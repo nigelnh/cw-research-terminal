@@ -11,41 +11,26 @@ const snapshotBuffer = new Map<string, { row: any; ts?: number }>();
 // Source of truth in the worker
 const rowsMap = new Map<string, any>();
 const lastFlushedRowsMap = new Map<string, any>();
-const underlyingToCWs = new Map<string, Set<string>>();
-
 // Buffer for tick-by-tick directions to avoid "net change" color errors
 const pendingDirections = new Map<string, "up" | "down">();
 
-function isAfter915AM() {
-  const now = new Date();
-  // Vietnam is UTC+7
-  const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const vnMinutes = (utcMinutes + 7 * 60) % (24 * 60);
-  return vnMinutes >= (9 * 60 + 15);
-}
-
 function propagateDirection(sym: string, key: string, dir: "up" | "down") {
-  const row = rowsMap.get(sym);
-  const isMarketOpen = isAfter915AM();
-
-  // Basic flash for the column itself
-  // Requirement: Under_Prc and Under_Symbol don't flash before 9:15 AM.
-  if (isMarketOpen || (key !== "Under_Prc" && key !== "Under_Symbol")) {
-     pendingDirections.set(`${sym}:${key}`, dir);
-  }
+  pendingDirections.set(`${sym}:${key}`, dir);
   
   if (key === "Bid1_Prc") {
     pendingDirections.set(`${sym}:Bid1_Qty`, dir);
-    // Requirement 2 from first request: Spread(%) flashes if both Vol_Bid1 and Vol_Ask1 have values
+    const row = rowsMap.get(sym);
     if (row && row.Vol1 > 0 && row.Vol3 > 0) {
       pendingDirections.set(`${sym}:Spread`, dir);
     }
   } else if (key === "Ask1_Prc") {
     pendingDirections.set(`${sym}:Ask1_Qty`, dir);
+    const row = rowsMap.get(sym);
     if (row && row.Vol1 > 0 && row.Vol3 > 0) {
       pendingDirections.set(`${sym}:Spread`, dir);
     }
-  } else if (key === "Vol3" || key === "Vol1") { // Vol changed naturally
+  } else if (key === "Vol3" || key === "Vol1") {
+    const row = rowsMap.get(sym);
     if (row && row.Vol1 > 0 && row.Vol3 > 0) {
       pendingDirections.set(`${sym}:Spread`, dir);
     }
@@ -53,14 +38,6 @@ function propagateDirection(sym: string, key: string, dir: "up" | "down") {
     pendingDirections.set(`${sym}:Traded_Qty`, dir);
     pendingDirections.set(`${sym}:Change`, dir);
     pendingDirections.set(`${sym}:ChangePercent`, dir);
-  } else if (key === "Under_Prc") {
-    pendingDirections.set(`${sym}:Under_Symbol`, dir);
-    // Requirement: Spread doesn't flash if triggered by Under_Prc changes BEFORE 9:15 AM.
-    if (isMarketOpen) {
-      if (row && row.Vol1 > 0 && row.Vol3 > 0) {
-        pendingDirections.set(`${sym}:Spread`, dir);
-      }
-    }
   }
 }
 
@@ -68,13 +45,10 @@ function handleSnapshot(symbol: string, row: any, ts?: number) {
   const sym = symbol.toUpperCase();
   snapshotBuffer.set(sym, { row, ts });
   
-  // Maintain local state
   const existing = rowsMap.get(sym) || {};
-  
   const updatedRow = { ...existing, ...row, _ts: ts || Date.now() };
   rowsMap.set(sym, updatedRow);
 
-  // Track direction for changed fields
   Object.entries(row).forEach(([key, newVal]) => {
     if (typeof newVal === 'number') {
       const oldVal = existing[key];
@@ -84,14 +58,6 @@ function handleSnapshot(symbol: string, row: any, ts?: number) {
     }
   });
 
-  // Dependency tracking
-  if (updatedRow.Under_Symbol) {
-    const underSym = updatedRow.Under_Symbol.toUpperCase();
-    if (!underlyingToCWs.has(underSym)) underlyingToCWs.set(underSym, new Set());
-    underlyingToCWs.get(underSym)!.add(sym);
-  }
-
-  // Instant update for priority listeners (charts, etc.)
   self.postMessage({ type: "INSTANT_SNAPSHOT", symbol: sym, row: updatedRow, ts });
 }
 
@@ -100,14 +66,10 @@ function handlePatch(symbol: string, patch: any, ts?: number) {
   const existingPatch = patchBuffer.get(sym)?.patch || {};
   patchBuffer.set(sym, { patch: { ...existingPatch, ...patch }, ts });
   
-  // Update local state
-  // BUGFIX: If the row doesn't exist yet (e.g. a volatility patch arrives before the full snapshot),
-  // create a stub so the SAB is written and values aren't silently dropped.
   const row = rowsMap.get(sym) || { Symbol: sym };
   const updatedRow = { ...row, ...patch, _ts: ts || Date.now() };
   rowsMap.set(sym, updatedRow);
 
-  // Track direction for changed fields
   Object.entries(patch).forEach(([key, newVal]) => {
     if (typeof newVal === 'number') {
       const oldVal = (row as any)[key];
@@ -117,28 +79,6 @@ function handlePatch(symbol: string, patch: any, ts?: number) {
     }
   });
 
-  // Special: If this is an underlying symbol, propagate its price to all dependent CWs
-  // Requirement: Don't update Under_Prc/Under_Symbol values before 9:15 AM.
-  if (isAfter915AM() && sym.length <= 3 && (patch.Traded !== undefined || patch.Ref !== undefined)) {
-    const newUnderPrc = patch.Traded ?? patch.Ref;
-    const dependents = underlyingToCWs.get(sym);
-    if (dependents && newUnderPrc !== undefined) {
-      dependents.forEach(cwSym => {
-        const cwRow = rowsMap.get(cwSym);
-        if (cwRow) {
-          const oldUnderPrc = cwRow.Under_Prc;
-          const updatedCw = { ...cwRow, Under_Prc: newUnderPrc };
-          rowsMap.set(cwSym, updatedCw);
-          
-          if (newUnderPrc !== oldUnderPrc) {
-            propagateDirection(cwSym, "Under_Prc", newUnderPrc > (oldUnderPrc || 0) ? "up" : "down");
-          }
-        }
-      });
-    }
-  }
-
-  // Instant update for priority listeners (charts, etc.)
   self.postMessage({ type: "INSTANT_PATCH", symbol: sym, patch, row: updatedRow, ts });
 }
 

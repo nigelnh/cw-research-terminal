@@ -24,8 +24,8 @@ function formatTime(d: Date): string {
 }
 
 interface TopbarProps {
-  currentView: "table" | "chart" | "ta";
-  onViewChange: (view: "table" | "chart" | "ta") => void;
+  currentView: "table";
+  onViewChange: (view: "table") => void;
   serverTimeOffset?: number;
 }
 
@@ -82,18 +82,6 @@ export function Topbar({ currentView, onViewChange, serverTimeOffset = 0 }: Topb
           onClick={() => onViewChange("table")}
         >
           Covered Warrants
-        </div>
-        <div 
-          style={navButtonStyle(currentView === "chart")}
-          onClick={() => onViewChange("chart")}
-        >
-          Chart
-        </div>
-        <div 
-          style={navButtonStyle(currentView === "ta")}
-          onClick={() => onViewChange("ta")}
-        >
-          TA
         </div>
       </div>
 

@@ -4,13 +4,13 @@ services:
   # --- 1. INFRASTRUCTURE ---
   redis:
     image: redis:7.2-alpine
-    container_name: cw_redis
+    container_name: stock_redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     restart: always
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "200mb", "--maxmemory-policy", "allkeys-lru"]
     networks:
-      - cw_network
+      - stock_network
     deploy:
       resources:
         limits:
@@ -18,34 +18,34 @@ services:
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
-    container_name: cw_zookeeper
+    container_name: stock_zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "22181:2181"
+      - "22182:2181"
     restart: always
     networks:
-      - cw_network
+      - stock_network
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
-    container_name: cw_kafka
+    container_name: stock_kafka
     depends_on:
       - zookeeper
     ports:
-      - "9092:9092"
-      - "29092:29092"
+      - "9094:9092"
+      - "29094:29092"
     restart: always
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9094
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     networks:
-      - cw_network
+      - stock_network
     deploy:
       resources:
         limits:
@@ -54,25 +54,24 @@ services:
   # --- 2. APPLICATION SERVICES ---
   python_api:
     build: ./server/python_api
-    container_name: cw_python_api
+    container_name: stock_python_api
     depends_on:
       - redis
     env_file:
       - ./server/python_api/.env
     environment:
-      - DB_HOST=host.docker.internal
       - REDIS_HOST=redis
     ports:
-      - "8000:8000"
+      - "8001:8001"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - cw_network
+      - stock_network
     restart: always
 
   python_kafka_consumer:
     build: ./server/python_api
-    container_name: cw_python_consumer
+    container_name: stock_python_consumer
     command: python kafka_consumer.py
     restart: always
     depends_on:
@@ -81,33 +80,31 @@ services:
     env_file:
       - ./server/python_api/.env
     environment:
-      - DB_HOST=host.docker.internal
       - REDIS_HOST=redis
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - cw_network
+      - stock_network
 
   node_server:
     build: ./server
-    container_name: cw_node_server
+    container_name: stock_node_server
     depends_on:
       - redis
       - kafka
     env_file:
       - ./server/python_api/.env
     environment:
-      - DB_HOST=host.docker.internal
       - REDIS_URL=redis://redis:6379
       - KAFKA_BROKERS=kafka:29092
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8787:8787"
+      - "8788:8788"
     restart: always
     networks:
-      - cw_network
+      - stock_network
     deploy:
       resources:
         limits:
@@ -118,8 +115,6 @@ services:
           memory: 512M
 
 networks:
-  cw_network:
+  stock_network:
     driver: bridge
 
-volumes:
-  postgres_data:

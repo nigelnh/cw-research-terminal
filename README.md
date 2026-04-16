@@ -1,4 +1,4 @@
-# CW Trading Dashboard
+# HQ Stock Trading Dashboard
 
 Real-time trading dashboard with React frontend and Node.js backend.
 
