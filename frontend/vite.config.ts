@@ -11,13 +11,13 @@ export default defineConfig({
   },
   server: {
     host: true,       // Listen on all network interfaces (enables LAN access)
-    port: 3000,
+    port: 3001,
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
     },
     proxy: {
       "/ws": {
-        target: "ws://localhost:8787",
+        target: "ws://localhost:8788",
         ws: true,
       },
       // SSI iboard proxy — avoids browser CORS restrictions.

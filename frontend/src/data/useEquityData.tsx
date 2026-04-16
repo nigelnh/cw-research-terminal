@@ -57,9 +57,6 @@ export function EquityDataProvider({ children }: { children: ReactNode }) {
     const val = row[field];
     return typeof val === 'number' ? val : null;
   }, []);
-  // Pre-computed map for Underlyings -> Covered Warrants
-  const underlyingToCWsRef = useRef<Map<string, Set<string>>>(new Map());
-  const lastTimeUpdateRef = useRef<number>(0);
   const lastServerTimeUpdateRef = useRef<number>(0);
   
   const isSymbolDirty = useCallback((symbol: string) => {
@@ -94,18 +91,7 @@ export function EquityDataProvider({ children }: { children: ReactNode }) {
     const sym = symbol.toUpperCase();
     const callbacks = listenersRef.current.get(sym);
     
-    // 1. Maintain the dependency map dynamically
-    const incomingRow = row as EquityRow;
-    if (incomingRow.Under_Symbol && incomingRow.Symbol) {
-      const underSym = incomingRow.Under_Symbol.toUpperCase();
-      const cwSym = incomingRow.Symbol.toUpperCase();
-      if (!underlyingToCWsRef.current.has(underSym)) {
-        underlyingToCWsRef.current.set(underSym, new Set());
-      }
-      underlyingToCWsRef.current.get(underSym)!.add(cwSym);
-    }
-
-    // 2. Trigger primary listener
+    // Trigger primary listener
     if (callbacks && callbacks.size > 0) {
       const isIndexRow = (row as IndexRow).name !== undefined && (row as any).Symbol === undefined;
 
@@ -115,46 +101,20 @@ export function EquityDataProvider({ children }: { children: ReactNode }) {
       } else {
         const existing = rowsMapRef.current.get(sym) || { Symbol: sym } as EquityRow;
         payload = { ...existing, ...(row as EquityRow), _ts: ts || Date.now() };
-        // We DON'T set rowsMapRef here; that's handled by the buffered interval
-        // to keep snapshots and patches consistent during high-freq updates
       }
 
       callbacks.forEach(cb => cb(payload));
     }
-
-    // 3. Trigger dependents (Underlying -> CWs)
-    const dependents = underlyingToCWsRef.current.get(sym);
-    if (dependents) {
-      dependents.forEach(cwSymbol => {
-        const cwCallbacks = listenersRef.current.get(cwSymbol);
-        if (cwCallbacks && cwCallbacks.size > 0) {
-          const cwExisting = rowsMapRef.current.get(cwSymbol);
-          if (cwExisting) {
-            // Trigger the CW listener with latest known data
-            cwCallbacks.forEach(cb => cb({ ...cwExisting }));
-          }
-        }
-      });
-    }
   }, []);
 
   // Keep rowsRef and rowsMapRef in sync with the latest rows state.
-  // rowsMapRef is the backing store for getNumericValue — always keep it current.
   useEffect(() => {
     rowsRef.current = rows;
     const newMap = new Map<string, EquityRow>();
-    const newUnderlyingMap = new Map<string, Set<string>>();
     rows.forEach(r => {
       newMap.set(r.Symbol, r);
-      if (r.Under_Symbol) {
-        if (!newUnderlyingMap.has(r.Under_Symbol)) {
-          newUnderlyingMap.set(r.Under_Symbol, new Set());
-        }
-        newUnderlyingMap.get(r.Under_Symbol)!.add(r.Symbol);
-      }
     });
     rowsMapRef.current = newMap;
-    underlyingToCWsRef.current = newUnderlyingMap;
   }, [rows]);
 
   const updateServerTime = useCallback((ts: number) => {
