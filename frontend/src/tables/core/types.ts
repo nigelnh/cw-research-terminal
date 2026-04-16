@@ -15,7 +15,8 @@ export interface CellChange {
 }
 
 export interface ColumnConfig<T> {
-  key: keyof T & string;
+  key: string;       // Unique identifier for React keys and settings
+  dataKey?: keyof T & string; // Optional: specify which data field to use (defaults to key)
   header: string;
   widthPx?: number;  // Optional fixed width
   flex?: number;     // Flex grow factor (default: 1)

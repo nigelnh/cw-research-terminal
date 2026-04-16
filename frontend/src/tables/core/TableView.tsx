@@ -240,7 +240,11 @@ const TableRow = React.memo(
       }
 
       const next = { ...row };
-      const fields = ["Ceil", "Floor", "Ref", "Ask1_Qty", "Ask1_Prc", "Traded", "Bid1_Prc", "Bid1_Qty", "Vol1", "Vol2", "Vol3", "Under_Prc", "Strike_Prc", "Ratio", "Traded_Qty", "Total_Vol"];
+      const fields = [
+        "Ceil", "Floor", "Ref", "Ask1_Qty", "Ask1_Prc", "Traded", "Bid1_Prc", "Bid1_Qty", 
+        "Vol1", "Vol2", "Vol3", "Under_Prc", "Strike_Prc", "Ratio", "Traded_Qty", "Total_Vol",
+        "FB", "FS", "FR", "FO", "Total_Val", "Avg_Prc", "Change", "ChangePercent"
+      ];
       fields.forEach(field => {
         const val = getNumericValue(symbol, field);
         if (val !== null) next[field] = val;

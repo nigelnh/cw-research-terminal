@@ -29,5 +29,5 @@ export function getPriceColor(price: number, ref: number, ceil: number, floor: n
  * (Defaults to using Traded price)
  */
 export function getTrendColor(row: EquityRow): string {
-    return getPriceColor(row.Traded, row.Ref, row.Ceil, row.Floor);
+    return getPriceColor(row.Traded || 0, row.Ref || 0, row.Ceil || 0, row.Floor || 0);
 }

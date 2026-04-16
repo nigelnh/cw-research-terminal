@@ -16,6 +16,9 @@ Real-time trading dashboard with React frontend and Node.js backend.
 
 ## Quick Start
 
+### Prerequisites
+- Node.js 18+
+
 ### 1. Start the backend server
 
 ```bash
@@ -24,7 +27,7 @@ npm install
 npm run dev
 ```
 
-Server will connect to SSI and listen on `ws://localhost:8787`.
+Server will connect to upstream market socket and listen on port 8788.
 
 ### 2. Start the frontend
 

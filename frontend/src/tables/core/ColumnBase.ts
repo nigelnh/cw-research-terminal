@@ -5,7 +5,8 @@
 import type { Alignment, ColumnConfig } from "./types";
 
 export class ColumnBase<T> {
-  readonly key: keyof T & string;
+  readonly key: string;
+  readonly dataKey: keyof T & string;
   readonly header: string;
   readonly widthPx?: number;  // Optional fixed width
   readonly flex: number;      // Flex grow factor
@@ -15,11 +16,12 @@ export class ColumnBase<T> {
   readonly bgColor?: string | ((row: T) => string | undefined);
   readonly sortable: boolean;
   readonly sortArrowOnRight: boolean;
-  readonly colorDependencies?: (keyof T & string)[];
+  readonly colorDependencies?: string[];
   private readonly customFormat?: (value: unknown) => string;
 
   constructor(config: ColumnConfig<T>) {
     this.key = config.key;
+    this.dataKey = config.dataKey ?? (config.key as keyof T & string);
     this.header = config.header;
     this.widthPx = config.widthPx;
     this.flex = config.flex ?? 1;  // Default flex: 1
@@ -60,7 +62,7 @@ export class ColumnBase<T> {
    * Get raw value from row
    */
   getValue(row: T): unknown {
-    return row[this.key];
+    return row[this.dataKey];
   }
 
   /**
@@ -99,12 +101,12 @@ export class PriceColumn<T> extends ColumnBase<T> {
     }
     const num = typeof value === "number" ? value : parseFloat(String(value));
     if (isNaN(num) || num === 0) return "";
-    return num.toFixed(2);
+    return (num / 1000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 }
 
 /**
- * Column for quantity values (with thousand separators)
+ * Column for quantity values (divided by 1000, with 2 decimal places)
  */
 export class QuantityColumn<T> extends ColumnBase<T> {
   format(value: unknown): string {
@@ -114,9 +116,9 @@ export class QuantityColumn<T> extends ColumnBase<T> {
     if (value === null || value === undefined) {
       return "";
     }
-    const num = typeof value === "number" ? value : parseInt(String(value), 10);
+    const num = typeof value === "number" ? value : parseFloat(String(value));
     if (isNaN(num) || num === 0) return "";
-    return num.toLocaleString();
+    return (num / 1000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 }
 
