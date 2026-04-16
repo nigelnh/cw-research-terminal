@@ -77,11 +77,11 @@ export function Topbar({ currentView, onViewChange, serverTimeOffset = 0 }: Topb
           gap: 8,
         }}
       >
-        <div 
+        <div
           style={navButtonStyle(currentView === "table")}
           onClick={() => onViewChange("table")}
         >
-          Covered Warrants
+          Stocks
         </div>
       </div>
 
