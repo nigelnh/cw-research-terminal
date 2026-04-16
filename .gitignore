@@ -1,0 +1,46 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+build/
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Archive
+server/archive/
+
+# Logs
+*.log
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# cursor
+.cursor/
+
+# ngrok
+bin/
+
+# performance scripts
+performance_test_cw.js
+
+docs/
+
+# tests
+tests/
+
+# .agents
+.agents/
+
+# node_modules
+node_modules/
