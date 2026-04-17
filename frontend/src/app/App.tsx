@@ -8,7 +8,7 @@ import { colors } from "@/design/tokens";
 import { DisplayOptionContent } from "@/tables/core/DisplayOptionContent";
 
 const VN30_SYMBOLS = [
-  "ACB", "BCM", "BID", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG", "LPB", "MBB", "MSN", "MWG", "PLX", "SAB", "SHB", "SSB", "SSI", "STB", "TCB", "TPB", "VCB", "VHM", "VIC", "VIB", "VJC", "VNM", "VPB", "VRE", "VPL"
+  "ACB", "BCM", "BID", "CTG", "DGC", "FPT", "GAS", "GVR", "HDB", "HPG", "LPB", "MBB", "MSN", "MWG", "PLX", "SAB", "SHB", "SSB", "SSI", "STB", "TCB", "TPB", "VCB", "VHM", "VIC", "VIB", "VJC", "VNM", "VPB", "VRE", "VPL"
 ];
 
 type ViewMode = "table";
