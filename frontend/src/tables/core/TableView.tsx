@@ -464,7 +464,7 @@ const HeaderCell = React.memo(
           transform: `translateX(${translateX}px) translateZ(0)`,
           zIndex: isDraggingCol ? 100 : 1,
           position: "relative",
-          backgroundColor: colors.background,
+          backgroundColor: "#101010",
         }}
       >
         {!col.sortArrowOnRight && isSorted && (
@@ -873,7 +873,7 @@ export function TableView<T extends Record<string, unknown>>({
         style={{
           display: "flex",
           height: headerHeight,
-          backgroundColor: colors.background,
+          backgroundColor: "#101010",
           borderBottom: `1px solid ${colors.borderSubtle}`,
           position: "sticky",
           top: 0,
