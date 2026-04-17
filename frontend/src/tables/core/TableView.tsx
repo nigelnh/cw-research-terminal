@@ -171,7 +171,8 @@ const TableCell = React.memo(
     // 4. Color dependencies
     // If the column uses dynamic coloring, check common price-related dependencies
     if (typeof next.col.color === "function") {
-      // Always check Ref, Ceil, Floor as they affect almost all price colors
+      // Always check Traded, Ref, Ceil, Floor as they affect almost all price colors
+      if (prev.row.Traded !== next.row.Traded) return false;
       if (prev.row.Ref !== next.row.Ref) return false;
       if (prev.row.Ceil !== next.row.Ceil) return false;
       if (prev.row.Floor !== next.row.Floor) return false;
