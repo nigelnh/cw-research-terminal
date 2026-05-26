@@ -101,10 +101,37 @@ const TableCell = React.memo(
 
     const config = table.config;
     const getColumnStyle = (): React.CSSProperties => {
+      const isFlexLayout = table.getColumns().length <= 20;
+      const baseWidth = 85;
       if (col.widthPx) {
-        return { width: col.widthPx, flexShrink: 0, flexGrow: 0 };
+        return {
+          width: col.widthPx,
+          minWidth: col.widthPx,
+          maxWidth: col.widthPx,
+          flexShrink: 0,
+          flexGrow: 0,
+          boxSizing: "border-box",
+        };
       }
-      return { flex: col.flex, minWidth: 0 };
+      const calculatedWidth = col.flex ? col.flex * baseWidth : baseWidth;
+      if (isFlexLayout) {
+        return {
+          flexGrow: col.flex || 1,
+          flexShrink: 0,
+          flexBasis: `${calculatedWidth}px`,
+          minWidth: `${calculatedWidth}px`,
+          boxSizing: "border-box",
+        };
+      } else {
+        return {
+          width: calculatedWidth,
+          minWidth: calculatedWidth,
+          maxWidth: calculatedWidth,
+          flexShrink: 0,
+          flexGrow: 0,
+          boxSizing: "border-box",
+        };
+      }
     };
 
     return (
@@ -141,7 +168,54 @@ const TableCell = React.memo(
         onDragStart={(e) => colKey === "Symbol" && onDragStart(e, idx)}
         onDragEnd={onDragEnd}
       >
-        {col.getDisplayValue(row)}
+        {(() => {
+          const displayVal = col.getDisplayValue(row);
+          if (typeof displayVal === "string" && displayVal.startsWith("__LINK__")) {
+            const href = displayVal.slice("__LINK__".length);
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  color: "#0ECB81",
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                  fontSize: "inherit",
+                  fontWeight: 600,
+                  letterSpacing: "0.01em",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLAnchorElement).style.textDecoration = "underline";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLAnchorElement).style.textDecoration = "none";
+                }}
+              >
+                ↗ View
+              </a>
+            );
+          }
+          return displayVal;
+        })()}
+        {colKey === "ticker" && row.div_d > 0 && (
+          <span
+            title={`Div Yield: ${(parseFloat(row.div_d) * 100).toFixed(2)}%`}
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              backgroundColor: "#9333EA", // Elegant glowing purple/indigo dot
+              boxShadow: "0 0 8px #9333EA",
+              display: "inline-block",
+              marginLeft: 6,
+              cursor: "help",
+            }}
+          />
+        )}
         {isPinned && (
           <span
             className="material-symbols-outlined"
@@ -235,6 +309,9 @@ const TableRow = React.memo(
     const prevHydratedRowRef = useRef<any>(null);
 
     const hydratedRow = React.useMemo(() => {
+      // Non-equity tables (Holiday, Dividend, etc.) have no Symbol — skip hydration entirely.
+      if (!symbol) return row;
+
       // If symbol is NOT dirty and we have a previous version, skip the hydration loop
       if (prevHydratedRowRef.current && !isSymbolDirty(symbol)) {
         return prevHydratedRowRef.current;
@@ -324,6 +401,8 @@ const TableRow = React.memo(
           position: "relative",
           pointerEvents: isDragging ? "none" : "auto",
           cursor: "pointer",
+          width: "max-content",
+          minWidth: "100%",
         }}
       >
         {columns.map((col, cIdx) => {
@@ -423,10 +502,37 @@ const HeaderCell = React.memo(
     }, [idx, draggedColKey]);
 
     const getColumnStyle = (col: any): React.CSSProperties => {
+      const isFlexLayout = table.getColumns().length <= 20;
+      const baseWidth = 85;
       if (col.widthPx) {
-        return { width: col.widthPx, flexShrink: 0, flexGrow: 0 };
+        return {
+          width: col.widthPx,
+          minWidth: col.widthPx,
+          maxWidth: col.widthPx,
+          flexShrink: 0,
+          flexGrow: 0,
+          boxSizing: "border-box",
+        };
       }
-      return { flex: col.flex, minWidth: 0 };
+      const calculatedWidth = col.flex ? col.flex * baseWidth : baseWidth;
+      if (isFlexLayout) {
+        return {
+          flexGrow: col.flex || 1,
+          flexShrink: 0,
+          flexBasis: `${calculatedWidth}px`,
+          minWidth: `${calculatedWidth}px`,
+          boxSizing: "border-box",
+        };
+      } else {
+        return {
+          width: calculatedWidth,
+          minWidth: calculatedWidth,
+          maxWidth: calculatedWidth,
+          flexShrink: 0,
+          flexGrow: 0,
+          boxSizing: "border-box",
+        };
+      }
     };
 
     return (
@@ -857,6 +963,7 @@ export function TableView<T extends Record<string, unknown>>({
         backgroundColor: colors.background,
         border: `1px solid ${colors.border}`,
         borderRadius: 12,
+        overflowX: "auto",
         overflowY: "auto",
         maxHeight: "max(400px, 86vh)", // Adjusted slightly for safety
         fontFamily: "'Inter', sans-serif",
@@ -879,6 +986,8 @@ export function TableView<T extends Record<string, unknown>>({
           position: "sticky",
           top: 0,
           zIndex: 200,
+          width: "max-content",
+          minWidth: "100%",
         }}
       >
         {sortedColumns.map((col, idx) => {
@@ -939,6 +1048,8 @@ export function TableView<T extends Record<string, unknown>>({
           position: "relative",
           height: sortedData.length * rowHeight,
           boxSizing: "content-box",
+          width: "max-content",
+          minWidth: "100%",
         }}
       >
         {/* Render only visible range + buffers */}
@@ -953,7 +1064,8 @@ export function TableView<T extends Record<string, unknown>>({
                 position: "absolute",
                 top: 0,
                 left: 0,
-                width: "100%",
+                width: "max-content",
+                minWidth: "100%",
                 height: rowHeight,
                 transform: `translateY(${idx * rowHeight}px) translateZ(0)`,
                 willChange: "transform",
