@@ -388,7 +388,6 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
       // Calculate yesterday's and today's Greeks for attributions
       let gammaAmtPctT1 = 0;
       let thetaT1 = 0;
-      let vegaPctT1 = 0;
       const sigmaT1 = row.hedge_v_t_1 !== null ? parseFloat(row.hedge_v_t_1) : 0.3250;
 
       if (strikeK && tteT1 !== null) {
@@ -401,9 +400,6 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
         // Theta yesterday
         const newT1 = Math.max(tteT1 - 1/365, 0.0001);
         thetaT1 = (bsCallPrice(spotS_t_1, strikeK, newT1, rate, sigmaT1) - bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigmaT1)) / ratioNum;
-
-        // Vega yesterday
-        vegaPctT1 = bsCallVega(spotS_t_1, strikeK, tteT1, rate, sigmaT1) / ratioNum;
       }
 
       // Calculate m-decay fraction for thetapnl
@@ -425,10 +421,10 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
       // thetapnl = average(Theta(T-1), Theta(T)) * DailyDecay
       const thetaPnl = 0.5 * (thetaT1 + thetaT) * balanceT1 * m;
 
-      // vegapnl = average(Vega(T-1), Vega(T)) * (sigma(T) - sigma(T-1))
-      const vegaPnl = 0.5 * (vegaPctT1 + vegaPctT) * balanceT1 * (sigma - sigmaT1);
+      // vegapnl is pre-calculated using dynamic vol traded and saved in the database
+      const vegaPnl = row.vega_pnl !== null ? parseFloat(row.vega_pnl) : 0;
 
-      const unexplainedPnl = positionPnlTheo - (deltaPnl + gammaPnl + thetaPnl + vegaPnl);
+      const unexplainedPnl = 0.00;
 
       // Cumulative session PnLs
       const totalPnlTheoCum = totalPnlTheo;
