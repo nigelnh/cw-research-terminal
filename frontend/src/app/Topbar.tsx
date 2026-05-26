@@ -24,8 +24,8 @@ function formatTime(d: Date): string {
 }
 
 interface TopbarProps {
-  currentView: "table";
-  onViewChange: (view: "table") => void;
+  currentView: "equity" | "info";
+  onViewChange: (view: "equity" | "info") => void;
   serverTimeOffset?: number;
 }
 
@@ -78,10 +78,16 @@ export function Topbar({ currentView, onViewChange, serverTimeOffset = 0 }: Topb
         }}
       >
         <div
-          style={navButtonStyle(currentView === "table")}
-          onClick={() => onViewChange("table")}
+          style={navButtonStyle(currentView === "equity")}
+          onClick={() => onViewChange("equity")}
         >
-          Stocks
+          Equity
+        </div>
+        <div
+          style={navButtonStyle(currentView === "info")}
+          onClick={() => onViewChange("info")}
+        >
+          Info
         </div>
       </div>
 
