@@ -14,6 +14,7 @@ interface TableViewProps<T extends Record<string, unknown>> {
   data: T[];
   hiddenColumns?: string[];
   lastChanges?: Map<string, "up" | "down">;
+  emptyStateMessage?: string;
 }
 
 // Flash duration in ms
@@ -33,6 +34,7 @@ const TableCell = React.memo(
     onDragEnd,
     idx,
     colIdx,
+    isFlexLayout,
   }: {
     row: any;
     col: any;
@@ -45,12 +47,14 @@ const TableCell = React.memo(
     onDragEnd: () => void;
     idx: number;
     colIdx: number;
+    isFlexLayout: boolean;
+    containerWidth: number;
   }) => {
     const colKey = col.key;
     const { getRow } = useEquityData();
-    
+
     const baseColor = col.getColor(row, getRow);
-    
+
     // FLIP logic for columns
     const prevColIdxRef = useRef<number>(colIdx);
     const [isAnimatingX, setIsAnimatingX] = useState(false);
@@ -101,28 +105,23 @@ const TableCell = React.memo(
 
     const config = table.config;
     const getColumnStyle = (): React.CSSProperties => {
-      const isFlexLayout = table.getColumns().length <= 20;
       const baseWidth = 85;
-      if (col.widthPx) {
-        return {
-          width: col.widthPx,
-          minWidth: col.widthPx,
-          maxWidth: col.widthPx,
-          flexShrink: 0,
-          flexGrow: 0,
-          boxSizing: "border-box",
-        };
-      }
-      const calculatedWidth = col.flex ? col.flex * baseWidth : baseWidth;
+      const rawWidth = col.widthPx || (col.flex ? col.flex * baseWidth : baseWidth);
+
       if (isFlexLayout) {
+        // In flex layout, expand columns proportionally to cover all container space
+        const growWeight = col.widthPx || col.flex || 1;
+        const minWidthVal = col.widthPx ? Math.max(col.widthPx - 5, 50) : baseWidth;
         return {
-          flexGrow: col.flex || 1,
-          flexShrink: 0,
-          flexBasis: `${calculatedWidth}px`,
-          minWidth: `${calculatedWidth}px`,
+          flexGrow: growWeight,
+          flexShrink: 1,
+          flexBasis: `${minWidthVal}px`,
+          minWidth: `${minWidthVal}px`,
           boxSizing: "border-box",
         };
       } else {
+        // Horizontal scrolling layout: strictly enforce column widths
+        const calculatedWidth = rawWidth + 20;
         return {
           width: calculatedWidth,
           minWidth: calculatedWidth,
@@ -195,7 +194,7 @@ const TableCell = React.memo(
                   (e.currentTarget as HTMLAnchorElement).style.textDecoration = "none";
                 }}
               >
-                ↗ View
+                View
               </a>
             );
           }
@@ -231,10 +230,10 @@ const TableCell = React.memo(
     // 1. Core data for this specific cell
     const colKey = next.col.key;
     if (prev.row[colKey] !== next.row[colKey]) return false;
-    
+
     // 2. Flash state
     if (prev.flash !== next.flash) return false;
-    
+
     // 3. UI state
     if (prev.isPinned !== next.isPinned) return false;
     if (prev.isDraggingCol !== next.isDraggingCol) return false;
@@ -242,7 +241,11 @@ const TableCell = React.memo(
     if (prev.idx !== next.idx) return false;
     if (prev.colIdx !== next.colIdx) return false;
 
-    // 4. Color dependencies
+    // 4. Container size & Layout mode
+    if (prev.isFlexLayout !== next.isFlexLayout) return false;
+    if (prev.containerWidth !== next.containerWidth) return false;
+
+    // 5. Color dependencies
     // If the column uses dynamic coloring, check common price-related dependencies
     if (typeof next.col.color === "function") {
       // Always check Traded, Ref, Ceil, Floor as they affect almost all price colors
@@ -250,7 +253,7 @@ const TableCell = React.memo(
       if (prev.row.Ref !== next.row.Ref) return false;
       if (prev.row.Ceil !== next.row.Ceil) return false;
       if (prev.row.Floor !== next.row.Floor) return false;
-      
+
       // Explicit dependencies
       const deps = next.col.colorDependencies;
       if (deps && deps.length > 0) {
@@ -260,7 +263,7 @@ const TableCell = React.memo(
       }
     }
 
-    // 5. Active flash synchronization
+    // 6. Active flash synchronization
     return true;
   }
 );
@@ -283,6 +286,8 @@ const TableRow = React.memo(
     togglePin,
     onDragStart,
     onDragEnd,
+    isFlexLayout,
+    containerWidth,
   }: {
     row: any;
     idx: number;
@@ -299,6 +304,8 @@ const TableRow = React.memo(
     togglePin: (symbol: string) => void;
     onDragStart: (e: React.DragEvent, index: number) => void;
     onDragEnd: () => void;
+    isFlexLayout: boolean;
+    containerWidth: number;
   }) => {
     const [isHovered, setIsHovered] = useState(false);
     // Hydrate row with latest live numeric values from the in-memory row map.
@@ -319,7 +326,7 @@ const TableRow = React.memo(
 
       const next = { ...row };
       const fields = [
-        "Ceil", "Floor", "Ref", "Ask1_Qty", "Ask1_Prc", "Traded", "Bid1_Prc", "Bid1_Qty", 
+        "Ceil", "Floor", "Ref", "Ask1_Qty", "Ask1_Prc", "Traded", "Bid1_Prc", "Bid1_Qty",
         "Vol1", "Vol2", "Vol3", "Under_Prc", "Strike_Prc", "Ratio", "Traded_Qty", "Total_Vol",
         "FB", "FS", "FR", "FO", "Total_Val", "Avg_Prc", "Change", "ChangePercent"
       ];
@@ -327,7 +334,7 @@ const TableRow = React.memo(
         const val = getNumericValue(symbol, field);
         if (val !== null) next[field] = val;
       });
-      
+
       prevHydratedRowRef.current = next;
       return next;
     }, [row, symbol, getNumericValue, isSymbolDirty, lastUpdateTs]);
@@ -340,7 +347,7 @@ const TableRow = React.memo(
     useLayoutEffect(() => {
       if (prevIdxRef.current !== idx && draggedIdx === null) {
         const delta = (prevIdxRef.current - idx) * config.rowHeightPx;
-        
+
         // Step 1: Set the offset instantly (no animation)
         setFlipOffset(delta);
         setIsAnimating(false);
@@ -401,7 +408,7 @@ const TableRow = React.memo(
           position: "relative",
           pointerEvents: isDragging ? "none" : "auto",
           cursor: "pointer",
-          width: "max-content",
+          width: isFlexLayout ? "100%" : "max-content",
           minWidth: "100%",
         }}
       >
@@ -452,6 +459,8 @@ const TableRow = React.memo(
               onDragEnd={onDragEnd}
               idx={idx}
               colIdx={cIdx}
+              isFlexLayout={isFlexLayout}
+              containerWidth={containerWidth}
             />
           );
         })}
@@ -472,6 +481,7 @@ const HeaderCell = React.memo(
     draggedColKey,
     translateX,
     table,
+    isFlexLayout,
   }: {
     col: any;
     idx: number;
@@ -482,6 +492,7 @@ const HeaderCell = React.memo(
     draggedColKey: string | null;
     translateX: number;
     table: any;
+    isFlexLayout: boolean;
   }) => {
     const config = table.config;
     const isSorted = sortConfig?.key === col.key;
@@ -502,28 +513,23 @@ const HeaderCell = React.memo(
     }, [idx, draggedColKey]);
 
     const getColumnStyle = (col: any): React.CSSProperties => {
-      const isFlexLayout = table.getColumns().length <= 20;
       const baseWidth = 85;
-      if (col.widthPx) {
-        return {
-          width: col.widthPx,
-          minWidth: col.widthPx,
-          maxWidth: col.widthPx,
-          flexShrink: 0,
-          flexGrow: 0,
-          boxSizing: "border-box",
-        };
-      }
-      const calculatedWidth = col.flex ? col.flex * baseWidth : baseWidth;
+      const rawWidth = col.widthPx || (col.flex ? col.flex * baseWidth : baseWidth);
+
       if (isFlexLayout) {
+        // In flex layout, expand columns proportionally to cover all container space
+        const growWeight = col.widthPx || col.flex || 1;
+        const minWidthVal = col.widthPx ? Math.max(col.widthPx - 5, 50) : baseWidth;
         return {
-          flexGrow: col.flex || 1,
-          flexShrink: 0,
-          flexBasis: `${calculatedWidth}px`,
-          minWidth: `${calculatedWidth}px`,
+          flexGrow: growWeight,
+          flexShrink: 1,
+          flexBasis: `${minWidthVal}px`,
+          minWidth: `${minWidthVal}px`,
           boxSizing: "border-box",
         };
       } else {
+        // Horizontal scrolling layout: strictly enforce column widths
+        const calculatedWidth = rawWidth + 20;
         return {
           width: calculatedWidth,
           minWidth: calculatedWidth,
@@ -603,11 +609,23 @@ export function TableView<T extends Record<string, unknown>>({
   data,
   hiddenColumns = [],
   lastChanges,
+  emptyStateMessage,
 }: TableViewProps<T>) {
   const { getNumericValue } = useEquityData();
 
   const columns = table.getColumns().filter(c => !hiddenColumns.includes(c.key));
+  const isFlexLayout = columns.length <= 20;
   const config = table.config;
+
+  const totalColumnsWidth = React.useMemo(() => {
+    const baseWidth = 85;
+    return columns.reduce((sum, col) => {
+      const rawWidth = col.widthPx || (col.flex ? col.flex * baseWidth : baseWidth);
+      return sum + rawWidth + 20;
+    }, 0);
+  }, [columns]);
+
+  const tableWidthStyle = isFlexLayout ? "100%" : `${totalColumnsWidth}px`;
 
   // Refs for precise coordinate detection
   const headerRef = useRef<HTMLDivElement>(null);
@@ -638,7 +656,7 @@ export function TableView<T extends Record<string, unknown>>({
       }
     }
     return result;
-      }, [lastChanges]); // Re-calculate when data ticks or changes arrive
+  }, [lastChanges]); // Re-calculate when data ticks or changes arrive
 
 
 
@@ -745,11 +763,11 @@ export function TableView<T extends Record<string, unknown>>({
           sortedUnpinned.sort((a, b) => {
             const symA = table.getRowKey(a);
             const symB = table.getRowKey(b);
-            
+
             // Prefer live numeric values from the in-memory row map for sorting
             const liveValA = getNumericValue(symA, key);
             const liveValB = getNumericValue(symB, key);
-            
+
             const valA = liveValA !== null ? liveValA : col.getValue(a);
             const valB = liveValB !== null ? liveValB : col.getValue(b);
 
@@ -922,6 +940,7 @@ export function TableView<T extends Record<string, unknown>>({
 
   // custom hook for container sizing
   const [containerHeight, setContainerHeight] = useState(800);
+  const [containerWidth, setContainerWidth] = useState(0);
   useLayoutEffect(() => {
     if (!containerRef.current) return;
 
@@ -929,6 +948,7 @@ export function TableView<T extends Record<string, unknown>>({
       const entry = entries[0];
       if (entry) {
         setContainerHeight(entry.contentRect.height);
+        setContainerWidth(entry.contentRect.width);
       }
     });
 
@@ -948,7 +968,7 @@ export function TableView<T extends Record<string, unknown>>({
   const rowHeight = config.rowHeightPx;
   const headerHeight = config.headerHeightPx;
   const bufferRows = 4;
-  
+
   // Calculate visible range based on current scrollTop and measured height
   const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - bufferRows);
   const visibleCount = Math.ceil(containerHeight / rowHeight);
@@ -956,141 +976,179 @@ export function TableView<T extends Record<string, unknown>>({
 
   return (
     <div
-      ref={containerRef}
-      onScroll={onScroll}
       style={{
         width: "100%",
         backgroundColor: colors.background,
         border: `1px solid ${colors.border}`,
-        borderRadius: 12,
-        overflowX: "auto",
-        overflowY: "auto",
-        maxHeight: "max(400px, 86vh)", // Adjusted slightly for safety
-        fontFamily: "'Inter', sans-serif",
-        position: "relative",
+        borderRadius: 6,
+        overflow: "hidden",
+        maxHeight: "max(400px, 86vh)",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
-      {/* 
+      <div
+        ref={containerRef}
+        onScroll={onScroll}
+        style={{
+          width: "100%",
+          overflowX: "auto",
+          overflowY: "auto",
+          fontFamily: "'Inter', sans-serif",
+          position: "relative",
+          scrollbarGutter: "stable",
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
+        {/* 
           VIRTUALIZED HEADER 
           Uses sticky positioning at top: 0
       */}
-      <div
-        ref={headerRef}
-        onDragOver={onColDragOver}
-        onDrop={onColDrop}
-        style={{
-          display: "flex",
-          height: headerHeight,
-          backgroundColor: "#101010",
-          borderBottom: `1px solid ${colors.borderSubtle}`,
-          position: "sticky",
-          top: 0,
-          zIndex: 200,
-          width: "max-content",
-          minWidth: "100%",
-        }}
-      >
-        {sortedColumns.map((col, idx) => {
-          let translateX = 0;
-          if (draggedColKey && hoverColKey) {
-            const currentOrder = sortedColumns.map((c) => c.key);
-            const dIdx = currentOrder.indexOf(draggedColKey);
-            const hIdx = currentOrder.indexOf(hoverColKey);
+        <div
+          ref={headerRef}
+          onDragOver={onColDragOver}
+          onDrop={onColDrop}
+          style={{
+            display: "flex",
+            height: headerHeight,
+            backgroundColor: "#101010",
+            borderBottom: `1px solid ${colors.borderSubtle}`,
+            position: "sticky",
+            top: 0,
+            zIndex: 200,
+            width: tableWidthStyle,
+            minWidth: tableWidthStyle,
+          }}
+        >
+          {sortedColumns.map((col, idx) => {
+            let translateX = 0;
+            if (draggedColKey && hoverColKey) {
+              const currentOrder = sortedColumns.map((c) => c.key);
+              const dIdx = currentOrder.indexOf(draggedColKey);
+              const hIdx = currentOrder.indexOf(hoverColKey);
 
-            if (col.key === draggedColKey) {
-              let distance = 0;
-              if (dIdx < hIdx) {
-                distance = sortedColumns
-                  .slice(dIdx + 1, hIdx + 1)
-                  .reduce((sum, c) => sum + (measuredWidths.get(c.key) || c.widthPx || 0), 0);
-              } else if (dIdx > hIdx) {
-                distance = -sortedColumns
-                  .slice(hIdx, dIdx)
-                  .reduce((sum, c) => sum + (measuredWidths.get(c.key) || c.widthPx || 0), 0);
-              }
-              translateX = distance;
-            } else {
-              const draggedWidth = measuredWidths.get(draggedColKey) || sortedColumns[dIdx].widthPx || 0;
-              if (dIdx < hIdx && idx > dIdx && idx <= hIdx) {
-                translateX = -draggedWidth;
-              } else if (dIdx > hIdx && idx < dIdx && idx >= hIdx) {
-                translateX = draggedWidth;
+              if (col.key === draggedColKey) {
+                let distance = 0;
+                if (dIdx < hIdx) {
+                  distance = sortedColumns
+                    .slice(dIdx + 1, hIdx + 1)
+                    .reduce((sum, c) => sum + (measuredWidths.get(c.key) || c.widthPx || 0), 0);
+                } else if (dIdx > hIdx) {
+                  distance = -sortedColumns
+                    .slice(hIdx, dIdx)
+                    .reduce((sum, c) => sum + (measuredWidths.get(c.key) || c.widthPx || 0), 0);
+                }
+                translateX = distance;
+              } else {
+                const draggedWidth = measuredWidths.get(draggedColKey) || sortedColumns[dIdx].widthPx || 0;
+                if (dIdx < hIdx && idx > dIdx && idx <= hIdx) {
+                  translateX = -draggedWidth;
+                } else if (dIdx > hIdx && idx < dIdx && idx >= hIdx) {
+                  translateX = draggedWidth;
+                }
               }
             }
-          }
 
-          return (
-            <HeaderCell
-              key={col.key}
-              col={col}
-              idx={idx}
-              sortConfig={sortConfig}
-              handleSort={handleSort}
-              onColDragStart={onColDragStart}
-              onColDragEnd={onColDragEnd}
-              draggedColKey={draggedColKey}
-              translateX={translateX}
-              table={table}
-            />
-          );
-        })}
-      </div>
+            return (
+              <HeaderCell
+                key={col.key}
+                col={col}
+                idx={idx}
+                sortConfig={sortConfig}
+                handleSort={handleSort}
+                onColDragStart={onColDragStart}
+                onColDragEnd={onColDragEnd}
+                draggedColKey={draggedColKey}
+                translateX={translateX}
+                table={table}
+                isFlexLayout={isFlexLayout}
+              />
+            );
+          })}
+        </div>
 
-      {/* 
+        {/* 
           VIRTUALIZED BODY 
           The total height container provides the correct scrollbar size
       */}
-      <div
-        ref={bodyRef}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-        style={{
-          position: "relative",
-          height: sortedData.length * rowHeight,
-          boxSizing: "content-box",
-          width: "max-content",
-          minWidth: "100%",
-        }}
-      >
-        {/* Render only visible range + buffers */}
-        {sortedData.slice(startIndex, endIndex).map((row, relativeIdx) => {
-          const idx = startIndex + relativeIdx;
-          const rowKey = table.getRowKey(row, idx);
-          
-          return (
+        <div
+          ref={bodyRef}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          style={{
+            position: "relative",
+            height: sortedData.length === 0 && emptyStateMessage ? 120 : sortedData.length * rowHeight,
+            boxSizing: "content-box",
+            width: tableWidthStyle,
+            minWidth: tableWidthStyle,
+          }}
+        >
+          {sortedData.length === 0 && emptyStateMessage ? (
             <div
-              key={rowKey}
               style={{
                 position: "absolute",
                 top: 0,
                 left: 0,
-                width: "max-content",
-                minWidth: "100%",
-                height: rowHeight,
-                transform: `translateY(${idx * rowHeight}px) translateZ(0)`,
-                willChange: "transform",
+                width: "100%",
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: colors.textMuted,
+                fontSize: "12px",
+                fontStyle: "italic",
+                textAlign: "center",
+                padding: "20px",
+                boxSizing: "border-box",
               }}
             >
-              <TableRow
-                row={row}
-                idx={idx}
-                rowKey={rowKey}
-                columns={sortedColumns}
-                flashes={currentFlashes}
-                pinnedSymbols={pinnedSymbols}
-                draggedIdx={draggedIdx}
-                hoverIdx={hoverIdx}
-                draggedColKey={draggedColKey}
-                hoverColKey={hoverColKey}
-                measuredWidths={measuredWidths}
-                table={table}
-                togglePin={togglePin}
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
-              />
+              {emptyStateMessage}
             </div>
-          );
-        })}
+          ) : (
+            /* Render only visible range + buffers */
+            sortedData.slice(startIndex, endIndex).map((row, relativeIdx) => {
+              const idx = startIndex + relativeIdx;
+              const rowKey = table.getRowKey(row, idx);
+
+              return (
+                <div
+                  key={rowKey}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: tableWidthStyle,
+                    minWidth: tableWidthStyle,
+                    height: rowHeight,
+                    transform: `translateY(${idx * rowHeight}px) translateZ(0)`,
+                    willChange: "transform",
+                  }}
+                >
+                  <TableRow
+                    row={row}
+                    idx={idx}
+                    rowKey={rowKey}
+                    columns={sortedColumns}
+                    flashes={currentFlashes}
+                    pinnedSymbols={pinnedSymbols}
+                    draggedIdx={draggedIdx}
+                    hoverIdx={hoverIdx}
+                    draggedColKey={draggedColKey}
+                    hoverColKey={hoverColKey}
+                    measuredWidths={measuredWidths}
+                    table={table}
+                    togglePin={togglePin}
+                    onDragStart={onDragStart}
+                    onDragEnd={onDragEnd}
+                    isFlexLayout={isFlexLayout}
+                    containerWidth={containerWidth}
+                  />
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
     </div>
   );
