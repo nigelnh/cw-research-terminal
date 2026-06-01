@@ -79,7 +79,7 @@ export function DisplayOptionContent({
               e.currentTarget.style.color = colors.textSecondary;
             }}
           >
-            Clear
+            Reset
           </button>
           <button
             onClick={onUnselectAll}

@@ -26,7 +26,7 @@ function DateInput({ value, onChange }: DateInputProps) {
 
   const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    
+
     // Filter non-digits and insert slashes automatically for a high-fidelity experience
     const clean = val.replace(/\D/g, "");
     let formatted = "";
@@ -39,7 +39,7 @@ function DateInput({ value, onChange }: DateInputProps) {
     if (clean.length > 4) {
       formatted += "/" + clean.substring(4, 8);
     }
-    
+
     setInputValue(formatted);
 
     // Propagate changes to the parent filter when a complete date is entered
@@ -373,7 +373,7 @@ export function TableFilterContent({
                 e.currentTarget.style.backgroundColor = "transparent";
               }}
             >
-              Clear
+              Reset
             </button>
           </div>
         </div>
