@@ -53,7 +53,7 @@ export function DisplayOptionContent({
   return (
     <div style={containerStyle} onClick={(e) => e.stopPropagation()}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
-        <div style={{ fontWeight: 600, fontSize: 11, color: colors.textSecondary, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        <div style={{ fontWeight: 600, fontSize: 11, color: colors.textSecondary, textTransform: "capitalize", letterSpacing: "0.04em" }}>
           Display Option
         </div>
         <div style={{ display: "flex", gap: 6 }}>
