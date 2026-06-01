@@ -8,6 +8,22 @@ import type { TableConfig } from "../core/types";
 import { colors, tableConfig } from "@/design/tokens";
 import { getPriceColor } from "@/tables/equity/utils";
 
+/**
+ * The four logical column groups for the PosMaster tabbed sub-view layout.
+ * "all" is a special sentinel that returns every column (used for the
+ * DisplayOption panel and any non-tabbed consumer).
+ */
+export type PosColumnGroup = "overview" | "summary" | "inventory" | "greeks" | "pnl" | "all";
+
+/** Human-readable labels, accent colours, and column counts for the tab bar */
+export const POS_GROUP_META: Record<Exclude<PosColumnGroup, "all">, { label: string; color: string; count: number }> = {
+  overview:  { label: "Overview",  color: "#0ECB81", count: 52 },
+  summary:   { label: "Summary",   color: "#FF9F1C", count: 13 },
+  inventory: { label: "Inventory", color: "#FFD700", count: 11 },
+  greeks:    { label: "Greeks",    color: "#C77DFF", count: 17 },
+  pnl:       { label: "PnL",       color: "#C77DFF", count: 16 },
+};
+
 export interface PosMasterRow {
   ticker: string;
   und_ticker: string;
@@ -111,6 +127,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
     headerFontSize: tableConfig.headerFontSize,
   };
 
+  activeGroup: PosColumnGroup = "overview";
   private columns: ColumnBase<PosMasterRow>[];
 
   constructor() {
@@ -121,9 +138,14 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "ticker",
         header: "Ticker",
-        flex: 1.2,
+        widthPx: 70,
         align: "left",
-        color: colors.increase,
+        color: (row: PosMasterRow) => {
+          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
+          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
+          if (prc === 0) return colors.textSecondary;
+          return getPriceColor(prc, ref, 0, 0);
+        },
         sortArrowOnRight: true,
       }),
 
@@ -131,9 +153,14 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "und_ticker",
         header: "Und_Ticker",
-        flex: 1,
+        widthPx: 55,
         align: "left",
-        color: colors.increase,
+        color: (row: PosMasterRow) => {
+          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
+          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
+          if (prc === 0) return colors.textSecondary;
+          return getPriceColor(prc, ref, 0, 0);
+        },
       }),
 
       // 3. LastPrc(T) — live realtime traded price of the CW symbol
@@ -142,7 +169,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "last_prc_t",
         header: "LastPrc(T)",
-        flex: 1.2,
+        widthPx: 70,
         align: "right",
         format: (v) => formatNum(v),
         color: (row: PosMasterRow) => {
@@ -159,7 +186,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "last_prc_t_1",
         header: "LastPrc(T-1)",
-        flex: 1.2,
+        widthPx: 70,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.volData,
@@ -169,31 +196,45 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "net_chg_pct",
         header: "Net_Chg(%)",
-        flex: 1.2,
+        widthPx: 65,
         align: "right",
         format: (v) => formatPct(v),
-        color: colors.increase,
+        color: (row: PosMasterRow) => {
+          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
+          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
+          if (prc === 0) return colors.textSecondary;
+          return getPriceColor(prc, ref, 0, 0);
+        },
       }),
 
       // 6. Expiry (Col 11)
       new ColumnBase<PosMasterRow>({
         key: "expiry",
         header: "Expiry",
-        flex: 1.3,
+        widthPx: 75,
         align: "center",
         format: (v) => {
           if (!v) return "N/A";
           const dateStr = String(v);
+          let y = "";
+          let m = "";
+          let dy = "";
           if (dateStr.includes("T")) {
             const d = new Date(dateStr);
             // Shift +7 hours to get true Vietnam local calendar date
             const local = new Date(d.getTime() + 7 * 60 * 60 * 1000);
-            const y = local.getUTCFullYear();
-            const m = String(local.getUTCMonth() + 1).padStart(2, "0");
-            const dy = String(local.getUTCDate()).padStart(2, "0");
-            return `${y}-${m}-${dy}`;
+            y = String(local.getUTCFullYear());
+            m = String(local.getUTCMonth() + 1).padStart(2, "0");
+            dy = String(local.getUTCDate()).padStart(2, "0");
+          } else {
+            const parts = dateStr.split("-");
+            if (parts.length === 3 && parts[0].length === 4) {
+              [y, m, dy] = parts;
+            } else {
+              return dateStr;
+            }
           }
-          return dateStr;
+          return `${dy}/${m}/${y}`;
         },
         color: colors.increase,
       }),
@@ -202,7 +243,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "dte",
         header: "DTE",
-        flex: 0.8,
+        widthPx: 50,
         align: "right",
         format: (v) => {
           if (v === null || v === undefined || v === "") return "N/A";
@@ -217,7 +258,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "tte_t",
         header: "TTE(t)",
-        flex: 1.1,
+        widthPx: 75,
         align: "right",
         format: (v) => formatNum(v, 6),
         color: colors.increase,
@@ -227,7 +268,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "tte_t_1",
         header: "TTE(t-1)",
-        flex: 1.1,
+        widthPx: 75,
         align: "right",
         format: (v) => formatNum(v, 6),
         color: colors.increase,
@@ -237,7 +278,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "strike_k",
         header: "Strike(K)",
-        flex: 1.2,
+        widthPx: 70,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.increase,
@@ -247,7 +288,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "multiplier_m",
         header: "Multiplier(M)",
-        flex: 1.2,
+        widthPx: 65,
         align: "right",
         format: (v) => formatNum(v, 4),
         color: colors.increase,
@@ -257,33 +298,26 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "cvr",
         header: "CVR",
-        flex: 0.9,
+        widthPx: 50,
         align: "center",
         format: (v) => v ? String(v) : "N/A",
         color: colors.increase,
       }),
 
       // 13. Spot_Prc(S) — live realtime traded price of the UNDERLYING stock
-      // Color: uses getPriceColor relative to the underlying's Ref/Ceil/Floor from KB RT API
+      // Color: matches LastPrc(T) color based on the warrant's last_prc_t / last_prc_t_1 movement
       // Flash: up/down driven by posMasterChanges in App.tsx
       new ColumnBase<PosMasterRow>({
         key: "spot_prc_s",
         header: "Spot_Prc(S)",
-        flex: 1.2,
+        widthPx: 75,
         align: "right",
         format: (v) => formatNum(v),
-        color: (row: PosMasterRow, getRow?: (symbol: string) => any) => {
-          const spotPrc = row.spot_prc_s !== null && row.spot_prc_s !== undefined
-            ? parseFloat(String(row.spot_prc_s)) : 0;
-          if (spotPrc === 0) return colors.textSecondary;
-          // Look up the live underlying equity row for its Ref/Ceil/Floor
-          if (getRow && row.und_ticker) {
-            const undRow = getRow(row.und_ticker.toUpperCase());
-            if (undRow) {
-              return getPriceColor(spotPrc, undRow.Ref ?? 0, undRow.Ceil ?? 0, undRow.Floor ?? 0);
-            }
-          }
-          return colors.increase;
+        color: (row: PosMasterRow) => {
+          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
+          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
+          if (prc === 0) return colors.textSecondary;
+          return getPriceColor(prc, ref, 0, 0);
         },
       }),
 
@@ -291,7 +325,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "hedge_v_t",
         header: "HedgeV(T)",
-        flex: 1.1,
+        widthPx: 70,
         align: "right",
         format: (v) => formatPct(v),
         color: colors.yellow,
@@ -301,7 +335,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "hedge_v_t_1",
         header: "HedgeV(T-1)",
-        flex: 1.1,
+        widthPx: 70,
         align: "right",
         format: (v) => formatPct(v),
         color: colors.yellow,
@@ -311,7 +345,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "rate",
         header: "Rate",
-        flex: 1,
+        widthPx: 50,
         align: "right",
         format: (v) => formatPct(v),
         color: colors.yellow,
@@ -324,7 +358,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "fund",
         header: "Fund",
-        flex: 1.2,
+        widthPx: 60,
         align: "right",
         format: (v) => formatInt(v),
         color: colors.yellow,
@@ -334,7 +368,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "balance_t_1",
         header: "Balance(T-1)",
-        flex: 1.3,
+        widthPx: 75,
         align: "right",
         format: (v) => formatInt(v),
         color: colors.yellow,
@@ -344,7 +378,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "balance",
         header: "Balance",
-        flex: 1.3,
+        widthPx: 75,
         align: "right",
         format: (v) => formatInt(v),
         color: colors.yellow,
@@ -354,7 +388,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "sold_amt",
         header: "Sold_Amt",
-        flex: 1.5,
+        widthPx: 85,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.yellow,
@@ -364,7 +398,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "sold_qty",
         header: "Sold_Qty",
-        flex: 1.3,
+        widthPx: 70,
         align: "right",
         format: (v) => formatInt(v),
         color: colors.yellow,
@@ -374,7 +408,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "sold_avg",
         header: "Sold_Avg",
-        flex: 1.2,
+        widthPx: 70,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -384,7 +418,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "bought_amt",
         header: "Bought_Amt",
-        flex: 1.5,
+        widthPx: 85,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.yellow,
@@ -394,7 +428,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "bought_qty",
         header: "Bought_Qty",
-        flex: 1.3,
+        widthPx: 70,
         align: "right",
         format: (v) => formatInt(v),
         color: colors.yellow,
@@ -404,7 +438,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "bought_avg",
         header: "Bought_Avg",
-        flex: 1.2,
+        widthPx: 70,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -414,17 +448,22 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "theo_prc_t",
         header: "TheoPrc(T)",
-        flex: 1.2,
+        widthPx: 75,
         align: "right",
         format: (v) => formatNum(v, 4),
-        color: colors.increase,
+        color: (row: PosMasterRow) => {
+          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
+          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
+          if (prc === 0) return colors.textSecondary;
+          return getPriceColor(prc, ref, 0, 0);
+        },
       }),
 
       // 27. TheoPrc(T-1) (Col 34)
       new ColumnBase<PosMasterRow>({
         key: "theo_prc_t_1",
         header: "TheoPrc(T-1)",
-        flex: 1.2,
+        widthPx: 75,
         align: "right",
         format: (v) => formatNum(v, 4),
         color: colors.increase,
@@ -434,7 +473,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "delta_t",
         header: "Delta(T)",
-        flex: 1.2,
+        widthPx: 60,
         align: "right",
         format: (v) => formatDelta(v),
         color: colors.increase,
@@ -444,7 +483,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "delta_lots_t",
         header: "DeltaLots(T)",
-        flex: 1.3,
+        widthPx: 70,
         align: "right",
         format: (v) => formatLots(v),
         color: colors.purple,
@@ -454,7 +493,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "delta_cash_t",
         header: "DeltaCash(T)",
-        flex: 1.5,
+        widthPx: 90,
         align: "right",
         format: (v) => formatCash(v),
         color: colors.purple,
@@ -464,7 +503,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "delta_cash_t_1",
         header: "DeltaCash(T-1)",
-        flex: 1.5,
+        widthPx: 90,
         align: "right",
         format: (v) => formatNum(v, 1),
         color: colors.purple,
@@ -474,7 +513,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "trd_delta_lots_t",
         header: "TrdDeltaLots(T)",
-        flex: 1.3,
+        widthPx: 70,
         align: "right",
         format: (v) => formatLots(v),
         color: colors.purple,
@@ -484,7 +523,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "trd_delta_cash_t",
         header: "TrdDeltaCash(T)",
-        flex: 1.5,
+        widthPx: 90,
         align: "right",
         format: (v) => formatCash(v),
         color: colors.purple,
@@ -494,7 +533,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "gamma_amt_pct_t",
         header: "%GammaAmt(T)",
-        flex: 1.4,
+        widthPx: 75,
         align: "right",
         format: (v) => formatPct(v, 4),
         color: colors.increase,
@@ -504,7 +543,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "vega_pct_t",
         header: "%Vega(T)",
-        flex: 1.4,
+        widthPx: 65,
         align: "right",
         format: (v) => formatPct(v, 4),
         color: colors.increase,
@@ -514,7 +553,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "cash_vega_t",
         header: "CashVega(T)",
-        flex: 1.5,
+        widthPx: 80,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -524,7 +563,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "theta_t",
         header: "Theta(T)",
-        flex: 1.4,
+        widthPx: 75,
         align: "right",
         format: (v) => formatNum(v, 6),
         color: colors.increase,
@@ -534,7 +573,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "cash_theta_t",
         header: "CashTheta(T)",
-        flex: 1.5,
+        widthPx: 80,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -544,7 +583,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "trading_pnl_theo",
         header: "TradingPnL(Theo)",
-        flex: 1.5,
+        widthPx: 90,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -554,7 +593,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "position_pnl_theo",
         header: "PositionPnL(Theo)",
-        flex: 1.5,
+        widthPx: 90,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -564,7 +603,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "delta_pnl",
         header: "DeltaPnL",
-        flex: 1.5,
+        widthPx: 85,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -574,7 +613,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "gamma_pnl",
         header: "GammaPnL",
-        flex: 1.5,
+        widthPx: 85,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -584,7 +623,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "theta_pnl",
         header: "ThetaPnL",
-        flex: 1.5,
+        widthPx: 85,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -594,7 +633,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "vega_pnl",
         header: "VegaPnL",
-        flex: 1.5,
+        widthPx: 85,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -604,7 +643,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "unexplained_pnl",
         header: "UnexplainedPnL",
-        flex: 1.5,
+        widthPx: 85,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -614,7 +653,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "capital_cost",
         header: "CapitalCost",
-        flex: 1.5,
+        widthPx: 85,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.yellow,
@@ -624,7 +663,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "total_pnl_theo",
         header: "TotalPnL(Theo)",
-        flex: 1.5,
+        widthPx: 90,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -634,7 +673,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "total_pnl_mtm",
         header: "TotalPnL(MtM)",
-        flex: 1.5,
+        widthPx: 90,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -644,7 +683,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "position_pnl_mtm",
         header: "PositionPnL(MtM)",
-        flex: 1.5,
+        widthPx: 90,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -654,7 +693,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "trading_pnl_mtm",
         header: "TradingPnL(MtM)",
-        flex: 1.5,
+        widthPx: 90,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -664,7 +703,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "total_pnl_theo_cum",
         header: "TotalPnL(Theo) Cum",
-        flex: 1.5,
+        widthPx: 95,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
@@ -674,14 +713,87 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "total_pnl_mtm_cum",
         header: "TotalPnL(MtM) Cum",
-        flex: 1.5,
+        widthPx: 95,
         align: "right",
         format: (v) => formatNum(v),
         color: colors.purple,
       }),
     ];
 
+    // Define the dynamic keys set (live calculated/Kb streaming in Overview & Summary tabs)
+    const dynamicKeys = new Set(["ticker", "und_ticker", "last_prc_t", "last_prc_t_1", "net_chg_pct", "spot_prc_s", "theo_prc_t"]);
 
+    // Override the getColor method on each column to enforce the tab-based coloring logic
+    this.columns.forEach((col) => {
+      const originalGetColor = col.getColor.bind(col);
+      col.getColor = (row: PosMasterRow, getRow?: (symbol: string) => any): string => {
+        // Ticker, Under_Ticker, Spot_Prc, and Theo_Prc always keep their color logics across all tabs
+        if (col.key === "ticker" || col.key === "und_ticker" || col.key === "spot_prc_s" || col.key === "theo_prc_t") {
+          return originalGetColor(row, getRow);
+        }
+
+        // If we are not on Overview or Summary tabs, use grey for everything else
+        if (this.activeGroup !== "overview" && this.activeGroup !== "summary") {
+          return colors.textMuted;
+        }
+
+        // If we are on Overview or Summary tabs, keep original colors for dynamic keys; everything else is grey
+        if (dynamicKeys.has(col.key)) {
+          return originalGetColor(row, getRow);
+        }
+
+        return colors.textMuted;
+      };
+    });
+  }
+
+  /** Keys that belong to each logical group. */
+  private static readonly GROUP_KEYS: Record<Exclude<PosColumnGroup, "all">, string[]> = {
+    // Overview = All 52 columns (handled dynamically in getColumnsByGroup())
+    overview: [],
+    // Summary = The old 13-column Overview sub-view (Market prices + Contract parameters)
+    summary: [
+      "ticker", "und_ticker",
+      "last_prc_t", "last_prc_t_1", "net_chg_pct",
+      "spot_prc_s", "theo_prc_t",
+      "expiry", "dte", "strike_k",
+      "cvr", "hedge_v_t", "rate",
+    ],
+    inventory: [
+      "ticker", "und_ticker",
+      "fund", "balance_t_1", "balance",
+      "sold_amt", "sold_qty", "sold_avg",
+      "bought_amt", "bought_qty", "bought_avg",
+    ],
+    greeks: [
+      "ticker", "und_ticker", "last_prc_t", "spot_prc_s",
+      "theo_prc_t", "theo_prc_t_1",
+      "delta_t", "delta_lots_t", "delta_cash_t", "delta_cash_t_1",
+      "trd_delta_lots_t", "trd_delta_cash_t",
+      "gamma_amt_pct_t", "vega_pct_t", "cash_vega_t",
+      "theta_t", "cash_theta_t",
+    ],
+    pnl: [
+      "ticker", "und_ticker",
+      "trading_pnl_theo", "position_pnl_theo",
+      "delta_pnl", "gamma_pnl", "theta_pnl", "vega_pnl",
+      "unexplained_pnl", "capital_cost",
+      "total_pnl_theo", "total_pnl_mtm",
+      "position_pnl_mtm", "trading_pnl_mtm",
+      "total_pnl_theo_cum", "total_pnl_mtm_cum",
+    ],
+  };
+
+  /**
+   * Return columns filtered to the requested group.
+   * - "all" returns every column (used for DisplayOption panel).
+   * - Any named group returns only the columns defined for that group,
+   *   preserving original column order from this.columns.
+   */
+  getColumnsByGroup(group: PosColumnGroup): ColumnBase<PosMasterRow>[] {
+    if (group === "all" || group === "overview") return this.columns;
+    const allowed = new Set(PosMasterTable.GROUP_KEYS[group]);
+    return this.columns.filter((c) => allowed.has(c.key));
   }
 
   getColumns(): ColumnBase<PosMasterRow>[] {
@@ -697,21 +809,38 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
   }
 
   /**
-   * Flash color override for PosMaster — mirrors StockTable.getFlashColor logic.
-   * When a cell's value is 0/null/undefined, flash a muted color instead of green/red.
+   * Flash color override for PosMaster — reuses and extends StockTable.getFlashColor logic.
    */
   getFlashColor(
     row: PosMasterRow,
     colKey: string,
     _direction: "up" | "down",
-    _getRow?: (symbol: string) => any
+    getRow?: (symbol: string) => any
   ): string | undefined {
-    if (colKey === "last_prc_t" || colKey === "spot_prc_s") {
-      const val = colKey === "last_prc_t" ? row.last_prc_t : row.spot_prc_s;
-      const num = val !== null && val !== undefined ? parseFloat(String(val)) : 0;
-      if (num === 0) return colors.textSecondary;
+    const col = this.columns.find((c) => c.key === colKey);
+    if (!col) return undefined;
+
+    // 1. Live Data Input Columns: Ticker, und_ticker, LastPrice(T), Net_Chg(%), Spot_Price(S)
+    const liveKeys = new Set(["ticker", "und_ticker", "last_prc_t", "net_chg_pct", "spot_prc_s"]);
+    if (liveKeys.has(colKey)) {
+      const val = col.getValue(row);
+      if (val === 0 || val === null || val === undefined) {
+        return colors.textSecondary;
+      }
+      const color = col.getColor(row, getRow);
+      if (color === colors.cyan) return colors.blue;
+      return color;
     }
-    return undefined; // use default green/red flash
+
+    // 2. Static / contract parameter columns do not flash or return default
+    const staticKeys = new Set(["fund", "strike_k", "multiplier_m", "expiry", "rate", "cvr"]);
+    if (staticKeys.has(colKey)) {
+      return undefined;
+    }
+
+    // 3. For all other dynamic columns (theoreticals, Greeks, PnL, cash balance, quantity),
+    // flash "Foreign's columns color" (colors.volData) when data changes.
+    return colors.volData;
   }
 }
 

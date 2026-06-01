@@ -34,9 +34,9 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
       new ColumnBase<DividendRow>({
         key: "symbol",
         header: "Symbol",
-        widthPx: 72,
+        flex: 0.8,
         align: "left",
-        color: colors.yellow,
+        color: colors.textSecondary,
         sortArrowOnRight: true,
         format: (v) => {
           if (!v) return "—";
@@ -48,9 +48,9 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
       new ColumnBase<DividendRow>({
         key: "name",
         header: "Name",
-        widthPx: 90,
+        flex: 1.2,
         align: "left",
-        color: colors.textSecondary,
+        color: colors.textMuted,
         format: (v) => {
           if (!v) return "—";
           return String(v);
@@ -61,9 +61,9 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
       new ColumnBase<DividendRow>({
         key: "note",
         header: "Event",
-        flex: 1,
+        flex: 2.5,
         align: "left",
-        color: colors.textPrimary,
+        color: colors.textSecondary,
         format: (v) => {
           if (!v) return "—";
           return String(v);
@@ -74,9 +74,9 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
       new ColumnBase<DividendRow>({
         key: "exDate",
         header: "Ex-Date",
-        widthPx: 100,
+        flex: 1.0,
         align: "center",
-        color: colors.purple,
+        color: colors.textSecondary,
         format: (v) => {
           if (!v) return "—";
           const str = String(v);
@@ -96,7 +96,7 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
       new ColumnBase<DividendRow>({
         key: "fileUrl",
         header: "Document",
-        widthPx: 84,
+        flex: 0.9,
         align: "center",
         color: colors.increase,
         // Raw value is passed; the custom cell renderer in TableView handles links.

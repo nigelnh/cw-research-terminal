@@ -4,12 +4,23 @@ import { PanelTitle } from "./PanelTitle";
 import { TableView } from "@/tables/core/TableView";
 import { stockTable } from "@/tables/stock/StockTable";
 import { posMasterTable } from "@/tables/info/PosMasterTable";
+import { type PosColumnGroup, POS_GROUP_META } from "@/tables/info/PosMasterTable";
 import { rtTradesTable } from "@/tables/info/RtTradesTable";
 import { holidayTable } from "@/tables/info/HolidayTable";
 import { dividendTable } from "@/tables/info/DividendTable";
 import { useEquityData } from "@/data/useEquityData";
 import { colors } from "@/design/tokens";
 import { DisplayOptionContent } from "@/tables/core/DisplayOptionContent";
+import { TableFilterContent } from "@/tables/core/TableFilterContent";
+
+const getUnderlying = (symbol: string): string => {
+  const sym = symbol.toUpperCase();
+  if (sym.length === 3) return sym;
+  if (sym.startsWith("C") && sym.length >= 8) {
+    return sym.substring(1, 4);
+  }
+  return sym;
+};
 
 const VN30_SYMBOLS = [
   "ACB", "BCM", "BID", "CTG", "DGC", "FPT", "GAS", "GVR", "HDB", "HPG", "LPB", "MBB", "MSN", "MWG", "PLX", "SAB", "SHB", "SSB", "SSI", "STB", "TCB", "TPB", "VCB", "VHM", "VIC", "VIB", "VJC", "VNM", "VPB", "VRE", "VPL"
@@ -21,15 +32,17 @@ export function App() {
   const { rows, lastChanges, serverTimeOffset, getRow, lastUpdateTs } = useEquityData();
   const [viewMode, setViewMode] = useState<ViewMode>("equity");
   const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
+  const [infoHiddenColumns, setInfoHiddenColumns] = useState<string[]>([]);
+  const [tradesHiddenColumns, setTradesHiddenColumns] = useState<string[]>([]);
+
   const [posRows, setPosRows] = useState<any[]>([]);
   const [loadingPos, setLoadingPos] = useState(false);
   const [posError, setPosError] = useState<string | null>(null);
-  const [infoHiddenColumns, setInfoHiddenColumns] = useState<string[]>([]);
+  const [posColumnGroup, setPosColumnGroup] = useState<PosColumnGroup>("overview");
 
   const [tradesRows, setTradesRows] = useState<any[]>([]);
   const [loadingTrades, setLoadingTrades] = useState(false);
   const [tradesError, setTradesError] = useState<string | null>(null);
-  const [tradesHiddenColumns, setTradesHiddenColumns] = useState<string[]>([]);
 
   const [holidayRows, setHolidayRows] = useState<any[]>([]);
   const [loadingHolidays, setLoadingHolidays] = useState(false);
@@ -39,35 +52,37 @@ export function App() {
   const [loadingDividends, setLoadingDividends] = useState(false);
   const [dividendsError, setDividendsError] = useState<string | null>(null);
 
+  // ── Info Tab Table Filters States ──────────────────────────────────
+  const [posFilter, setPosFilter] = useState<{ underlyings: string[]; fromDate: string; toDate: string }>({ underlyings: ["All"], fromDate: "", toDate: "" });
+  const [tradesFilter, setTradesFilter] = useState<{ underlyings: string[]; fromDate: string; toDate: string }>({ underlyings: ["All"], fromDate: "", toDate: "" });
+  const [holidayFilter, setHolidayFilter] = useState<{ underlyings: string[]; fromDate: string; toDate: string }>({ underlyings: ["All"], fromDate: "", toDate: "" });
+  const [dividendFilter, setDividendFilter] = useState<{ underlyings: string[]; fromDate: string; toDate: string }>({ underlyings: ["All"], fromDate: "", toDate: "" });
+
   const toggleColumn = (key: string) => {
     setHiddenColumns((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
     );
   };
-
-  const resetColumns = () => {
-    setHiddenColumns([]);
-  };
+  const resetColumns = () => setHiddenColumns([]);
+  const unselectAllColumns = () => setHiddenColumns(stockTable.getColumns().map(c => c.key));
 
   const toggleInfoColumn = (key: string) => {
     setInfoHiddenColumns((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
     );
   };
-
-  const resetInfoColumns = () => {
-    setInfoHiddenColumns([]);
-  };
+  const resetInfoColumns = () => setInfoHiddenColumns([]);
+  const unselectAllInfoColumns = () => setInfoHiddenColumns(posMasterTable.getColumns().map(c => c.key));
 
   const toggleTradesColumn = (key: string) => {
     setTradesHiddenColumns((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
     );
   };
+  const resetTradesColumns = () => setTradesHiddenColumns([]);
+  const unselectAllTradesColumns = () => setTradesHiddenColumns(rtTradesTable.getColumns().map(c => c.key));
 
-  const resetTradesColumns = () => {
-    setTradesHiddenColumns([]);
-  };
+
 
   useEffect(() => {
     if (viewMode !== "info") return;
@@ -189,48 +204,48 @@ export function App() {
     return rows.filter(r => VN30_SYMBOLS.includes(r.Symbol));
   }, [rows]);
 
-// Standard normal cumulative distribution function (cnd)
-function cnd(x: number): number {
-  const a1 = 0.319381530;
-  const a2 = -0.356563782;
-  const a3 = 1.781477937;
-  const a4 = -1.821255978;
-  const a5 = 1.330274429;
-  const L = Math.abs(x);
-  const K = 1.0 / (1.0 + 0.2316419 * L);
-  let w = 1.0 - 1.0 / Math.sqrt(2.0 * Math.PI) * Math.exp(-L * L / 2.0) * (a1 * K + a2 * K * K + a3 * Math.pow(K, 3) + a4 * Math.pow(K, 4) + a5 * Math.pow(K, 5));
-  if (x < 0) {
-    w = 1.0 - w;
+  // Standard normal cumulative distribution function (cnd)
+  function cnd(x: number): number {
+    const a1 = 0.319381530;
+    const a2 = -0.356563782;
+    const a3 = 1.781477937;
+    const a4 = -1.821255978;
+    const a5 = 1.330274429;
+    const L = Math.abs(x);
+    const K = 1.0 / (1.0 + 0.2316419 * L);
+    let w = 1.0 - 1.0 / Math.sqrt(2.0 * Math.PI) * Math.exp(-L * L / 2.0) * (a1 * K + a2 * K * K + a3 * Math.pow(K, 3) + a4 * Math.pow(K, 4) + a5 * Math.pow(K, 5));
+    if (x < 0) {
+      w = 1.0 - w;
+    }
+    return w;
   }
-  return w;
-}
 
-// Probability Density Function of standard normal distribution (nd_pdf)
-function nd_pdf(x: number): number {
-  return (1.0 / Math.sqrt(2.0 * Math.PI)) * Math.exp(-x * x / 2.0);
-}
+  // Probability Density Function of standard normal distribution (nd_pdf)
+  function nd_pdf(x: number): number {
+    return (1.0 / Math.sqrt(2.0 * Math.PI)) * Math.exp(-x * x / 2.0);
+  }
 
-// Black-Scholes Call Option Price
-function bsCallPrice(S: number, K: number, t: number, r: number, sigma: number): number {
-  if (t <= 0) return Math.max(0, S - K);
-  const d1 = (Math.log(S / K) + (r + (sigma * sigma) / 2) * t) / (sigma * Math.sqrt(t));
-  const d2 = d1 - sigma * Math.sqrt(t);
-  return S * cnd(d1) - K * Math.exp(-r * t) * cnd(d2);
-}
+  // Black-Scholes Call Option Price
+  function bsCallPrice(S: number, K: number, t: number, r: number, sigma: number): number {
+    if (t <= 0) return Math.max(0, S - K);
+    const d1 = (Math.log(S / K) + (r + (sigma * sigma) / 2) * t) / (sigma * Math.sqrt(t));
+    const d2 = d1 - sigma * Math.sqrt(t);
+    return S * cnd(d1) - K * Math.exp(-r * t) * cnd(d2);
+  }
 
-// Black-Scholes Call Option Vega
-function bsCallVega(S: number, K: number, t: number, r: number, sigma: number): number {
-  if (t <= 0) return 0.0;
-  const d1 = (Math.log(S / K) + (r + (sigma * sigma) / 2) * t) / (sigma * Math.sqrt(t));
-  return S * Math.sqrt(t) * nd_pdf(d1);
-}
+  // Black-Scholes Call Option Vega
+  function bsCallVega(S: number, K: number, t: number, r: number, sigma: number): number {
+    if (t <= 0) return 0.0;
+    const d1 = (Math.log(S / K) + (r + (sigma * sigma) / 2) * t) / (sigma * Math.sqrt(t));
+    return S * Math.sqrt(t) * nd_pdf(d1);
+  }
 
-// Black-Scholes Call Option Delta
-function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number): number {
-  if (t <= 0) return S >= K ? 1.0 : 0.0;
-  const d1 = (Math.log(S / K) + (r + (sigma * sigma) / 2) * t) / (sigma * Math.sqrt(t));
-  return cnd(d1);
-}
+  // Black-Scholes Call Option Delta
+  function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number): number {
+    if (t <= 0) return S >= K ? 1.0 : 0.0;
+    const d1 = (Math.log(S / K) + (r + (sigma * sigma) / 2) * t) / (sigma * Math.sqrt(t));
+    return cnd(d1);
+  }
 
 
 
@@ -240,15 +255,15 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
       // getRow() reads from rowsMapRef directly (always latest tick, never stale).
       // Guard: only apply if Ref > 0 (skip zero-filled initial snapshots before first KB tick).
       const liveWarrant = getRow(row.ticker.toUpperCase());
-      
-      let lastPrcT  = row.last_prc_t  !== null ? parseFloat(row.last_prc_t)  : null;
+
+      let lastPrcT = row.last_prc_t !== null ? parseFloat(row.last_prc_t) : null;
       let lastPrcT1 = row.last_prc_t_1 !== null ? parseFloat(row.last_prc_t_1) : null;
       let netChgPct = row.net_chg_pct !== null ? parseFloat(row.net_chg_pct) : null;
 
       if (liveWarrant && liveWarrant.Ref && liveWarrant.Ref > 0) {
         // LastPrc(T)  = Traded price when matched; otherwise Ref (yesterday's close from KB)
         // LastPrc(T-1)= Ref (yesterday's reference price from KB — e.g. CACB2606 = 660)
-        lastPrcT  = liveWarrant.Traded && liveWarrant.Traded > 0 ? liveWarrant.Traded : liveWarrant.Ref;
+        lastPrcT = liveWarrant.Traded && liveWarrant.Traded > 0 ? liveWarrant.Traded : liveWarrant.Ref;
         lastPrcT1 = liveWarrant.Ref;
         if (lastPrcT1 > 0) {
           netChgPct = (lastPrcT / lastPrcT1) - 1;
@@ -317,7 +332,7 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
         theoPrcT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigma) / ratioNum;
         vegaPctT = bsCallVega(spotS_t, strikeK, tteT, rate, sigma) / ratioNum;
         // Daily Theta decay using finite difference: bsCallPrice(newT) - bsCallPrice(T)
-        const newT = Math.max(tteT - 1/365, 0.0001);
+        const newT = Math.max(tteT - 1 / 365, 0.0001);
         thetaT = (bsCallPrice(spotS_t, strikeK, newT, rate, sigma) - bsCallPrice(spotS_t, strikeK, tteT, rate, sigma)) / ratioNum;
       }
 
@@ -326,7 +341,7 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
       const deltaLotsT = deltaT * balance;
       const deltaCashT = spotS_t * deltaLotsT;
       const deltaCashT1 = deltaT * balanceT1 * spotS_t_1;
-      
+
       const trdDeltaLotsT = deltaT * (boughtQty - soldQty);
       const trdDeltaCashT = trdDeltaLotsT * spotS_t;
 
@@ -346,7 +361,7 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
         if (soldQty > 0 && boughtQty > 0) {
           const minQty = Math.min(soldQty, boughtQty);
           const matchedPnl = minQty * (absSoldAvg - absBoughtAvg);
-          
+
           let unmatchedPnl = 0;
           if (soldQty >= boughtQty) {
             unmatchedPnl = (soldQty - boughtQty) * (absSoldAvg - lastPrcT);
@@ -369,7 +384,7 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
       if (soldQty > 0 && boughtQty > 0) {
         const minQty = Math.min(soldQty, boughtQty);
         const matchedPnl = minQty * (absSoldAvg - absBoughtAvg);
-        
+
         let unmatchedPnl = 0;
         if (soldQty >= boughtQty) {
           unmatchedPnl = (soldQty - boughtQty) * (absSoldAvg - theoPrcT);
@@ -398,7 +413,7 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
         gammaAmtPctT1 = gammaOption_1 / ratioNum;
 
         // Theta yesterday
-        const newT1 = Math.max(tteT1 - 1/365, 0.0001);
+        const newT1 = Math.max(tteT1 - 1 / 365, 0.0001);
         thetaT1 = (bsCallPrice(spotS_t_1, strikeK, newT1, rate, sigmaT1) - bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigmaT1)) / ratioNum;
       }
 
@@ -417,7 +432,7 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
       const stockReturn = spotS_t_1 > 0 ? (spotS_t - spotS_t_1) / spotS_t_1 : 0;
       const deltaPnl = deltaCashT1 * stockReturn;
       const gammaPnl = 0.5 * Math.pow(stockReturn, 2) * Math.pow(spotS_t, 2) * gammaAmtPctT1 * balanceT1;
-      
+
       // thetapnl = average(Theta(T-1), Theta(T)) * DailyDecay
       const thetaPnl = 0.5 * (thetaT1 + thetaT) * balanceT1 * m;
 
@@ -436,7 +451,7 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
         last_prc_t_1: lastPrcT1 !== null ? String(lastPrcT1) : null,
         net_chg_pct: netChgPct !== null ? String(netChgPct) : null,
         spot_prc_s: spotPrcS !== null ? String(spotPrcS) : null,
-        
+
         balance_t_1: balanceT1,
         balance: balance,
         sold_qty: soldQty,
@@ -445,7 +460,7 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
         bought_qty: boughtQty,
         bought_amt: boughtAmt,
         bought_avg: boughtAvg,
-        
+
         theo_prc_t: theoPrcT,
         theo_prc_t_1: theoPrcT1,
         delta_lots_t: deltaLotsT,
@@ -457,21 +472,21 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
         cash_vega_t: cashVegaT,
         theta_t: thetaT,
         cash_theta_t: cashThetaT,
-        
+
         position_pnl_mtm: positionPnlMtm,
         trading_pnl_mtm: tradingPnlMtm,
         total_pnl_mtm: totalPnlMtm,
-        
+
         position_pnl_theo: positionPnlTheo,
         trading_pnl_theo: tradingPnlTheo,
         total_pnl_theo: totalPnlTheo,
-        
+
         delta_pnl: deltaPnl,
         gamma_pnl: gammaPnl,
         theta_pnl: thetaPnl,
         vega_pnl: vegaPnl,
         unexplained_pnl: unexplainedPnl,
-        
+
         total_pnl_theo_cum: totalPnlTheoCum,
         total_pnl_mtm_cum: totalPnlMtmCum,
       };
@@ -490,7 +505,7 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
       const ticker: string = row.ticker;
       const newLastPrcT = row.last_prc_t !== null && row.last_prc_t !== undefined
         ? parseFloat(String(row.last_prc_t)) : null;
-      const newSpotPrc  = row.spot_prc_s !== null && row.spot_prc_s !== undefined
+      const newSpotPrc = row.spot_prc_s !== null && row.spot_prc_s !== undefined
         ? parseFloat(String(row.spot_prc_s)) : null;
 
       const prev = posMasterPrevPricesRef.current.get(ticker);
@@ -508,6 +523,78 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
     }
     return changes;
   }, [livePosRows]);
+
+  // ── Unique Options for Position Master Filters ──
+  const posUnderlyings = useMemo(() => {
+    const set = new Set<string>();
+    livePosRows.forEach((row) => {
+      if (row.und_ticker) set.add(row.und_ticker.toUpperCase());
+    });
+    return Array.from(set).sort();
+  }, [livePosRows]);
+
+  // ── Unique Options for Realtime Trades Filters ──
+  const tradesUnderlyings = useMemo(() => {
+    const set = new Set<string>();
+    tradesRows.forEach((row) => {
+      if (row.symbol) set.add(getUnderlying(row.symbol).toUpperCase());
+    });
+    return Array.from(set).sort();
+  }, [tradesRows]);
+
+  // ── Unique Options for Dividend Calendar Filters ──
+  const dividendUnderlyings = useMemo(() => {
+    const set = new Set<string>();
+    dividendRows.forEach((row) => {
+      if (row.symbol) set.add(row.symbol.toUpperCase());
+    });
+    return Array.from(set).sort();
+  }, [dividendRows]);
+
+  // ── Filtered Position Master Data ──
+  const filteredPosRows = useMemo(() => {
+    return livePosRows.filter((row) => {
+      const matchUnd = posFilter.underlyings.includes("All") || (row.und_ticker && posFilter.underlyings.map(u => u.toUpperCase()).includes(row.und_ticker.toUpperCase()));
+      const matchFrom = !posFilter.fromDate || (row.expiry && row.expiry >= posFilter.fromDate);
+      const matchTo = !posFilter.toDate || (row.expiry && row.expiry <= posFilter.toDate);
+      return matchUnd && matchFrom && matchTo;
+    });
+  }, [livePosRows, posFilter]);
+
+  // ── Filtered Realtime Trades Data ──
+  const filteredTradesRows = useMemo(() => {
+    return tradesRows.filter((row) => {
+      const rowUnd = getUnderlying(row.symbol);
+      const matchUnd = tradesFilter.underlyings.includes("All") || (rowUnd && tradesFilter.underlyings.map(u => u.toUpperCase()).includes(rowUnd.toUpperCase()));
+
+      const livePos = livePosRows.find((pos) => pos.ticker.toUpperCase() === row.symbol.toUpperCase());
+      const rowExpiry = livePos ? livePos.expiry : null;
+      
+      const matchFrom = !tradesFilter.fromDate || (rowExpiry && rowExpiry >= tradesFilter.fromDate);
+      const matchTo = !tradesFilter.toDate || (rowExpiry && rowExpiry <= tradesFilter.toDate);
+
+      return matchUnd && matchFrom && matchTo;
+    });
+  }, [tradesRows, tradesFilter, livePosRows]);
+
+  // ── Filtered Holiday Calendar Data ──
+  const filteredHolidayRows = useMemo(() => {
+    return holidayRows.filter((row) => {
+      const matchFrom = !holidayFilter.fromDate || (row.date && row.date >= holidayFilter.fromDate);
+      const matchTo = !holidayFilter.toDate || (row.date && row.date <= holidayFilter.toDate);
+      return matchFrom && matchTo;
+    });
+  }, [holidayRows, holidayFilter]);
+
+  // ── Filtered Dividend Calendar Data ──
+  const filteredDividendRows = useMemo(() => {
+    return dividendRows.filter((row) => {
+      const matchUnd = dividendFilter.underlyings.includes("All") || (row.symbol && dividendFilter.underlyings.map(u => u.toUpperCase()).includes(row.symbol.toUpperCase()));
+      const matchFrom = !dividendFilter.fromDate || (row.exDate && row.exDate >= dividendFilter.fromDate);
+      const matchTo = !dividendFilter.toDate || (row.exDate && row.exDate <= dividendFilter.toDate);
+      return matchUnd && matchFrom && matchTo;
+    });
+  }, [dividendRows, dividendFilter]);
 
   return (
     <div
@@ -545,6 +632,7 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
                 hiddenColumns={hiddenColumns}
                 onToggleColumn={toggleColumn}
                 onReset={resetColumns}
+                onUnselectAll={unselectAllColumns}
               />
             }
           />
@@ -570,15 +658,92 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
           <div style={{ flex: 1.2, display: "flex", flexDirection: "column", minHeight: 0 }}>
             <PanelTitle
               title="Position Master"
+              filterContent={
+                <TableFilterContent
+                  underlyings={posUnderlyings}
+                  selectedUnderlyings={posFilter.underlyings}
+                  onSelectUnderlyings={(vals) => setPosFilter(prev => ({ ...prev, underlyings: vals }))}
+                  fromDate={posFilter.fromDate}
+                  toDate={posFilter.toDate}
+                  onChangeFromDate={(val) => setPosFilter(prev => ({ ...prev, fromDate: val }))}
+                  onChangeToDate={(val) => setPosFilter(prev => ({ ...prev, toDate: val }))}
+                  onReset={() => setPosFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
+                />
+              }
               displayOptionContent={
                 <DisplayOptionContent
                   columns={posMasterTable.getColumns().map((c) => ({ key: c.key, header: c.header }))}
                   hiddenColumns={infoHiddenColumns}
                   onToggleColumn={toggleInfoColumn}
                   onReset={resetInfoColumns}
+                  onUnselectAll={unselectAllInfoColumns}
                 />
               }
             />
+
+            {/* ── Column-group tab bar ─────────────────────────────────────── */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingBottom: 10,
+                marginBottom: 4,
+                flexShrink: 0,
+              }}
+            >
+              {(Object.entries(POS_GROUP_META) as [Exclude<PosColumnGroup, "all">, { label: string; color: string; count: number }][]).map(
+                ([group, meta]) => {
+                  const isActive = posColumnGroup === group;
+                  return (
+                    <button
+                      key={group}
+                      onClick={() => setPosColumnGroup(group)}
+                      style={{
+                        padding: "5px 14px",
+                        borderRadius: "6px",
+                        border: `1px solid ${isActive ? meta.color : "rgba(255,255,255,0.10)"
+                          }`,
+                        background: isActive ? `${meta.color}40` : "transparent",
+                        boxShadow: isActive
+                          ? `0 0 0 1px ${meta.color}55, 0 2px 8px ${meta.color}22`
+                          : "none",
+                        color: isActive ? meta.color : "rgba(255,255,255,0.40)",
+                        fontSize: 12,
+                        fontWeight: isActive ? 700 : 400,
+                        cursor: "pointer",
+                        transition: "all 0.18s ease",
+                        letterSpacing: "0.03em",
+                        lineHeight: "1.6",
+                        whiteSpace: "nowrap",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        userSelect: "none",
+                      }}
+                    >
+                      {meta.label}
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 400,
+                          opacity: isActive ? 0.75 : 0.40,
+                          background: isActive ? `${meta.color}30` : "rgba(255,255,255,0.06)",
+                          color: isActive ? meta.color : "rgba(255,255,255,0.45)",
+                          borderRadius: 10,
+                          padding: "0px 6px",
+                          lineHeight: "1.8",
+                        }}
+                      >
+                        {meta.count}
+                      </span>
+                    </button>
+                  );
+                }
+              )}
+            </div>
+            {/* ─────────────────────────────────────────────────────────────── */}
             {loadingPos ? (
               <div
                 style={{
@@ -616,12 +781,30 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
                 {posError}
               </div>
             ) : (
-              <TableView
-                table={posMasterTable}
-                data={livePosRows}
-                hiddenColumns={infoHiddenColumns}
-                lastChanges={posMasterChanges}
-              />
+              (() => {
+                posMasterTable.activeGroup = posColumnGroup;
+                return (
+                  <TableView
+                    table={posMasterTable}
+                    data={filteredPosRows}
+                    hiddenColumns={[
+                      // hide every column NOT in the active group (computed from group keys),
+                      // PLUS any manually hidden columns from the DisplayOption panel
+                      ...posMasterTable
+                        .getColumns()
+                        .filter(
+                          (c) =>
+                            !posMasterTable
+                              .getColumnsByGroup(posColumnGroup)
+                              .some((gc) => gc.key === c.key)
+                        )
+                        .map((c) => c.key),
+                      ...infoHiddenColumns,
+                    ]}
+                    lastChanges={posMasterChanges}
+                  />
+                );
+              })()
             )}
           </div>
 
@@ -629,15 +812,28 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
           <div style={{ flex: 0.8, display: "flex", flexDirection: "row", minHeight: 0, gap: "16px", paddingBottom: "24px" }}>
 
             {/* 2a. Realtime Trades */}
-            <div style={{ flex: 1.5, display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <div style={{ flex: 3, display: "flex", flexDirection: "column", minWidth: 0 }}>
               <PanelTitle
                 title="Realtime Trades"
+                filterContent={
+                  <TableFilterContent
+                    underlyings={tradesUnderlyings}
+                    selectedUnderlyings={tradesFilter.underlyings}
+                    onSelectUnderlyings={(vals) => setTradesFilter(prev => ({ ...prev, underlyings: vals }))}
+                    fromDate={tradesFilter.fromDate}
+                    toDate={tradesFilter.toDate}
+                    onChangeFromDate={(val) => setTradesFilter(prev => ({ ...prev, fromDate: val }))}
+                    onChangeToDate={(val) => setTradesFilter(prev => ({ ...prev, toDate: val }))}
+                    onReset={() => setTradesFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
+                  />
+                }
                 displayOptionContent={
                   <DisplayOptionContent
                     columns={rtTradesTable.getColumns().map((c) => ({ key: c.key, header: c.header }))}
                     hiddenColumns={tradesHiddenColumns}
                     onToggleColumn={toggleTradesColumn}
                     onReset={resetTradesColumns}
+                    onUnselectAll={unselectAllTradesColumns}
                   />
                 }
               />
@@ -680,15 +876,30 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
               ) : (
                 <TableView
                   table={rtTradesTable}
-                  data={tradesRows}
+                  data={filteredTradesRows}
                   hiddenColumns={tradesHiddenColumns}
                 />
               )}
             </div>
 
             {/* 2b. Holiday Calendar */}
-            <div style={{ flex: 0.8, display: "flex", flexDirection: "column", minWidth: 0 }}>
-              <PanelTitle title="Holiday Calendar" />
+            <div style={{ flex: 1.5, display: "flex", flexDirection: "column", minWidth: 0 }}>
+              <PanelTitle
+                title="Holiday Calendar"
+                filterContent={
+                  <TableFilterContent
+                    isDateOnly={true}
+                    underlyings={[]}
+                    selectedUnderlyings={holidayFilter.underlyings}
+                    onSelectUnderlyings={(vals) => setHolidayFilter(prev => ({ ...prev, underlyings: vals }))}
+                    fromDate={holidayFilter.fromDate}
+                    toDate={holidayFilter.toDate}
+                    onChangeFromDate={(val) => setHolidayFilter(prev => ({ ...prev, fromDate: val }))}
+                    onChangeToDate={(val) => setHolidayFilter(prev => ({ ...prev, toDate: val }))}
+                    onReset={() => setHolidayFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
+                  />
+                }
+              />
               {loadingHolidays ? (
                 <div
                   style={{
@@ -725,35 +936,33 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
                 >
                   {holidaysError}
                 </div>
-              ) : holidayRows.length === 0 ? (
-                <div
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    border: `1px solid ${colors.border}`,
-                    backgroundColor: colors.panelBg,
-                    borderRadius: "8px",
-                    marginTop: "8px",
-                    padding: "24px",
-                    color: colors.textMuted,
-                    fontSize: "13px",
-                  }}
-                >
-                  No holiday data available
-                </div>
               ) : (
                 <TableView
                   table={holidayTable}
-                  data={holidayRows}
+                  data={filteredHolidayRows}
+                  emptyStateMessage="No holiday data available"
                 />
               )}
             </div>
 
             {/* 2c. Dividend Calendar */}
-            <div style={{ flex: 1.2, display: "flex", flexDirection: "column", minWidth: 0 }}>
-              <PanelTitle title="Dividend Calendar" />
+            <div style={{ flex: 2.5, display: "flex", flexDirection: "column", minWidth: 0 }}>
+              <PanelTitle
+                title="Dividend Calendar"
+                filterContent={
+                  <TableFilterContent
+                    isDateOnly={true}
+                    underlyings={dividendUnderlyings}
+                    selectedUnderlyings={dividendFilter.underlyings}
+                    onSelectUnderlyings={(vals) => setDividendFilter(prev => ({ ...prev, underlyings: vals }))}
+                    fromDate={dividendFilter.fromDate}
+                    toDate={dividendFilter.toDate}
+                    onChangeFromDate={(val) => setDividendFilter(prev => ({ ...prev, fromDate: val }))}
+                    onChangeToDate={(val) => setDividendFilter(prev => ({ ...prev, toDate: val }))}
+                    onReset={() => setDividendFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
+                  />
+                }
+              />
               {loadingDividends ? (
                 <div
                   style={{
@@ -790,28 +999,11 @@ function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number):
                 >
                   {dividendsError}
                 </div>
-              ) : dividendRows.length === 0 ? (
-                <div
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    border: `1px solid ${colors.border}`,
-                    backgroundColor: colors.panelBg,
-                    borderRadius: "8px",
-                    marginTop: "8px",
-                    padding: "24px",
-                    color: colors.textMuted,
-                    fontSize: "13px",
-                  }}
-                >
-                  No dividend events with GDKHQDate in the next 7 days
-                </div>
               ) : (
                 <TableView
                   table={dividendTable}
-                  data={dividendRows}
+                  data={filteredDividendRows}
+                  emptyStateMessage="No dividend events with GDKHQDate in the next 7 days"
                 />
               )}
             </div>

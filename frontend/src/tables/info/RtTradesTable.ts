@@ -64,7 +64,7 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
       new ColumnBase<RtTradesRow>({
         key: "datetime",
         header: "Timestamp",
-        widthPx: 160,
+        flex: 1.5,
         align: "center",
         format: (v) => {
           if (!v) return "N/A";
@@ -78,16 +78,16 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
           }
           return str;
         },
-        color: colors.yellow,
+        color: colors.textMuted,
       }),
 
       // 2. Symbol
       new ColumnBase<RtTradesRow>({
         key: "symbol",
         header: "Symbol",
-        widthPx: 93.5, // flex: 1.1 * 85
+        flex: 0.9,
         align: "left",
-        color: colors.yellow,
+        color: colors.textSecondary,
         sortArrowOnRight: true,
       }),
 
@@ -96,10 +96,10 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
         key: "name",
         dataKey: "symbol" as any,
         header: "Name",
-        widthPx: 153, // flex: 1.8 * 85
+        flex: 1.5,
         align: "left",
         format: (v) => getSymbolName(String(v)),
-        color: colors.yellow,
+        color: colors.textMuted,
       }),
 
       // 4. Product (Derived)
@@ -107,10 +107,10 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
         key: "product",
         dataKey: "symbol" as any,
         header: "Product",
-        widthPx: 85, // flex: 1 * 85
+        flex: 0.8,
         align: "center",
         format: (v) => String(v).length === 3 ? "Equity" : "Warrant",
-        color: colors.yellow,
+        color: colors.textMuted,
       }),
 
       // 5. Underlying (Derived)
@@ -118,10 +118,10 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
         key: "underlying",
         dataKey: "symbol" as any,
         header: "Underlying",
-        widthPx: 85, // flex: 1 * 85
+        flex: 0.9,
         align: "center",
         format: (v) => getUnderlying(String(v)),
-        color: colors.yellow,
+        color: colors.textSecondary,
       }),
 
       // 6. Call/Put (Derived)
@@ -129,52 +129,66 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
         key: "call_put",
         dataKey: "symbol" as any,
         header: "Call/Put",
-        widthPx: 76.5, // flex: 0.9 * 85
+        flex: 0.8,
         align: "center",
         format: (v) => String(v).length > 3 ? "Call" : "N/A",
-        color: colors.yellow,
+        color: (row: RtTradesRow) => {
+          const sym = String(row.symbol).toUpperCase();
+          if (sym.length > 3) return colors.increase; // Warrants are calls (green)
+          return colors.textMuted; // Equity is N/A
+        },
       }),
 
       // 7. Buy/Sell (type)
       new ColumnBase<RtTradesRow>({
         key: "type",
         header: "Buy/Sell",
-        widthPx: 76.5, // flex: 0.9 * 85
+        flex: 0.8,
         align: "center",
         format: (v) => {
           if (!v) return "";
           const str = String(v);
           return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
         },
-        color: colors.yellow,
+        color: (row: RtTradesRow) => {
+          const t = String(row.type).toLowerCase();
+          if (t.startsWith("b")) return colors.increase; // Buy (green)
+          if (t.startsWith("s")) return colors.decrease; // Sell (red)
+          return colors.textSecondary;
+        },
       }),
 
       // 8. Quantity (volume)
       new ColumnBase<RtTradesRow>({
         key: "volume",
         header: "Quantity",
-        widthPx: 102, // flex: 1.2 * 85
+        flex: 1.0,
         align: "right",
         format: (v) => {
           if (v === null || v === undefined) return "0";
           const num = typeof v === "number" ? v : parseInt(String(v), 10);
           return isNaN(num) ? "0" : num.toLocaleString();
         },
-        color: colors.yellow,
+        color: colors.textSecondary,
       }),
 
       // 9. Traded_Prc (price)
       new ColumnBase<RtTradesRow>({
         key: "price",
         header: "Traded_Prc",
-        flex: 1.2,
+        flex: 1.0,
         align: "right",
         format: (v) => {
           if (v === null || v === undefined) return "N/A";
           const num = typeof v === "number" ? v : parseFloat(String(v));
           return isNaN(num) ? "N/A" : num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         },
-        color: colors.yellow,
+        color: (row: RtTradesRow) => {
+          const t = String(row.type).toLowerCase();
+          if (t.startsWith("b")) return colors.increase; // Buy-executed price in green
+          if (t.startsWith("s")) return colors.decrease; // Sell-executed price in red
+          return colors.textSecondary;
+        },
       }),
     ];
   }

@@ -26,7 +26,7 @@ export default defineConfig({
   },
   server: {
     host: true,       // Listen on all network interfaces (enables LAN access)
-    port: 3001,
+    port: 3000,
     allowedHosts: ["unapposite-nonpurchasable-eddie.ngrok-free.dev"],
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",

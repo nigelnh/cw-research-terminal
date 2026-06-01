@@ -31,7 +31,7 @@ export class HolidayTable extends TableBase<Record<string, unknown> & HolidayRow
       new ColumnBase<HolidayRow>({
         key: "event",
         header: "Event",
-        flex: 1,
+        flex: 2.0,
         align: "left",
         color: colors.textSecondary,
         format: (v) => {
@@ -44,9 +44,9 @@ export class HolidayTable extends TableBase<Record<string, unknown> & HolidayRow
       new ColumnBase<HolidayRow>({
         key: "date",
         header: "Date",
-        widthPx: 110,
+        flex: 1.0,
         align: "center",
-        color: colors.yellow,
+        color: colors.textSecondary,
         format: (v) => {
           if (!v) return "—";
           const str = String(v);
