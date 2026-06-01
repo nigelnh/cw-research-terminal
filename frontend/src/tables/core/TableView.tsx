@@ -54,6 +54,7 @@ const TableCell = React.memo(
     const { getRow } = useEquityData();
 
     const baseColor = col.getColor(row, getRow);
+    const cellBgColor = col.getBgColor(row, getRow);
 
     // FLIP logic for columns
     const prevColIdxRef = useRef<number>(colIdx);
@@ -98,7 +99,7 @@ const TableCell = React.memo(
 
       return {
         color: baseColor,
-        backgroundColor: col.getBgColor(row, getRow),
+        backgroundColor: cellBgColor || "transparent",
         transition: "background-color 0.05s ease, color 0.05s ease",
       };
     };
@@ -136,6 +137,7 @@ const TableCell = React.memo(
     return (
       <div
         ref={cellRef}
+        className={cellBgColor && !flash ? "table-cell-custom-bg" : undefined}
         title={colKey === "Symbol" ? "Double click to pin- Drag & Drop to sort row" : undefined}
         style={{
           ...getColumnStyle(),
@@ -307,7 +309,6 @@ const TableRow = React.memo(
     isFlexLayout: boolean;
     containerWidth: number;
   }) => {
-    const [isHovered, setIsHovered] = useState(false);
     // Hydrate row with latest live numeric values from the in-memory row map.
     // lastUpdateTs dependency ensures re-hydration on every data tick (~50ms flush).
     const symbol = row.Symbol;
@@ -393,14 +394,12 @@ const TableRow = React.memo(
 
     return (
       <div
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        className="table-row"
         onDoubleClick={() => togglePin(rowKey)}
         style={{
           display: "flex",
           height: config.rowHeightPx,
           borderBottom: `1px solid ${colors.borderSubtle}`,
-          backgroundColor: isHovered ? "rgba(255, 255, 255, 0.08)" : undefined,
           opacity: isDragging ? 0.3 : 1,
           transition: transitionString,
           transform: `translateY(${translateY + flipOffset}px) translateZ(0)`,
