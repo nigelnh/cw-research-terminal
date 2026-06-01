@@ -518,10 +518,21 @@ export function App() {
           changes.set(`${ticker}:spot_prc_s`, newSpotPrc > prev.spotPrc ? "up" : "down");
         }
       }
+    }
+    return changes;
+  }, [livePosRows]);
+
+  // Safely update the ref only during the commit phase (useEffect) to prevent React double-render/Strict-mode race conditions from wiping out detected price changes.
+  useEffect(() => {
+    for (const row of livePosRows) {
+      const ticker: string = row.ticker;
+      const newLastPrcT = row.last_prc_t !== null && row.last_prc_t !== undefined
+        ? parseFloat(String(row.last_prc_t)) : null;
+      const newSpotPrc = row.spot_prc_s !== null && row.spot_prc_s !== undefined
+        ? parseFloat(String(row.spot_prc_s)) : null;
 
       posMasterPrevPricesRef.current.set(ticker, { lastPrcT: newLastPrcT, spotPrc: newSpotPrc });
     }
-    return changes;
   }, [livePosRows]);
 
   // ── Unique Options for Position Master Filters ──
@@ -569,7 +580,7 @@ export function App() {
 
       const livePos = livePosRows.find((pos) => pos.ticker.toUpperCase() === row.symbol.toUpperCase());
       const rowExpiry = livePos ? livePos.expiry : null;
-      
+
       const matchFrom = !tradesFilter.fromDate || (rowExpiry && rowExpiry >= tradesFilter.fromDate);
       const matchTo = !tradesFilter.toDate || (rowExpiry && rowExpiry <= tradesFilter.toDate);
 
@@ -1003,7 +1014,7 @@ export function App() {
                 <TableView
                   table={dividendTable}
                   data={filteredDividendRows}
-                  emptyStateMessage="No dividend events with GDKHQDate in the next 7 days"
+                  emptyStateMessage="No new dividend events"
                 />
               )}
             </div>

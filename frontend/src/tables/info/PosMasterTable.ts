@@ -150,16 +150,20 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       }),
 
       // 2. Und_Ticker (Col 5)
+      // Color: based on the underlying's own live Ref/Ceil/Floor (exactly like Equity table logic)
       new ColumnBase<PosMasterRow>({
         key: "und_ticker",
         header: "Und_Ticker",
         widthPx: 55,
         align: "left",
-        color: (row: PosMasterRow) => {
-          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
-          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
-          if (prc === 0) return colors.textSecondary;
-          return getPriceColor(prc, ref, 0, 0);
+        color: (row: PosMasterRow, getRow?: (symbol: string) => any) => {
+          const undRow = getRow ? getRow(row.und_ticker) : null;
+          const spot  = undRow?.Traded ?? 0;
+          if (!spot) return colors.textSecondary;
+          const ref   = undRow?.Ref   ?? 0;
+          const ceil  = undRow?.Ceil  ?? 0;
+          const floor = undRow?.Floor ?? 0;
+          return getPriceColor(spot, ref, ceil, floor);
         },
       }),
 
@@ -305,7 +309,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       }),
 
       // 13. Spot_Prc(S) — live realtime traded price of the UNDERLYING stock
-      // Color: matches LastPrc(T) color based on the warrant's last_prc_t / last_prc_t_1 movement
+      // Color: based on the underlying's own live Ref/Ceil/Floor (exactly like Equity table logic)
       // Flash: up/down driven by posMasterChanges in App.tsx
       new ColumnBase<PosMasterRow>({
         key: "spot_prc_s",
@@ -313,11 +317,16 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         widthPx: 75,
         align: "right",
         format: (v) => formatNum(v),
-        color: (row: PosMasterRow) => {
-          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
-          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
-          if (prc === 0) return colors.textSecondary;
-          return getPriceColor(prc, ref, 0, 0);
+        color: (row: PosMasterRow, getRow?: (symbol: string) => any) => {
+          const spot = row.spot_prc_s !== null && row.spot_prc_s !== undefined
+            ? parseFloat(String(row.spot_prc_s)) : 0;
+          if (!spot) return colors.textSecondary;
+          // Resolve the underlying's live equity row for its own Ref/Ceil/Floor
+          const undRow = getRow ? getRow(row.und_ticker) : null;
+          const ref  = undRow?.Ref  ?? 0;
+          const ceil = undRow?.Ceil ?? 0;
+          const floor = undRow?.Floor ?? 0;
+          return getPriceColor(spot, ref, ceil, floor);
         },
       }),
 
@@ -820,9 +829,9 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
     const col = this.columns.find((c) => c.key === colKey);
     if (!col) return undefined;
 
-    // 1. Live Data Input Columns: Ticker, und_ticker, LastPrice(T), Net_Chg(%), Spot_Price(S)
-    const liveKeys = new Set(["ticker", "und_ticker", "last_prc_t", "net_chg_pct", "spot_prc_s"]);
-    if (liveKeys.has(colKey)) {
+    // 1. Live Data Input Columns: Ticker, LastPrice(T), Net_Chg(%)
+    const cwLiveKeys = new Set(["ticker", "last_prc_t", "net_chg_pct"]);
+    if (cwLiveKeys.has(colKey)) {
       const val = col.getValue(row);
       if (val === 0 || val === null || val === undefined) {
         return colors.textSecondary;
@@ -830,6 +839,20 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       const color = col.getColor(row, getRow);
       if (color === colors.cyan) return colors.blue;
       return color;
+    }
+
+    // 1b. Und_Ticker + Spot_Prc(S): color based on the underlying's own live Ref/Ceil/Floor
+    if (colKey === "und_ticker" || colKey === "spot_prc_s") {
+      const undRow = getRow ? getRow(row.und_ticker) : null;
+      const spot  = colKey === "und_ticker"
+        ? (undRow?.Traded ?? 0)
+        : (row.spot_prc_s !== null && row.spot_prc_s !== undefined ? parseFloat(String(row.spot_prc_s)) : 0);
+      if (!spot) return colors.textSecondary;
+      const ref   = undRow?.Ref   ?? 0;
+      const ceil  = undRow?.Ceil  ?? 0;
+      const floor = undRow?.Floor ?? 0;
+      const c = getPriceColor(spot, ref, ceil, floor);
+      return c === colors.cyan ? colors.blue : c;
     }
 
     // 2. Static / contract parameter columns do not flash or return default

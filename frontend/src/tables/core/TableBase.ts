@@ -8,6 +8,7 @@ import type { TableConfig, CellChange, ChangeDirection } from "./types";
 
 export abstract class TableBase<T extends Record<string, unknown>> {
   abstract readonly config: TableConfig;
+  readonly needsLiveHydration?: boolean;
 
   /**
    * Get column definitions
