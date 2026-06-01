@@ -237,7 +237,7 @@ export function TableFilterContent({
     fontSize: 11,
     fontWeight: 600,
     color: colors.textSecondary, // Changed to textSecondary color
-    textTransform: "uppercase",
+    textTransform: "capitalize",
     letterSpacing: "0.04em",
   };
 
