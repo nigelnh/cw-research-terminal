@@ -317,7 +317,7 @@ const TableRow = React.memo(
 
     const hydratedRow = React.useMemo(() => {
       // Non-equity tables (Holiday, Dividend, etc.) have no Symbol — skip hydration entirely.
-      if (!symbol) return row;
+      if (!symbol || !table.needsLiveHydration) return row;
 
       // If symbol is NOT dirty and we have a previous version, skip the hydration loop
       if (prevHydratedRowRef.current && !isSymbolDirty(symbol)) {
