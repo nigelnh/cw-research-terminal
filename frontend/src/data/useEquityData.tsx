@@ -21,12 +21,12 @@ interface EquityDataContextValue {
   lastChanges: Map<string, "up" | "down">;
   serverTimeOffset: number;
   // New subscription for unbuffered real-time updates
-  subscribeSymbol: (symbol: string, callback: (row: EquityRow) => void) => () => void;
+  subscribeSymbol: (symbol: string | null | undefined, callback: (row: EquityRow) => void) => () => void;
   // Get row data by symbol without triggering a full context re-render
-  getRow: (symbol: string) => EquityRow | undefined;
+  getRow: (symbol: string | null | undefined) => EquityRow | undefined;
   // Live value access (replaces SharedArrayBuffer)
-  getNumericValue: (symbol: string, field: string) => number | null;
-  isSymbolDirty: (symbol: string) => boolean;
+  getNumericValue: (symbol: string | null | undefined, field: string) => number | null;
+  isSymbolDirty: (symbol: string | null | undefined) => boolean;
   lastUpdateTs: number;
 }
 
@@ -51,7 +51,8 @@ export function EquityDataProvider({ children }: { children: ReactNode }) {
   // Read live numeric values directly from the in-memory row map.
   // rowsMapRef is kept up-to-date on every FLUSH tick (~50ms), which is
   // more than sufficient for sorting and row hydration.
-  const getNumericValue = useCallback((symbol: string, field: string): number | null => {
+  const getNumericValue = useCallback((symbol: string | null | undefined, field: string): number | null => {
+    if (!symbol) return null;
     const row = rowsMapRef.current.get(symbol.toUpperCase()) as any;
     if (!row) return null;
     const val = row[field];
@@ -59,14 +60,16 @@ export function EquityDataProvider({ children }: { children: ReactNode }) {
   }, []);
   const lastServerTimeUpdateRef = useRef<number>(0);
   
-  const isSymbolDirty = useCallback((symbol: string) => {
+  const isSymbolDirty = useCallback((symbol: string | null | undefined) => {
+    if (!symbol) return false;
     return dirtySymbolsRef.current.has(symbol.toUpperCase());
   }, []);
 
   // High-frequency listeners for priority symbols (e.g. charts)
   const listenersRef = useRef<Map<string, Set<(row: EquityRow) => void>>>(new Map());
 
-  const subscribeSymbol = useCallback((symbol: string, callback: (row: EquityRow) => void) => {
+  const subscribeSymbol = useCallback((symbol: string | null | undefined, callback: (row: EquityRow) => void) => {
+    if (!symbol) return () => {};
     const sym = symbol.toUpperCase();
     if (!listenersRef.current.has(sym)) {
       listenersRef.current.set(sym, new Set());
@@ -83,11 +86,13 @@ export function EquityDataProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const getRow = useCallback((symbol: string) => {
+  const getRow = useCallback((symbol: string | null | undefined) => {
+    if (!symbol) return undefined;
     return rowsMapRef.current.get(symbol.toUpperCase());
   }, []);
 
-  const triggerListeners = useCallback((symbol: string, row: EquityRow | IndexRow, ts?: number) => {
+  const triggerListeners = useCallback((symbol: string | null | undefined, row: EquityRow | IndexRow, ts?: number) => {
+    if (!symbol) return;
     const sym = symbol.toUpperCase();
     const callbacks = listenersRef.current.get(sym);
     

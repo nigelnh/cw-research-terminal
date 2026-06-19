@@ -34,7 +34,7 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
       new ColumnBase<DividendRow>({
         key: "symbol",
         header: "Symbol",
-        flex: 0.8,
+        flex: 0.1,
         align: "left",
         color: colors.textSecondary,
         sortArrowOnRight: true,
@@ -44,24 +44,11 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
         },
       }),
 
-      // 2. Company name
-      new ColumnBase<DividendRow>({
-        key: "name",
-        header: "Name",
-        flex: 1.2,
-        align: "left",
-        color: colors.textMuted,
-        format: (v) => {
-          if (!v) return "—";
-          return String(v);
-        },
-      }),
-
       // 2b. Event note / description (e.g. "Trả cổ tức năm 2025 bằng tiền, 1,000 đồng/CP")
       new ColumnBase<DividendRow>({
         key: "note",
         header: "Event",
-        flex: 2.5,
+        flex: 3,
         align: "left",
         color: colors.textSecondary,
         format: (v) => {
@@ -74,7 +61,7 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
       new ColumnBase<DividendRow>({
         key: "exDate",
         header: "Ex-Date",
-        flex: 1.0,
+        flex: 0.2,
         align: "center",
         color: colors.textSecondary,
         format: (v) => {
@@ -96,7 +83,7 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
       new ColumnBase<DividendRow>({
         key: "fileUrl",
         header: "Document",
-        flex: 0.9,
+        flex: 0.1,
         align: "center",
         color: colors.increase,
         // Raw value is passed; the custom cell renderer in TableView handles links.
