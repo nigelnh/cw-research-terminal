@@ -35,7 +35,8 @@ export function App() {
   const [infoHiddenColumns, setInfoHiddenColumns] = useState<string[]>([]);
   const [tradesHiddenColumns, setTradesHiddenColumns] = useState<string[]>([]);
 
-  const [posRows, setPosRows] = useState<any[]>([]);
+  const [posRowsMM, setPosRowsMM] = useState<any[]>([]);
+  const [posRowsHedge, setPosRowsHedge] = useState<any[]>([]);
   const [loadingPos, setLoadingPos] = useState(false);
   const [posError, setPosError] = useState<string | null>(null);
   const [posColumnGroup, setPosColumnGroup] = useState<PosColumnGroup>("overview");
@@ -96,15 +97,22 @@ export function App() {
         setLoadingPos(true);
         setPosError(null);
       }
-      fetch("/api/pos-master")
-        .then((res) => {
-          if (!res.ok) throw new Error("Failed to fetch position master data.");
+      Promise.all([
+        fetch('/api/pos-master?subAccountNo=0001922095').then((res) => {
+          if (!res.ok) throw new Error("Failed to fetch MM position master data.");
+          return res.json();
+        }),
+        fetch('/api/pos-master?subAccountNo=0001115688').then((res) => {
+          if (!res.ok) throw new Error("Failed to fetch Hedging position master data.");
           return res.json();
         })
-        .then((data) => {
+      ])
+        .then(([dataMM, dataHedge]) => {
           if (!isMounted) return;
-          const mappedData = data.map((r: any) => ({ ...r, Symbol: r.ticker }));
-          setPosRows(mappedData);
+          const mappedMM = dataMM.map((r: any) => ({ ...r, Symbol: r.ticker }));
+          const mappedHedge = dataHedge.map((r: any) => ({ ...r, Symbol: r.ticker }));
+          setPosRowsMM(mappedMM);
+          setPosRowsHedge(mappedHedge);
           if (initialLoadPos) {
             setLoadingPos(false);
             initialLoadPos = false;
@@ -249,8 +257,8 @@ export function App() {
 
 
 
-  const livePosRows = useMemo(() => {
-    return posRows.map((row) => {
+  const calculateLivePosRows = (rowsList: any[], isHedging: boolean = false) => {
+    return rowsList.map((row) => {
       // ── CW Warrant live price ──────────────────────────────────────────────
       // getRow() reads from rowsMapRef directly (always latest tick, never stale).
       // Guard: only apply if Ref > 0 (skip zero-filled initial snapshots before first KB tick).
@@ -270,15 +278,24 @@ export function App() {
         }
       }
 
-      // ── Underlying stock live spot price ──────────────────────────────────
-      // Same logic as Equity tab: Traded > 0 ? Traded : Ref
+      // ── Spot_Prc(S) — per-account logic ───────────────────────────────────
+      // MM account (isHedging=false): CW-focused. Spot_Prc(S) = CW's own LastPrc(T),
+      //   i.e. the same live warrant price already computed above.
+      // Hedging account (isHedging=true): Stock-focused. Spot_Prc(S) = the stock
+      //   ticker's own live price (via getRow(ticker)), not the underlying of a CW.
       let spotPrcS = row.spot_prc_s !== null ? parseFloat(row.spot_prc_s) : null;
-      if (row.und_ticker) {
-        const liveUnderlying = getRow(row.und_ticker.toUpperCase());
-        if (liveUnderlying && liveUnderlying.Ref && liveUnderlying.Ref > 0) {
-          spotPrcS = liveUnderlying.Traded && liveUnderlying.Traded > 0
-            ? liveUnderlying.Traded
-            : liveUnderlying.Ref;
+      if (!isHedging) {
+        // MM: Spot_Prc(S) mirrors LastPrc(T) (CW live price)
+        if (lastPrcT !== null) {
+          spotPrcS = lastPrcT;
+        }
+      } else {
+        // Hedging: Spot_Prc(S) = direct stock live price from WebSocket
+        const liveStock = getRow(row.ticker.toUpperCase());
+        if (liveStock && liveStock.Ref && liveStock.Ref > 0) {
+          spotPrcS = liveStock.Traded && liveStock.Traded > 0
+            ? liveStock.Traded
+            : liveStock.Ref;
         }
       }
 
@@ -491,13 +508,60 @@ export function App() {
         total_pnl_mtm_cum: totalPnlMtmCum,
       };
     });
-  }, [posRows, getRow, lastUpdateTs]);
+  };
+
+  // MM account: Spot_Prc(S) = CW's own LastPrc(T)
+  const livePosRowsMM = useMemo(() => calculateLivePosRows(posRowsMM, false), [posRowsMM, getRow, lastUpdateTs]);
+  // Hedging account: Spot_Prc(S) = stock ticker's own live price
+  const livePosRowsHedge = useMemo(() => calculateLivePosRows(posRowsHedge, true), [posRowsHedge, getRow, lastUpdateTs]);
+
+  const livePosRows = useMemo(() => {
+    return [...livePosRowsMM, ...livePosRowsHedge];
+  }, [livePosRowsMM, livePosRowsHedge]);
 
   // ── PosMaster flash tracking ───────────────────────────────────────────────
   // Tracks previous last_prc_t and spot_prc_s per CW ticker to determine flash
   // direction (up/down) on each realtime tick, using the "ticker:colKey" format
   // expected by TableView's currentFlashes map.
   const posMasterPrevPricesRef = useRef<Map<string, { lastPrcT: number | null; spotPrc: number | null }>>(new Map());
+
+  const mmContainerRef = useRef<HTMLDivElement>(null);
+  const hedgeContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const mmEl = mmContainerRef.current;
+    const hedgeEl = hedgeContainerRef.current;
+    if (!mmEl || !hedgeEl) return;
+
+    let isSyncingMM = false;
+    let isSyncingHedge = false;
+
+    const handleScrollMM = () => {
+      if (isSyncingMM) {
+        isSyncingMM = false;
+        return;
+      }
+      isSyncingHedge = true;
+      hedgeEl.scrollLeft = mmEl.scrollLeft;
+    };
+
+    const handleScrollHedge = () => {
+      if (isSyncingHedge) {
+        isSyncingHedge = false;
+        return;
+      }
+      isSyncingMM = true;
+      mmEl.scrollLeft = hedgeEl.scrollLeft;
+    };
+
+    mmEl.addEventListener("scroll", handleScrollMM, { passive: true });
+    hedgeEl.addEventListener("scroll", handleScrollHedge, { passive: true });
+
+    return () => {
+      mmEl.removeEventListener("scroll", handleScrollMM);
+      hedgeEl.removeEventListener("scroll", handleScrollHedge);
+    };
+  }, [viewMode, posRowsMM, posRowsHedge, loadingPos]);
 
   const posMasterChanges = useMemo(() => {
     const changes = new Map<string, "up" | "down">();
@@ -563,14 +627,23 @@ export function App() {
   }, [dividendRows]);
 
   // ── Filtered Position Master Data ──
-  const filteredPosRows = useMemo(() => {
-    return livePosRows.filter((row) => {
+  const filteredPosRowsMM = useMemo(() => {
+    return livePosRowsMM.filter((row) => {
       const matchUnd = posFilter.underlyings.includes("All") || (row.und_ticker && posFilter.underlyings.map(u => u.toUpperCase()).includes(row.und_ticker.toUpperCase()));
       const matchFrom = !posFilter.fromDate || (row.expiry && row.expiry >= posFilter.fromDate);
       const matchTo = !posFilter.toDate || (row.expiry && row.expiry <= posFilter.toDate);
       return matchUnd && matchFrom && matchTo;
     });
-  }, [livePosRows, posFilter]);
+  }, [livePosRowsMM, posFilter]);
+
+  const filteredPosRowsHedge = useMemo(() => {
+    return livePosRowsHedge.filter((row) => {
+      const matchUnd = posFilter.underlyings.includes("All") || (row.und_ticker && posFilter.underlyings.map(u => u.toUpperCase()).includes(row.und_ticker.toUpperCase()));
+      const matchFrom = !posFilter.fromDate || (row.expiry && row.expiry >= posFilter.fromDate);
+      const matchTo = !posFilter.toDate || (row.expiry && row.expiry <= posFilter.toDate);
+      return matchUnd && matchFrom && matchTo;
+    });
+  }, [livePosRowsHedge, posFilter]);
 
   // ── Filtered Realtime Trades Data ──
   const filteredTradesRows = useMemo(() => {
@@ -698,61 +771,63 @@ export function App() {
                 display: "flex",
                 flexDirection: "row",
                 alignItems: "center",
-                gap: 6,
+                justifyContent: "space-between",
                 paddingBottom: 10,
                 marginBottom: 4,
                 flexShrink: 0,
               }}
             >
-              {(Object.entries(POS_GROUP_META) as [Exclude<PosColumnGroup, "all">, { label: string; color: string; count: number }][]).map(
-                ([group, meta]) => {
-                  const isActive = posColumnGroup === group;
-                  return (
-                    <button
-                      key={group}
-                      onClick={() => setPosColumnGroup(group)}
-                      style={{
-                        padding: "5px 14px",
-                        borderRadius: "6px",
-                        border: `1px solid ${isActive ? meta.color : "rgba(255,255,255,0.10)"
-                          }`,
-                        background: isActive ? `${meta.color}40` : "transparent",
-                        boxShadow: isActive
-                          ? `0 0 0 1px ${meta.color}55, 0 2px 8px ${meta.color}22`
-                          : "none",
-                        color: isActive ? meta.color : "rgba(255,255,255,0.40)",
-                        fontSize: 12,
-                        fontWeight: isActive ? 700 : 400,
-                        cursor: "pointer",
-                        transition: "all 0.18s ease",
-                        letterSpacing: "0.03em",
-                        lineHeight: "1.6",
-                        whiteSpace: "nowrap",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        userSelect: "none",
-                      }}
-                    >
-                      {meta.label}
-                      <span
+              <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 6 }}>
+                {(Object.entries(POS_GROUP_META) as [Exclude<PosColumnGroup, "all">, { label: string; color: string; count: number }][]).map(
+                  ([group, meta]) => {
+                    const isActive = posColumnGroup === group;
+                    return (
+                      <button
+                        key={group}
+                        onClick={() => setPosColumnGroup(group)}
                         style={{
-                          fontSize: 10,
-                          fontWeight: 400,
-                          opacity: isActive ? 0.75 : 0.40,
-                          background: isActive ? `${meta.color}30` : "rgba(255,255,255,0.06)",
-                          color: isActive ? meta.color : "rgba(255,255,255,0.45)",
-                          borderRadius: 10,
-                          padding: "0px 6px",
-                          lineHeight: "1.8",
+                          padding: "5px 14px",
+                          borderRadius: "6px",
+                          border: `1px solid ${isActive ? meta.color : "rgba(255,255,255,0.10)"
+                            }`,
+                          background: isActive ? `${meta.color}40` : "transparent",
+                          boxShadow: isActive
+                            ? `0 0 0 1px ${meta.color}55, 0 2px 8px ${meta.color}22`
+                            : "none",
+                          color: isActive ? meta.color : "rgba(255,255,255,0.40)",
+                          fontSize: 12,
+                          fontWeight: isActive ? 700 : 400,
+                          cursor: "pointer",
+                          transition: "all 0.18s ease",
+                          letterSpacing: "0.03em",
+                          lineHeight: "1.6",
+                          whiteSpace: "nowrap",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          userSelect: "none",
                         }}
                       >
-                        {meta.count}
-                      </span>
-                    </button>
-                  );
-                }
-              )}
+                        {meta.label}
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 400,
+                            opacity: isActive ? 0.75 : 0.40,
+                            background: isActive ? `${meta.color}30` : "rgba(255,255,255,0.06)",
+                            color: isActive ? meta.color : "rgba(255,255,255,0.45)",
+                            borderRadius: 10,
+                            padding: "0px 6px",
+                            lineHeight: "1.8",
+                          }}
+                        >
+                          {posMasterTable.getColumnsByGroup(group).length}
+                        </span>
+                      </button>
+                    );
+                  }
+                )}
+              </div>
             </div>
             {/* ─────────────────────────────────────────────────────────────── */}
             {loadingPos ? (
@@ -794,26 +869,52 @@ export function App() {
             ) : (
               (() => {
                 posMasterTable.activeGroup = posColumnGroup;
+                const hiddenColsList = [
+                  // hide every column NOT in the active group (computed from group keys),
+                  // PLUS any manually hidden columns from the DisplayOption panel
+                  ...posMasterTable
+                    .getColumns()
+                    .filter(
+                      (c) =>
+                        !posMasterTable
+                          .getColumnsByGroup(posColumnGroup)
+                          .some((gc) => gc.key === c.key)
+                    )
+                    .map((c) => c.key),
+                  ...infoHiddenColumns,
+                ];
                 return (
-                  <TableView
-                    table={posMasterTable}
-                    data={filteredPosRows}
-                    hiddenColumns={[
-                      // hide every column NOT in the active group (computed from group keys),
-                      // PLUS any manually hidden columns from the DisplayOption panel
-                      ...posMasterTable
-                        .getColumns()
-                        .filter(
-                          (c) =>
-                            !posMasterTable
-                              .getColumnsByGroup(posColumnGroup)
-                              .some((gc) => gc.key === c.key)
-                        )
-                        .map((c) => c.key),
-                      ...infoHiddenColumns,
-                    ]}
-                    lastChanges={posMasterChanges}
-                  />
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1, minHeight: 0 }}>
+                    {/* MM Account Table */}
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: colors.textSecondary, marginBottom: "6px", paddingLeft: "4px" }}>
+                        Account: 0001922095
+                      </div>
+                      <TableView
+                        scrollContainerRef={mmContainerRef}
+                        hideHorizontalScrollbar={true}
+                        table={posMasterTable}
+                        data={filteredPosRowsMM}
+                        hiddenColumns={hiddenColsList}
+                        lastChanges={posMasterChanges}
+                      />
+                    </div>
+
+                    {/* Hedging Account Table */}
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: colors.textSecondary, marginBottom: "6px", paddingLeft: "4px" }}>
+                        Account: 0001115688
+                      </div>
+                      <TableView
+                        scrollContainerRef={hedgeContainerRef}
+                        hideHorizontalScrollbar={false}
+                        table={posMasterTable}
+                        data={filteredPosRowsHedge}
+                        hiddenColumns={hiddenColsList}
+                        lastChanges={posMasterChanges}
+                      />
+                    </div>
+                  </div>
                 );
               })()
             )}
@@ -823,7 +924,7 @@ export function App() {
           <div style={{ flex: 0.8, display: "flex", flexDirection: "row", minHeight: 0, gap: "16px", paddingBottom: "24px" }}>
 
             {/* 2a. Realtime Trades */}
-            <div style={{ flex: 3, display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <div style={{ flex: 7, display: "flex", flexDirection: "column", minWidth: 0 }}>
               <PanelTitle
                 title="Realtime Trades"
                 filterContent={
@@ -893,130 +994,133 @@ export function App() {
               )}
             </div>
 
-            {/* 2b. Holiday Calendar */}
-            <div style={{ flex: 1.5, display: "flex", flexDirection: "column", minWidth: 0 }}>
-              <PanelTitle
-                title="Holiday Calendar"
-                filterContent={
-                  <TableFilterContent
-                    isDateOnly={true}
-                    underlyings={[]}
-                    selectedUnderlyings={holidayFilter.underlyings}
-                    onSelectUnderlyings={(vals) => setHolidayFilter(prev => ({ ...prev, underlyings: vals }))}
-                    fromDate={holidayFilter.fromDate}
-                    toDate={holidayFilter.toDate}
-                    onChangeFromDate={(val) => setHolidayFilter(prev => ({ ...prev, fromDate: val }))}
-                    onChangeToDate={(val) => setHolidayFilter(prev => ({ ...prev, toDate: val }))}
-                    onReset={() => setHolidayFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
-                  />
-                }
-              />
-              {loadingHolidays ? (
-                <div
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    border: `1px solid ${colors.border}`,
-                    backgroundColor: colors.panelBg,
-                    borderRadius: "8px",
-                    marginTop: "8px",
-                    padding: "24px",
-                    color: colors.textSecondary,
-                    fontSize: "14px",
-                  }}
-                >
-                  Loading holidays...
-                </div>
-              ) : holidaysError ? (
-                <div
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    border: `1px solid ${colors.border}`,
-                    backgroundColor: colors.panelBg,
-                    borderRadius: "8px",
-                    marginTop: "8px",
-                    padding: "24px",
-                    color: colors.decrease,
-                    fontSize: "14px",
-                  }}
-                >
-                  {holidaysError}
-                </div>
-              ) : (
-                <TableView
-                  table={holidayTable}
-                  data={filteredHolidayRows}
-                  emptyStateMessage="No holiday data available"
+            {/* Calendars Stack Container */}
+            <div style={{ flex: 3.5, display: "flex", flexDirection: "column", gap: "16px", minWidth: 0 }}>
+              {/* 2b. Holiday Calendar */}
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <PanelTitle
+                  title="Holiday Calendar"
+                  filterContent={
+                    <TableFilterContent
+                      isDateOnly={true}
+                      underlyings={[]}
+                      selectedUnderlyings={holidayFilter.underlyings}
+                      onSelectUnderlyings={(vals) => setHolidayFilter(prev => ({ ...prev, underlyings: vals }))}
+                      fromDate={holidayFilter.fromDate}
+                      toDate={holidayFilter.toDate}
+                      onChangeFromDate={(val) => setHolidayFilter(prev => ({ ...prev, fromDate: val }))}
+                      onChangeToDate={(val) => setHolidayFilter(prev => ({ ...prev, toDate: val }))}
+                      onReset={() => setHolidayFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
+                    />
+                  }
                 />
-              )}
-            </div>
+                {loadingHolidays ? (
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      border: `1px solid ${colors.border}`,
+                      backgroundColor: colors.panelBg,
+                      borderRadius: "8px",
+                      marginTop: "8px",
+                      padding: "24px",
+                      color: colors.textSecondary,
+                      fontSize: "14px",
+                    }}
+                  >
+                    Loading holidays...
+                  </div>
+                ) : holidaysError ? (
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      border: `1px solid ${colors.border}`,
+                      backgroundColor: colors.panelBg,
+                      borderRadius: "8px",
+                      marginTop: "8px",
+                      padding: "24px",
+                      color: colors.decrease,
+                      fontSize: "14px",
+                    }}
+                  >
+                    {holidaysError}
+                  </div>
+                ) : (
+                  <TableView
+                    table={holidayTable}
+                    data={filteredHolidayRows}
+                    emptyStateMessage="No holiday data available"
+                  />
+                )}
+              </div>
 
-            {/* 2c. Dividend Calendar */}
-            <div style={{ flex: 2.5, display: "flex", flexDirection: "column", minWidth: 0 }}>
-              <PanelTitle
-                title="Dividend Calendar"
-                filterContent={
-                  <TableFilterContent
-                    isDateOnly={true}
-                    underlyings={dividendUnderlyings}
-                    selectedUnderlyings={dividendFilter.underlyings}
-                    onSelectUnderlyings={(vals) => setDividendFilter(prev => ({ ...prev, underlyings: vals }))}
-                    fromDate={dividendFilter.fromDate}
-                    toDate={dividendFilter.toDate}
-                    onChangeFromDate={(val) => setDividendFilter(prev => ({ ...prev, fromDate: val }))}
-                    onChangeToDate={(val) => setDividendFilter(prev => ({ ...prev, toDate: val }))}
-                    onReset={() => setDividendFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
-                  />
-                }
-              />
-              {loadingDividends ? (
-                <div
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    border: `1px solid ${colors.border}`,
-                    backgroundColor: colors.panelBg,
-                    borderRadius: "8px",
-                    marginTop: "8px",
-                    padding: "24px",
-                    color: colors.textSecondary,
-                    fontSize: "14px",
-                  }}
-                >
-                  Loading dividends (T−400 → T+400, showing GDKHQDate today→+7)...
-                </div>
-              ) : dividendsError ? (
-                <div
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    border: `1px solid ${colors.border}`,
-                    backgroundColor: colors.panelBg,
-                    borderRadius: "8px",
-                    marginTop: "8px",
-                    padding: "24px",
-                    color: colors.decrease,
-                    fontSize: "14px",
-                  }}
-                >
-                  {dividendsError}
-                </div>
-              ) : (
-                <TableView
-                  table={dividendTable}
-                  data={filteredDividendRows}
-                  emptyStateMessage="No new dividend events"
+              {/* 2c. Dividend Calendar */}
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <PanelTitle
+                  title="Dividend Calendar"
+                  filterContent={
+                    <TableFilterContent
+                      isDateOnly={true}
+                      underlyings={dividendUnderlyings}
+                      selectedUnderlyings={dividendFilter.underlyings}
+                      onSelectUnderlyings={(vals) => setDividendFilter(prev => ({ ...prev, underlyings: vals }))}
+                      fromDate={dividendFilter.fromDate}
+                      toDate={dividendFilter.toDate}
+                      onChangeFromDate={(val) => setDividendFilter(prev => ({ ...prev, fromDate: val }))}
+                      onChangeToDate={(val) => setDividendFilter(prev => ({ ...prev, toDate: val }))}
+                      onReset={() => setDividendFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
+                    />
+                  }
                 />
-              )}
+                {loadingDividends ? (
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      border: `1px solid ${colors.border}`,
+                      backgroundColor: colors.panelBg,
+                      borderRadius: "8px",
+                      marginTop: "8px",
+                      padding: "24px",
+                      color: colors.textSecondary,
+                      fontSize: "14px",
+                    }}
+                  >
+                    Loading dividends (T−400 → T+400, showing GDKHQDate today→+7)...
+                  </div>
+                ) : dividendsError ? (
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      border: `1px solid ${colors.border}`,
+                      backgroundColor: colors.panelBg,
+                      borderRadius: "8px",
+                      marginTop: "8px",
+                      padding: "24px",
+                      color: colors.decrease,
+                      fontSize: "14px",
+                    }}
+                  >
+                    {dividendsError}
+                  </div>
+                ) : (
+                  <TableView
+                    table={dividendTable}
+                    data={filteredDividendRows}
+                    emptyStateMessage="No new dividend events"
+                  />
+                )}
+              </div>
             </div>
 
           </div>

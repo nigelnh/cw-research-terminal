@@ -58,3 +58,12 @@ body {
   background-image: linear-gradient(rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.08)) !important;
 }
 
+/* Hide horizontal scrollbars on WebKit and Firefox */
+.no-scrollbar-x::-webkit-scrollbar:horizontal {
+  display: none !important;
+}
+.no-scrollbar-x {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+

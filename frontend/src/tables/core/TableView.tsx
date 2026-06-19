@@ -15,6 +15,8 @@ interface TableViewProps<T extends Record<string, unknown>> {
   hiddenColumns?: string[];
   lastChanges?: Map<string, "up" | "down">;
   emptyStateMessage?: string;
+  scrollContainerRef?: React.RefObject<HTMLDivElement>;
+  hideHorizontalScrollbar?: boolean;
 }
 
 // Flash duration in ms
@@ -609,6 +611,8 @@ export function TableView<T extends Record<string, unknown>>({
   hiddenColumns = [],
   lastChanges,
   emptyStateMessage,
+  scrollContainerRef,
+  hideHorizontalScrollbar,
 }: TableViewProps<T>) {
   const { getNumericValue } = useEquityData();
 
@@ -940,8 +944,12 @@ export function TableView<T extends Record<string, unknown>>({
   // custom hook for container sizing
   const [containerHeight, setContainerHeight] = useState(800);
   const [containerWidth, setContainerWidth] = useState(0);
+  const internalRef = useRef<HTMLDivElement>(null);
+  const containerRef = scrollContainerRef || internalRef;
+
   useLayoutEffect(() => {
-    if (!containerRef.current) return;
+    const el = containerRef.current;
+    if (!el) return;
 
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
@@ -951,13 +959,12 @@ export function TableView<T extends Record<string, unknown>>({
       }
     });
 
-    observer.observe(containerRef.current);
+    observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [containerRef]);
 
   // Scroll state
   const [scrollTop, setScrollTop] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     setScrollTop(e.currentTarget.scrollTop);
@@ -989,6 +996,7 @@ export function TableView<T extends Record<string, unknown>>({
       <div
         ref={containerRef}
         onScroll={onScroll}
+        className={hideHorizontalScrollbar ? "no-scrollbar-x" : undefined}
         style={{
           width: "100%",
           overflowX: "auto",
