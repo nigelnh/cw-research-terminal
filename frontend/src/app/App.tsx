@@ -198,8 +198,10 @@ export function App() {
 
     // Start silent 2-second background polling for database data updates
     const pollInterval = setInterval(() => {
-      fetchPosMaster();
-      fetchRtTrades();
+      if (!document.hidden) {
+        fetchPosMaster();
+        fetchRtTrades();
+      }
     }, 2000);
 
     return () => {
