@@ -44,7 +44,7 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
         },
       }),
 
-      // 2b. Event note / description (e.g. "Trả cổ tức năm 2025 bằng tiền, 1,000 đồng/CP")
+      // 2b. Event note / description (e.g. "2025 cash dividend payment, 1,000 VND/share")
       new ColumnBase<DividendRow>({
         key: "note",
         header: "Event",

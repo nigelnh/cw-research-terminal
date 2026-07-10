@@ -1085,7 +1085,7 @@ export function TableView<T extends Record<string, unknown>>({
           onDrop={onDrop}
           style={{
             position: "relative",
-            height: sortedData.length === 0 && emptyStateMessage ? 120 : sortedData.length * rowHeight,
+            height: sortedData.length === 0 && emptyStateMessage ? 80 : sortedData.length * rowHeight,
             boxSizing: "content-box",
             width: tableWidthStyle,
             minWidth: tableWidthStyle,

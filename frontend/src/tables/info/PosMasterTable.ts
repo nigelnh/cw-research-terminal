@@ -412,7 +412,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         color: colors.yellow,
       }),
 
-      // Note: Standalone Div(D) [Col 23] omitted from columns list as requested by "bỏ cột này"
+      // Note: Standalone Div(D) [Col 23] omitted from columns list as requested by "remove this column"
       // to display it as a dot marker next to the ticker in TableView cell renderer instead.
 
       // 17. Fund (Col 24)
