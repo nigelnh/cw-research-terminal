@@ -33,7 +33,9 @@ export function App() {
   const { rows, lastChanges, serverTimeOffset, getRow, lastUpdateTs } = useEquityData();
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("viewMode");
+      const lastUser = localStorage.getItem("lastActiveUser");
+      const key = lastUser ? `${lastUser}:viewMode` : "viewMode";
+      const saved = localStorage.getItem(key);
       if (saved === "equity" || saved === "info") {
         return saved as ViewMode;
       }
@@ -44,9 +46,56 @@ export function App() {
   const [loggedOut, setLoggedOut] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  useEffect(() => {
-    localStorage.setItem("viewMode", viewMode);
-  }, [viewMode]);
+  const [hiddenColumns, setHiddenColumns] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      const lastUser = localStorage.getItem("lastActiveUser");
+      const key = lastUser ? `${lastUser}:hiddenColumns` : "hiddenColumns";
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
+  const [infoHiddenColumns, setInfoHiddenColumns] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      const lastUser = localStorage.getItem("lastActiveUser");
+      const key = lastUser ? `${lastUser}:infoHiddenColumns` : "infoHiddenColumns";
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
+  const [tradesHiddenColumns, setTradesHiddenColumns] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      const lastUser = localStorage.getItem("lastActiveUser");
+      const key = lastUser ? `${lastUser}:tradesHiddenColumns` : "tradesHiddenColumns";
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
+    return [];
+  });
+  const [posColumnGroup, setPosColumnGroup] = useState<PosColumnGroup>(() => {
+    if (typeof window !== "undefined") {
+      const lastUser = localStorage.getItem("lastActiveUser");
+      const key = lastUser ? `${lastUser}:posColumnGroup` : "posColumnGroup";
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        return saved as PosColumnGroup;
+      }
+    }
+    return "overview";
+  });
 
   // Decode user email from Access Token
   const userEmail = useMemo(() => {
@@ -59,6 +108,82 @@ export function App() {
       return "";
     }
   }, [accessToken]);
+
+  // Keep track of the last active user
+  useEffect(() => {
+    if (userEmail) {
+      localStorage.setItem("lastActiveUser", userEmail);
+    }
+  }, [userEmail]);
+
+  // Load user settings when userEmail resolves
+  useEffect(() => {
+    if (userEmail) {
+      const savedViewMode = localStorage.getItem(`${userEmail}:viewMode`);
+      if (savedViewMode === "equity" || savedViewMode === "info") {
+        setViewMode(savedViewMode as ViewMode);
+      }
+      
+      const savedHidden = localStorage.getItem(`${userEmail}:hiddenColumns`);
+      if (savedHidden) {
+        try { setHiddenColumns(JSON.parse(savedHidden)); } catch (e) {}
+      } else {
+        setHiddenColumns([]);
+      }
+      
+      const savedInfoHidden = localStorage.getItem(`${userEmail}:infoHiddenColumns`);
+      if (savedInfoHidden) {
+        try { setInfoHiddenColumns(JSON.parse(savedInfoHidden)); } catch (e) {}
+      } else {
+        setInfoHiddenColumns([]);
+      }
+      
+      const savedTradesHidden = localStorage.getItem(`${userEmail}:tradesHiddenColumns`);
+      if (savedTradesHidden) {
+        try { setTradesHiddenColumns(JSON.parse(savedTradesHidden)); } catch (e) {}
+      } else {
+        setTradesHiddenColumns([]);
+      }
+      
+      const savedGroup = localStorage.getItem(`${userEmail}:posColumnGroup`);
+      if (savedGroup) {
+        setPosColumnGroup(savedGroup as PosColumnGroup);
+      } else {
+        setPosColumnGroup("overview");
+      }
+    }
+  }, [userEmail]);
+
+  // Persist user settings when they change
+  useEffect(() => {
+    if (userEmail) {
+      localStorage.setItem(`${userEmail}:viewMode`, viewMode);
+    }
+  }, [viewMode, userEmail]);
+
+  useEffect(() => {
+    if (userEmail) {
+      localStorage.setItem(`${userEmail}:hiddenColumns`, JSON.stringify(hiddenColumns));
+    }
+  }, [hiddenColumns, userEmail]);
+
+  useEffect(() => {
+    if (userEmail) {
+      localStorage.setItem(`${userEmail}:infoHiddenColumns`, JSON.stringify(infoHiddenColumns));
+    }
+  }, [infoHiddenColumns, userEmail]);
+
+  useEffect(() => {
+    if (userEmail) {
+      localStorage.setItem(`${userEmail}:tradesHiddenColumns`, JSON.stringify(tradesHiddenColumns));
+    }
+  }, [tradesHiddenColumns, userEmail]);
+
+  useEffect(() => {
+    if (userEmail) {
+      localStorage.setItem(`${userEmail}:posColumnGroup`, posColumnGroup);
+    }
+  }, [posColumnGroup, userEmail]);
 
   // Silent refresh on startup
   useEffect(() => {
@@ -112,15 +237,13 @@ export function App() {
       setLoggedOut(true);
     }
   };
-  const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
-  const [infoHiddenColumns, setInfoHiddenColumns] = useState<string[]>([]);
-  const [tradesHiddenColumns, setTradesHiddenColumns] = useState<string[]>([]);
+  // Hidden columns and column groups are declared at the top of the component
 
   const [posRowsMM, setPosRowsMM] = useState<any[]>([]);
   const [posRowsHedge, setPosRowsHedge] = useState<any[]>([]);
   const [loadingPos, setLoadingPos] = useState(false);
   const [posError, setPosError] = useState<string | null>(null);
-  const [posColumnGroup, setPosColumnGroup] = useState<PosColumnGroup>("overview");
+  // posColumnGroup is declared at the top of the component
 
   const [tradesRows, setTradesRows] = useState<any[]>([]);
   const [loadingTrades, setLoadingTrades] = useState(false);
@@ -913,6 +1036,7 @@ export function App() {
             data={filteredTableData}
             hiddenColumns={hiddenColumns}
             lastChanges={lastChanges}
+            userEmail={userEmail}
           />
         </div>
 
@@ -1085,6 +1209,7 @@ export function App() {
                         data={filteredPosRowsMM}
                         hiddenColumns={hiddenColsList}
                         lastChanges={posMasterChanges}
+                        userEmail={userEmail}
                       />
                     </div>
 
@@ -1100,6 +1225,7 @@ export function App() {
                         data={filteredPosRowsHedge}
                         hiddenColumns={hiddenColsList}
                         lastChanges={posMasterChanges}
+                        userEmail={userEmail}
                       />
                     </div>
                   </div>
@@ -1178,6 +1304,7 @@ export function App() {
                   table={rtTradesTable}
                   data={filteredTradesRows}
                   hiddenColumns={tradesHiddenColumns}
+                  userEmail={userEmail}
                 />
               )}
             </div>
@@ -1243,6 +1370,7 @@ export function App() {
                     table={holidayTable}
                     data={filteredHolidayRows}
                     emptyStateMessage="No holiday data available"
+                    userEmail={userEmail}
                   />
                 )}
               </div>
@@ -1306,6 +1434,7 @@ export function App() {
                     table={dividendTable}
                     data={filteredDividendRows}
                     emptyStateMessage="No new dividend events"
+                    userEmail={userEmail}
                   />
                 )}
               </div>

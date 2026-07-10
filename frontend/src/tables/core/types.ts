@@ -25,7 +25,7 @@ export interface ColumnConfig<T> {
   color?: string | ((row: T, getRow?: (symbol: string) => any | undefined) => string);
   colorDependencies?: (keyof T & string)[];
   bgColor?: string | ((row: T, getRow?: (symbol: string) => any | undefined) => string | undefined);
-  format?: (value: unknown) => string;
+  format?: (value: unknown, row?: T) => string;
   sortable?: boolean;
   sortArrowOnRight?: boolean;
 }

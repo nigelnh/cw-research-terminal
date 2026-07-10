@@ -44,32 +44,42 @@ export function Topbar({
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"info" | "password">("info");
-  const [notificationCount, setNotificationCount] = useState<number>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("notificationCount");
-      return stored ? parseInt(stored, 10) : 0;
-    }
-    return 0;
-  });
-  const [notificationsList, setNotificationsList] = useState<string[]>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("notificationsList");
+  const [notificationCount, setNotificationCount] = useState<number>(0);
+  const [notificationsList, setNotificationsList] = useState<string[]>([]);
+
+  // Synchronize notifications per-user
+  useEffect(() => {
+    if (userEmail) {
+      const countKey = `${userEmail}:notificationCount`;
+      const listKey = `${userEmail}:notificationsList`;
+      
+      const storedCount = localStorage.getItem(countKey);
+      setNotificationCount(storedCount ? parseInt(storedCount, 10) : 0);
+      
+      const storedList = localStorage.getItem(listKey);
       try {
-        return stored ? JSON.parse(stored) : [];
+        setNotificationsList(storedList ? JSON.parse(storedList) : []);
       } catch {
-        return [];
+        setNotificationsList([]);
       }
+    } else {
+      setNotificationCount(0);
+      setNotificationsList([]);
     }
-    return [];
-  });
+  }, [userEmail]);
+
+  // Persist notifications per-user
+  useEffect(() => {
+    if (userEmail) {
+      localStorage.setItem(`${userEmail}:notificationCount`, String(notificationCount));
+    }
+  }, [notificationCount, userEmail]);
 
   useEffect(() => {
-    localStorage.setItem("notificationCount", String(notificationCount));
-  }, [notificationCount]);
-
-  useEffect(() => {
-    localStorage.setItem("notificationsList", JSON.stringify(notificationsList));
-  }, [notificationsList]);
+    if (userEmail) {
+      localStorage.setItem(`${userEmail}:notificationsList`, JSON.stringify(notificationsList));
+    }
+  }, [notificationsList, userEmail]);
 
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const notificationTimeoutRef = useRef<any>(null);
@@ -152,9 +162,10 @@ export function Topbar({
           setConfirmPassword("");
           setModalSuccess("Password changed successfully!");
 
-          const timeString = new Date().toLocaleTimeString();
+          const now = new Date();
+          const dateTimeString = `${formatDate(now)} ${formatTime(now)}`;
           setNotificationsList(prev => [
-            `Password updated successfully at ${timeString}`,
+            `Password updated successfully at ${dateTimeString}`,
             ...prev
           ]);
           setNotificationCount(c => c + 1);
@@ -337,7 +348,7 @@ export function Topbar({
                   </span>
                 )}
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 150, overflowY: "auto" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 144, overflowY: "auto" }}>
                 {notificationsList.length === 0 ? (
                   <div style={{ color: colors.textMuted, fontSize: 12, padding: "8px 0", textAlign: "center" }}>
                     No new notifications
@@ -347,11 +358,14 @@ export function Topbar({
                     <div
                       key={idx}
                       style={{
-                        padding: 6,
+                        padding: "8px 10px",
                         borderRadius: 4,
                         backgroundColor: "rgba(255, 255, 255, 0.03)",
                         color: colors.textSecondary,
                         fontSize: 12,
+                        lineHeight: "1.4",
+                        minHeight: "44px",
+                        boxSizing: "border-box",
                       }}
                     >
                       {notif}

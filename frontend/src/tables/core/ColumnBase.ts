@@ -17,7 +17,7 @@ export class ColumnBase<T> {
   readonly sortable: boolean;
   readonly sortArrowOnRight: boolean;
   readonly colorDependencies?: string[];
-  private readonly customFormat?: (value: unknown) => string;
+  private readonly customFormat?: (value: unknown, row?: T) => string;
 
   constructor(config: ColumnConfig<T>) {
     this.key = config.key;
@@ -69,9 +69,9 @@ export class ColumnBase<T> {
    * Format value for display
    * Override in subclasses for custom formatting
    */
-  format(value: unknown): string {
+  format(value: unknown, row?: T): string {
     if (this.customFormat) {
-      return this.customFormat(value);
+      return this.customFormat(value, row);
     }
     if (value === null || value === undefined || value === 0 || value === "0") {
       return "";
@@ -83,7 +83,7 @@ export class ColumnBase<T> {
    * Get formatted display value from row
    */
   getDisplayValue(row: T): string {
-    return this.format(this.getValue(row));
+    return this.format(this.getValue(row), row);
   }
 }
 
@@ -91,8 +91,8 @@ export class ColumnBase<T> {
  * Column for price values (2 decimal places)
  */
 export class PriceColumn<T> extends ColumnBase<T> {
-  format(value: unknown): string {
-    const custom = super.format(value);
+  format(value: unknown, row?: T): string {
+    const custom = super.format(value, row);
     // If super.format returned something other than String(value), it means customFormat was used
     if ((this as any).customFormat) return custom;
 
@@ -109,8 +109,8 @@ export class PriceColumn<T> extends ColumnBase<T> {
  * Column for quantity values (divided by 1000, with 2 decimal places)
  */
 export class QuantityColumn<T> extends ColumnBase<T> {
-  format(value: unknown): string {
-    const custom = super.format(value);
+  format(value: unknown, row?: T): string {
+    const custom = super.format(value, row);
     if ((this as any).customFormat) return custom;
 
     if (value === null || value === undefined) {
@@ -126,8 +126,8 @@ export class QuantityColumn<T> extends ColumnBase<T> {
  * Column for large numbers (with thousand separators)
  */
 export class LargeNumberColumn<T> extends ColumnBase<T> {
-  format(value: unknown): string {
-    const custom = super.format(value);
+  format(value: unknown, row?: T): string {
+    const custom = super.format(value, row);
     if ((this as any).customFormat) return custom;
 
     if (value === null || value === undefined) {
