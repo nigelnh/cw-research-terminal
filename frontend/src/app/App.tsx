@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { Topbar } from "./Topbar";
+import { Login } from "../components/Login";
 import { PanelTitle } from "./PanelTitle";
 import { TableView } from "@/tables/core/TableView";
 import { stockTable } from "@/tables/stock/StockTable";
@@ -30,7 +31,87 @@ type ViewMode = "equity" | "info";
 
 export function App() {
   const { rows, lastChanges, serverTimeOffset, getRow, lastUpdateTs } = useEquityData();
-  const [viewMode, setViewMode] = useState<ViewMode>("equity");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("viewMode");
+      if (saved === "equity" || saved === "info") {
+        return saved as ViewMode;
+      }
+    }
+    return "equity";
+  });
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [loggedOut, setLoggedOut] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem("viewMode", viewMode);
+  }, [viewMode]);
+
+  // Decode user email from Access Token
+  const userEmail = useMemo(() => {
+    if (!accessToken) return "";
+    try {
+      const payload = accessToken.split(".")[1];
+      const decoded = JSON.parse(atob(payload));
+      return decoded.email || "";
+    } catch (e) {
+      return "";
+    }
+  }, [accessToken]);
+
+  // Silent refresh on startup
+  useEffect(() => {
+    fetch("/api/auth/refresh", { method: "POST" })
+      .then((res) => {
+        if (res.ok) return res.json();
+        throw new Error("No session");
+      })
+      .then((data) => {
+        if (data.success && data.accessToken) {
+          setAccessToken(data.accessToken);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setIsInitialized(true);
+      });
+  }, []);
+
+  // Background token refresh loop
+  useEffect(() => {
+    if (!accessToken) return;
+
+    const interval = setInterval(() => {
+      fetch("/api/auth/refresh", { method: "POST" })
+        .then((res) => {
+          if (res.ok) return res.json();
+          throw new Error("Session expired");
+        })
+        .then((data) => {
+          if (data.success && data.accessToken) {
+            setAccessToken(data.accessToken);
+          }
+        })
+        .catch((err) => {
+          console.error("Token refresh failed:", err);
+          setAccessToken(null);
+        });
+    }, 14 * 60 * 1000); // 14 minutes (token expires in 15m)
+
+    return () => clearInterval(interval);
+  }, [accessToken]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (err) {
+      console.error("Failed to call logout API:", err);
+    } finally {
+      setAccessToken(null);
+      setLoggedOut(true);
+    }
+  };
   const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
   const [infoHiddenColumns, setInfoHiddenColumns] = useState<string[]>([]);
   const [tradesHiddenColumns, setTradesHiddenColumns] = useState<string[]>([]);
@@ -59,6 +140,40 @@ export function App() {
   const [holidayFilter, setHolidayFilter] = useState<{ underlyings: string[]; fromDate: string; toDate: string }>({ underlyings: ["All"], fromDate: "", toDate: "" });
   const [dividendFilter, setDividendFilter] = useState<{ underlyings: string[]; fromDate: string; toDate: string }>({ underlyings: ["All"], fromDate: "", toDate: "" });
 
+  // Keep refs of states so the background polling effect doesn't capture stale closures
+  const posRowsMMRef = useRef<any[]>([]);
+  const posRowsHedgeRef = useRef<any[]>([]);
+  const tradesRowsRef = useRef<any[]>([]);
+  const holidayRowsRef = useRef<any[]>([]);
+  const dividendRowsRef = useRef<any[]>([]);
+  const viewModeRef = useRef<ViewMode>(viewMode);
+  const initialPosFetchedRef = useRef(false);
+  const initialTradesFetchedRef = useRef(false);
+
+  useEffect(() => {
+    posRowsMMRef.current = posRowsMM;
+  }, [posRowsMM]);
+
+  useEffect(() => {
+    posRowsHedgeRef.current = posRowsHedge;
+  }, [posRowsHedge]);
+
+  useEffect(() => {
+    tradesRowsRef.current = tradesRows;
+  }, [tradesRows]);
+
+  useEffect(() => {
+    holidayRowsRef.current = holidayRows;
+  }, [holidayRows]);
+
+  useEffect(() => {
+    dividendRowsRef.current = dividendRows;
+  }, [dividendRows]);
+
+  useEffect(() => {
+    viewModeRef.current = viewMode;
+  }, [viewMode]);
+
   const toggleColumn = (key: string) => {
     setHiddenColumns((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
@@ -86,23 +201,38 @@ export function App() {
 
 
   useEffect(() => {
-    if (viewMode !== "info") return;
+    if (!accessToken) {
+      initialPosFetchedRef.current = false;
+      initialTradesFetchedRef.current = false;
+      return;
+    }
 
     let isMounted = true;
-    let initialLoadPos = true;
-    let initialLoadTrades = true;
 
     const fetchPosMaster = () => {
-      if (initialLoadPos) {
+      // Only set loading state if we haven't successfully fetched it yet
+      if (!initialPosFetchedRef.current) {
         setLoadingPos(true);
         setPosError(null);
       }
       Promise.all([
-        fetch('/api/pos-master?subAccountNo=0001922095').then((res) => {
+        fetch('/api/pos-master?subAccountNo=0001922095', {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        }).then((res) => {
+          if (res.status === 401) {
+            setAccessToken(null);
+            throw new Error("Unauthorized");
+          }
           if (!res.ok) throw new Error("Failed to fetch MM position master data.");
           return res.json();
         }),
-        fetch('/api/pos-master?subAccountNo=0001115688').then((res) => {
+        fetch('/api/pos-master?subAccountNo=0001115688', {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        }).then((res) => {
+          if (res.status === 401) {
+            setAccessToken(null);
+            throw new Error("Unauthorized");
+          }
           if (!res.ok) throw new Error("Failed to fetch Hedging position master data.");
           return res.json();
         })
@@ -113,26 +243,33 @@ export function App() {
           const mappedHedge = dataHedge.map((r: any) => ({ ...r, Symbol: r.ticker }));
           setPosRowsMM(mappedMM);
           setPosRowsHedge(mappedHedge);
-          if (initialLoadPos) {
-            setLoadingPos(false);
-            initialLoadPos = false;
-          }
+          setLoadingPos(false);
+          initialPosFetchedRef.current = true;
         })
         .catch((err) => {
           if (!isMounted) return;
           console.error("Error fetching pos_master:", err);
-          setPosError(err.message || "Could not load positions from database.");
+          if (!err.message.includes("Unauthorized")) {
+            setPosError(err.message || "Could not load positions from database.");
+          }
           setLoadingPos(false);
         });
     };
 
     const fetchRtTrades = () => {
-      if (initialLoadTrades) {
+      // Only set loading state if we haven't successfully fetched it yet
+      if (!initialTradesFetchedRef.current) {
         setLoadingTrades(true);
         setTradesError(null);
       }
-      fetch("/api/rt-trades")
+      fetch("/api/rt-trades", {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      })
         .then((res) => {
+          if (res.status === 401) {
+            setAccessToken(null);
+            throw new Error("Unauthorized");
+          }
           if (!res.ok) throw new Error("Failed to fetch realtime trades.");
           return res.json();
         })
@@ -140,65 +277,74 @@ export function App() {
           if (!isMounted) return;
           const mappedData = data.map((r: any) => ({ ...r, Symbol: r.symbol }));
           setTradesRows(mappedData);
-          if (initialLoadTrades) {
-            setLoadingTrades(false);
-            initialLoadTrades = false;
-          }
+          setLoadingTrades(false);
+          initialTradesFetchedRef.current = true;
         })
         .catch((err) => {
           if (!isMounted) return;
           console.error("Error fetching rt_trades:", err);
-          setTradesError(err.message || "Could not load trades from database.");
+          if (!err.message.includes("Unauthorized")) {
+            setTradesError(err.message || "Could not load trades from database.");
+          }
           setLoadingTrades(false);
         });
     };
 
     // Initial fetches
-    setLoadingHolidays(true);
-    setHolidaysError(null);
-    setLoadingDividends(true);
-    setDividendsError(null);
-
     fetchPosMaster();
     fetchRtTrades();
 
-    fetch("/api/holidays")
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch holiday data.");
-        return res.json();
-      })
-      .then((data: any[]) => {
-        if (!isMounted) return;
-        setHolidayRows(data);
-        setLoadingHolidays(false);
-      })
-      .catch((err) => {
-        if (!isMounted) return;
-        console.error("Error fetching holidays:", err);
-        setHolidaysError(err.message || "Could not load holidays.");
-        setLoadingHolidays(false);
-      });
+    if (holidayRowsRef.current.length === 0) {
+      setLoadingHolidays(true);
+      setHolidaysError(null);
+      fetch("/api/holidays")
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed to fetch holiday data.");
+          return res.json();
+        })
+        .then((data: any[]) => {
+          if (!isMounted) return;
+          setHolidayRows(data);
+          setLoadingHolidays(false);
+        })
+        .catch((err) => {
+          if (!isMounted) return;
+          console.error("Error fetching holidays:", err);
+          setHolidaysError(err.message || "Could not load holidays.");
+          setLoadingHolidays(false);
+        });
+    }
 
-    fetch("/api/dividends")
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch dividend data.");
-        return res.json();
-      })
-      .then((data: any[]) => {
-        if (!isMounted) return;
-        setDividendRows(data);
-        setLoadingDividends(false);
-      })
-      .catch((err) => {
-        if (!isMounted) return;
-        console.error("Error fetching dividends:", err);
-        setDividendsError(err.message || "Could not load dividends.");
-        setLoadingDividends(false);
-      });
+    if (dividendRowsRef.current.length === 0) {
+      setLoadingDividends(true);
+      setDividendsError(null);
+      fetch("/api/dividends")
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed to fetch dividend data.");
+          return res.json();
+        })
+        .then((data: any[]) => {
+          if (!isMounted) return;
+          setDividendRows(data);
+          setLoadingDividends(false);
+        })
+        .catch((err) => {
+          if (!isMounted) return;
+          console.error("Error fetching dividends:", err);
+          setDividendsError(err.message || "Could not load dividends.");
+          setLoadingDividends(false);
+        });
+    }
 
-    // Start silent 2-second background polling for database data updates
+    // Dynamic background polling based on tab activity (2s active vs 10s background)
+    let tickCount = 0;
     const pollInterval = setInterval(() => {
-      if (!document.hidden) {
+      if (document.hidden) return;
+      
+      const isInfoActive = viewModeRef.current === "info";
+      tickCount++;
+      if (isInfoActive || tickCount >= 5) {
+        tickCount = 0;
         fetchPosMaster();
         fetchRtTrades();
       }
@@ -208,7 +354,7 @@ export function App() {
       isMounted = false;
       clearInterval(pollInterval);
     };
-  }, [viewMode]);
+  }, [accessToken]);
 
   const filteredTableData = useMemo(() => {
     return rows.filter(r => VN30_SYMBOLS.includes(r.Symbol));
@@ -682,6 +828,39 @@ export function App() {
     });
   }, [dividendRows, dividendFilter]);
 
+  if (!isInitialized) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "100vh",
+          backgroundColor: colors.background,
+          color: colors.textSecondary,
+          fontSize: 16,
+          fontWeight: 500,
+          fontFamily: "Inter, sans-serif",
+        }}
+      >
+        Initializing system...
+      </div>
+    );
+  }
+
+  if (!accessToken) {
+    return (
+      <Login
+        onLoginSuccess={(token) => {
+          setAccessToken(token);
+          setLoggedOut(false);
+        }}
+        loggedOut={loggedOut}
+        onClearLoggedOut={() => setLoggedOut(false)}
+      />
+    );
+  }
+
   return (
     <div
       style={{
@@ -691,7 +870,14 @@ export function App() {
         backgroundColor: colors.background,
       }}
     >
-      <Topbar currentView={viewMode} onViewChange={setViewMode} serverTimeOffset={serverTimeOffset} />
+      <Topbar
+        currentView={viewMode}
+        onViewChange={setViewMode}
+        serverTimeOffset={serverTimeOffset}
+        userEmail={userEmail}
+        onLogout={handleLogout}
+        accessToken={accessToken}
+      />
 
       <div
         style={{
