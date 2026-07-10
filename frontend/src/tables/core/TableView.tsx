@@ -17,6 +17,7 @@ interface TableViewProps<T extends Record<string, unknown>> {
   emptyStateMessage?: string;
   scrollContainerRef?: React.RefObject<HTMLDivElement>;
   hideHorizontalScrollbar?: boolean;
+  userEmail?: string;
 }
 
 // Flash duration in ms
@@ -613,6 +614,7 @@ export function TableView<T extends Record<string, unknown>>({
   emptyStateMessage,
   scrollContainerRef,
   hideHorizontalScrollbar,
+  userEmail,
 }: TableViewProps<T>) {
   const { getNumericValue } = useEquityData();
 
@@ -680,8 +682,50 @@ export function TableView<T extends Record<string, unknown>>({
     direction: "asc" | "desc";
   } | null>(null);
 
+  const storageKey = React.useMemo(() => {
+    const tableName = table.constructor.name || "genericTable";
+    return userEmail 
+      ? `${userEmail}:${tableName}:pinnedSymbols` 
+      : `${tableName}:pinnedSymbols`;
+  }, [userEmail, table]);
+
   // Pinned symbols
-  const [pinnedSymbols, setPinnedSymbols] = useState<Set<string | null>>(new Set());
+  const [pinnedSymbols, setPinnedSymbols] = useState<Set<string | null>>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          return new Set(JSON.parse(saved));
+        } catch (e) {
+          console.error("Failed to parse saved pinned symbols:", e);
+        }
+      }
+    }
+    return new Set();
+  });
+
+  // Load pinned symbols when storageKey changes
+  React.useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          setPinnedSymbols(new Set(JSON.parse(saved)));
+          return;
+        } catch (e) {
+          console.error("Failed to parse saved pinned symbols:", e);
+        }
+      }
+      setPinnedSymbols(new Set());
+    }
+  }, [storageKey]);
+
+  // Persist pinned symbols
+  React.useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(storageKey, JSON.stringify(Array.from(pinnedSymbols)));
+    }
+  }, [pinnedSymbols, storageKey]);
 
   const togglePin = (symbol: string) => {
     setPinnedSymbols((prev) => {

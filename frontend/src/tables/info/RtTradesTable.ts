@@ -14,6 +14,9 @@ export interface RtTradesRow {
   execType: string;
   execQtty: number;
   execPrice: number;
+  quotePrice?: number;
+  orStatusValue?: string;
+  orStatus?: string;
 }
 
 // Helper to derive name
@@ -188,9 +191,14 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
         header: "Traded_Prc",
         widthPx: 95,
         align: "right",
-        format: (v) => {
-          if (v === null || v === undefined) return "";
-          const num = typeof v === "number" ? v : parseFloat(String(v));
+        format: (v, row) => {
+          let num = typeof v === "number" ? v : parseFloat(String(v));
+          if ((isNaN(num) || num === 0) && row) {
+            const rawRow = row as any;
+            if (rawRow.quotePrice !== undefined && rawRow.quotePrice !== null) {
+              num = typeof rawRow.quotePrice === "number" ? rawRow.quotePrice : parseFloat(String(rawRow.quotePrice));
+            }
+          }
           if (isNaN(num) || num === 0) return "";
           return (num / 1000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         },
@@ -198,6 +206,45 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
           const t = String(row.execType).toUpperCase();
           if (t === "NB") return colors.increase; // Buy-executed price in green
           if (t === "NS") return colors.decrease; // Sell-executed price in red
+          return colors.textSecondary;
+        },
+      }),
+
+      // 11. Status (orStatusValue)
+      new ColumnBase<RtTradesRow>({
+        key: "status",
+        dataKey: "orStatusValue" as any,
+        header: "Status",
+        widthPx: 90,
+        align: "center",
+        format: (v, row) => {
+          if (v === null || v === undefined) {
+            const rawRow = row as any;
+            if (rawRow && rawRow.orStatus) {
+              const os = String(rawRow.orStatus).toLowerCase();
+              if (os.includes("gửi")) return "Send";
+              if (os.includes("hủy")) return "Canceled";
+              return rawRow.orStatus;
+            }
+            return "";
+          }
+          const val = String(v).trim();
+          if (val === "2") return "Send";
+          if (val === "3") return "Canceled";
+
+          const rawRow = row as any;
+          if (rawRow && rawRow.orStatus) {
+            const os = String(rawRow.orStatus).toLowerCase();
+            if (os.includes("gửi")) return "Send";
+            if (os.includes("hủy")) return "Canceled";
+            return rawRow.orStatus;
+          }
+          return val;
+        },
+        color: (row: RtTradesRow) => {
+          const v = String(row.orStatusValue || "");
+          if (v === "2") return colors.increase; // Green for Send
+          if (v === "3") return colors.decrease; // Red for Canceled
           return colors.textSecondary;
         },
       }),
