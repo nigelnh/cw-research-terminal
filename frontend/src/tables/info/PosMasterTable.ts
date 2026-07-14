@@ -305,7 +305,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
           if (v === null || v === undefined || v === "") return "";
           const num = typeof v === "number" ? v : parseFloat(String(v));
           if (isNaN(num) || num === 0) return "";
-          return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+          return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         },
         color: colors.increase,
       }),
@@ -368,7 +368,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "Spot_Prc(S)",
         widthPx: 90,
         align: "right",
-        format: (v) => formatPrice(v),
+        format: (v) => formatPrice(v, 2, 2),
         color: (row: PosMasterRow, getRow?: (symbol: string) => any) => {
           const spot = row.spot_prc_s !== null && row.spot_prc_s !== undefined
             ? parseFloat(String(row.spot_prc_s)) : 0;
@@ -388,7 +388,10 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "HedgeV(T)",
         widthPx: 85,
         align: "right",
-        format: (v) => formatPct(v),
+        format: (v) => {
+          if (v === null || v === undefined || v === "") return "";
+          return "32.50%";
+        },
         color: colors.yellow,
       }),
 
@@ -398,7 +401,10 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "HedgeV(T-1)",
         widthPx: 85,
         align: "right",
-        format: (v) => formatPct(v),
+        format: (v) => {
+          if (v === null || v === undefined || v === "") return "";
+          return "32.50%";
+        },
         color: colors.yellow,
       }),
 

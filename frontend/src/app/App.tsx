@@ -550,15 +550,17 @@ export function App() {
       }
 
       // ── Spot_Prc(S) — per-account logic ───────────────────────────────────
-      // MM account (isHedging=false): CW-focused. Spot_Prc(S) = CW's own LastPrc(T),
-      //   i.e. the same live warrant price already computed above.
+      // MM account (isHedging=false): CW-focused. Spot_Prc(S) = underlying stock's live price.
       // Hedging account (isHedging=true): Stock-focused. Spot_Prc(S) = the stock
       //   ticker's own live price (via getRow(ticker)), not the underlying of a CW.
       let spotPrcS = row.spot_prc_s !== null ? parseFloat(row.spot_prc_s) : null;
       if (!isHedging) {
-        // MM: Spot_Prc(S) mirrors LastPrc(T) (CW live price)
-        if (lastPrcT !== null) {
-          spotPrcS = lastPrcT;
+        // MM: Spot_Prc(S) should be the underlying stock's live price from WebSocket
+        const liveUnderlying = row.und_ticker ? getRow(row.und_ticker.toUpperCase()) : null;
+        if (liveUnderlying && liveUnderlying.Ref && liveUnderlying.Ref > 0) {
+          spotPrcS = liveUnderlying.Traded && liveUnderlying.Traded > 0
+            ? liveUnderlying.Traded
+            : liveUnderlying.Ref;
         }
       } else {
         // Hedging: Spot_Prc(S) = direct stock live price from WebSocket
@@ -614,6 +616,7 @@ export function App() {
       let theoPrcT1 = 0;
       let vegaPctT = 0;
       let thetaT = 0;
+      let deltaT = 1.0; // Default delta = 1 for stocks/indexes
 
       if (strikeK && tteT !== null && tteT1 !== null) {
         theoPrcT = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma) / ratioNum;
@@ -622,10 +625,13 @@ export function App() {
         // Daily Theta decay using finite difference: bsCallPrice(newT) - bsCallPrice(T)
         const newT = Math.max(tteT - 1 / 365, 0.0001);
         thetaT = (bsCallPrice(spotS_t, strikeK, newT, rate, sigma) - bsCallPrice(spotS_t, strikeK, tteT, rate, sigma)) / ratioNum;
-      }
 
-      // 3. Option sensitivities
-      const deltaT = row.delta_t !== null ? parseFloat(row.delta_t) : 0;
+        // Calculate Delta using finite difference on Call Option Price:
+        // (CallPrice(S * 1.0001) - CallPrice(S * 0.9999)) / (S * 0.0002)
+        const priceUp = bsCallPrice(spotS_t * 1.0001, strikeK, tteT, rate, sigma);
+        const priceDown = bsCallPrice(spotS_t * 0.9999, strikeK, tteT, rate, sigma);
+        deltaT = (priceUp - priceDown) / (spotS_t * 0.0002);
+      }
       const deltaLotsT = deltaT * balance;
       const deltaCashT = spotS_t * deltaLotsT;
       const deltaCashT1 = deltaT * balanceT1 * spotS_t_1;
@@ -739,6 +745,7 @@ export function App() {
         last_prc_t_1: lastPrcT1 !== null ? String(lastPrcT1) : null,
         net_chg_pct: netChgPct !== null ? String(netChgPct) : null,
         spot_prc_s: spotPrcS !== null ? String(spotPrcS) : null,
+        delta_t: deltaT !== null ? String(deltaT) : null,
 
         balance_t_1: balanceT1,
         balance: balance,
