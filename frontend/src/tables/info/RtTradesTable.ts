@@ -19,21 +19,7 @@ export interface RtTradesRow {
   orStatus?: string;
 }
 
-// Helper to derive name
-const getSymbolName = (symbol: string): string => {
-  const sym = symbol.toUpperCase();
-  if (sym === "HPG") return "Hoa Phat Group";
-  if (sym === "FPT") return "FPT Corporation";
-  if (sym === "VHM") return "Vinhomes JSC";
-  if (sym === "VIC") return "Vingroup JSC";
-  if (sym === "MWG") return "Mobile World Group";
 
-  if (sym.startsWith("C") && sym.length >= 8) {
-    const under = sym.substring(1, 4);
-    return `${under}`;
-  }
-  return sym;
-};
 
 // Helper to derive underlying
 const getUnderlying = (symbol: string): string => {
@@ -109,7 +95,6 @@ const getStatusColor = (status: string): string => {
   switch (status) {
     case "Sent":
     case "Matched":
-    case "Matched":
     case "Success":
       return colors.increase;
     case "Cancelled":
@@ -178,27 +163,7 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
         sortArrowOnRight: true,
       }),
 
-      // 4. Name (Derived)
-      new ColumnBase<RtTradesRow>({
-        key: "name",
-        dataKey: "symbol" as any,
-        header: "Name",
-        widthPx: 130,
-        align: "left",
-        format: (v) => getSymbolName(String(v)),
-        color: colors.textMuted,
-      }),
 
-      // 5. Product (Derived)
-      new ColumnBase<RtTradesRow>({
-        key: "product",
-        dataKey: "symbol" as any,
-        header: "Product",
-        widthPx: 80,
-        align: "center",
-        format: (v) => String(v).length === 3 ? "Equity" : "Warrant",
-        color: colors.textMuted,
-      }),
 
       // 6. Underlying (Derived)
       new ColumnBase<RtTradesRow>({
@@ -211,20 +176,6 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
         color: colors.textSecondary,
       }),
 
-      // 7. Call/Put (Derived)
-      new ColumnBase<RtTradesRow>({
-        key: "call_put",
-        dataKey: "symbol" as any,
-        header: "Call/Put",
-        widthPx: 80,
-        align: "center",
-        format: (v) => String(v).length > 3 ? "Call" : "N/A",
-        color: (row: RtTradesRow) => {
-          const sym = String(row.symbol).toUpperCase();
-          if (sym.length > 3) return colors.increase; // Warrants are calls (green)
-          return colors.textMuted; // Equity is N/A
-        },
-      }),
 
       // 8. Buy/Sell (execType)
       new ColumnBase<RtTradesRow>({

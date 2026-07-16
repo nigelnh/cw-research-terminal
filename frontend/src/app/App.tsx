@@ -7,6 +7,7 @@ import { stockTable } from "@/tables/stock/StockTable";
 import { posMasterTable } from "@/tables/info/PosMasterTable";
 import { type PosColumnGroup, POS_GROUP_META } from "@/tables/info/PosMasterTable";
 import { rtTradesTable } from "@/tables/info/RtTradesTable";
+import { PosMasterTreeView } from "@/tables/info/PosMasterTreeView";
 import { holidayTable } from "@/tables/info/HolidayTable";
 import { dividendTable } from "@/tables/info/DividendTable";
 import { useEquityData } from "@/data/useEquityData";
@@ -258,10 +259,9 @@ export function App() {
   const [dividendsError, setDividendsError] = useState<string | null>(null);
 
   // ── Info Tab Table Filters States ──────────────────────────────────
-  const [posFilter, setPosFilter] = useState<{ underlyings: string[]; fromDate: string; toDate: string }>({ underlyings: ["All"], fromDate: "", toDate: "" });
-  const [tradesFilter, setTradesFilter] = useState<{ underlyings: string[]; fromDate: string; toDate: string }>({ underlyings: ["All"], fromDate: "", toDate: "" });
-  const [holidayFilter, setHolidayFilter] = useState<{ underlyings: string[]; fromDate: string; toDate: string }>({ underlyings: ["All"], fromDate: "", toDate: "" });
-  const [dividendFilter, setDividendFilter] = useState<{ underlyings: string[]; fromDate: string; toDate: string }>({ underlyings: ["All"], fromDate: "", toDate: "" });
+  const [posFilter, setPosFilter] = useState<{ underlyings: string[] }>({ underlyings: ["All"] });
+  const [tradesFilter, setTradesFilter] = useState<{ underlyings: string[] }>({ underlyings: ["All"] });
+  const [dividendFilter, setDividendFilter] = useState<{ underlyings: string[] }>({ underlyings: ["All"] });
 
   // Keep refs of states so the background polling effect doesn't capture stale closures
   const posRowsMMRef = useRef<any[]>([]);
@@ -593,8 +593,12 @@ export function App() {
 
       // Conversion Ratio (CVR) parsing
       let ratioNum = 1;
-      if (row.cvr) {
-        const parts = row.cvr.split(":");
+      let cvrVal = row.cvr;
+      if (liveWarrant && liveWarrant.Exercise_Ratio !== null && liveWarrant.Exercise_Ratio !== undefined) {
+        cvrVal = `${liveWarrant.Exercise_Ratio}:1`;
+      }
+      if (cvrVal) {
+        const parts = cvrVal.split(":");
         const num = parseFloat(parts[0]);
         if (!isNaN(num) && num > 0) {
           ratioNum = num;
@@ -741,6 +745,7 @@ export function App() {
 
       return {
         ...row,
+        cvr: cvrVal,
         last_prc_t: lastPrcT !== null ? String(lastPrcT) : null,
         last_prc_t_1: lastPrcT1 !== null ? String(lastPrcT1) : null,
         net_chg_pct: netChgPct !== null ? String(netChgPct) : null,
@@ -800,46 +805,8 @@ export function App() {
   // ── PosMaster flash tracking ───────────────────────────────────────────────
   // Tracks previous last_prc_t and spot_prc_s per CW ticker to determine flash
   // direction (up/down) on each realtime tick, using the "ticker:colKey" format
-  // expected by TableView's currentFlashes map.
+  // expected by PosMasterTreeView's currentFlashes map.
   const posMasterPrevPricesRef = useRef<Map<string, { lastPrcT: number | null; spotPrc: number | null }>>(new Map());
-
-  const mmContainerRef = useRef<HTMLDivElement>(null);
-  const hedgeContainerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const mmEl = mmContainerRef.current;
-    const hedgeEl = hedgeContainerRef.current;
-    if (!mmEl || !hedgeEl) return;
-
-    let isSyncingMM = false;
-    let isSyncingHedge = false;
-
-    const handleScrollMM = () => {
-      if (isSyncingMM) {
-        isSyncingMM = false;
-        return;
-      }
-      isSyncingHedge = true;
-      hedgeEl.scrollLeft = mmEl.scrollLeft;
-    };
-
-    const handleScrollHedge = () => {
-      if (isSyncingHedge) {
-        isSyncingHedge = false;
-        return;
-      }
-      isSyncingMM = true;
-      mmEl.scrollLeft = hedgeEl.scrollLeft;
-    };
-
-    mmEl.addEventListener("scroll", handleScrollMM, { passive: true });
-    hedgeEl.addEventListener("scroll", handleScrollHedge, { passive: true });
-
-    return () => {
-      mmEl.removeEventListener("scroll", handleScrollMM);
-      hedgeEl.removeEventListener("scroll", handleScrollHedge);
-    };
-  }, [viewMode, posRowsMM, posRowsHedge, loadingPos]);
 
   const posMasterChanges = useMemo(() => {
     const changes = new Map<string, "up" | "down">();
@@ -904,59 +871,94 @@ export function App() {
     return Array.from(set).sort();
   }, [dividendRows]);
 
-  // ── Filtered Position Master Data ──
-  const filteredPosRowsMM = useMemo(() => {
-    return livePosRowsMM.filter((row) => {
-      const matchUnd = posFilter.underlyings.includes("All") || (row.und_ticker && posFilter.underlyings.map(u => u.toUpperCase()).includes(row.und_ticker.toUpperCase()));
-      const matchFrom = !posFilter.fromDate || (row.expiry && row.expiry >= posFilter.fromDate);
-      const matchTo = !posFilter.toDate || (row.expiry && row.expiry <= posFilter.toDate);
-      return matchUnd && matchFrom && matchTo;
+  // ── Filtered Position Master Data (merged across both accounts) ──
+  const filteredPosRows = useMemo(() => {
+    return livePosRows.filter((row) => {
+      // For CW rows, filter by und_ticker; for stock rows, filter by ticker itself
+      const rowUnd = String(row.und_ticker ?? row.ticker ?? "").toUpperCase();
+      const matchUnd =
+        posFilter.underlyings.includes("All") ||
+        posFilter.underlyings.map((u) => u.toUpperCase()).includes(rowUnd);
+      return matchUnd;
     });
-  }, [livePosRowsMM, posFilter]);
-
-  const filteredPosRowsHedge = useMemo(() => {
-    return livePosRowsHedge.filter((row) => {
-      const matchUnd = posFilter.underlyings.includes("All") || (row.und_ticker && posFilter.underlyings.map(u => u.toUpperCase()).includes(row.und_ticker.toUpperCase()));
-      const matchFrom = !posFilter.fromDate || (row.expiry && row.expiry >= posFilter.fromDate);
-      const matchTo = !posFilter.toDate || (row.expiry && row.expiry <= posFilter.toDate);
-      return matchUnd && matchFrom && matchTo;
-    });
-  }, [livePosRowsHedge, posFilter]);
+  }, [livePosRows, posFilter]);
 
   // ── Filtered Realtime Trades Data ──
   const filteredTradesRows = useMemo(() => {
-    return tradesRows.filter((row) => {
+    const filtered = tradesRows.filter((row) => {
       const rowUnd = getUnderlying(row.symbol);
       const matchUnd = tradesFilter.underlyings.includes("All") || (rowUnd && tradesFilter.underlyings.map(u => u.toUpperCase()).includes(rowUnd.toUpperCase()));
+      return matchUnd;
+    });
 
-      const livePos = livePosRows.find((pos) => pos.ticker.toUpperCase() === row.symbol.toUpperCase());
-      const rowExpiry = livePos ? livePos.expiry : null;
+    const parseTimestamp = (str: string): number => {
+      if (!str) return 0;
+      try {
+        const parts = str.trim().split(" ");
+        if (parts.length === 2) {
+          const [day, month, year] = parts[0].split("/").map(Number);
+          const [h, m, s] = parts[1].split(":").map(Number);
+          if (!isNaN(day) && !isNaN(month) && !isNaN(year) && !isNaN(h) && !isNaN(m) && !isNaN(s)) {
+            return new Date(year, month - 1, day, h, m, s).getTime();
+          }
+        }
+      } catch (e) {}
+      const ts = Date.parse(str);
+      return isNaN(ts) ? 0 : ts;
+    };
 
-      const matchFrom = !tradesFilter.fromDate || (rowExpiry && rowExpiry >= tradesFilter.fromDate);
-      const matchTo = !tradesFilter.toDate || (rowExpiry && rowExpiry <= tradesFilter.toDate);
-
-      return matchUnd && matchFrom && matchTo;
+    // Default sort from latest to oldest based on column Timestamp (lastChange)
+    return filtered.sort((a, b) => {
+      const timeA = parseTimestamp(a.lastChange);
+      const timeB = parseTimestamp(b.lastChange);
+      return timeB - timeA;
     });
   }, [tradesRows, tradesFilter, livePosRows]);
 
+  // ── Active Holdings & Trades Symbols for Dividend Filtering ──
+  const activeHoldingsAndTradesSymbols = useMemo(() => {
+    const symbols = new Set<string>();
+
+    // From Position Master
+    posRowsMM.forEach((row) => {
+      if (row.ticker) symbols.add(row.ticker.toUpperCase());
+      if (row.und_ticker) symbols.add(row.und_ticker.toUpperCase());
+    });
+    posRowsHedge.forEach((row) => {
+      if (row.ticker) symbols.add(row.ticker.toUpperCase());
+      if (row.und_ticker) symbols.add(row.und_ticker.toUpperCase());
+    });
+
+    // From Realtime Trades
+    tradesRows.forEach((row) => {
+      if (row.symbol) {
+        symbols.add(row.symbol.toUpperCase());
+        symbols.add(getUnderlying(row.symbol).toUpperCase());
+      }
+    });
+
+    return symbols;
+  }, [posRowsMM, posRowsHedge, tradesRows]);
+
   // ── Filtered Holiday Calendar Data ──
   const filteredHolidayRows = useMemo(() => {
+    const todayStr = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().split("T")[0];
     return holidayRows.filter((row) => {
-      const matchFrom = !holidayFilter.fromDate || (row.date && row.date >= holidayFilter.fromDate);
-      const matchTo = !holidayFilter.toDate || (row.date && row.date <= holidayFilter.toDate);
-      return matchFrom && matchTo;
+      if (row.date && row.date < todayStr) return false;
+      return true;
     });
-  }, [holidayRows, holidayFilter]);
+  }, [holidayRows]);
 
   // ── Filtered Dividend Calendar Data ──
   const filteredDividendRows = useMemo(() => {
     return dividendRows.filter((row) => {
+      if (!row.symbol || !activeHoldingsAndTradesSymbols.has(row.symbol.toUpperCase())) {
+        return false;
+      }
       const matchUnd = dividendFilter.underlyings.includes("All") || (row.symbol && dividendFilter.underlyings.map(u => u.toUpperCase()).includes(row.symbol.toUpperCase()));
-      const matchFrom = !dividendFilter.fromDate || (row.exDate && row.exDate >= dividendFilter.fromDate);
-      const matchTo = !dividendFilter.toDate || (row.exDate && row.exDate <= dividendFilter.toDate);
-      return matchUnd && matchFrom && matchTo;
+      return matchUnd;
     });
-  }, [dividendRows, dividendFilter]);
+  }, [dividendRows, dividendFilter, activeHoldingsAndTradesSymbols]);
 
   if (!isInitialized) {
     return (
@@ -1066,11 +1068,7 @@ export function App() {
                   underlyings={posUnderlyings}
                   selectedUnderlyings={posFilter.underlyings}
                   onSelectUnderlyings={(vals) => setPosFilter(prev => ({ ...prev, underlyings: vals }))}
-                  fromDate={posFilter.fromDate}
-                  toDate={posFilter.toDate}
-                  onChangeFromDate={(val) => setPosFilter(prev => ({ ...prev, fromDate: val }))}
-                  onChangeToDate={(val) => setPosFilter(prev => ({ ...prev, toDate: val }))}
-                  onReset={() => setPosFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
+                  onReset={() => setPosFilter({ underlyings: ["All"] })}
                 />
               }
               displayOptionContent={
@@ -1189,8 +1187,7 @@ export function App() {
               (() => {
                 posMasterTable.activeGroup = posColumnGroup;
                 const hiddenColsList = [
-                  // hide every column NOT in the active group (computed from group keys),
-                  // PLUS any manually hidden columns from the DisplayOption panel
+                  // Hide columns NOT in the active group, plus manually hidden ones
                   ...posMasterTable
                     .getColumns()
                     .filter(
@@ -1203,39 +1200,13 @@ export function App() {
                   ...infoHiddenColumns,
                 ];
                 return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1, minHeight: 0 }}>
-                    {/* MM Account Table */}
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: colors.textSecondary, marginBottom: "6px", paddingLeft: "4px" }}>
-                        Account: 0001922095
-                      </div>
-                      <TableView
-                        scrollContainerRef={mmContainerRef}
-                        hideHorizontalScrollbar={true}
-                        table={posMasterTable}
-                        data={filteredPosRowsMM}
-                        hiddenColumns={hiddenColsList}
-                        lastChanges={posMasterChanges}
-                        userEmail={userEmail}
-                      />
-                    </div>
-
-                    {/* Hedging Account Table */}
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                      <div style={{ fontSize: "12px", fontWeight: 700, color: colors.textSecondary, marginBottom: "6px", paddingLeft: "4px" }}>
-                        Account: 0001115688
-                      </div>
-                      <TableView
-                        scrollContainerRef={hedgeContainerRef}
-                        hideHorizontalScrollbar={false}
-                        table={posMasterTable}
-                        data={filteredPosRowsHedge}
-                        hiddenColumns={hiddenColsList}
-                        lastChanges={posMasterChanges}
-                        userEmail={userEmail}
-                      />
-                    </div>
-                  </div>
+                  <PosMasterTreeView
+                    data={filteredPosRows}
+                    hiddenColumns={hiddenColsList}
+                    lastChanges={posMasterChanges}
+                    posColumnGroup={posColumnGroup}
+                    userEmail={userEmail}
+                  />
                 );
               })()
             )}
@@ -1253,11 +1224,7 @@ export function App() {
                     underlyings={tradesUnderlyings}
                     selectedUnderlyings={tradesFilter.underlyings}
                     onSelectUnderlyings={(vals) => setTradesFilter(prev => ({ ...prev, underlyings: vals }))}
-                    fromDate={tradesFilter.fromDate}
-                    toDate={tradesFilter.toDate}
-                    onChangeFromDate={(val) => setTradesFilter(prev => ({ ...prev, fromDate: val }))}
-                    onChangeToDate={(val) => setTradesFilter(prev => ({ ...prev, toDate: val }))}
-                    onReset={() => setTradesFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
+                    onReset={() => setTradesFilter({ underlyings: ["All"] })}
                   />
                 }
                 displayOptionContent={
@@ -1322,19 +1289,6 @@ export function App() {
               <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <PanelTitle
                   title="Holiday Calendar"
-                  filterContent={
-                    <TableFilterContent
-                      isDateOnly={true}
-                      underlyings={[]}
-                      selectedUnderlyings={holidayFilter.underlyings}
-                      onSelectUnderlyings={(vals) => setHolidayFilter(prev => ({ ...prev, underlyings: vals }))}
-                      fromDate={holidayFilter.fromDate}
-                      toDate={holidayFilter.toDate}
-                      onChangeFromDate={(val) => setHolidayFilter(prev => ({ ...prev, fromDate: val }))}
-                      onChangeToDate={(val) => setHolidayFilter(prev => ({ ...prev, toDate: val }))}
-                      onReset={() => setHolidayFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
-                    />
-                  }
                 />
                 {loadingHolidays ? (
                   <div
@@ -1388,15 +1342,10 @@ export function App() {
                   title="Dividend Calendar"
                   filterContent={
                     <TableFilterContent
-                      isDateOnly={true}
                       underlyings={dividendUnderlyings}
                       selectedUnderlyings={dividendFilter.underlyings}
                       onSelectUnderlyings={(vals) => setDividendFilter(prev => ({ ...prev, underlyings: vals }))}
-                      fromDate={dividendFilter.fromDate}
-                      toDate={dividendFilter.toDate}
-                      onChangeFromDate={(val) => setDividendFilter(prev => ({ ...prev, fromDate: val }))}
-                      onChangeToDate={(val) => setDividendFilter(prev => ({ ...prev, toDate: val }))}
-                      onReset={() => setDividendFilter({ underlyings: ["All"], fromDate: "", toDate: "" })}
+                      onReset={() => setDividendFilter({ underlyings: ["All"] })}
                     />
                   }
                 />
