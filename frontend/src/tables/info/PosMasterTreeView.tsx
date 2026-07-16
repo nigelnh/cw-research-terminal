@@ -209,7 +209,7 @@ const TreeCell = React.memo(
                 ? "center"
                 : "flex-start",
           // Child rows: indent only the ticker column
-          paddingLeft: isTickerCol && !isParent ? 20 : 8,
+          paddingLeft: isTickerCol && !isParent ? 25 : 8,
           paddingRight: 8,
           fontSize: isParent ? config.fontSize : config.fontSize,
           fontWeight: isParent ? 700 : 500,
