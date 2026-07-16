@@ -6,6 +6,11 @@ interface TableFilterContentProps {
   selectedUnderlyings: string[];
   onSelectUnderlyings: (vals: string[]) => void;
   onReset: () => void;
+
+  // Optional status filtering columns
+  statuses?: string[];
+  selectedStatuses?: string[];
+  onSelectStatuses?: (vals: string[]) => void;
 }
 
 export function TableFilterContent({
@@ -13,13 +18,16 @@ export function TableFilterContent({
   selectedUnderlyings,
   onSelectUnderlyings,
   onReset,
+  statuses,
+  selectedStatuses,
+  onSelectStatuses,
 }: TableFilterContentProps) {
   const containerStyle: React.CSSProperties = {
     position: "absolute",
     top: "100%",
     right: 0,
     marginTop: 8,
-    width: 170, // Sleek, single-column width for underlying selector
+    width: statuses ? 340 : 170, // Expand width if status column exists
     backgroundColor: colors.panelBg,
     border: `1px solid ${colors.border}`,
     borderRadius: 8,
@@ -46,7 +54,7 @@ export function TableFilterContent({
     backgroundColor: "rgba(0, 0, 0, 0.25)",
     border: `1px solid ${colors.border}`,
     borderRadius: 6,
-    padding: "6px 10px 6px 10px",
+    padding: "6px 10px",
     height: 140, // Standard scroll height
     overflowY: "auto",
     display: "flex",
@@ -71,52 +79,110 @@ export function TableFilterContent({
 
   return (
     <div style={containerStyle} onClick={(e) => e.stopPropagation()}>
-      <div style={columnTitleStyle}>Underlying</div>
-      <div style={scrollableBoxStyle} className="custom-scrollbar">
-        {["All", ...underlyings].map((item) => {
-          const isAllSelected = selectedUnderlyings.includes("All");
-          const isActive = item === "All" ? isAllSelected : (isAllSelected || selectedUnderlyings.includes(item));
+      <div style={{ display: "flex", flexDirection: "row", gap: 14, width: "100%" }}>
+        
+        {/* Underlying column */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1, minWidth: 0 }}>
+          <div style={columnTitleStyle}>Underlying</div>
+          <div style={scrollableBoxStyle} className="custom-scrollbar">
+            {["All", ...underlyings].map((item) => {
+              const isAllSelected = selectedUnderlyings.includes("All");
+              const isActive = item === "All" ? isAllSelected : (isAllSelected || selectedUnderlyings.includes(item));
 
-          const handleToggle = () => {
-            if (item === "All") {
-              if (isAllSelected) {
-                onSelectUnderlyings([]);
-              } else {
-                onSelectUnderlyings(["All", ...underlyings]);
-              }
-            } else {
-              let next = [...selectedUnderlyings];
-              if (isAllSelected) {
-                // Clicking an individual option when "All" was checked unchecks "All" and keeps all other individual options checked
-                next = underlyings.filter((u) => u !== item);
-              } else {
-                if (next.includes(item)) {
-                  next = next.filter((u) => u !== item);
+              const handleToggle = () => {
+                if (item === "All") {
+                  if (isAllSelected) {
+                    onSelectUnderlyings([]);
+                  } else {
+                    onSelectUnderlyings(["All", ...underlyings]);
+                  }
                 } else {
-                  next.push(item);
+                  let next = [...selectedUnderlyings];
+                  if (isAllSelected) {
+                    next = underlyings.filter((u) => u !== item);
+                  } else {
+                    if (next.includes(item)) {
+                      next = next.filter((u) => u !== item);
+                    } else {
+                      next.push(item);
+                    }
+                  }
+                  onSelectUnderlyings(next);
                 }
-              }
-              onSelectUnderlyings(next);
-            }
-          };
+              };
 
-          return (
-            <label key={item} style={optionLabelStyle(isActive)}>
-              <input
-                type="checkbox"
-                checked={isActive}
-                onChange={handleToggle}
-                style={{
-                  accentColor: colors.textPrimary,
-                  cursor: "pointer",
-                  margin: 0,
-                }}
-              />
-              <span>{item}</span>
-            </label>
-          );
-        })}
+              return (
+                <label key={item} style={optionLabelStyle(isActive)}>
+                  <input
+                    type="checkbox"
+                    checked={isActive}
+                    onChange={handleToggle}
+                    style={{
+                      accentColor: colors.textPrimary,
+                      cursor: "pointer",
+                      margin: 0,
+                    }}
+                  />
+                  <span>{item}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Status column (Optional) */}
+        {statuses && selectedStatuses && onSelectStatuses && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1, minWidth: 0 }}>
+            <div style={columnTitleStyle}>Status</div>
+            <div style={scrollableBoxStyle} className="custom-scrollbar">
+              {["All", ...statuses].map((item) => {
+                const isAllSelected = selectedStatuses.includes("All");
+                const isActive = item === "All" ? isAllSelected : (isAllSelected || selectedStatuses.includes(item));
+
+                const handleToggle = () => {
+                  if (item === "All") {
+                    if (isAllSelected) {
+                      onSelectStatuses([]);
+                    } else {
+                      onSelectStatuses(["All", ...statuses]);
+                    }
+                  } else {
+                    let next = [...selectedStatuses];
+                    if (isAllSelected) {
+                      next = statuses.filter((s) => s !== item);
+                    } else {
+                      if (next.includes(item)) {
+                        next = next.filter((s) => s !== item);
+                      } else {
+                        next.push(item);
+                      }
+                    }
+                    onSelectStatuses(next);
+                  }
+                };
+
+                return (
+                  <label key={item} style={optionLabelStyle(isActive)}>
+                    <input
+                      type="checkbox"
+                      checked={isActive}
+                      onChange={handleToggle}
+                      style={{
+                        accentColor: colors.textPrimary,
+                        cursor: "pointer",
+                        margin: 0,
+                      }}
+                    />
+                    <span>{item}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
       </div>
+
       <button
         onClick={onReset}
         style={{
