@@ -33,11 +33,11 @@ export default defineConfig({
     },
     proxy: {
       "/ws": {
-        target: "ws://localhost:8788",
+        target: "ws://localhost:8501",
         ws: true,
       },
       "/api": {
-        target: "http://localhost:8788",
+        target: "http://localhost:8501",
         changeOrigin: true,
       },
     },

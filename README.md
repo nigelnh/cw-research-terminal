@@ -7,7 +7,7 @@ Real-time trading dashboard with React frontend and Node.js backend.
 ```
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
 │  SSI iBoard     │ ───> │  Node.js Server │ ───> │  React Frontend │
-│  WebSocket      │      │  (port 8787)    │      │  (port 3000)    │
+│  WebSocket      │      │  (port 8501)    │      │  (port 3000)    │
 └─────────────────┘      └─────────────────┘      └─────────────────┘
 ```
 
@@ -27,7 +27,7 @@ npm install
 npm run dev
 ```
 
-Server will connect to upstream market socket and listen on port 8788.
+Server will connect to upstream market socket and listen on port 8501.
 
 ### 2. Start the frontend
 
