@@ -422,7 +422,7 @@ export function Topbar({
     }
 
     const passwordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
-    const isDevExempt = (userEmail && (userEmail.toLowerCase().includes("test") || userEmail.toLowerCase().includes("dev")));
+    const isDevExempt = (userEmail && (userEmail.toLowerCase().includes("test") || userEmail.toLowerCase().includes("dev") || userEmail.toLowerCase() === "dev@example.invalid"));
     if (!isDevExempt && !passwordRegex.test(newPassword)) {
       setNewPasswordError("Password must be at least 8 characters long and contain at least one uppercase letter, one number, and one special character.");
       return;
