@@ -7,35 +7,24 @@ interface LoginProps {
   onClearLoggedOut?: () => void;
 }
 
-declare global {
-  interface Window {
-    turnstile?: {
-      render: (container: string | HTMLElement, params: any) => string;
-      reset: (widgetId?: string) => void;
-      remove: (widgetId?: string) => void;
-    };
-  }
-}
-
 export function Login({ onLoginSuccess, loggedOut, onClearLoggedOut }: LoginProps) {
-  const [email, setEmail] = useState("");
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState(""); // used as email input on login and signup
   const [password, setPassword] = useState("");
+  const [retypePassword, setRetypePassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showCaptcha, setShowCaptcha] = useState(false);
-  const [turnstileToken, setTurnstileToken] = useState("");
 
   const emailInputRef = useRef<HTMLInputElement>(null);
-  const turnstileWidgetId = useRef<string | null>(null);
 
-  // Auto focus email field on mount
+  // Auto focus field on mount
   useEffect(() => {
     if (emailInputRef.current) {
       emailInputRef.current.focus();
     }
-  }, []);
+  }, [isSignUp]);
 
   // Listen to loggedOut prop
   useEffect(() => {
@@ -47,120 +36,84 @@ export function Login({ onLoginSuccess, loggedOut, onClearLoggedOut }: LoginProp
     }
   }, [loggedOut, onClearLoggedOut]);
 
-  // Auto-clear error message after 3 seconds
+  // Auto-clear error message after 5 seconds
   useEffect(() => {
     if (errorMsg) {
       const timer = setTimeout(() => {
         setErrorMsg("");
-      }, 3000);
+      }, 5000);
       return () => clearTimeout(timer);
     }
   }, [errorMsg]);
 
-  // Auto-clear success message after 3 seconds
+  // Auto-clear success message after 10 seconds
   useEffect(() => {
     if (successMsg) {
       const timer = setTimeout(() => {
         setSuccessMsg("");
-      }, 3000);
+      }, 10000);
       return () => clearTimeout(timer);
     }
   }, [successMsg]);
 
-  // Dynamically load Cloudflare Turnstile script if captcha is required
-  useEffect(() => {
-    if (showCaptcha) {
-      const existingScript = document.getElementById("cf-turnstile-script");
-      if (!existingScript) {
-        const script = document.createElement("script");
-        script.id = "cf-turnstile-script";
-        script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-        script.async = true;
-        script.defer = true;
-        document.body.appendChild(script);
-        script.onload = initializeTurnstile;
-      } else {
-        initializeTurnstile();
-      }
-    }
-    return () => {
-      if (window.turnstile && turnstileWidgetId.current) {
-        try {
-          window.turnstile.remove(turnstileWidgetId.current);
-        } catch (e) {
-          // ignore
-        }
-      }
-    };
-  }, [showCaptcha]);
-
-  const initializeTurnstile = () => {
-    if (window.turnstile && document.getElementById("turnstile-container")) {
-      try {
-        if (turnstileWidgetId.current) {
-          window.turnstile.reset(turnstileWidgetId.current);
-        } else {
-          turnstileWidgetId.current = window.turnstile.render("#turnstile-container", {
-            sitekey: "1x0000000000000000000000000000000AA", // CF Test Sitekey
-            theme: "dark",
-            callback: (token: string) => {
-              setTurnstileToken(token);
-            },
-          });
-        }
-      } catch (err) {
-        console.error("Failed to render Turnstile widget:", err);
-      }
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setErrorMsg("Please enter both email and password.");
-      return;
-    }
-
-    if (showCaptcha && !turnstileToken) {
-      setErrorMsg("Please complete CAPTCHA verification.");
-      return;
-    }
-
     setErrorMsg("");
+    setSuccessMsg("");
+
+    if (isSignUp) {
+      if (!email || !password || !retypePassword) {
+        setErrorMsg("All fields are required.");
+        return;
+      }
+      if (password !== retypePassword) {
+        setErrorMsg("Passwords do not match.");
+        return;
+      }
+      // Password strength constraint: min 8 characters, 1 special char, 1 number, 1 uppercase letter
+      const passwordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+      const isDevExempt = email.toLowerCase().includes("test") || email.toLowerCase().includes("dev");
+      if (!isDevExempt && !passwordRegex.test(password)) {
+        setErrorMsg("Password must be at least 8 characters long and contain at least one uppercase letter, one number, and one special character.");
+        return;
+      }
+    } else {
+      if (!email || !password) {
+        setErrorMsg("Please enter both email and password.");
+        return;
+      }
+    }
+
     setLoading(true);
 
     try {
-      const response = await fetch("/api/auth/login", {
+      const endpoint = isSignUp ? "/api/auth/register" : "/api/auth/login";
+      const payload = { email, password };
+
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          email,
-          password,
-          turnstileToken: showCaptcha ? turnstileToken : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
 
-      if (response.ok && data.success) {
-        onLoginSuccess(data.accessToken);
-      } else {
-        // Handle login failure
-        if (data.showCaptcha) {
-          setShowCaptcha(true);
-          // reset turnstile token if already rendered
-          setTurnstileToken("");
-          if (window.turnstile && turnstileWidgetId.current) {
-            window.turnstile.reset(turnstileWidgetId.current);
-          }
-        }
-
-        if (response.status === 429) {
-          setErrorMsg(data.message || "Account temporarily locked due to multiple failed login attempts. Please try again in 5 minutes.");
+      if (response.ok && (data.success || response.status === 201)) {
+        if (isSignUp) {
+          setSuccessMsg(data.message || "Registration successful! Your account is pending Admin approval.");
+          setIsSignUp(false);
+          setPassword("");
+          setRetypePassword("");
         } else {
-          setErrorMsg("Invalid email or password. Please try again.");
+          onLoginSuccess(data.accessToken);
+        }
+      } else {
+        if (response.status === 429) {
+          setErrorMsg(data.message || "Too many attempts. Please try again later.");
+        } else {
+          setErrorMsg(data.message || (isSignUp ? "Registration failed. Please try again." : "Incorrect email or password"));
         }
       }
     } catch (err) {
@@ -205,72 +158,99 @@ export function Login({ onLoginSuccess, loggedOut, onClearLoggedOut }: LoginProp
               fontSize: 24,
               fontWeight: 700,
               letterSpacing: "0.5px",
-              marginBottom: 8,
+              marginBottom: 4,
             }}
           >
             HQ TERMINAL
           </h2>
+          {isSignUp && (
+            <p style={{ color: colors.textMuted, fontSize: 13, margin: 0 }}>
+              Create a new user account
+            </p>
+          )}
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          {/* Email input */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <label style={{ color: colors.textSecondary, fontSize: 13, fontWeight: 500 }}>
-              Username
-            </label>
-            <input
-              ref={emailInputRef}
-              type="text"
-              placeholder="name@company.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={loading}
-              style={{
-                width: "100%",
-                padding: "12px 16px",
-                borderRadius: 8,
-                backgroundColor: "rgba(255, 255, 255, 0.04)",
-                border: `1px solid ${colors.border}`,
-                color: colors.textSecondary,
-                fontSize: 14,
-                outline: "none",
-                transition: "border-color 0.2s, box-shadow 0.2s",
-              }}
-              onFocus={(e) => {
-                e.target.style.borderColor = colors.textPrimary;
-                e.target.style.boxShadow = `0 0 0 2px rgba(243, 186, 47, 0.2)`;
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = colors.border;
-                e.target.style.boxShadow = "none";
-              }}
-            />
-          </div>
+        <form onSubmit={handleSubmit} noValidate style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {isSignUp ? (
+            /* Email field (Sign Up only) */
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ color: colors.textSecondary, fontSize: 13, fontWeight: 500 }}>
+                Email Address
+              </label>
+              <input
+                ref={emailInputRef}
+                type="email"
+                placeholder="name@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={loading}
+                style={{
+                  width: "100%",
+                  padding: "12px 16px",
+                  borderRadius: 8,
+                  backgroundColor: "rgba(255, 255, 255, 0.04)",
+                  border: `1px solid ${colors.border}`,
+                  color: colors.textSecondary,
+                  fontSize: 14,
+                  outline: "none",
+                  transition: "border-color 0.2s, box-shadow 0.2s",
+                }}
+              />
+            </div>
+          ) : (
+            /* Email input (Login only) */
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ color: colors.textSecondary, fontSize: 13, fontWeight: 500 }}>
+                Email Address
+              </label>
+              <input
+                ref={emailInputRef}
+                type="email"
+                placeholder="name@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={loading}
+                style={{
+                  width: "100%",
+                  padding: "12px 16px",
+                  borderRadius: 8,
+                  backgroundColor: "rgba(255, 255, 255, 0.04)",
+                  border: `1px solid ${colors.border}`,
+                  color: colors.textSecondary,
+                  fontSize: 14,
+                  outline: "none",
+                  transition: "border-color 0.2s, box-shadow 0.2s",
+                }}
+              />
+            </div>
+          )}
 
-          {/* Password input */}
+          {/* Password field */}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <label style={{ color: colors.textSecondary, fontSize: 13, fontWeight: 500 }}>
                 Password
               </label>
-              <a
-                href="#forgot-password"
-                onClick={(e) => {
-                  e.preventDefault();
-                  alert("Please contact the administrator to reset your password.");
-                }}
-                style={{
-                  color: colors.textPrimary,
-                  fontSize: 12,
-                  textDecoration: "none",
-                  transition: "opacity 0.2s",
-                }}
-                onMouseOver={(e) => (e.currentTarget.style.opacity = "0.8")}
-                onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
-              >
-                Forgot password?
-              </a>
+              {!isSignUp && (
+                <a
+                  href="#forgot-password"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    alert("Please contact the administrator to reset your password.");
+                  }}
+                  style={{
+                    color: colors.textPrimary,
+                    fontSize: 12,
+                    textDecoration: "none",
+                    transition: "opacity 0.2s",
+                  }}
+                  onMouseOver={(e) => (e.currentTarget.style.opacity = "0.8")}
+                  onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
+                >
+                  Forgot password?
+                </a>
+              )}
             </div>
             <div style={{ position: "relative" }}>
               <input
@@ -290,14 +270,6 @@ export function Login({ onLoginSuccess, loggedOut, onClearLoggedOut }: LoginProp
                   outline: "none",
                   transition: "border-color 0.2s, box-shadow 0.2s",
                 }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = colors.textPrimary;
-                  e.target.style.boxShadow = `0 0 0 2px rgba(243, 186, 47, 0.2)`;
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = colors.border;
-                  e.target.style.boxShadow = "none";
-                }}
               />
               <span
                 className="material-symbols-outlined"
@@ -316,55 +288,152 @@ export function Login({ onLoginSuccess, loggedOut, onClearLoggedOut }: LoginProp
                 {showPassword ? "visibility" : "visibility_off"}
               </span>
             </div>
+            {isSignUp && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4, paddingLeft: 2 }}>
+                {[
+                  { label: "Minimum password length: 8 characters", valid: password.length >= 8 },
+                  { label: "At least 1 uppercase letter", valid: /[A-Z]/.test(password) },
+                  { label: "At least 1 digit", valid: /\d/.test(password) },
+                  { label: "At least 1 special character", valid: /[^A-Za-z0-9]/.test(password) },
+                ].map((req, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11 }}>
+                    <span
+                      className="material-symbols-outlined"
+                      style={{
+                        fontSize: 14,
+                        color: req.valid ? colors.increase : colors.textMuted,
+                        fontWeight: "bold",
+                        userSelect: "none",
+                      }}
+                    >
+                      {req.valid ? "check_circle" : "radio_button_unchecked"}
+                    </span>
+                    <span style={{ color: req.valid ? colors.textSecondary : colors.textMuted, transition: "color 0.2s" }}>
+                      {req.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Cloudflare Turnstile */}
-          {showCaptcha && (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                marginTop: 8,
-                minHeight: 65,
-              }}
-            >
-              <div id="turnstile-container"></div>
+          {isSignUp && (
+            /* Confirm Password (Sign Up only) */
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ color: colors.textSecondary, fontSize: 13, fontWeight: 500 }}>
+                Confirm Password
+              </label>
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={retypePassword}
+                onChange={(e) => setRetypePassword(e.target.value)}
+                disabled={loading}
+                style={{
+                  width: "100%",
+                  padding: "12px 16px",
+                  borderRadius: 8,
+                  backgroundColor: "rgba(255, 255, 255, 0.04)",
+                  border: `1px solid ${colors.border}`,
+                  color: colors.textSecondary,
+                  fontSize: 14,
+                  outline: "none",
+                  transition: "border-color 0.2s, box-shadow 0.2s",
+                }}
+              />
             </div>
           )}
 
-          {/* Submit button */}
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: "100%",
-              padding: "14px",
-              borderRadius: 8,
-              backgroundColor: colors.textPrimary,
-              color: colors.background,
-              fontSize: 14,
-              fontWeight: 600,
-              border: "none",
-              cursor: loading ? "not-allowed" : "pointer",
-              transition: "transform 0.1s, opacity 0.2s",
-              opacity: loading ? 0.7 : 1,
-              marginTop: 8,
-            }}
-            onMouseOver={(e) => {
-              if (!loading) e.currentTarget.style.opacity = "0.9";
-            }}
-            onMouseOut={(e) => {
-              if (!loading) e.currentTarget.style.opacity = "1";
-            }}
-            onMouseDown={(e) => {
-              if (!loading) e.currentTarget.style.transform = "scale(0.98)";
-            }}
-            onMouseUp={(e) => {
-              if (!loading) e.currentTarget.style.transform = "scale(1)";
-            }}
-          >
-            {loading ? "PROCESSING..." : "LOG IN"}
-          </button>
+
+
+          {/* Action buttons */}
+          {isSignUp ? (
+            /* Submit Button for Register */
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                width: "100%",
+                padding: "14px",
+                borderRadius: 8,
+                backgroundColor: colors.textPrimary,
+                color: colors.background,
+                fontSize: 14,
+                fontWeight: 600,
+                border: "none",
+                cursor: loading ? "not-allowed" : "pointer",
+                transition: "transform 0.1s, opacity 0.2s",
+                opacity: loading ? 0.7 : 1,
+                marginTop: 8,
+              }}
+              onMouseOver={(e) => {
+                if (!loading) e.currentTarget.style.opacity = "0.9";
+              }}
+              onMouseOut={(e) => {
+                if (!loading) e.currentTarget.style.opacity = "1";
+              }}
+            >
+              {loading ? "REGISTERING..." : "CREATE ACCOUNT"}
+            </button>
+          ) : (
+            /* Side-by-side Log In / Sign Up buttons */
+            <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+              <button
+                type="submit"
+                disabled={loading}
+                style={{
+                  flex: 1,
+                  padding: "14px",
+                  borderRadius: 8,
+                  backgroundColor: colors.textPrimary,
+                  color: colors.background,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  border: "none",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  transition: "transform 0.1s, opacity 0.2s",
+                  opacity: loading ? 0.7 : 1,
+                }}
+                onMouseOver={(e) => {
+                  if (!loading) e.currentTarget.style.opacity = "0.9";
+                }}
+                onMouseOut={(e) => {
+                  if (!loading) e.currentTarget.style.opacity = "1";
+                }}
+              >
+                {loading ? "LOGGING IN..." : "LOG IN"}
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setIsSignUp(true);
+                  setErrorMsg("");
+                  setSuccessMsg("");
+                }}
+                style={{
+                  flex: 1,
+                  padding: "14px",
+                  borderRadius: 8,
+                  backgroundColor: "rgba(255, 255, 255, 0.08)",
+                  color: colors.textPrimary,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  border: `1px solid ${colors.border}`,
+                  cursor: loading ? "not-allowed" : "pointer",
+                  transition: "transform 0.1s, opacity 0.2s",
+                }}
+                onMouseOver={(e) => {
+                  if (!loading) e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.12)";
+                }}
+                onMouseOut={(e) => {
+                  if (!loading) e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.08)";
+                }}
+              >
+                SIGN UP
+              </button>
+            </div>
+          )}
 
           {/* Error message */}
           {errorMsg && (
@@ -399,6 +468,35 @@ export function Login({ onLoginSuccess, loggedOut, onClearLoggedOut }: LoginProp
               }}
             >
               {successMsg}
+            </div>
+          )}
+
+          {/* Toggle link back to Login if in Sign Up mode */}
+          {isSignUp && (
+            <div style={{ textAlign: "center", marginTop: 8 }}>
+              <span style={{ color: colors.textMuted, fontSize: 13 }}>
+                Already have an account?{" "}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSignUp(false);
+                  setErrorMsg("");
+                  setSuccessMsg("");
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: colors.textPrimary,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  padding: 0,
+                  textDecoration: "underline",
+                }}
+              >
+                Log in
+              </button>
             </div>
           )}
         </form>

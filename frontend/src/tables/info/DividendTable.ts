@@ -79,22 +79,6 @@ export class DividendTable extends TableBase<Record<string, unknown> & DividendR
         },
       }),
 
-      // 4. Dividend document link (fileUrl) — rendered as a "↗ View" link in TableView
-      new ColumnBase<DividendRow>({
-        key: "fileUrl",
-        header: "Document",
-        flex: 0.1,
-        align: "center",
-        color: colors.increase,
-        // Raw value is passed; the custom cell renderer in TableView handles links.
-        // We mark non-empty values with a display label so TableView can detect it.
-        format: (v) => {
-          if (!v || String(v).trim() === "") return "—";
-          // Return the URL prefixed with a sentinel so the TableView cell renderer
-          // can detect and render it as a clickable link.
-          return `__LINK__${String(v)}`;
-        },
-      }),
     ];
   }
 

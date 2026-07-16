@@ -179,7 +179,6 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
   };
 
   activeGroup: PosColumnGroup = "overview";
-  subAccount: string = "0001922095";
   private columns: ColumnBase<PosMasterRow>[];
 
   constructor() {
@@ -201,23 +200,6 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         sortArrowOnRight: true,
       }),
 
-      // 2. Und_Ticker (Col 5)
-      // Color: based on the underlying's own live Ref/Ceil/Floor (exactly like Equity table logic)
-      new ColumnBase<PosMasterRow>({
-        key: "und_ticker",
-        header: "Und_Ticker",
-        widthPx: 75,
-        align: "left",
-        color: (row: PosMasterRow, getRow?: (symbol: string) => any) => {
-          const undRow = getRow ? getRow(row.und_ticker) : null;
-          const spot  = undRow?.Traded ?? 0;
-          if (!spot) return colors.textSecondary;
-          const ref   = undRow?.Ref   ?? 0;
-          const ceil  = undRow?.Ceil  ?? 0;
-          const floor = undRow?.Floor ?? 0;
-          return getPriceColor(spot, ref, ceil, floor);
-        },
-      }),
 
       // 3. LastPrc(T) — live realtime traded price of the CW symbol
       // Color: green if above Ref (last_prc_t_1), red if below, yellow if equal, purple/cyan at limits
@@ -354,9 +336,25 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "cvr",
         header: "CVR",
-        widthPx: 60,
+        widthPx: 80,
         align: "center",
-        format: (v) => v ? String(v) : "",
+        format: (v) => {
+          if (!v) return "";
+          const str = String(v).trim();
+          if (str.includes(":")) {
+            const parts = str.split(":");
+            const num = parseFloat(parts[0]);
+            if (!isNaN(num)) {
+              return `${num.toFixed(4)}:${parts[1]}`;
+            }
+          } else {
+            const num = parseFloat(str);
+            if (!isNaN(num)) {
+              return num.toFixed(4);
+            }
+          }
+          return str;
+        },
         color: colors.increase,
       }),
 
@@ -831,20 +829,20 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
     overview: [],
     // Summary = The old 13-column Overview sub-view (Market prices + Contract parameters)
     summary: [
-      "ticker", "und_ticker",
+      "ticker",
       "last_prc_t", "last_prc_t_1", "net_chg_pct",
       "spot_prc_s", "theo_prc_t",
       "expiry", "dte", "strike_k",
       "cvr", "hedge_v_t", "rate",
     ],
     inventory: [
-      "ticker", "und_ticker",
+      "ticker",
       "fund", "balance_t_1", "balance",
       "sold_amt", "sold_qty", "sold_avg",
       "bought_amt", "bought_qty", "bought_avg",
     ],
     greeks: [
-      "ticker", "und_ticker", "last_prc_t", "spot_prc_s",
+      "ticker", "last_prc_t", "spot_prc_s",
       "theo_prc_t", "theo_prc_t_1",
       "delta_t", "delta_lots_t", "delta_cash_t", "delta_cash_t_1",
       "trd_delta_lots_t", "trd_delta_cash_t",
@@ -852,7 +850,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       "theta_t", "cash_theta_t",
     ],
     pnl: [
-      "ticker", "und_ticker",
+      "ticker",
       "trading_pnl_theo", "position_pnl_theo",
       "delta_pnl", "gamma_pnl", "theta_pnl", "vega_pnl",
       "unexplained_pnl", "capital_cost",
