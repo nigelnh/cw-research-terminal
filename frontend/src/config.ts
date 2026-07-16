@@ -19,7 +19,7 @@ const getWsUrl = () => {
     return `${protocol}//${host}/ws`;
   }
   
-  return "ws://localhost:8788";
+  return "ws://localhost:8501";
 };
 
 export const config = {
