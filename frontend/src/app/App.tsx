@@ -260,7 +260,7 @@ export function App() {
 
   // ── Info Tab Table Filters States ──────────────────────────────────
   const [posFilter, setPosFilter] = useState<{ underlyings: string[] }>({ underlyings: ["All"] });
-  const [tradesFilter, setTradesFilter] = useState<{ underlyings: string[] }>({ underlyings: ["All"] });
+  const [tradesFilter, setTradesFilter] = useState<{ underlyings: string[]; statuses: string[] }>({ underlyings: ["All"], statuses: ["All"] });
   const [dividendFilter, setDividendFilter] = useState<{ underlyings: string[] }>({ underlyings: ["All"] });
 
   // Keep refs of states so the background polling effect doesn't capture stale closures
@@ -862,6 +862,16 @@ export function App() {
     return Array.from(set).sort();
   }, [tradesRows]);
 
+  const tradesStatuses = useMemo(() => {
+    const set = new Set<string>();
+    const statusCol = rtTradesTable.getColumns().find((c) => c.key === "status");
+    for (const r of tradesRows) {
+      const val = statusCol ? statusCol.format(r.orStatusValue, r) : (r.orStatusValue || "");
+      if (val) set.add(String(val));
+    }
+    return Array.from(set).sort();
+  }, [tradesRows]);
+
   // ── Unique Options for Dividend Calendar Filters ──
   const dividendUnderlyings = useMemo(() => {
     const set = new Set<string>();
@@ -885,10 +895,15 @@ export function App() {
 
   // ── Filtered Realtime Trades Data ──
   const filteredTradesRows = useMemo(() => {
+    const statusCol = rtTradesTable.getColumns().find((c) => c.key === "status");
     const filtered = tradesRows.filter((row) => {
       const rowUnd = getUnderlying(row.symbol);
       const matchUnd = tradesFilter.underlyings.includes("All") || (rowUnd && tradesFilter.underlyings.map(u => u.toUpperCase()).includes(rowUnd.toUpperCase()));
-      return matchUnd;
+      
+      const rowStatusText = statusCol ? statusCol.format(row.orStatusValue, row) : (row.orStatusValue || "");
+      const matchStatus = tradesFilter.statuses.includes("All") || tradesFilter.statuses.includes(rowStatusText);
+      
+      return matchUnd && matchStatus;
     });
 
     const parseTimestamp = (str: string): number => {
@@ -1224,7 +1239,10 @@ export function App() {
                     underlyings={tradesUnderlyings}
                     selectedUnderlyings={tradesFilter.underlyings}
                     onSelectUnderlyings={(vals) => setTradesFilter(prev => ({ ...prev, underlyings: vals }))}
-                    onReset={() => setTradesFilter({ underlyings: ["All"] })}
+                    onReset={() => setTradesFilter({ underlyings: ["All"], statuses: ["All"] })}
+                    statuses={tradesStatuses}
+                    selectedStatuses={tradesFilter.statuses}
+                    onSelectStatuses={(vals) => setTradesFilter(prev => ({ ...prev, statuses: vals }))}
                   />
                 }
                 displayOptionContent={
