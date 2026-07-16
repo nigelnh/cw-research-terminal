@@ -45,6 +45,82 @@ const getUnderlying = (symbol: string): string => {
   return sym;
 };
 
+// Status translation map
+const STATUS_MAP: Record<string, string> = {
+  "0": "Rejected",
+  "1": "Open",
+  "2": "Sent",
+  "3": "Cancelled",
+  "A": "Amending",
+  "4": "Matched",
+  "5": "Expired",
+  "C": "Cancelling",
+  "6": "Rejected",
+  "7": "Success",
+  "8": "Pending Send",
+  "9": "Pending Approval",
+  "10": "Amended",
+  "11": "Sending",
+  "12": "Matched",
+  "13": "Pending Confirmation",
+  "P": "Pending",
+  "E": "Expired",
+  "R": "Cancelled",
+  "W": "Pending Margin",
+};
+
+// Helper to translate status
+const getStatusText = (v: unknown, orStatus?: string): string => {
+  if (v !== null && v !== undefined) {
+    const val = String(v).trim().toUpperCase();
+    if (STATUS_MAP[val]) return STATUS_MAP[val];
+  }
+  if (orStatus) {
+    const text = String(orStatus).trim().toLowerCase();
+    if (text.includes("từ chối")) return "Rejected";
+    if (text.includes("mở")) return "Open";
+    if (text.includes("đã gửi")) return "Sent";
+    if (text.includes("đang gửi")) return "Sending";
+    if (text.includes("đã hủy")) return "Cancelled";
+    if (text.includes("đang hủy")) return "Cancelling";
+    if (text.includes("hủy bỏ")) return "Cancelled";
+    if (text.includes("đang sửa")) return "Amending";
+    if (text.includes("đã khớp")) return "Matched";
+    if (text.includes("khớp hết")) return "Matched";
+    if (text.includes("hết hiệu lực")) return "Expired";
+    if (text.includes("hết hạn")) return "Expired";
+    if (text.includes("thành công")) return "Success";
+    if (text.includes("chờ gửi")) return "Pending Send";
+    if (text.includes("chờ duyệt")) return "Pending Approval";
+    if (text.includes("đã sửa")) return "Amended";
+    if (text.includes("chờ xác nhận")) return "Pending Confirmation";
+    if (text.includes("chờ xử lý")) return "Pending";
+    if (text.includes("chờ ký quỹ")) return "Pending Margin";
+
+    const textUpper = text.toUpperCase();
+    if (STATUS_MAP[textUpper]) return STATUS_MAP[textUpper];
+    return orStatus;
+  }
+  return v !== null && v !== undefined ? String(v) : "";
+};
+
+// Helper to get color based on status text or code
+const getStatusColor = (status: string): string => {
+  switch (status) {
+    case "Sent":
+    case "Matched":
+    case "Matched":
+    case "Success":
+      return colors.increase;
+    case "Cancelled":
+    case "Rejected":
+    case "Expired":
+      return colors.decrease;
+    default:
+      return colors.textSecondary;
+  }
+};
+
 export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesRow> {
   readonly config: TableConfig = {
     headerHeightPx: tableConfig.headerHeight,
@@ -218,34 +294,15 @@ export class RtTradesTable extends TableBase<Record<string, unknown> & RtTradesR
         widthPx: 90,
         align: "center",
         format: (v, row) => {
-          if (v === null || v === undefined) {
-            const rawRow = row as any;
-            if (rawRow && rawRow.orStatus) {
-              const os = String(rawRow.orStatus).toLowerCase();
-              if (os.includes("gửi")) return "Send";
-              if (os.includes("hủy")) return "Canceled";
-              return rawRow.orStatus;
-            }
-            return "";
-          }
-          const val = String(v).trim();
-          if (val === "2") return "Send";
-          if (val === "3") return "Canceled";
-
           const rawRow = row as any;
-          if (rawRow && rawRow.orStatus) {
-            const os = String(rawRow.orStatus).toLowerCase();
-            if (os.includes("gửi")) return "Send";
-            if (os.includes("hủy")) return "Canceled";
-            return rawRow.orStatus;
-          }
-          return val;
+          const orStatus = rawRow ? rawRow.orStatus : undefined;
+          return getStatusText(v, orStatus);
         },
         color: (row: RtTradesRow) => {
-          const v = String(row.orStatusValue || "");
-          if (v === "2") return colors.increase; // Green for Send
-          if (v === "3") return colors.decrease; // Red for Canceled
-          return colors.textSecondary;
+          const rawRow = row as any;
+          const orStatus = rawRow ? rawRow.orStatus : undefined;
+          const statusText = getStatusText(row.orStatusValue, orStatus);
+          return getStatusColor(statusText);
         },
       }),
     ];
