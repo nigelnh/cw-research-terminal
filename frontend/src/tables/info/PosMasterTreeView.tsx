@@ -425,9 +425,11 @@ export function PosMasterTreeView({
           last_prc_t_1: lastPrcT1,
           spot_prc_s: lastPrcT,
           net_chg_pct:
-            lastPrcT && lastPrcT1 && lastPrcT1 > 0
-              ? lastPrcT / lastPrcT1 - 1
-              : null,
+            liveStock && liveStock.ChangePercent !== null && liveStock.ChangePercent !== undefined
+              ? liveStock.ChangePercent / 100
+              : (lastPrcT && lastPrcT1 && lastPrcT1 > 0
+                  ? lastPrcT / lastPrcT1 - 1
+                  : null),
           // Aggregated financial fields
           balance: sumOf("balance"),
           balance_t_1: sumOf("balance_t_1"),
