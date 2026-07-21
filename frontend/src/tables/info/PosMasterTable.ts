@@ -13,15 +13,14 @@ import { getPriceColor } from "@/tables/equity/utils";
  * "all" is a special sentinel that returns every column (used for the
  * DisplayOption panel and any non-tabbed consumer).
  */
-export type PosColumnGroup = "overview" | "summary" | "inventory" | "greeks" | "pnl" | "all";
+export type PosColumnGroup = "overview" | "info" | "inventory" | "summary" | "all";
 
 /** Human-readable labels, accent colours, and column counts for the tab bar */
 export const POS_GROUP_META: Record<Exclude<PosColumnGroup, "all">, { label: string; color: string; count: number }> = {
-  overview:  { label: "Overview",  color: "#0ECB81", count: 52 },
-  summary:   { label: "Summary",   color: "#FF9F1C", count: 13 },
-  inventory: { label: "Inventory", color: "#FFD700", count: 11 },
-  greeks:    { label: "Greeks",    color: "#C77DFF", count: 17 },
-  pnl:       { label: "PnL",       color: "#C77DFF", count: 16 },
+  overview: { label: "Overview", color: "#0ECB81", count: 52 },
+  info: { label: "Info", color: "#FF9F1C", count: 12 },
+  summary: { label: "Summary", color: "#A855F7", count: 27 },
+  inventory: { label: "Inventory", color: "#FFD700", count: 10 },
 };
 
 export interface PosMasterRow {
@@ -192,8 +191,8 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         widthPx: 90,
         align: "left",
         color: (row: PosMasterRow) => {
-          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
-          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
+          const prc = row.last_prc_t !== null && row.last_prc_t !== undefined ? parseFloat(String(row.last_prc_t)) : 0;
+          const ref = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
           if (prc === 0) return colors.textSecondary;
           return getPriceColor(prc, ref, 0, 0);
         },
@@ -211,8 +210,8 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         align: "right",
         format: (v) => formatPrice(v, 2, 2),
         color: (row: PosMasterRow) => {
-          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
-          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
+          const prc = row.last_prc_t !== null && row.last_prc_t !== undefined ? parseFloat(String(row.last_prc_t)) : 0;
+          const ref = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
           // CW warrants don't have KB Ceil/Floor, so use 0 — only green/yellow/red logic applies
           if (prc === 0) return colors.textSecondary;
           return getPriceColor(prc, ref, 0, 0);
@@ -238,8 +237,8 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         align: "right",
         format: (v) => formatPct(v),
         color: (row: PosMasterRow) => {
-          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
-          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
+          const prc = row.last_prc_t !== null && row.last_prc_t !== undefined ? parseFloat(String(row.last_prc_t)) : 0;
+          const ref = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
           if (prc === 0) return colors.textSecondary;
           return getPriceColor(prc, ref, 0, 0);
         },
@@ -373,7 +372,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
           if (!spot) return colors.textSecondary;
           // Resolve the underlying's live equity row for its own Ref/Ceil/Floor
           const undRow = getRow ? getRow(row.und_ticker) : null;
-          const ref  = undRow?.Ref  ?? 0;
+          const ref = undRow?.Ref ?? 0;
           const ceil = undRow?.Ceil ?? 0;
           const floor = undRow?.Floor ?? 0;
           return getPriceColor(spot, ref, ceil, floor);
@@ -517,8 +516,8 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         align: "right",
         format: (v) => formatPrice(v, 4),
         color: (row: PosMasterRow) => {
-          const prc   = row.last_prc_t  !== null && row.last_prc_t  !== undefined ? parseFloat(String(row.last_prc_t))  : 0;
-          const ref   = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
+          const prc = row.last_prc_t !== null && row.last_prc_t !== undefined ? parseFloat(String(row.last_prc_t)) : 0;
+          const ref = row.last_prc_t_1 !== null && row.last_prc_t_1 !== undefined ? parseFloat(String(row.last_prc_t_1)) : 0;
           if (prc === 0) return colors.textSecondary;
           return getPriceColor(prc, ref, 0, 0);
         },
@@ -785,7 +784,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       }),
     ];
 
-    // Define the dynamic keys set (live calculated/Kb streaming in Overview & Summary tabs)
+    // Define the dynamic keys set (live calculated/Kb streaming in Overview & Info tabs)
     const dynamicKeys = new Set(["ticker", "und_ticker", "last_prc_t", "last_prc_t_1", "net_chg_pct", "spot_prc_s", "theo_prc_t"]);
 
     // Override the getColor method on each column to enforce the tab-based coloring logic
@@ -797,12 +796,12 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
           return originalGetColor(row, getRow);
         }
 
-        // If we are not on Overview or Summary tabs, use grey for everything else
-        if (this.activeGroup !== "overview" && this.activeGroup !== "summary") {
+        // If we are not on Overview or Info tabs, use grey for everything else
+        if (this.activeGroup !== "overview" && this.activeGroup !== "info") {
           return colors.textMuted;
         }
 
-        // If we are on Overview or Summary tabs, keep original colors for dynamic keys; everything else is grey
+        // If we are on Overview or Info tabs, keep original colors for dynamic keys; everything else is grey
         if (dynamicKeys.has(col.key)) {
           return originalGetColor(row, getRow);
         }
@@ -827,8 +826,8 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
   private static readonly GROUP_KEYS: Record<Exclude<PosColumnGroup, "all">, string[]> = {
     // Overview = All 52 columns (handled dynamically in getColumnsByGroup())
     overview: [],
-    // Summary = The old 13-column Overview sub-view (Market prices + Contract parameters)
-    summary: [
+    // Info = The old 12-column Overview sub-view (Market prices + Contract parameters)
+    info: [
       "ticker",
       "last_prc_t", "last_prc_t_1", "net_chg_pct",
       "spot_prc_s", "theo_prc_t",
@@ -841,16 +840,12 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       "sold_amt", "sold_qty", "sold_avg",
       "bought_amt", "bought_qty", "bought_avg",
     ],
-    greeks: [
-      "ticker", "last_prc_t", "spot_prc_s",
-      "theo_prc_t", "theo_prc_t_1",
+    summary: [
+      "ticker",
       "delta_t", "delta_lots_t", "delta_cash_t", "delta_cash_t_1",
       "trd_delta_lots_t", "trd_delta_cash_t",
       "gamma_amt_pct_t", "vega_pct_t", "cash_vega_t",
       "theta_t", "cash_theta_t",
-    ],
-    pnl: [
-      "ticker",
       "trading_pnl_theo", "position_pnl_theo",
       "delta_pnl", "gamma_pnl", "theta_pnl", "vega_pnl",
       "unexplained_pnl", "capital_cost",
@@ -912,12 +907,12 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
     // 1b. Und_Ticker + Spot_Prc(S): color based on the underlying's own live Ref/Ceil/Floor
     if (colKey === "und_ticker" || colKey === "spot_prc_s") {
       const undRow = getRow ? getRow(row.und_ticker) : null;
-      const spot  = colKey === "und_ticker"
+      const spot = colKey === "und_ticker"
         ? (undRow?.Traded ?? 0)
         : (row.spot_prc_s !== null && row.spot_prc_s !== undefined ? parseFloat(String(row.spot_prc_s)) : 0);
       if (!spot) return colors.textSecondary;
-      const ref   = undRow?.Ref   ?? 0;
-      const ceil  = undRow?.Ceil  ?? 0;
+      const ref = undRow?.Ref ?? 0;
+      const ceil = undRow?.Ceil ?? 0;
       const floor = undRow?.Floor ?? 0;
       const c = getPriceColor(spot, ref, ceil, floor);
       return c === colors.cyan ? colors.blue : c;
