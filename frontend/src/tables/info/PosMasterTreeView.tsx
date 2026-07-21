@@ -274,8 +274,9 @@ const TreeCell = React.memo(
 /**
  * Calculates optimal column width based on the header text length
  * and the maximum length of formatted data values across all rows.
+ * Accounts for child row indentation and dot markers on Ticker column.
  */
-export function calculateOptimalColumnWidth(col: any, rows: any[]): number {
+export function calculateOptimalColumnWidth(col: any, flatRows: any[]): number {
   const minWidth = 70;
   const maxWidth = 250;
   
@@ -284,15 +285,30 @@ export function calculateOptimalColumnWidth(col: any, rows: any[]): number {
   const headerWidth = headerText.length * 7.8 + 24;
 
   // 2. Calculate width needed for the cell contents
-  let maxCellLength = 0;
-  for (const row of rows) {
+  let maxCellWidth = 0;
+  for (const item of flatRows) {
+    const row = item.row;
     const displayVal = col.getDisplayValue(row);
-    if (displayVal && displayVal.length > maxCellLength) {
-      maxCellLength = displayVal.length;
+    if (displayVal) {
+      let charWidth = displayVal.length * 7.2;
+      
+      // Indentation for child (CW) rows in the Ticker column: padding-left: 25px instead of 8px (+17px)
+      if (col.key === "ticker" && !item.isParent) {
+        charWidth += 17;
+      }
+      
+      // Dividend indicator dot next to ticker symbol (+15px)
+      if (col.key === "ticker" && row.div_d > 0) {
+        charWidth += 15;
+      }
+      
+      if (charWidth > maxCellWidth) {
+        maxCellWidth = charWidth;
+      }
     }
   }
   
-  const cellDataWidth = maxCellLength * 7.2 + 20;
+  const cellDataWidth = maxCellWidth + 20; // 20px basic cell padding/safety
 
   return Math.max(minWidth, Math.min(maxWidth, Math.max(headerWidth, cellDataWidth)));
 }
@@ -494,9 +510,8 @@ export function PosMasterTreeView({
   // ── Compute Optimal Column Widths dynamically ──
   const columnWidths = useMemo(() => {
     const widths: Record<string, number> = {};
-    const rows = flatRows.map((item) => item.row);
     columns.forEach((col) => {
-      widths[col.key] = calculateOptimalColumnWidth(col, rows);
+      widths[col.key] = calculateOptimalColumnWidth(col, flatRows);
     });
     return widths;
   }, [columns, flatRows]);
