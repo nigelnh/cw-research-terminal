@@ -525,6 +525,15 @@ export function PosMasterTreeView({
 
   const tableWidthStyle = isFlexLayout ? "100%" : `${totalColumnsWidth}px`;
 
+  const tableMinWidthStyle = useMemo(() => {
+    const minWidthSum = columns.reduce((sum, col) => {
+      const rawWidth = columnWidths[col.key] || 85;
+      const minVal = isFlexLayout ? Math.max(rawWidth - 5, 50) : rawWidth + 20;
+      return sum + minVal;
+    }, 0);
+    return `${minWidthSum}px`;
+  }, [columns, columnWidths, isFlexLayout]);
+
   // ── Flash tracking ────────────────────────────────────────────────────────
   const activeFlashesRef = useRef<Map<string, { dir: "up" | "down"; expire: number }>>(
     new Map()
@@ -617,7 +626,7 @@ export function PosMasterTreeView({
             top: 0,
             zIndex: 200,
             width: tableWidthStyle,
-            minWidth: tableWidthStyle,
+            minWidth: tableMinWidthStyle,
           }}
         >
           {columns.map((col) => (
@@ -636,7 +645,7 @@ export function PosMasterTreeView({
             position: "relative",
             height: flatRows.length * rowHeight,
             width: tableWidthStyle,
-            minWidth: tableWidthStyle,
+            minWidth: tableMinWidthStyle,
             boxSizing: "content-box",
           }}
         >
@@ -672,7 +681,7 @@ export function PosMasterTreeView({
                     top: 0,
                     left: 0,
                     width: tableWidthStyle,
-                    minWidth: tableWidthStyle,
+                    minWidth: tableMinWidthStyle,
                     height: rowHeight,
                     transform: `translateY(${absIdx * rowHeight}px) translateZ(0)`,
                     willChange: "transform",

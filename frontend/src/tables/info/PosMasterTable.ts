@@ -767,7 +767,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       // 51. TotalPnL(Theo) - Cumulative Annual (Col 58)
       new ColumnBase<PosMasterRow>({
         key: "total_pnl_theo_cum",
-        header: "TotalPnL(Theo) Cum",
+        header: "TotalPnL(Theo)",
         widthPx: 135,
         align: "right",
         format: (v) => formatPrice(v),
@@ -777,7 +777,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       // 52. TotalPnL(MtM) - Cumulative Annual (Col 59)
       new ColumnBase<PosMasterRow>({
         key: "total_pnl_mtm_cum",
-        header: "TotalPnL(MtM) Cum",
+        header: "TotalPnL(MtM)",
         widthPx: 135,
         align: "right",
         format: (v) => formatPrice(v),
