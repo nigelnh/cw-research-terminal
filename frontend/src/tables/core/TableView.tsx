@@ -18,6 +18,7 @@ interface TableViewProps<T extends Record<string, unknown>> {
   scrollContainerRef?: React.RefObject<HTMLDivElement>;
   hideHorizontalScrollbar?: boolean;
   userEmail?: string;
+  disablePinning?: boolean;
 }
 
 // Flash duration in ms
@@ -38,6 +39,7 @@ const TableCell = React.memo(
     idx,
     colIdx,
     isFlexLayout,
+    disablePinning,
   }: {
     row: any;
     col: any;
@@ -52,6 +54,7 @@ const TableCell = React.memo(
     colIdx: number;
     isFlexLayout: boolean;
     containerWidth: number;
+    disablePinning?: boolean;
   }) => {
     const colKey = col.key;
     const { getRow } = useEquityData();
@@ -141,7 +144,13 @@ const TableCell = React.memo(
       <div
         ref={cellRef}
         className={cellBgColor && !flash ? "table-cell-custom-bg" : undefined}
-        title={colKey === "Symbol" ? "Double click to pin- Drag & Drop to sort row" : undefined}
+        title={
+          colKey === "Symbol"
+            ? disablePinning
+              ? "Drag & Drop to sort row"
+              : "Double click to pin- Drag & Drop to sort row"
+            : undefined
+        }
         style={{
           ...getColumnStyle(),
           height: config.rowHeightPx,
@@ -249,6 +258,7 @@ const TableCell = React.memo(
     // 4. Container size & Layout mode
     if (prev.isFlexLayout !== next.isFlexLayout) return false;
     if (prev.containerWidth !== next.containerWidth) return false;
+    if (prev.disablePinning !== next.disablePinning) return false;
 
     // 5. Color dependencies
     // If the column uses dynamic coloring, check common price-related dependencies
@@ -293,6 +303,7 @@ const TableRow = React.memo(
     onDragEnd,
     isFlexLayout,
     containerWidth,
+    disablePinning,
   }: {
     row: any;
     idx: number;
@@ -311,6 +322,7 @@ const TableRow = React.memo(
     onDragEnd: () => void;
     isFlexLayout: boolean;
     containerWidth: number;
+    disablePinning?: boolean;
   }) => {
     // Hydrate row with latest live numeric values from the in-memory row map.
     // lastUpdateTs dependency ensures re-hydration on every data tick (~50ms flush).
@@ -398,7 +410,7 @@ const TableRow = React.memo(
     return (
       <div
         className="table-row"
-        onDoubleClick={() => togglePin(rowKey)}
+        onDoubleClick={disablePinning ? undefined : () => togglePin(rowKey)}
         style={{
           display: "flex",
           height: config.rowHeightPx,
@@ -415,7 +427,7 @@ const TableRow = React.memo(
         }}
       >
         {columns.map((col, cIdx) => {
-          const isPinned = col.key === "Symbol" && pinnedSymbols.has(rowKey);
+          const isPinned = !disablePinning && col.key === "Symbol" && pinnedSymbols.has(rowKey);
           const cellKey = `${rowKey}:${col.key}`;
           const flash = flashes.get(cellKey);
 
@@ -463,6 +475,7 @@ const TableRow = React.memo(
               colIdx={cIdx}
               isFlexLayout={isFlexLayout}
               containerWidth={containerWidth}
+              disablePinning={disablePinning}
             />
           );
         })}
@@ -615,6 +628,7 @@ export function TableView<T extends Record<string, unknown>>({
   scrollContainerRef,
   hideHorizontalScrollbar,
   userEmail,
+  disablePinning = false,
 }: TableViewProps<T>) {
   const { getNumericValue } = useEquityData();
 
@@ -769,8 +783,8 @@ export function TableView<T extends Record<string, unknown>>({
   // Sort data
   const sortedData = React.useMemo(() => {
     // Partition data into pinned and unpinned
-    const pinnedRows = data.filter((r) => pinnedSymbols.has(table.getRowKey(r)));
-    const unpinnedRows = data.filter((r) => !pinnedSymbols.has(table.getRowKey(r)));
+    const pinnedRows = disablePinning ? [] : data.filter((r) => pinnedSymbols.has(table.getRowKey(r)));
+    const unpinnedRows = disablePinning ? data : data.filter((r) => !pinnedSymbols.has(table.getRowKey(r)));
 
     // 1. Sort pinned rows (always alphabetically by Symbol)
     pinnedRows.sort((a, b) => {
@@ -1194,6 +1208,7 @@ export function TableView<T extends Record<string, unknown>>({
                     onDragEnd={onDragEnd}
                     isFlexLayout={isFlexLayout}
                     containerWidth={containerWidth}
+                    disablePinning={disablePinning}
                   />
                 </div>
               );

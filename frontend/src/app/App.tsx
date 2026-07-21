@@ -1297,6 +1297,7 @@ export function App() {
                   data={filteredTradesRows}
                   hiddenColumns={tradesHiddenColumns}
                   userEmail={userEmail}
+                  disablePinning={true}
                 />
               )}
             </div>
