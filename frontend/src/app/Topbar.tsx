@@ -54,6 +54,27 @@ export function Topbar({
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"info" | "manage" | "password">("info");
+  const [envStage, setEnvStage] = useState<string>("UAT STAGE");
+
+  // Fetch environment stage on modal open
+  useEffect(() => {
+    if (isSettingsOpen) {
+      fetch("/api/environment")
+        .then((res) => {
+          if (res.ok) return res.json();
+          throw new Error("Failed to fetch environment");
+        })
+        .then((data) => {
+          if (data && data.environment) {
+            setEnvStage(data.environment === "PROD" ? "PROD STAGE" : "UAT STAGE");
+          }
+        })
+        .catch((err) => {
+          console.error("[Topbar] Error fetching environment:", err);
+          setEnvStage("UAT STAGE");
+        });
+    }
+  }, [isSettingsOpen]);
   const [notificationCount, setNotificationCount] = useState<number>(0);
   const [notificationsList, setNotificationsList] = useState<string[]>([]);
 
@@ -400,7 +421,9 @@ export function Topbar({
     // Reset errors
     clearFormErrors();
 
-    if (!oldPassword) {
+    const isAdmin = userRole === "admin";
+
+    if (!isAdmin && !oldPassword) {
       setOldPasswordError("Old password is required.");
       return;
     }
@@ -416,7 +439,7 @@ export function Topbar({
       setConfirmPasswordError("New passwords do not match.");
       return;
     }
-    if (oldPassword === newPassword) {
+    if (!isAdmin && oldPassword === newPassword) {
       setNewPasswordError("New password cannot be the same as the old password.");
       return;
     }
@@ -428,13 +451,16 @@ export function Topbar({
       return;
     }
 
-    fetch("/api/auth/change-password", {
+    const endpoint = isAdmin ? "/api/admin/change-password" : "/api/auth/change-password";
+    const payload = isAdmin ? { newPassword, confirmPassword } : { oldPassword, newPassword, confirmPassword };
+
+    fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${accessToken || ""}`
       },
-      body: JSON.stringify({ oldPassword, newPassword, confirmPassword })
+      body: JSON.stringify(payload)
     })
       .then(async (res) => {
         const data = await res.json();
@@ -980,8 +1006,12 @@ export function Topbar({
                         <span style={{ color: colors.textMuted, fontSize: 12, fontWeight: 500 }}>
                           Environment
                         </span>
-                        <span style={{ color: colors.increase, fontSize: 13, fontWeight: 600 }}>
-                          DEVELOPMENT STAGE
+                        <span style={{ 
+                          color: envStage === "PROD STAGE" ? colors.increase : "#F3BA2F", 
+                          fontSize: 13, 
+                          fontWeight: 600 
+                        }}>
+                          {envStage}
                         </span>
                       </div>
                     </div>
@@ -1145,31 +1175,33 @@ export function Topbar({
 
 
                       {/* Inputs */}
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <label style={{ color: colors.textMuted, fontSize: 11 }}>
-                          Old Password
-                        </label>
-                        <input
-                          type="password"
-                          placeholder="••••••••"
-                          value={oldPassword}
-                          onChange={(e) => setOldPassword(e.target.value)}
-                          style={{
-                            padding: "8px 12px",
-                            borderRadius: 6,
-                            backgroundColor: "rgba(255, 255, 255, 0.04)",
-                            border: `1px solid ${oldPasswordError ? colors.decrease : colors.border}`,
-                            color: colors.textSecondary,
-                            fontSize: 13,
-                            outline: "none",
-                          }}
-                        />
-                        {oldPasswordError && (
-                          <span style={{ color: colors.decrease, fontSize: 11, marginTop: 2 }}>
-                            {oldPasswordError}
-                          </span>
-                        )}
-                      </div>
+                      {userRole !== "admin" && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <label style={{ color: colors.textMuted, fontSize: 11 }}>
+                            Old Password
+                          </label>
+                          <input
+                            type="password"
+                            placeholder="••••••••"
+                            value={oldPassword}
+                            onChange={(e) => setOldPassword(e.target.value)}
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: 6,
+                              backgroundColor: "rgba(255, 255, 255, 0.04)",
+                              border: `1px solid ${oldPasswordError ? colors.decrease : colors.border}`,
+                              color: colors.textSecondary,
+                              fontSize: 13,
+                              outline: "none",
+                            }}
+                          />
+                          {oldPasswordError && (
+                            <span style={{ color: colors.decrease, fontSize: 11, marginTop: 2 }}>
+                              {oldPasswordError}
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                         <label style={{ color: colors.textMuted, fontSize: 11 }}>
