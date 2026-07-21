@@ -49,19 +49,20 @@ type FlatRow = {
 const HeaderCell = React.memo(
   ({
     col,
+    width,
     isFlexLayout,
   }: {
     col: any;
+    width: number;
     isFlexLayout: boolean;
   }) => {
     const config = posMasterTable.config;
 
     const getColumnStyle = (): React.CSSProperties => {
-      const baseWidth = 85;
-      const rawWidth = col.widthPx || (col.flex ? col.flex * baseWidth : baseWidth);
+      const rawWidth = width;
       if (isFlexLayout) {
-        const growWeight = col.widthPx || col.flex || 1;
-        const minWidthVal = col.widthPx ? Math.max(col.widthPx - 5, 50) : baseWidth;
+        const growWeight = rawWidth;
+        const minWidthVal = Math.max(rawWidth - 5, 50);
         return {
           flexGrow: growWeight,
           flexShrink: 1,
@@ -118,6 +119,7 @@ const TreeCell = React.memo(
   ({
     col,
     row,
+    width,
     isParent,
     isFirstCol,
     isCollapsed,
@@ -128,6 +130,7 @@ const TreeCell = React.memo(
   }: {
     col: any;
     row: any;
+    width: number;
     isParent: boolean;
     isFirstCol: boolean;
     isCollapsed: boolean;
@@ -142,11 +145,10 @@ const TreeCell = React.memo(
     const cellBgColor = col.getBgColor(row, getRow);
 
     const getColumnStyle = (): React.CSSProperties => {
-      const baseWidth = 85;
-      const rawWidth = col.widthPx || (col.flex ? col.flex * baseWidth : baseWidth);
+      const rawWidth = width;
       if (isFlexLayout) {
-        const growWeight = col.widthPx || col.flex || 1;
-        const minWidthVal = col.widthPx ? Math.max(col.widthPx - 5, 50) : baseWidth;
+        const growWeight = rawWidth;
+        const minWidthVal = Math.max(rawWidth - 5, 50);
         return {
           flexGrow: growWeight,
           flexShrink: 1,
@@ -269,6 +271,32 @@ const TreeCell = React.memo(
   }
 );
 
+/**
+ * Calculates optimal column width based on the header text length
+ * and the maximum length of formatted data values across all rows.
+ */
+export function calculateOptimalColumnWidth(col: any, rows: any[]): number {
+  const minWidth = 70;
+  const maxWidth = 250;
+  
+  // 1. Calculate width needed for the Header
+  const headerText = col.header || "";
+  const headerWidth = headerText.length * 7.8 + 24;
+
+  // 2. Calculate width needed for the cell contents
+  let maxCellLength = 0;
+  for (const row of rows) {
+    const displayVal = col.getDisplayValue(row);
+    if (displayVal && displayVal.length > maxCellLength) {
+      maxCellLength = displayVal.length;
+    }
+  }
+  
+  const cellDataWidth = maxCellLength * 7.2 + 20;
+
+  return Math.max(minWidth, Math.min(maxWidth, Math.max(headerWidth, cellDataWidth)));
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export function PosMasterTreeView({
   data,
@@ -320,14 +348,8 @@ export function PosMasterTreeView({
     return groupCols.filter((c) => !hiddenColumns.includes(c.key));
   }, [posColumnGroup, hiddenColumns]);
 
-  // ── Layout mode ───────────────────────────────────────────────────────────
+  // ── Layout mode ──
   const isFlexLayout = columns.length <= 20;
-  const baseWidth = 85;
-  const totalColumnsWidth = columns.reduce((sum, col) => {
-    const rawWidth = col.widthPx || (col.flex ? col.flex * baseWidth : baseWidth);
-    return sum + rawWidth + 20;
-  }, 0);
-  const tableWidthStyle = isFlexLayout ? "100%" : `${totalColumnsWidth}px`;
 
   // ── Build flat tree ───────────────────────────────────────────────────────
   const flatRows = useMemo((): FlatRow[] => {
@@ -469,6 +491,25 @@ export function PosMasterTreeView({
     return result;
   }, [data, collapsedGroups, getRow]);
 
+  // ── Compute Optimal Column Widths dynamically ──
+  const columnWidths = useMemo(() => {
+    const widths: Record<string, number> = {};
+    const rows = flatRows.map((item) => item.row);
+    columns.forEach((col) => {
+      widths[col.key] = calculateOptimalColumnWidth(col, rows);
+    });
+    return widths;
+  }, [columns, flatRows]);
+
+  const totalColumnsWidth = useMemo(() => {
+    return columns.reduce((sum, col) => {
+      const rawWidth = columnWidths[col.key] || 85;
+      return sum + rawWidth + 20;
+    }, 0);
+  }, [columns, columnWidths]);
+
+  const tableWidthStyle = isFlexLayout ? "100%" : `${totalColumnsWidth}px`;
+
   // ── Flash tracking ────────────────────────────────────────────────────────
   const activeFlashesRef = useRef<Map<string, { dir: "up" | "down"; expire: number }>>(
     new Map()
@@ -565,7 +606,12 @@ export function PosMasterTreeView({
           }}
         >
           {columns.map((col) => (
-            <HeaderCell key={col.key} col={col} isFlexLayout={isFlexLayout} />
+            <HeaderCell
+              key={col.key}
+              col={col}
+              width={columnWidths[col.key] || 85}
+              isFlexLayout={isFlexLayout}
+            />
           ))}
         </div>
 
@@ -654,6 +700,7 @@ export function PosMasterTreeView({
                         key={col.key}
                         col={col}
                         row={item.row}
+                        width={columnWidths[col.key] || 85}
                         isParent={item.isParent}
                         isFirstCol={cIdx === 0}
                         isCollapsed={collapsedGroups.has(item.undTicker)}
