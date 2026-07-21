@@ -671,19 +671,34 @@ export function Topbar({
                 gap: 8,
               }}
             >
-              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", paddingBottom: notificationsList.length > 0 ? 6 : 0 }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, paddingBottom: notificationsList.length > 0 ? 6 : 0 }}>
                 {notificationsList.length > 0 && (
-                  <span
-                    style={{ color: colors.textPrimary, fontSize: 11, cursor: "pointer" }}
-                    onClick={() => {
-                      setNotificationCount(0);
-                      if (userEmail) {
-                        localStorage.setItem(`${userEmail}:notificationCount`, "0");
-                      }
-                    }}
-                  >
-                    Read all
-                  </span>
+                  <>
+                    <span
+                      style={{ color: colors.textPrimary, fontSize: 11, cursor: "pointer" }}
+                      onClick={() => {
+                        setNotificationCount(0);
+                        if (userEmail) {
+                          localStorage.setItem(`${userEmail}:notificationCount`, "0");
+                        }
+                      }}
+                    >
+                      Read all
+                    </span>
+                    <span
+                      style={{ color: colors.decrease, fontSize: 11, cursor: "pointer" }}
+                      onClick={() => {
+                        setNotificationCount(0);
+                        setNotificationsList([]);
+                        if (userEmail) {
+                          localStorage.setItem(`${userEmail}:notificationCount`, "0");
+                          localStorage.setItem(`${userEmail}:notificationsList`, JSON.stringify([]));
+                        }
+                      }}
+                    >
+                      Clear
+                    </span>
+                  </>
                 )}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto" }}>

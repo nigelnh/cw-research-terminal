@@ -499,10 +499,7 @@ export function App() {
     return w;
   }
 
-  // Probability Density Function of standard normal distribution (nd_pdf)
-  function nd_pdf(x: number): number {
-    return (1.0 / Math.sqrt(2.0 * Math.PI)) * Math.exp(-x * x / 2.0);
-  }
+
 
   // Black-Scholes Call Option Price
   function bsCallPrice(S: number, K: number, t: number, r: number, sigma: number): number {
@@ -512,12 +509,7 @@ export function App() {
     return S * cnd(d1) - K * Math.exp(-r * t) * cnd(d2);
   }
 
-  // Black-Scholes Call Option Vega
-  function bsCallVega(S: number, K: number, t: number, r: number, sigma: number): number {
-    if (t <= 0) return 0.0;
-    const d1 = (Math.log(S / K) + (r + (sigma * sigma) / 2) * t) / (sigma * Math.sqrt(t));
-    return S * Math.sqrt(t) * nd_pdf(d1);
-  }
+
 
   // Black-Scholes Call Option Delta
   function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number): number {
@@ -544,7 +536,9 @@ export function App() {
         // LastPrc(T-1)= Ref (yesterday's reference price from KB — e.g. CACB2606 = 660)
         lastPrcT = liveWarrant.Traded && liveWarrant.Traded > 0 ? liveWarrant.Traded : liveWarrant.Ref;
         lastPrcT1 = liveWarrant.Ref;
-        if (lastPrcT1 > 0) {
+        if (liveWarrant.ChangePercent !== null && liveWarrant.ChangePercent !== undefined) {
+          netChgPct = liveWarrant.ChangePercent / 100;
+        } else if (lastPrcT1 > 0) {
           netChgPct = (lastPrcT / lastPrcT1) - 1;
         }
       }
@@ -554,21 +548,47 @@ export function App() {
       // Hedging account (isHedging=true): Stock-focused. Spot_Prc(S) = the stock
       //   ticker's own live price (via getRow(ticker)), not the underlying of a CW.
       let spotPrcS = row.spot_prc_s !== null ? parseFloat(row.spot_prc_s) : null;
+      const dteVal = row.dte !== null && row.dte !== undefined ? parseFloat(String(row.dte)) : null;
+
       if (!isHedging) {
         // MM: Spot_Prc(S) should be the underlying stock's live price from WebSocket
         const liveUnderlying = row.und_ticker ? getRow(row.und_ticker.toUpperCase()) : null;
         if (liveUnderlying && liveUnderlying.Ref && liveUnderlying.Ref > 0) {
-          spotPrcS = liveUnderlying.Traded && liveUnderlying.Traded > 0
+          const tradedPrc = liveUnderlying.Traded && liveUnderlying.Traded > 0
             ? liveUnderlying.Traded
             : liveUnderlying.Ref;
+          const bid1 = liveUnderlying.Bid1_Prc;
+          const ask1 = liveUnderlying.Ask1_Prc;
+
+          if (dteVal !== null && dteVal < 1 && tradedPrc !== null && bid1 !== null && bid1 !== undefined && ask1 !== null && ask1 !== undefined) {
+            if (tradedPrc >= bid1 && tradedPrc <= ask1) {
+              spotPrcS = tradedPrc;
+            } else {
+              spotPrcS = (bid1 + ask1) / 2;
+            }
+          } else {
+            spotPrcS = tradedPrc;
+          }
         }
       } else {
         // Hedging: Spot_Prc(S) = direct stock live price from WebSocket
         const liveStock = getRow(row.ticker.toUpperCase());
         if (liveStock && liveStock.Ref && liveStock.Ref > 0) {
-          spotPrcS = liveStock.Traded && liveStock.Traded > 0
+          const tradedPrc = liveStock.Traded && liveStock.Traded > 0
             ? liveStock.Traded
             : liveStock.Ref;
+          const bid1 = liveStock.Bid1_Prc;
+          const ask1 = liveStock.Ask1_Prc;
+
+          if (dteVal !== null && dteVal < 1 && tradedPrc !== null && bid1 !== null && bid1 !== undefined && ask1 !== null && ask1 !== undefined) {
+            if (tradedPrc >= bid1 && tradedPrc <= ask1) {
+              spotPrcS = tradedPrc;
+            } else {
+              spotPrcS = (bid1 + ask1) / 2;
+            }
+          } else {
+            spotPrcS = tradedPrc;
+          }
         }
       }
 
@@ -590,6 +610,7 @@ export function App() {
       const tteT1 = row.tte_t_1 !== null ? parseFloat(row.tte_t_1) : null;
       const rate = row.rate !== null ? parseFloat(row.rate) : 0.0725;
       const sigma = row.hedge_v_t !== null ? parseFloat(row.hedge_v_t) : 0.3250;
+      const sigmaT1 = row.hedge_v_t_1 !== null ? parseFloat(row.hedge_v_t_1) : 0.3250;
 
       // Conversion Ratio (CVR) parsing
       let ratioNum = 1;
@@ -621,24 +642,30 @@ export function App() {
       let vegaPctT = 0;
       let thetaT = 0;
       let deltaT = 1.0; // Default delta = 1 for stocks/indexes
+      let deltaT1 = 1.0; // Default delta = 1 for stocks/indexes
 
       if (strikeK && tteT !== null && tteT1 !== null) {
         theoPrcT = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma) / ratioNum;
         theoPrcT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigma) / ratioNum;
-        vegaPctT = bsCallVega(spotS_t, strikeK, tteT, rate, sigma) / ratioNum;
-        // Daily Theta decay using finite difference: bsCallPrice(newT) - bsCallPrice(T)
+        const priceVolUp = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma + 0.0001) / ratioNum;
+        const priceVolDown = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma - 0.0001) / ratioNum;
+        vegaPctT = (priceVolUp - priceVolDown) / 0.02;
         const newT = Math.max(tteT - 1 / 365, 0.0001);
-        thetaT = (bsCallPrice(spotS_t, strikeK, newT, rate, sigma) - bsCallPrice(spotS_t, strikeK, tteT, rate, sigma)) / ratioNum;
+        const priceNewT = bsCallPrice(spotS_t, strikeK, newT, rate, sigma) / ratioNum;
+        thetaT = priceNewT - theoPrcT;
 
         // Calculate Delta using finite difference on Call Option Price:
         // (CallPrice(S * 1.0001) - CallPrice(S * 0.9999)) / (S * 0.0002)
         const priceUp = bsCallPrice(spotS_t * 1.0001, strikeK, tteT, rate, sigma);
         const priceDown = bsCallPrice(spotS_t * 0.9999, strikeK, tteT, rate, sigma);
         deltaT = (priceUp - priceDown) / (spotS_t * 0.0002);
+
+        // Calculate Yesterday's Delta
+        deltaT1 = bsCallDelta(spotS_t_1, strikeK, tteT1, rate, sigmaT1);
       }
       const deltaLotsT = deltaT * balance;
       const deltaCashT = spotS_t * deltaLotsT;
-      const deltaCashT1 = deltaT * balanceT1 * spotS_t_1;
+      const deltaCashT1 = deltaT1 * balanceT1 * spotS_t_1;
 
       const trdDeltaLotsT = deltaT * (boughtQty - soldQty);
       const trdDeltaCashT = trdDeltaLotsT * spotS_t;
@@ -701,7 +728,6 @@ export function App() {
       // Calculate yesterday's and today's Greeks for attributions
       let gammaAmtPctT1 = 0;
       let thetaT1 = 0;
-      const sigmaT1 = row.hedge_v_t_1 !== null ? parseFloat(row.hedge_v_t_1) : 0.3250;
 
       if (strikeK && tteT1 !== null) {
         // Gamma yesterday
@@ -712,7 +738,8 @@ export function App() {
 
         // Theta yesterday
         const newT1 = Math.max(tteT1 - 1 / 365, 0.0001);
-        thetaT1 = (bsCallPrice(spotS_t_1, strikeK, newT1, rate, sigmaT1) - bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigmaT1)) / ratioNum;
+        const priceNewT1 = bsCallPrice(spotS_t_1, strikeK, newT1, rate, sigmaT1) / ratioNum;
+        thetaT1 = priceNewT1 - theoPrcT1;
       }
 
       // Calculate m-decay fraction for thetapnl
