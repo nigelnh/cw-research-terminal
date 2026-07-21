@@ -119,6 +119,11 @@ setInterval(() => {
   });
   pendingDirections.clear();
 
+  // Structural flush check (only if symbol count changes or initial flush)
+  // Must be checked BEFORE updating lastFlushedRowsMap for new symbols in the loop below
+  const isInitialFlush = lastStructuralFlush === 0;
+  const shouldFlushStructural = isInitialFlush || rowsMap.size > lastFlushedRowsMap.size;
+
   // 2. Fallback: Calculate changes for symbols that changed but didn't have a clear direction 
   // (e.g. first time appearing, or complex snapshots)
   changedSymbols.forEach((symbol) => {
@@ -155,10 +160,6 @@ setInterval(() => {
       lastFlushedRowsMap.set(symbol, { ...row });
     }
   });
-
-  // Structural flush check (only if symbol count changes or initial flush)
-  const isInitialFlush = lastStructuralFlush === 0;
-  const shouldFlushStructural = isInitialFlush || rowsMap.size > lastFlushedRowsMap.size;
 
   // Send the flushed state update to main thread
   self.postMessage({ 
