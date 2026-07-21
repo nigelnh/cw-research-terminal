@@ -581,23 +581,33 @@ export function Topbar({
           position: "relative",
         }}
       >
-        <span style={{ color: colors.textSecondary, fontSize: 14 }}>
-          {formatDate(adjustedNow)}
-        </span>
-        <span
+        <div
           style={{
-            color: colors.textSecondary,
-            fontSize: 14,
-            fontWeight: 500,
-            fontFamily: "'JetBrains Mono', monospace",
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            flexShrink: 0,
+            whiteSpace: "nowrap",
           }}
         >
-          {formatTime(adjustedNow)}
-        </span>
+          <span style={{ color: colors.textSecondary, fontSize: 14 }}>
+            {formatDate(adjustedNow)}
+          </span>
+          <span
+            style={{
+              color: colors.textSecondary,
+              fontSize: 14,
+              fontWeight: 500,
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            {formatTime(adjustedNow)}
+          </span>
+        </div>
         <div
           onMouseEnter={handleNotificationMouseEnter}
           onMouseLeave={handleNotificationMouseLeave}
-          style={{ position: "relative" }}
+          style={{ position: "relative", flexShrink: 0 }}
         >
           <div
             style={{
@@ -786,6 +796,7 @@ export function Topbar({
               border: `1px solid rgba(255, 255, 255, 0.08)`,
               cursor: "pointer",
               transition: "background-color 0.2s",
+              flexShrink: 0,
             }}
             onClick={() => setIsSettingsOpen(true)}
             onMouseEnter={(e) => {
@@ -819,6 +830,7 @@ export function Topbar({
               backgroundColor: "rgba(246, 70, 93, 0.1)",
               cursor: "pointer",
               transition: "background-color 0.2s",
+              flexShrink: 0,
             }}
             title="Logout"
             onClick={onLogout}
