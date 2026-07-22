@@ -840,46 +840,87 @@ export function App() {
   }, [livePosRowsMM, livePosRowsHedge]);
 
   // ── PosMaster flash tracking ───────────────────────────────────────────────
-  // Tracks previous last_prc_t and spot_prc_s per CW ticker to determine flash
-  // direction (up/down) on each realtime tick, using the "ticker:colKey" format
-  // expected by PosMasterTreeView's currentFlashes map.
-  const posMasterPrevPricesRef = useRef<Map<string, { lastPrcT: number | null; spotPrc: number | null }>>(new Map());
+  // Track value changes for all formula-applied & API-driven columns.
+  // Static / mocked columns (rate, multiplier_m, div_d, fund, vega_pnl, unexplained_pnl, capital_cost, ticker, expiry, strike_k, cvr) are excluded.
+  const FLASHING_POS_KEYS = useMemo(() => new Set([
+    "last_prc_t",
+    "net_chg_pct",
+    "spot_prc_s",
+    "theo_prc_t",
+    "theo_prc_t_1",
+    "delta_t",
+    "delta_lots_t",
+    "delta_cash_t",
+    "delta_cash_t_1",
+    "trd_delta_lots_t",
+    "trd_delta_cash_t",
+    "gamma_amt_pct_t",
+    "vega_pct_t",
+    "cash_vega_t",
+    "theta_t",
+    "cash_theta_t",
+    "balance",
+    "bought_qty",
+    "bought_amt",
+    "bought_avg",
+    "sold_qty",
+    "sold_amt",
+    "sold_avg",
+    "position_pnl_mtm",
+    "trading_pnl_mtm",
+    "total_pnl_mtm",
+    "position_pnl_theo",
+    "trading_pnl_theo",
+    "total_pnl_theo",
+    "delta_pnl",
+    "gamma_pnl",
+    "theta_pnl",
+    "total_pnl_theo_cum",
+    "total_pnl_mtm_cum",
+    "dte",
+    "tte_t",
+    "tte_t_1",
+  ]), []);
+
+  const posMasterPrevValuesRef = useRef<Map<string, Record<string, number | null>>>(new Map());
 
   const posMasterChanges = useMemo(() => {
     const changes = new Map<string, "up" | "down">();
     for (const row of livePosRows) {
       const ticker: string = row.ticker;
-      const newLastPrcT = row.last_prc_t !== null && row.last_prc_t !== undefined
-        ? parseFloat(String(row.last_prc_t)) : null;
-      const newSpotPrc = row.spot_prc_s !== null && row.spot_prc_s !== undefined
-        ? parseFloat(String(row.spot_prc_s)) : null;
+      const isCW = Boolean(row.und_ticker && row.ticker.toUpperCase() !== row.und_ticker.toUpperCase());
+      const prevRecord = posMasterPrevValuesRef.current.get(ticker);
 
-      const prev = posMasterPrevPricesRef.current.get(ticker);
+      if (prevRecord) {
+        FLASHING_POS_KEYS.forEach((colKey) => {
+          // Rule: spot_prc_s only flashes for CW symbols (ticker !== und_ticker)
+          if (colKey === "spot_prc_s" && !isCW) return;
 
-      if (prev) {
-        if (newLastPrcT !== null && prev.lastPrcT !== null && newLastPrcT !== prev.lastPrcT) {
-          changes.set(`${ticker}:last_prc_t`, newLastPrcT > prev.lastPrcT ? "up" : "down");
-        }
-        if (newSpotPrc !== null && prev.spotPrc !== null && newSpotPrc !== prev.spotPrc) {
-          changes.set(`${ticker}:spot_prc_s`, newSpotPrc > prev.spotPrc ? "up" : "down");
-        }
+          const rawVal = (row as Record<string, unknown>)[colKey];
+          const newNum = rawVal !== null && rawVal !== undefined ? parseFloat(String(rawVal)) : null;
+          const prevNum = prevRecord[colKey] !== undefined ? prevRecord[colKey] : null;
+
+          if (newNum !== null && prevNum !== null && !isNaN(newNum) && !isNaN(prevNum) && Math.abs(newNum - prevNum) > 1e-9) {
+            changes.set(`${ticker}:${colKey}`, newNum > prevNum ? "up" : "down");
+          }
+        });
       }
     }
     return changes;
-  }, [livePosRows]);
+  }, [livePosRows, FLASHING_POS_KEYS]);
 
   // Safely update the ref only during the commit phase (useEffect) to prevent React double-render/Strict-mode race conditions from wiping out detected price changes.
   useEffect(() => {
     for (const row of livePosRows) {
       const ticker: string = row.ticker;
-      const newLastPrcT = row.last_prc_t !== null && row.last_prc_t !== undefined
-        ? parseFloat(String(row.last_prc_t)) : null;
-      const newSpotPrc = row.spot_prc_s !== null && row.spot_prc_s !== undefined
-        ? parseFloat(String(row.spot_prc_s)) : null;
-
-      posMasterPrevPricesRef.current.set(ticker, { lastPrcT: newLastPrcT, spotPrc: newSpotPrc });
+      const currentRecord: Record<string, number | null> = {};
+      FLASHING_POS_KEYS.forEach((colKey) => {
+        const rawVal = (row as Record<string, unknown>)[colKey];
+        currentRecord[colKey] = rawVal !== null && rawVal !== undefined ? parseFloat(String(rawVal)) : null;
+      });
+      posMasterPrevValuesRef.current.set(ticker, currentRecord);
     }
-  }, [livePosRows]);
+  }, [livePosRows, FLASHING_POS_KEYS]);
 
   // ── Unique Options for Position Master Filters ──
   const posUnderlyings = useMemo(() => {
