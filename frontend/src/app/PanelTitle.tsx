@@ -7,9 +7,10 @@ interface PanelTitleProps {
   onDateChange?: (date: string) => void;
   filterContent?: React.ReactNode;
   displayOptionContent?: React.ReactNode;
+  onExportCsv?: () => void;
 }
 
-export function PanelTitle({ title, icon, onDateChange, filterContent, displayOptionContent }: PanelTitleProps) {
+export function PanelTitle({ title, icon, onDateChange, filterContent, displayOptionContent, onExportCsv }: PanelTitleProps) {
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [showFilter, setShowFilter] = useState(false);
   const [showDisplayOption, setShowDisplayOption] = useState(false);
@@ -95,6 +96,28 @@ export function PanelTitle({ title, icon, onDateChange, filterContent, displayOp
       </span>
 
       <div style={{ flex: 1 }} />
+
+      {/* Export CSV Button */}
+      {onExportCsv && (
+        <span
+          className="material-symbols-outlined"
+          title="Export CSV"
+          onClick={onExportCsv}
+          style={{
+            fontSize: 18,
+            color: colors.textSecondary,
+            opacity: 0.8,
+            cursor: "pointer",
+            marginRight: 4,
+            transition: "color 0.2s, opacity 0.2s",
+            userSelect: "none",
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = colors.textPrimary; (e.currentTarget as HTMLElement).style.opacity = "1"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = colors.textSecondary; (e.currentTarget as HTMLElement).style.opacity = "0.8"; }}
+        >
+          file_download
+        </span>
+      )}
 
       {/* Display Option Button */}
       {displayOptionContent && (

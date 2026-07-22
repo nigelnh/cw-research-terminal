@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { Topbar } from "./Topbar";
 import { Login } from "../components/Login";
 import { PanelTitle } from "./PanelTitle";
@@ -340,7 +340,7 @@ export function App() {
         setPosError(null);
       }
       Promise.all([
-        fetch('/api/pos-master?subAccountNo=0001922095', {
+        fetch('/api/pos-master?type=MM', {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         }).then((res) => {
           if (res.status === 401) {
@@ -350,7 +350,7 @@ export function App() {
           if (!res.ok) throw new Error("Failed to fetch MM position master data.");
           return res.json();
         }),
-        fetch('/api/pos-master?subAccountNo=0001115688', {
+        fetch('/api/pos-master?type=HEDGING', {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         }).then((res) => {
           if (res.status === 401) {
@@ -976,6 +976,51 @@ export function App() {
     });
   }, [livePosRows, posFilter]);
 
+  // ── Export Position Master → CSV (Overview tab: all 48 columns + Div(D)) ──
+  const handleExportPosMasterCsv = useCallback(() => {
+    // Overview columns: all columns minus default-hidden ones
+    const overviewCols = posMasterTable.getColumnsByGroup("overview");
+    // Build header row — include Div(D) as an extra column right after Ticker
+    const extraDivHeader = "Div(D)";
+    const tickerIdx = overviewCols.findIndex((c) => c.key === "ticker");
+    const colsBefore = overviewCols.slice(0, tickerIdx + 1);
+    const colsAfter  = overviewCols.slice(tickerIdx + 1);
+
+    const headers = [
+      ...colsBefore.map((c) => c.header),
+      extraDivHeader,
+      ...colsAfter.map((c) => c.header),
+    ];
+
+    const escapeCell = (val: string): string => {
+      if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+        return `"${val.replace(/"/g, '""')}"`;
+      }
+      return val;
+    };
+
+    const rows = filteredPosRows.map((row) => {
+      const divVal = row.div_d !== null && row.div_d !== undefined ? String(row.div_d) : "";
+      const cellsBefore = colsBefore.map((c) => escapeCell(c.getDisplayValue(row as any)));
+      const cellsAfter  = colsAfter.map((c)  => escapeCell(c.getDisplayValue(row as any)));
+      return [...cellsBefore, escapeCell(divVal), ...cellsAfter].join(",");
+    });
+
+    const csvContent = [headers.map(escapeCell).join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const now  = new Date();
+    const dateStamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+    const timeStamp = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+    link.href = url;
+    link.setAttribute("download", `pos_master_overview_${dateStamp}_${timeStamp}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [filteredPosRows]);
+
   // ── Filtered Realtime Trades Data ──
   const filteredTradesRows = useMemo(() => {
     const statusCol = rtTradesTable.getColumns().find((c) => c.key === "status");
@@ -1178,6 +1223,7 @@ export function App() {
                   onUnselectAll={unselectAllInfoColumns}
                 />
               }
+              onExportCsv={handleExportPosMasterCsv}
             />
 
             {/* ── Column-group tab bar ─────────────────────────────────────── */}

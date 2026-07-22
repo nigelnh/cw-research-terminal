@@ -66,7 +66,7 @@ const getStatusText = (v: unknown, orStatus?: string): string => {
     if (text.includes("từ chối")) return "Rejected";
     if (text.includes("mở")) return "Open";
     if (text.includes("đã gửi")) return "Sent";
-    if (text.includes("đang gửi")) return "Sending";
+    if (text.includes("Đang gửi")) return "Sending";
     if (text.includes("đã hủy")) return "Cancelled";
     if (text.includes("đang hủy")) return "Cancelling";
     if (text.includes("hủy bỏ")) return "Cancelled";

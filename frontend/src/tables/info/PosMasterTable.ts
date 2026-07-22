@@ -98,6 +98,7 @@ const getEffectiveDecimals = (val: number, maxDec: number): number => {
   return maxDec;
 };
 
+
 // Precision formatters for compliance with spreadsheet masks
 // Returns "N/A" for null/undefined/NaN/empty — distinguishing missing data from zero/small calculated values.
 const formatNum = (v: unknown, decimals: number = 2, minDecimals: number = 0): string => {
@@ -332,7 +333,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "TTE(t)",
         widthPx: 90,
         align: "right",
-        format: (v) => formatNum(v, 6),
+        format: (v) => formatNum(v, 3),
         color: colors.increase,
       }),
 
@@ -342,7 +343,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "TTE(t-1)",
         widthPx: 90,
         align: "right",
-        format: (v) => formatNum(v, 6),
+        format: (v) => formatNum(v, 3),
         color: colors.increase,
       }),
 
@@ -375,16 +376,23 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         format: (v) => {
           if (!v) return "N/A";
           const str = String(v).trim();
+          const formatCvrNum = (num: number): string => {
+            if (Number.isInteger(num)) {
+              return num.toString();
+            }
+            return parseFloat(num.toFixed(4)).toString();
+          };
+
           if (str.includes(":")) {
             const parts = str.split(":");
             const num = parseFloat(parts[0]);
             if (!isNaN(num)) {
-              return `${num.toFixed(4)}:${parts[1]}`;
+              return `${formatCvrNum(num)}:${parts[1]}`;
             }
           } else {
             const num = parseFloat(str);
             if (!isNaN(num)) {
-              return num.toFixed(4);
+              return formatCvrNum(num);
             }
           }
           return str;
@@ -978,8 +986,8 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
     }
 
     // 3. For all other dynamic columns (theoreticals, Greeks, PnL, cash balance, quantity),
-    // flash "Foreign's columns color" (colors.volData) when data changes.
-    return colors.volData;
+    // do not apply any flash color (previously used colors.volData / "Foreign's columns" grey).
+    return undefined;
   }
 }
 
