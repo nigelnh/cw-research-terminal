@@ -73,8 +73,11 @@ export class ColumnBase<T> {
     if (this.customFormat) {
       return this.customFormat(value, row);
     }
-    if (value === null || value === undefined || value === 0 || value === "0") {
-      return "";
+    if (value === null || value === undefined || value === "") {
+      return "N/A";
+    }
+    if (value === 0 || value === "0") {
+      return "0";
     }
     return String(value);
   }

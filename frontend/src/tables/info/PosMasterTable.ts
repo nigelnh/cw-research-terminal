@@ -17,11 +17,19 @@ export type PosColumnGroup = "overview" | "info" | "inventory" | "summary" | "al
 
 /** Human-readable labels, accent colours, and column counts for the tab bar */
 export const POS_GROUP_META: Record<Exclude<PosColumnGroup, "all">, { label: string; color: string; count: number }> = {
-  overview: { label: "Overview", color: "#0ECB81", count: 52 },
+  overview: { label: "Overview", color: "#0ECB81", count: 48 },
   info: { label: "Info", color: "#FF9F1C", count: 12 },
-  summary: { label: "Summary", color: "#A855F7", count: 27 },
-  inventory: { label: "Inventory", color: "#FFD700", count: 10 },
+  summary: { label: "Summary", color: "#A855F7", count: 17 },
+  inventory: { label: "Inventory", color: "#FFD700", count: 9 },
 };
+
+/** Columns hidden by default on the UI */
+export const DEFAULT_HIDDEN_POS_COLUMNS: string[] = [
+  "unexplained_pnl",
+  "vega_pnl",
+  "fund",
+  "gamma_pnl"
+];
 
 export interface PosMasterRow {
   ticker: string;
@@ -79,56 +87,88 @@ export interface PosMasterRow {
   total_pnl_mtm_cum: number | null;
 }
 
+// Helper to dynamically expand decimal precision up to 6 places for small non-zero values
+// so that numbers like -0.003069 are displayed in full precision instead of rounding to 0 or 0.00.
+const getEffectiveDecimals = (val: number, maxDec: number): number => {
+  const absVal = Math.abs(val);
+  if (absVal > 0 && absVal < Math.pow(10, -maxDec)) {
+    return Math.min(6, Math.max(maxDec, 6));
+  }
+  return maxDec;
+};
+
 // Precision formatters for compliance with spreadsheet masks
-// Returns "" (empty) for null/undefined/NaN — matching the Equity tab style.
+// Returns "N/A" for null/undefined/NaN/empty — distinguishing missing data from zero/small calculated values.
 const formatNum = (v: unknown, decimals: number = 2, minDecimals: number = 0): string => {
-  if (v === null || v === undefined || v === "") return "";
+  if (v === null || v === undefined || v === "") return "N/A";
   const num = typeof v === "number" ? v : parseFloat(String(v));
-  if (isNaN(num) || num === 0) return "";
-  return num.toLocaleString(undefined, { minimumFractionDigits: minDecimals, maximumFractionDigits: decimals });
+  if (isNaN(num)) return "N/A";
+  if (num === 0) return minDecimals > 0 ? "0".padStart(minDecimals + 2, "0.") : "0";
+  const effDec = getEffectiveDecimals(num, decimals);
+  const res = num.toLocaleString(undefined, { minimumFractionDigits: minDecimals, maximumFractionDigits: effDec });
+  if (res === "-0" || res === "-0.00" || res === "-0.0") return minDecimals > 0 ? "0".padStart(minDecimals + 2, "0.") : "0";
+  return res;
 };
 
 // Price formatter: divides raw KB VND prices by 1000 (matching Equity tab PriceColumn).
 // e.g. raw 3090 → displayed as "3.09", raw 23600 → "23.6", raw 22000 → "22" (no trailing .00)
 const formatPrice = (v: unknown, decimals: number = 2, minDecimals: number = 0): string => {
-  if (v === null || v === undefined || v === "") return "";
+  if (v === null || v === undefined || v === "") return "N/A";
   const num = typeof v === "number" ? v : parseFloat(String(v));
-  if (isNaN(num) || num === 0) return "";
-  return (num / 1000).toLocaleString(undefined, { minimumFractionDigits: minDecimals, maximumFractionDigits: decimals });
+  if (isNaN(num)) return "N/A";
+  if (num === 0) return minDecimals > 0 ? "0".padStart(minDecimals + 2, "0.") : "0";
+  const val = num / 1000;
+  const effDec = getEffectiveDecimals(val, decimals);
+  const res = val.toLocaleString(undefined, { minimumFractionDigits: minDecimals, maximumFractionDigits: effDec });
+  if (res === "-0" || res === "-0.00" || res === "-0.0") return minDecimals > 0 ? "0".padStart(minDecimals + 2, "0.") : "0";
+  return res;
 };
 
 const formatDelta = (v: unknown): string => {
-  // Delta Sensitivities require exactly 3-decimal mask (x.xxx)
+  // Delta Sensitivities require strictly 3-decimal mask (x.xxx)
   return formatNum(v, 3, 3);
 };
 
 const formatLots = (v: unknown): string => {
-  if (v === null || v === undefined || v === "") return "";
+  if (v === null || v === undefined || v === "") return "N/A";
   const num = typeof v === "number" ? v : parseFloat(String(v));
-  if (isNaN(num) || num === 0) return "";
-  return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+  if (isNaN(num)) return "N/A";
+  if (num === 0) return "0";
+  const res = num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+  if (res === "-0" || res === "-0.0") return "0";
+  return res;
 };
 
 const formatCash = (v: unknown): string => {
-  if (v === null || v === undefined || v === "") return "";
+  if (v === null || v === undefined || v === "") return "N/A";
   const num = typeof v === "number" ? v : parseFloat(String(v));
-  if (isNaN(num) || num === 0) return "";
-  return (num / 1000).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+  if (isNaN(num)) return "N/A";
+  if (num === 0) return "0";
+  const val = num / 1000;
+  const effDec = getEffectiveDecimals(val, 1);
+  const res = val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: effDec });
+  if (res === "-0" || res === "-0.0") return "0";
+  return res;
 };
 
 const formatInt = (v: unknown): string => {
   // Inventory balances must be formatted as whole signed integers (e.g. -150,000)
-  if (v === null || v === undefined || v === "") return "";
+  if (v === null || v === undefined || v === "") return "N/A";
   const num = typeof v === "number" ? v : parseInt(String(v), 10);
-  if (isNaN(num) || num === 0) return "";
+  if (isNaN(num)) return "N/A";
   return num.toLocaleString();
 };
 
 const formatPct = (v: unknown, decimals: number = 2): string => {
-  if (v === null || v === undefined || v === "") return "";
+  if (v === null || v === undefined || v === "") return "N/A";
   const num = typeof v === "number" ? v : parseFloat(String(v));
-  if (isNaN(num)) return "";
-  return (num * 100).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimals }) + "%";
+  if (isNaN(num)) return "N/A";
+  if (num === 0) return "0%";
+  const pctVal = num * 100;
+  const effDec = getEffectiveDecimals(pctVal, decimals);
+  const res = pctVal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: effDec }) + "%";
+  if (res === "-0%" || res === "-0.00%" || res === "-0.0%") return "0%";
+  return res;
 };
 
 export const CW_RELATED_KEYS = new Set([
@@ -141,8 +181,6 @@ export const CW_RELATED_KEYS = new Set([
   "multiplier_m",
   "cvr",
   "spot_prc_s",
-  "hedge_v_t",
-  "hedge_v_t_1",
   "rate",
   "theo_prc_t",
   "theo_prc_t_1",
@@ -251,7 +289,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         widthPx: 95,
         align: "center",
         format: (v) => {
-          if (!v) return "";
+          if (!v) return "N/A";
           const dateStr = String(v);
           let y = "";
           let m = "";
@@ -282,12 +320,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "DTE",
         widthPx: 60,
         align: "right",
-        format: (v) => {
-          if (v === null || v === undefined || v === "") return "";
-          const num = typeof v === "number" ? v : parseFloat(String(v));
-          if (isNaN(num) || num === 0) return "";
-          return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        },
+        format: (v) => formatNum(v, 2, 2),
         color: colors.increase,
       }),
 
@@ -338,7 +371,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         widthPx: 80,
         align: "center",
         format: (v) => {
-          if (!v) return "";
+          if (!v) return "N/A";
           const str = String(v).trim();
           if (str.includes(":")) {
             const parts = str.split(":");
@@ -379,29 +412,23 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         },
       }),
 
-      // 14. HedgeV(T) (Col 20)
+      // 14. EWMA_V252(T) (Col 20)
       new ColumnBase<PosMasterRow>({
         key: "hedge_v_t",
-        header: "HedgeV(T)",
-        widthPx: 85,
+        header: "EWMA_V252(T)",
+        widthPx: 95,
         align: "right",
-        format: (v) => {
-          if (v === null || v === undefined || v === "") return "";
-          return "32.50%";
-        },
+        format: (v) => formatPct(v),
         color: colors.yellow,
       }),
 
-      // 15. HedgeV(T-1) (Col 21)
+      // 15. EWMA_V252(T-1) (Col 21)
       new ColumnBase<PosMasterRow>({
         key: "hedge_v_t_1",
-        header: "HedgeV(T-1)",
-        widthPx: 85,
+        header: "EWMA_V252(T-1)",
+        widthPx: 95,
         align: "right",
-        format: (v) => {
-          if (v === null || v === undefined || v === "") return "";
-          return "32.50%";
-        },
+        format: (v) => formatPct(v),
         color: colors.yellow,
       }),
 
@@ -533,13 +560,13 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         color: colors.increase,
       }),
 
-      // 28. Delta(T) (Col 35) - strictly 3 decimal places
+      // 28. Delta(T) (Col 35) - strictly 3 decimal places (2 on Summary tab)
       new ColumnBase<PosMasterRow>({
         key: "delta_t",
         header: "Delta(T)",
         widthPx: 80,
         align: "right",
-        format: (v) => formatDelta(v),
+        format: (v) => (this.activeGroup === "summary" ? formatNum(v, 2) : formatDelta(v)),
         color: colors.increase,
       }),
 
@@ -553,13 +580,13 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         color: colors.purple,
       }),
 
-      // 30. DeltaCash(T) (Col 37) - strictly 1 decimal place
+      // 30. DeltaCash(T) (Col 37) - strictly 1 decimal place (2 on Summary tab)
       new ColumnBase<PosMasterRow>({
         key: "delta_cash_t",
         header: "DeltaCash(T)",
         widthPx: 110,
         align: "right",
-        format: (v) => formatCash(v),
+        format: (v) => (this.activeGroup === "summary" ? formatPrice(v, 2) : formatCash(v)),
         color: colors.purple,
       }),
 
@@ -599,7 +626,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "%GammaAmt(T)",
         widthPx: 95,
         align: "right",
-        format: (v) => formatPct(v, 4),
+        format: (v) => formatPct(v, this.activeGroup === "summary" ? 2 : 4),
         color: colors.increase,
       }),
 
@@ -609,7 +636,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "%Vega(T)",
         widthPx: 80,
         align: "right",
-        format: (v) => formatPct(v, 4),
+        format: (v) => formatPct(v, this.activeGroup === "summary" ? 2 : 4),
         color: colors.increase,
       }),
 
@@ -629,7 +656,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "Theta(T)",
         widthPx: 90,
         align: "right",
-        format: (v) => formatNum(v, 6),
+        format: (v) => formatNum(v, this.activeGroup === "summary" ? 2 : 6),
         color: colors.increase,
       }),
 
@@ -836,22 +863,27 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
     ],
     inventory: [
       "ticker",
-      "fund", "balance_t_1", "balance",
+      "balance_t_1", "balance",
       "sold_amt", "sold_qty", "sold_avg",
       "bought_amt", "bought_qty", "bought_avg",
     ],
     summary: [
       "ticker",
-      "delta_t", "delta_lots_t", "delta_cash_t", "delta_cash_t_1",
-      "trd_delta_lots_t", "trd_delta_cash_t",
-      "gamma_amt_pct_t", "vega_pct_t", "cash_vega_t",
-      "theta_t", "cash_theta_t",
-      "trading_pnl_theo", "position_pnl_theo",
-      "delta_pnl", "gamma_pnl", "theta_pnl", "vega_pnl",
-      "unexplained_pnl", "capital_cost",
-      "total_pnl_theo", "total_pnl_mtm",
-      "position_pnl_mtm", "trading_pnl_mtm",
-      "total_pnl_theo_cum", "total_pnl_mtm_cum",
+      "delta_t",
+      "gamma_amt_pct_t",
+      "vega_pct_t",
+      "theta_t",
+      "delta_cash_t",
+      "cash_vega_t",
+      "cash_theta_t",
+      "delta_pnl",
+      "theta_pnl",
+      "trading_pnl_theo",
+      "position_pnl_theo",
+      "total_pnl_theo",
+      "total_pnl_mtm",
+      "position_pnl_mtm",
+      "trading_pnl_mtm",
     ],
   };
 
@@ -859,13 +891,17 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
    * Return columns filtered to the requested group.
    * - "all" returns every column (used for DisplayOption panel).
    * - Any named group returns only the columns defined for that group,
-   *   preserving original column order from this.columns.
+   *   excluding default hidden columns (unexplained_pnl, vega_pnl, fund, gamma_pnl).
    */
   getColumnsByGroup(group: PosColumnGroup): ColumnBase<PosMasterRow>[] {
     let cols = this.columns;
-    if (group === "all" || group === "overview") return cols;
+    const hiddenDefault = new Set(DEFAULT_HIDDEN_POS_COLUMNS);
+    if (group === "all") return cols;
+    if (group === "overview") {
+      return cols.filter((c) => !hiddenDefault.has(c.key));
+    }
     const allowed = new Set(PosMasterTable.GROUP_KEYS[group]);
-    return cols.filter((c) => allowed.has(c.key));
+    return cols.filter((c) => allowed.has(c.key) && !hiddenDefault.has(c.key));
   }
 
   getColumns(): ColumnBase<PosMasterRow>[] {
