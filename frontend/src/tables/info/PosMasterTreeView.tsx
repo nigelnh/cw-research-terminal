@@ -183,11 +183,7 @@ const TreeCell = React.memo(
             transition: "background-color 0.05s ease, color 0.05s ease",
           };
         }
-        return {
-          backgroundColor: flash === "up" ? colors.increase : colors.decrease,
-          color: "#FFFFFF",
-          transition: "background-color 0.05s ease, color 0.05s ease",
-        };
+        // undefined means "no flash" for this column — fall through to normal style
       }
       return {
         color: isParent && !flash ? (baseColor === colors.textMuted ? colors.textSecondary : baseColor) : baseColor,
@@ -377,87 +373,8 @@ export function PosMasterTreeView({
       let parent = parentRows.get(undTicker);
       const accentColor = accentMap.get(undTicker) ?? colors.increase;
 
-      if (!parent) {
-        // Synthesize parent from live equity data + aggregated child values
-        const liveStock = getRow(undTicker);
-        const lastPrcT =
-          liveStock?.Traded && liveStock.Traded > 0
-            ? liveStock.Traded
-            : liveStock?.Ref ?? null;
-        const lastPrcT1 = liveStock?.Ref ?? null;
-
-        const sumOf = (field: string) => {
-          if (children.length === 0) return null;
-          return children.reduce((s, r) => s + (Number(r[field]) || 0), 0);
-        };
-
-        parent = {
-          ticker: undTicker,
-          und_ticker: undTicker,
-          Symbol: undTicker,
-          last_prc_t: lastPrcT,
-          last_prc_t_1: lastPrcT1,
-          spot_prc_s: lastPrcT,
-          net_chg_pct:
-            liveStock && liveStock.ChangePercent !== null && liveStock.ChangePercent !== undefined
-              ? liveStock.ChangePercent / 100
-              : (lastPrcT && lastPrcT1 && lastPrcT1 > 0
-                  ? lastPrcT / lastPrcT1 - 1
-                  : null),
-          // Aggregated financial & sensitivity totals across the underlying group
-          balance: sumOf("balance"),
-          balance_t_1: sumOf("balance_t_1"),
-          bought_qty: sumOf("bought_qty"),
-          bought_amt: sumOf("bought_amt"),
-          sold_qty: sumOf("sold_qty"),
-          sold_amt: sumOf("sold_amt"),
-          delta_lots_t: sumOf("delta_lots_t"),
-          delta_cash_t: sumOf("delta_cash_t"),
-          delta_cash_t_1: sumOf("delta_cash_t_1"),
-          trd_delta_lots_t: sumOf("trd_delta_lots_t"),
-          trd_delta_cash_t: sumOf("trd_delta_cash_t"),
-          cash_vega_t: sumOf("cash_vega_t"),
-          cash_theta_t: sumOf("cash_theta_t"),
-          position_pnl_mtm: sumOf("position_pnl_mtm"),
-          trading_pnl_mtm: sumOf("trading_pnl_mtm"),
-          total_pnl_mtm: sumOf("total_pnl_mtm"),
-          position_pnl_theo: sumOf("position_pnl_theo"),
-          trading_pnl_theo: sumOf("trading_pnl_theo"),
-          total_pnl_theo: sumOf("total_pnl_theo"),
-          delta_pnl: sumOf("delta_pnl"),
-          gamma_pnl: sumOf("gamma_pnl"),
-          theta_pnl: sumOf("theta_pnl"),
-          total_pnl_theo_cum: sumOf("total_pnl_theo_cum"),
-          total_pnl_mtm_cum: sumOf("total_pnl_mtm_cum"),
-
-          // Non-aggregated CW-specific per-warrant fields (formatters display "N/A")
-          expiry: null,
-          dte: null,
-          tte_t: null,
-          tte_t_1: null,
-          strike_k: null,
-          multiplier_m: null,
-          cvr: null,
-          hedge_v_t: children.length > 0 ? children[0].hedge_v_t : null,
-          hedge_v_t_1: children.length > 0 ? children[0].hedge_v_t_1 : null,
-          rate: null,
-          div_d: liveStock?.DividendYield ?? null,
-          fund: null,
-          sold_avg: null,
-          bought_avg: null,
-          theo_prc_t: null,
-          theo_prc_t_1: null,
-          delta_t: null,
-          gamma_amt_pct_t: null,
-          vega_pct_t: null,
-          theta_t: null,
-          vega_pnl: null,
-          unexplained_pnl: null,
-          capital_cost: null,
-          _isSynthetic: true,
-        };
-      } else {
-        // Real hedging row — add aggregated CW sub-totals alongside its own data
+      if (parent) {
+        // Real hedging stock row — add aggregated CW sub-totals alongside its own data
         const sumOfVal = (field: string) =>
           children.reduce((s, r) => s + (Number(r[field]) || 0), 0);
         parent = {
@@ -490,13 +407,19 @@ export function PosMasterTreeView({
           _cwTotalPnlTheo: sumOfVal("total_pnl_theo"),
           _cwDeltaCash: sumOfVal("delta_cash_t"),
         };
-      }
 
-      // Push parent row
-      result.push({ row: parent, isParent: true, undTicker, accentColor });
+        // Push parent row only if underlying stock was traded
+        result.push({ row: parent, isParent: true, undTicker, accentColor });
 
-      // Push children if group is not collapsed
-      if (!collapsedGroups.has(undTicker)) {
+        // Push children if group is not collapsed
+        if (!collapsedGroups.has(undTicker)) {
+          for (const child of children) {
+            result.push({ row: child, isParent: false, undTicker, accentColor });
+          }
+        }
+      } else {
+        // Underlying stock was NOT traded — do NOT synthesize or show parent row.
+        // Show ONLY the CW rows directly.
         for (const child of children) {
           result.push({ row: child, isParent: false, undTicker, accentColor });
         }
@@ -690,10 +613,10 @@ export function PosMasterTreeView({
                     backgroundColor: item.isParent
                       ? "rgba(255, 255, 255, 0.04)"
                       : "transparent",
-                    // Child rows: inset left accent strip — no layout shift (unlike borderLeft)
+                    // Child rows: inset left accent strip — default white
                     boxShadow: item.isParent
                       ? "none"
-                      : `inset 2px 0 0 ${item.accentColor}66`,
+                      : "inset 2px 0 0 #FFFFFF",
                     borderBottom: `1px solid ${colors.borderSubtle}`,
                     cursor: item.isParent ? "pointer" : "default",
                     boxSizing: "border-box",
