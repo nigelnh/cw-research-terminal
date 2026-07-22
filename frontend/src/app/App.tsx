@@ -56,7 +56,7 @@ export function App() {
         try {
           const parsed = JSON.parse(saved);
           return Array.from(new Set([...parsed, ...DEFAULT_HIDDEN_POS_COLUMNS]));
-        } catch (e) {}
+        } catch (e) { }
       }
     }
     return DEFAULT_HIDDEN_POS_COLUMNS;
@@ -69,7 +69,7 @@ export function App() {
       if (saved) {
         try {
           return JSON.parse(saved);
-        } catch (e) {}
+        } catch (e) { }
       }
     }
     return [];
@@ -82,7 +82,7 @@ export function App() {
       if (saved) {
         try {
           return JSON.parse(saved);
-        } catch (e) {}
+        } catch (e) { }
       }
     }
     return [];
@@ -125,28 +125,28 @@ export function App() {
       if (savedViewMode === "equity" || savedViewMode === "info") {
         setViewMode(savedViewMode as ViewMode);
       }
-      
+
       const savedHidden = localStorage.getItem(`${userEmail}:hiddenColumns`);
       if (savedHidden) {
-        try { setHiddenColumns(JSON.parse(savedHidden)); } catch (e) {}
+        try { setHiddenColumns(JSON.parse(savedHidden)); } catch (e) { }
       } else {
         setHiddenColumns([]);
       }
-      
+
       const savedInfoHidden = localStorage.getItem(`${userEmail}:infoHiddenColumns`);
       if (savedInfoHidden) {
-        try { setInfoHiddenColumns(JSON.parse(savedInfoHidden)); } catch (e) {}
+        try { setInfoHiddenColumns(JSON.parse(savedInfoHidden)); } catch (e) { }
       } else {
         setInfoHiddenColumns([]);
       }
-      
+
       const savedTradesHidden = localStorage.getItem(`${userEmail}:tradesHiddenColumns`);
       if (savedTradesHidden) {
-        try { setTradesHiddenColumns(JSON.parse(savedTradesHidden)); } catch (e) {}
+        try { setTradesHiddenColumns(JSON.parse(savedTradesHidden)); } catch (e) { }
       } else {
         setTradesHiddenColumns([]);
       }
-      
+
       const savedGroup = localStorage.getItem(`${userEmail}:posColumnGroup`);
       if (savedGroup) {
         setPosColumnGroup(savedGroup as PosColumnGroup);
@@ -199,7 +199,7 @@ export function App() {
           setAccessToken(data.accessToken);
         }
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => {
         setIsInitialized(true);
       });
@@ -464,7 +464,7 @@ export function App() {
     let tickCount = 0;
     const pollInterval = setInterval(() => {
       if (document.hidden) return;
-      
+
       const isInfoActive = viewModeRef.current === "info";
       tickCount++;
       if (isInfoActive || tickCount >= 5) {
@@ -503,14 +503,33 @@ export function App() {
 
 
   // Black-Scholes Call Option Price
-  function bsCallPrice(S: number, K: number, t: number, r: number, sigma: number): number {
-    if (t <= 0) return Math.max(0, S - K);
-    const d1 = (Math.log(S / K) + (r + (sigma * sigma) / 2) * t) / (sigma * Math.sqrt(t));
-    const d2 = d1 - sigma * Math.sqrt(t);
-    return S * cnd(d1) - K * Math.exp(-r * t) * cnd(d2);
+  function bsCallPrice(
+    S: number,
+    K: number,
+    t: number,
+    r: number,
+    sigma: number,
+    cr: number
+  ): number {
+    if (t <= 0) {
+      return Math.max(0, S - K) / cr;
+    }
+
+    const sqrtT = Math.sqrt(t);
+
+    const d1 =
+      (Math.log(S / K) +
+        (r + (sigma * sigma) / 2) * t) /
+      (sigma * sqrtT);
+
+    const d2 = d1 - sigma * sqrtT;
+
+    const optionPrice =
+      S * cnd(d1) -
+      K * Math.exp(-r * t) * cnd(d2);
+
+    return optionPrice / cr;
   }
-
-
 
   // Black-Scholes Call Option Delta
   function bsCallDelta(S: number, K: number, t: number, r: number, sigma: number): number {
@@ -646,23 +665,23 @@ export function App() {
       let deltaT1 = 1.0; // Default delta = 1 for stocks/indexes
 
       if (strikeK && tteT !== null && tteT1 !== null) {
-        theoPrcT = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma) / ratioNum;
-        theoPrcT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigma) / ratioNum;
-        const priceVolUp = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma + 0.0001) / ratioNum;
-        const priceVolDown = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma - 0.0001) / ratioNum;
+        theoPrcT = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma, ratioNum) / ratioNum;
+        theoPrcT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigma, ratioNum) / ratioNum;
+        const priceVolUp = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma + 0.0001, ratioNum) / ratioNum;
+        const priceVolDown = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma - 0.0001, ratioNum) / ratioNum;
         vegaPctT = (priceVolUp - priceVolDown) / 0.02;
         const newT = Math.max(tteT - 1 / 365, 0.0001);
-        const priceNewT = bsCallPrice(spotS_t, strikeK, newT, rate, sigma) / ratioNum;
+        const priceNewT = bsCallPrice(spotS_t, strikeK, newT, rate, sigma, ratioNum) / ratioNum;
         thetaT = priceNewT - theoPrcT;
 
         // Calculate Delta using finite difference on Call Option Price:
         // (CallPrice(S * 1.0001) - CallPrice(S * 0.9999)) / (S * 0.0002)
-        const priceUp = bsCallPrice(spotS_t * 1.0001, strikeK, tteT, rate, sigma);
-        const priceDown = bsCallPrice(spotS_t * 0.9999, strikeK, tteT, rate, sigma);
+        const priceUp = bsCallPrice(spotS_t * 1.0001, strikeK, tteT, rate, sigma, ratioNum);
+        const priceDown = bsCallPrice(spotS_t * 0.9999, strikeK, tteT, rate, sigma, ratioNum);
         deltaT = (priceUp - priceDown) / (spotS_t * 0.0002);
 
         // Calculate Yesterday's Delta
-        deltaT1 = bsCallDelta(spotS_t_1, strikeK, tteT1, rate, sigmaT1);
+        deltaT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigmaT1, ratioNum);
       }
       const deltaLotsT = deltaT * balance;
       const deltaCashT = spotS_t * deltaLotsT;
@@ -739,7 +758,7 @@ export function App() {
 
         // Theta yesterday
         const newT1 = Math.max(tteT1 - 1 / 365, 0.0001);
-        const priceNewT1 = bsCallPrice(spotS_t_1, strikeK, newT1, rate, sigmaT1) / ratioNum;
+        const priceNewT1 = bsCallPrice(spotS_t_1, strikeK, newT1, rate, sigmaT1, ratioNum) / ratioNum;
         thetaT1 = priceNewT1 - theoPrcT1;
       }
 
@@ -764,8 +783,8 @@ export function App() {
       let gammaT: number | null = null;
       let gammaAmtPctT = 0;
       if (strikeK && tteT !== null && spotS_t > 0) {
-        const delta_up = (bsCallPrice(spotS_t * 1.0001 * 1.0001, strikeK, tteT, rate, sigma) - bsCallPrice(spotS_t * 1.0001 * 0.9999, strikeK, tteT, rate, sigma)) / (spotS_t * 1.0001 * 0.0002);
-        const delta_down = (bsCallPrice(spotS_t * 0.9999 * 1.0001, strikeK, tteT, rate, sigma) - bsCallPrice(spotS_t * 0.9999 * 0.9999, strikeK, tteT, rate, sigma)) / (spotS_t * 0.9999 * 0.0002);
+        const delta_up = (bsCallPrice(spotS_t * 1.0001 * 1.0001, strikeK, tteT, rate, sigma, ratioNum) - bsCallPrice(spotS_t * 1.0001 * 0.9999, strikeK, tteT, rate, sigma, ratioNum)) / (spotS_t * 1.0001 * 0.0002);
+        const delta_down = (bsCallPrice(spotS_t * 0.9999 * 1.0001, strikeK, tteT, rate, sigma, ratioNum) - bsCallPrice(spotS_t * 0.9999 * 0.9999, strikeK, tteT, rate, sigma, ratioNum)) / (spotS_t * 0.9999 * 0.0002);
         gammaT = (delta_up - delta_down) / (spotS_t * 0.0002);
         gammaAmtPctT = gammaT * 0.01 * spotS_t * balance;
       }
@@ -984,7 +1003,7 @@ export function App() {
     const extraDivHeader = "Div(D)";
     const tickerIdx = overviewCols.findIndex((c) => c.key === "ticker");
     const colsBefore = overviewCols.slice(0, tickerIdx + 1);
-    const colsAfter  = overviewCols.slice(tickerIdx + 1);
+    const colsAfter = overviewCols.slice(tickerIdx + 1);
 
     const headers = [
       ...colsBefore.map((c) => c.header),
@@ -1002,15 +1021,15 @@ export function App() {
     const rows = filteredPosRows.map((row) => {
       const divVal = row.div_d !== null && row.div_d !== undefined ? String(row.div_d) : "";
       const cellsBefore = colsBefore.map((c) => escapeCell(c.getDisplayValue(row as any)));
-      const cellsAfter  = colsAfter.map((c)  => escapeCell(c.getDisplayValue(row as any)));
+      const cellsAfter = colsAfter.map((c) => escapeCell(c.getDisplayValue(row as any)));
       return [...cellsBefore, escapeCell(divVal), ...cellsAfter].join(",");
     });
 
     const csvContent = [headers.map(escapeCell).join(","), ...rows].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url  = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    const now  = new Date();
+    const now = new Date();
     const dateStamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
     const timeStamp = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
     link.href = url;
@@ -1027,10 +1046,10 @@ export function App() {
     const filtered = tradesRows.filter((row) => {
       const rowUnd = getUnderlying(row.symbol);
       const matchUnd = tradesFilter.underlyings.includes("All") || (rowUnd && tradesFilter.underlyings.map(u => u.toUpperCase()).includes(rowUnd.toUpperCase()));
-      
+
       const rowStatusText = statusCol ? statusCol.format(row.orStatusValue, row) : (row.orStatusValue || "");
       const matchStatus = tradesFilter.statuses.includes("All") || tradesFilter.statuses.includes(rowStatusText);
-      
+
       return matchUnd && matchStatus;
     });
 
@@ -1045,7 +1064,7 @@ export function App() {
             return new Date(year, month - 1, day, h, m, s).getTime();
           }
         }
-      } catch (e) {}
+      } catch (e) { }
       const ts = Date.parse(str);
       return isNaN(ts) ? 0 : ts;
     };
