@@ -17,7 +17,7 @@ export type PosColumnGroup = "overview" | "info" | "inventory" | "summary" | "al
 
 /** Human-readable labels, accent colours, and column counts for the tab bar */
 export const POS_GROUP_META: Record<Exclude<PosColumnGroup, "all">, { label: string; color: string; count: number }> = {
-  overview: { label: "Overview", color: "#0ECB81", count: 48 },
+  overview: { label: "Overview", color: "#0ECB81", count: 49 },
   info: { label: "Info", color: "#FF9F1C", count: 12 },
   summary: { label: "Summary", color: "#A855F7", count: 17 },
   inventory: { label: "Inventory", color: "#FFD700", count: 9 },
@@ -61,6 +61,7 @@ export interface PosMasterRow {
   theo_prc_t: number | null;
   theo_prc_t_1: number | null;
   delta_t: number | null;
+  gamma_t: number | null;
   delta_lots_t: number | null;
   delta_cash_t: number | null;
   delta_cash_t_1: number | null;
@@ -185,6 +186,7 @@ export const CW_RELATED_KEYS = new Set([
   "theo_prc_t",
   "theo_prc_t_1",
   "delta_t",
+  "gamma_t",
   "delta_lots_t",
   "delta_cash_t",
   "delta_cash_t_1",
@@ -226,7 +228,7 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
       new ColumnBase<PosMasterRow>({
         key: "ticker",
         header: "Ticker",
-        widthPx: 90,
+        widthPx: 130,
         align: "left",
         color: (row: PosMasterRow) => {
           const prc = row.last_prc_t !== null && row.last_prc_t !== undefined ? parseFloat(String(row.last_prc_t)) : 0;
@@ -570,6 +572,16 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         color: colors.increase,
       }),
 
+      // 28b. Gamma(T)
+      new ColumnBase<PosMasterRow>({
+        key: "gamma_t",
+        header: "Gamma",
+        widthPx: 85,
+        align: "right",
+        format: (v) => (this.activeGroup === "summary" ? formatNum(v, 2) : formatNum(v, 6)),
+        color: colors.increase,
+      }),
+
       // 29. DeltaLots(T) (Col 36) - strictly 1 decimal place
       new ColumnBase<PosMasterRow>({
         key: "delta_lots_t",
@@ -870,10 +882,11 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
     summary: [
       "ticker",
       "delta_t",
-      "gamma_amt_pct_t",
+      "gamma_t",
       "vega_pct_t",
       "theta_t",
       "delta_cash_t",
+      "gamma_amt_pct_t",
       "cash_vega_t",
       "cash_theta_t",
       "delta_pnl",
@@ -900,8 +913,12 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
     if (group === "overview") {
       return cols.filter((c) => !hiddenDefault.has(c.key));
     }
-    const allowed = new Set(PosMasterTable.GROUP_KEYS[group]);
-    return cols.filter((c) => allowed.has(c.key) && !hiddenDefault.has(c.key));
+    const keyOrder = PosMasterTable.GROUP_KEYS[group];
+    const orderMap = new Map(keyOrder.map((k, i) => [k, i]));
+    const allowed = new Set(keyOrder);
+    return cols
+      .filter((c) => allowed.has(c.key) && !hiddenDefault.has(c.key))
+      .sort((a, b) => (orderMap.get(a.key) ?? 999) - (orderMap.get(b.key) ?? 999));
   }
 
   getColumns(): ColumnBase<PosMasterRow>[] {

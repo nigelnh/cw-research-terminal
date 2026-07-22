@@ -274,45 +274,15 @@ const TreeCell = React.memo(
 );
 
 /**
- * Calculates optimal column width based on the header text length
- * and the maximum length of formatted data values across all rows.
- * Accounts for child row indentation and dot markers on Ticker column.
+ * Calculates a fixed, non-fluctuating column width based on the column's defined widthPx
+ * and header text length. Does NOT depend on live row data lengths so columns never fluctuate.
  */
-export function calculateOptimalColumnWidth(col: any, flatRows: any[]): number {
+export function calculateOptimalColumnWidth(col: any, _flatRows?: any[]): number {
   const minWidth = 70;
-  const maxWidth = 250;
-  
-  // 1. Calculate width needed for the Header
+  const baseWidth = col.widthPx || 90;
   const headerText = col.header || "";
-  const headerWidth = headerText.length * 7.8 + 24;
-
-  // 2. Calculate width needed for the cell contents
-  let maxCellWidth = 0;
-  for (const item of flatRows) {
-    const row = item.row;
-    const displayVal = col.getDisplayValue(row);
-    if (displayVal) {
-      let charWidth = displayVal.length * 7.2;
-      
-      // Indentation for child (CW) rows in the Ticker column: padding-left: 25px instead of 8px (+17px)
-      if (col.key === "ticker" && !item.isParent) {
-        charWidth += 17;
-      }
-      
-      // Dividend indicator dot next to ticker symbol (+15px)
-      if (col.key === "ticker" && row.div_d > 0) {
-        charWidth += 15;
-      }
-      
-      if (charWidth > maxCellWidth) {
-        maxCellWidth = charWidth;
-      }
-    }
-  }
-  
-  const cellDataWidth = maxCellWidth + 20; // 20px basic cell padding/safety
-
-  return Math.max(minWidth, Math.min(maxWidth, Math.max(headerWidth, cellDataWidth)));
+  const headerWidth = headerText.length * 8 + 24;
+  return Math.max(minWidth, baseWidth, headerWidth);
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -367,7 +337,7 @@ export function PosMasterTreeView({
   }, [posColumnGroup, hiddenColumns]);
 
   // ── Layout mode ──
-  const isFlexLayout = columns.length <= 20;
+  const isFlexLayout = posColumnGroup !== "overview" && columns.length <= 20;
 
   // ── Build flat tree ───────────────────────────────────────────────────────
   const flatRows = useMemo((): FlatRow[] => {
@@ -540,10 +510,10 @@ export function PosMasterTreeView({
   const columnWidths = useMemo(() => {
     const widths: Record<string, number> = {};
     columns.forEach((col) => {
-      widths[col.key] = calculateOptimalColumnWidth(col, flatRows);
+      widths[col.key] = calculateOptimalColumnWidth(col);
     });
     return widths;
-  }, [columns, flatRows]);
+  }, [columns]);
 
   const totalColumnsWidth = useMemo(() => {
     return columns.reduce((sum, col) => {
