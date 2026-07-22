@@ -619,8 +619,6 @@ export function App() {
       const soldAmt = row.sold_amt !== null ? parseFloat(row.sold_amt) : 0;
       const boughtQty = row.bought_qty !== null ? parseInt(row.bought_qty, 10) : 0;
       const boughtAmt = row.bought_amt !== null ? parseFloat(row.bought_amt) : 0;
-      const ewmaVol = row.hedge_v_t !== null ? parseFloat(row.hedge_v_t) : 0.3250;
-      const ewmaVolT1 = row.hedge_v_t_1 !== null ? parseFloat(row.hedge_v_t) : 0.3250;
 
       // 2. Derived trade averages
       const soldAvg = soldQty > 0 ? soldAmt / soldQty : 0;
