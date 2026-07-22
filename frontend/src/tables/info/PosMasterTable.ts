@@ -646,7 +646,22 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "%GammaAmt(T)",
         widthPx: 95,
         align: "right",
-        format: (v) => formatPct(v, this.activeGroup === "summary" ? 2 : 4),
+        format: (v) => {
+          if (v === null || v === undefined || v === "") return "N/A";
+
+          const num = typeof v === "number" ? v : parseFloat(String(v));
+          if (isNaN(num)) return "N/A";
+
+          // Convert decimal ratio to percentage value, but do not append "%"
+          const pctVal = num * 100;
+          const decimals = this.activeGroup === "summary" ? 2 : 4;
+          const effDec = getEffectiveDecimals(pctVal, decimals);
+
+          return pctVal.toLocaleString(undefined, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: effDec,
+          });
+        },
         color: colors.increase,
       }),
 
@@ -656,7 +671,22 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "%Vega(T)",
         widthPx: 80,
         align: "right",
-        format: (v) => formatPct(v, this.activeGroup === "summary" ? 2 : 4),
+        format: (v) => {
+          if (v === null || v === undefined || v === "") return "N/A";
+
+          const num = typeof v === "number" ? v : parseFloat(String(v));
+          if (isNaN(num)) return "N/A";
+
+          // Convert ratio to percentage value, but do not display "%"
+          const pctVal = num * 100;
+          const decimals = this.activeGroup === "summary" ? 2 : 4;
+          const effDec = getEffectiveDecimals(pctVal, decimals);
+
+          return pctVal.toLocaleString(undefined, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: effDec,
+          });
+        },
         color: colors.increase,
       }),
 
