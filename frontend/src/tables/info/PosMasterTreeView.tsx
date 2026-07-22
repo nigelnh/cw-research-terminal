@@ -169,8 +169,12 @@ const TreeCell = React.memo(
       }
     };
 
+    const displayVal = col.getDisplayValue(row);
+    const rawVal = col.getValue(row);
+    const isValNullOrNA = displayVal === "N/A" || displayVal === "" || rawVal === null || rawVal === undefined;
+
     const getCellStyle = (): React.CSSProperties => {
-      if (flash) {
+      if (flash && !isValNullOrNA) {
         const customFlashColor = posMasterTable.getFlashColor(row, col.key, flash, getRow);
         if (customFlashColor) {
           return {
@@ -191,8 +195,6 @@ const TreeCell = React.memo(
         transition: "background-color 0.05s ease, color 0.05s ease",
       };
     };
-
-    const displayVal = col.getDisplayValue(row);
 
     // Ticker/first-col decoration
     const isTickerCol = col.key === "ticker";
@@ -414,8 +416,10 @@ export function PosMasterTreeView({
             : liveStock?.Ref ?? null;
         const lastPrcT1 = liveStock?.Ref ?? null;
 
-        const sumOf = (field: string) =>
-          children.reduce((s, r) => s + (Number(r[field]) || 0), 0) || null;
+        const sumOf = (field: string) => {
+          if (children.length === 0) return null;
+          return children.reduce((s, r) => s + (Number(r[field]) || 0), 0);
+        };
 
         parent = {
           ticker: undTicker,
@@ -430,15 +434,33 @@ export function PosMasterTreeView({
               : (lastPrcT && lastPrcT1 && lastPrcT1 > 0
                   ? lastPrcT / lastPrcT1 - 1
                   : null),
-          // Aggregated financial fields
+          // Aggregated financial & sensitivity totals across the underlying group
           balance: sumOf("balance"),
           balance_t_1: sumOf("balance_t_1"),
-          total_pnl_mtm: sumOf("total_pnl_mtm"),
-          total_pnl_theo: sumOf("total_pnl_theo"),
-          total_pnl_mtm_cum: sumOf("total_pnl_mtm_cum"),
-          total_pnl_theo_cum: sumOf("total_pnl_theo_cum"),
+          bought_qty: sumOf("bought_qty"),
+          bought_amt: sumOf("bought_amt"),
+          sold_qty: sumOf("sold_qty"),
+          sold_amt: sumOf("sold_amt"),
+          delta_lots_t: sumOf("delta_lots_t"),
           delta_cash_t: sumOf("delta_cash_t"),
-          // CW-specific fields: null (formatters will display "")
+          delta_cash_t_1: sumOf("delta_cash_t_1"),
+          trd_delta_lots_t: sumOf("trd_delta_lots_t"),
+          trd_delta_cash_t: sumOf("trd_delta_cash_t"),
+          cash_vega_t: sumOf("cash_vega_t"),
+          cash_theta_t: sumOf("cash_theta_t"),
+          position_pnl_mtm: sumOf("position_pnl_mtm"),
+          trading_pnl_mtm: sumOf("trading_pnl_mtm"),
+          total_pnl_mtm: sumOf("total_pnl_mtm"),
+          position_pnl_theo: sumOf("position_pnl_theo"),
+          trading_pnl_theo: sumOf("trading_pnl_theo"),
+          total_pnl_theo: sumOf("total_pnl_theo"),
+          delta_pnl: sumOf("delta_pnl"),
+          gamma_pnl: sumOf("gamma_pnl"),
+          theta_pnl: sumOf("theta_pnl"),
+          total_pnl_theo_cum: sumOf("total_pnl_theo_cum"),
+          total_pnl_mtm_cum: sumOf("total_pnl_mtm_cum"),
+
+          // Non-aggregated CW-specific per-warrant fields (formatters display "N/A")
           expiry: null,
           dte: null,
           tte_t: null,
@@ -449,49 +471,54 @@ export function PosMasterTreeView({
           hedge_v_t: children.length > 0 ? children[0].hedge_v_t : null,
           hedge_v_t_1: children.length > 0 ? children[0].hedge_v_t_1 : null,
           rate: null,
-          div_d: null,
+          div_d: liveStock?.DividendYield ?? null,
           fund: null,
-          sold_amt: null,
-          sold_qty: null,
           sold_avg: null,
-          bought_amt: null,
-          bought_qty: null,
           bought_avg: null,
           theo_prc_t: null,
           theo_prc_t_1: null,
           delta_t: null,
-          delta_lots_t: null,
-          delta_cash_t_1: null,
-          trd_delta_lots_t: null,
-          trd_delta_cash_t: null,
           gamma_amt_pct_t: null,
           vega_pct_t: null,
-          cash_vega_t: null,
           theta_t: null,
-          cash_theta_t: null,
-          trading_pnl_theo: null,
-          position_pnl_theo: null,
-          delta_pnl: null,
-          gamma_pnl: null,
-          theta_pnl: null,
           vega_pnl: null,
           unexplained_pnl: null,
           capital_cost: null,
-          position_pnl_mtm: null,
-          trading_pnl_mtm: null,
           _isSynthetic: true,
         };
       } else {
         // Real hedging row — add aggregated CW sub-totals alongside its own data
-        const sumOf = (field: string) =>
+        const sumOfVal = (field: string) =>
           children.reduce((s, r) => s + (Number(r[field]) || 0), 0);
         parent = {
           ...parent,
-          // For a real hedging row (stock), also add CW position summaries
-          // so the parent row gives a holistic view of that underlying group
-          _cwTotalPnlMtm: sumOf("total_pnl_mtm"),
-          _cwTotalPnlTheo: sumOf("total_pnl_theo"),
-          _cwDeltaCash: sumOf("delta_cash_t"),
+          balance: (Number(parent.balance) || 0) + sumOfVal("balance"),
+          balance_t_1: (Number(parent.balance_t_1) || 0) + sumOfVal("balance_t_1"),
+          bought_qty: (Number(parent.bought_qty) || 0) + sumOfVal("bought_qty"),
+          bought_amt: (Number(parent.bought_amt) || 0) + sumOfVal("bought_amt"),
+          sold_qty: (Number(parent.sold_qty) || 0) + sumOfVal("sold_qty"),
+          sold_amt: (Number(parent.sold_amt) || 0) + sumOfVal("sold_amt"),
+          delta_lots_t: (Number(parent.delta_lots_t) || 0) + sumOfVal("delta_lots_t"),
+          delta_cash_t: (Number(parent.delta_cash_t) || 0) + sumOfVal("delta_cash_t"),
+          delta_cash_t_1: (Number(parent.delta_cash_t_1) || 0) + sumOfVal("delta_cash_t_1"),
+          trd_delta_lots_t: (Number(parent.trd_delta_lots_t) || 0) + sumOfVal("trd_delta_lots_t"),
+          trd_delta_cash_t: (Number(parent.trd_delta_cash_t) || 0) + sumOfVal("trd_delta_cash_t"),
+          cash_vega_t: sumOfVal("cash_vega_t"),
+          cash_theta_t: sumOfVal("cash_theta_t"),
+          position_pnl_mtm: (Number(parent.position_pnl_mtm) || 0) + sumOfVal("position_pnl_mtm"),
+          trading_pnl_mtm: (Number(parent.trading_pnl_mtm) || 0) + sumOfVal("trading_pnl_mtm"),
+          total_pnl_mtm: (Number(parent.total_pnl_mtm) || 0) + sumOfVal("total_pnl_mtm"),
+          position_pnl_theo: (Number(parent.position_pnl_theo) || 0) + sumOfVal("position_pnl_theo"),
+          trading_pnl_theo: (Number(parent.trading_pnl_theo) || 0) + sumOfVal("trading_pnl_theo"),
+          total_pnl_theo: (Number(parent.total_pnl_theo) || 0) + sumOfVal("total_pnl_theo"),
+          delta_pnl: (Number(parent.delta_pnl) || 0) + sumOfVal("delta_pnl"),
+          gamma_pnl: (Number(parent.gamma_pnl) || 0) + sumOfVal("gamma_pnl"),
+          theta_pnl: (Number(parent.theta_pnl) || 0) + sumOfVal("theta_pnl"),
+          total_pnl_theo_cum: (Number(parent.total_pnl_theo_cum) || 0) + sumOfVal("total_pnl_theo_cum"),
+          total_pnl_mtm_cum: (Number(parent.total_pnl_mtm_cum) || 0) + sumOfVal("total_pnl_mtm_cum"),
+          _cwTotalPnlMtm: sumOfVal("total_pnl_mtm"),
+          _cwTotalPnlTheo: sumOfVal("total_pnl_theo"),
+          _cwDeltaCash: sumOfVal("delta_cash_t"),
         };
       }
 
