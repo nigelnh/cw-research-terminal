@@ -5,7 +5,7 @@ import { PanelTitle } from "./PanelTitle";
 import { TableView } from "@/tables/core/TableView";
 import { stockTable } from "@/tables/stock/StockTable";
 import { posMasterTable } from "@/tables/info/PosMasterTable";
-import { type PosColumnGroup, POS_GROUP_META } from "@/tables/info/PosMasterTable";
+import { type PosColumnGroup, POS_GROUP_META, DEFAULT_HIDDEN_POS_COLUMNS } from "@/tables/info/PosMasterTable";
 import { rtTradesTable } from "@/tables/info/RtTradesTable";
 import { PosMasterTreeView } from "@/tables/info/PosMasterTreeView";
 import { holidayTable } from "@/tables/info/HolidayTable";
@@ -54,11 +54,12 @@ export function App() {
       const saved = localStorage.getItem(key);
       if (saved) {
         try {
-          return JSON.parse(saved);
+          const parsed = JSON.parse(saved);
+          return Array.from(new Set([...parsed, ...DEFAULT_HIDDEN_POS_COLUMNS]));
         } catch (e) {}
       }
     }
-    return [];
+    return DEFAULT_HIDDEN_POS_COLUMNS;
   });
   const [infoHiddenColumns, setInfoHiddenColumns] = useState<string[]>(() => {
     if (typeof window !== "undefined") {
@@ -758,8 +759,16 @@ export function App() {
       const deltaPnl = deltaCashT1 * stockReturn;
       const gammaPnl = 0.5 * Math.pow(stockReturn, 2) * Math.pow(spotS_t, 2) * gammaAmtPctT1 * balanceT1;
 
-      // thetapnl = average(Theta(T-1), Theta(T)) * DailyDecay
-      const thetaPnl = 0.5 * (thetaT1 + thetaT) * balanceT1 * m;
+      // %GammaAmt(T) = ((Delta(S * 1.0001) - Delta(S * 0.9999)) / 0.0002) * 0.01 * S * Balance
+      let gammaAmtPctT = 0;
+      if (strikeK && tteT !== null && spotS_t > 0) {
+        const delta_up = (bsCallPrice(spotS_t * 1.0001 * 1.0001, strikeK, tteT, rate, sigma) - bsCallPrice(spotS_t * 1.0001 * 0.9999, strikeK, tteT, rate, sigma)) / (spotS_t * 1.0001 * 0.0002);
+        const delta_down = (bsCallPrice(spotS_t * 0.9999 * 1.0001, strikeK, tteT, rate, sigma) - bsCallPrice(spotS_t * 0.9999 * 0.9999, strikeK, tteT, rate, sigma)) / (spotS_t * 0.9999 * 0.0002);
+        gammaAmtPctT = ((delta_up - delta_down) / 0.0002) * 0.01 * spotS_t * balance;
+      }
+
+      // thetapnl = 0.5 * (Theta(T-1) + Theta(T)) * DailyDecay(X)
+      const thetaPnl = 0.5 * (thetaT1 + thetaT) * m;
 
       // vegapnl is pre-calculated using dynamic vol traded and saved in the database
       const vegaPnl = row.vega_pnl !== null ? parseFloat(row.vega_pnl) : 0;
@@ -795,6 +804,7 @@ export function App() {
         delta_cash_t_1: deltaCashT1,
         trd_delta_lots_t: trdDeltaLotsT,
         trd_delta_cash_t: trdDeltaCashT,
+        gamma_amt_pct_t: gammaAmtPctT,
         vega_pct_t: vegaPctT,
         cash_vega_t: cashVegaT,
         theta_t: thetaT,
@@ -1229,7 +1239,7 @@ export function App() {
               (() => {
                 posMasterTable.activeGroup = posColumnGroup;
                 const hiddenColsList = [
-                  // Hide columns NOT in the active group, plus manually hidden ones
+                  // Hide columns NOT in the active group, plus manually hidden ones and default hidden columns
                   ...posMasterTable
                     .getColumns()
                     .filter(
@@ -1240,6 +1250,7 @@ export function App() {
                     )
                     .map((c) => c.key),
                   ...infoHiddenColumns,
+                  ...DEFAULT_HIDDEN_POS_COLUMNS,
                 ];
                 return (
                   <PosMasterTreeView
