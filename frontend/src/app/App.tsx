@@ -619,6 +619,8 @@ export function App() {
       const soldAmt = row.sold_amt !== null ? parseFloat(row.sold_amt) : 0;
       const boughtQty = row.bought_qty !== null ? parseInt(row.bought_qty, 10) : 0;
       const boughtAmt = row.bought_amt !== null ? parseFloat(row.bought_amt) : 0;
+      const ewmaVol = row.hedge_v_t !== null ? parseFloat(row.hedge_v_t) : 0.3250;
+      const ewmaVolT1 = row.hedge_v_t_1 !== null ? parseFloat(row.hedge_v_t) : 0.3250;
 
       // 2. Derived trade averages
       const soldAvg = soldQty > 0 ? soldAmt / soldQty : 0;
@@ -667,8 +669,8 @@ export function App() {
       if (strikeK && tteT !== null && tteT1 !== null) {
         theoPrcT = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma, ratioNum) / ratioNum;
         theoPrcT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigma, ratioNum) / ratioNum;
-        const priceVolUp = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma + 0.0001, ratioNum) / ratioNum;
-        const priceVolDown = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma - 0.0001, ratioNum) / ratioNum;
+        const priceVolUp = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma + 0.0001, ratioNum);
+        const priceVolDown = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma - 0.0001, ratioNum);
         vegaPctT = (priceVolUp - priceVolDown) / 0.02;
         const newT = Math.max(tteT - 1 / 365, 0.0001);
         const priceNewT = bsCallPrice(spotS_t, strikeK, newT, rate, sigma, ratioNum) / ratioNum;
