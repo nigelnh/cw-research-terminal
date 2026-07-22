@@ -759,12 +759,15 @@ export function App() {
       const deltaPnl = deltaCashT1 * stockReturn;
       const gammaPnl = 0.5 * Math.pow(stockReturn, 2) * Math.pow(spotS_t, 2) * gammaAmtPctT1 * balanceT1;
 
-      // %GammaAmt(T) = ((Delta(S * 1.0001) - Delta(S * 0.9999)) / 0.0002) * 0.01 * S * Balance
+      // Gamma(T) = (Delta(S * 1.0001) - Delta(S * 0.9999)) / (S * 0.0002)
+      // %GammaAmt(T) = Gamma(T) * 0.01 * S * Balance
+      let gammaT: number | null = null;
       let gammaAmtPctT = 0;
       if (strikeK && tteT !== null && spotS_t > 0) {
         const delta_up = (bsCallPrice(spotS_t * 1.0001 * 1.0001, strikeK, tteT, rate, sigma) - bsCallPrice(spotS_t * 1.0001 * 0.9999, strikeK, tteT, rate, sigma)) / (spotS_t * 1.0001 * 0.0002);
         const delta_down = (bsCallPrice(spotS_t * 0.9999 * 1.0001, strikeK, tteT, rate, sigma) - bsCallPrice(spotS_t * 0.9999 * 0.9999, strikeK, tteT, rate, sigma)) / (spotS_t * 0.9999 * 0.0002);
-        gammaAmtPctT = ((delta_up - delta_down) / 0.0002) * 0.01 * spotS_t * balance;
+        gammaT = (delta_up - delta_down) / (spotS_t * 0.0002);
+        gammaAmtPctT = gammaT * 0.01 * spotS_t * balance;
       }
 
       // thetapnl = 0.5 * (Theta(T-1) + Theta(T)) * DailyDecay(X)
@@ -787,6 +790,7 @@ export function App() {
         net_chg_pct: netChgPct !== null ? String(netChgPct) : null,
         spot_prc_s: spotPrcS !== null ? String(spotPrcS) : null,
         delta_t: deltaT !== null ? String(deltaT) : null,
+        gamma_t: gammaT,
 
         balance_t_1: balanceT1,
         balance: balance,
@@ -849,6 +853,7 @@ export function App() {
     "theo_prc_t",
     "theo_prc_t_1",
     "delta_t",
+    "gamma_t",
     "delta_lots_t",
     "delta_cash_t",
     "delta_cash_t_1",
