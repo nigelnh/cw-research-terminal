@@ -665,20 +665,29 @@ export function App() {
       let deltaT1 = 1.0; // Default delta = 1 for stocks/indexes
 
       if (strikeK && tteT !== null && tteT1 !== null) {
-        theoPrcT = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma, ratioNum);
-        theoPrcT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigma, ratioNum);
-        const priceVolUp = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma + 0.0001, ratioNum);
-        const priceVolDown = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma - 0.0001, ratioNum);
-        vegaPctT = (priceVolUp - priceVolDown) / 0.02;
-        const newT = Math.max(tteT - 1 / 365, 0.0001);
-        const priceNewT = bsCallPrice(spotS_t, strikeK, newT, rate, sigma, ratioNum);
-        thetaT = priceNewT - theoPrcT;
+        if (lastPrcT && lastPrcT > 0) {
+          theoPrcT = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma, ratioNum);
+          theoPrcT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigma, ratioNum);
+          const priceVolUp = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma + 0.0001, ratioNum);
+          const priceVolDown = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma - 0.0001, ratioNum);
+          vegaPctT = (priceVolUp - priceVolDown) / 0.02;
+          const newT = Math.max(tteT - 1 / 365, 0.0001);
+          const priceNewT = bsCallPrice(spotS_t, strikeK, newT, rate, sigma, ratioNum);
+          thetaT = priceNewT - theoPrcT;
 
-        // Calculate Delta using analytical formula:
-        deltaT = bsCallDelta(spotS_t, strikeK, tteT, rate, sigma) / ratioNum;
+          // Calculate Delta using analytical formula:
+          deltaT = bsCallDelta(spotS_t, strikeK, tteT, rate, sigma) / ratioNum;
 
-        // Calculate Yesterday's Delta using analytical formula:
-        deltaT1 = bsCallDelta(spotS_t_1, strikeK, tteT1, rate, sigmaT1) / ratioNum;
+          // Calculate Yesterday's Delta using analytical formula:
+          deltaT1 = bsCallDelta(spotS_t_1, strikeK, tteT1, rate, sigmaT1) / ratioNum;
+        } else {
+          theoPrcT = 0;
+          theoPrcT1 = 0;
+          vegaPctT = 0;
+          thetaT = 0;
+          deltaT = 0;
+          deltaT1 = 0;
+        }
       }
       const deltaLotsT = deltaT * balance;
       const deltaCashT = spotS_t * deltaLotsT;
