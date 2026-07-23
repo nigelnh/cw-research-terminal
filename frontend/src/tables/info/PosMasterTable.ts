@@ -677,12 +677,11 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
           const num = typeof v === "number" ? v : parseFloat(String(v));
           if (isNaN(num)) return "N/A";
 
-          // Convert ratio to percentage value, but do not display "%"
-          const pctVal = num * 100;
+          // Raw value is already the price change in VND for a 1% vol change
           const decimals = this.activeGroup === "summary" ? 2 : 4;
-          const effDec = getEffectiveDecimals(pctVal, decimals);
+          const effDec = getEffectiveDecimals(num, decimals);
 
-          return pctVal.toLocaleString(undefined, {
+          return num.toLocaleString(undefined, {
             minimumFractionDigits: 0,
             maximumFractionDigits: effDec,
           });
