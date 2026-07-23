@@ -665,23 +665,20 @@ export function App() {
       let deltaT1 = 1.0; // Default delta = 1 for stocks/indexes
 
       if (strikeK && tteT !== null && tteT1 !== null) {
-        theoPrcT = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma, ratioNum) / ratioNum;
-        theoPrcT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigma, ratioNum) / ratioNum;
+        theoPrcT = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma, ratioNum);
+        theoPrcT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigma, ratioNum);
         const priceVolUp = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma + 0.0001, ratioNum);
         const priceVolDown = bsCallPrice(spotS_t, strikeK, tteT, rate, sigma - 0.0001, ratioNum);
         vegaPctT = (priceVolUp - priceVolDown) / 0.02;
         const newT = Math.max(tteT - 1 / 365, 0.0001);
-        const priceNewT = bsCallPrice(spotS_t, strikeK, newT, rate, sigma, ratioNum) / ratioNum;
+        const priceNewT = bsCallPrice(spotS_t, strikeK, newT, rate, sigma, ratioNum);
         thetaT = priceNewT - theoPrcT;
 
-        // Calculate Delta using finite difference on Call Option Price:
-        // (CallPrice(S * 1.0001) - CallPrice(S * 0.9999)) / (S * 0.0002)
-        const priceUp = bsCallPrice(spotS_t * 1.0001, strikeK, tteT, rate, sigma, ratioNum);
-        const priceDown = bsCallPrice(spotS_t * 0.9999, strikeK, tteT, rate, sigma, ratioNum);
-        deltaT = (priceUp - priceDown) / (spotS_t * 0.0002);
+        // Calculate Delta using analytical formula:
+        deltaT = bsCallDelta(spotS_t, strikeK, tteT, rate, sigma) / ratioNum;
 
-        // Calculate Yesterday's Delta
-        deltaT1 = bsCallPrice(spotS_t_1, strikeK, tteT1, rate, sigmaT1, ratioNum);
+        // Calculate Yesterday's Delta using analytical formula:
+        deltaT1 = bsCallDelta(spotS_t_1, strikeK, tteT1, rate, sigmaT1) / ratioNum;
       }
       const deltaLotsT = deltaT * balance;
       const deltaCashT = spotS_t * deltaLotsT;
@@ -753,12 +750,12 @@ export function App() {
         // Gamma yesterday
         const delta_up_1 = bsCallDelta(spotS_t_1 * 1.0001, strikeK, tteT1, rate, sigmaT1);
         const delta_down_1 = bsCallDelta(spotS_t_1 * 0.9999, strikeK, tteT1, rate, sigmaT1);
-        const gammaOption_1 = (delta_up_1 - delta_down_1) / 0.0002;
+        const gammaOption_1 = (delta_up_1 - delta_down_1) / (spotS_t_1 * 0.0002);
         gammaAmtPctT1 = gammaOption_1 / ratioNum;
 
         // Theta yesterday
         const newT1 = Math.max(tteT1 - 1 / 365, 0.0001);
-        const priceNewT1 = bsCallPrice(spotS_t_1, strikeK, newT1, rate, sigmaT1, ratioNum) / ratioNum;
+        const priceNewT1 = bsCallPrice(spotS_t_1, strikeK, newT1, rate, sigmaT1, ratioNum);
         thetaT1 = priceNewT1 - theoPrcT1;
       }
 
@@ -776,17 +773,17 @@ export function App() {
 
       const stockReturn = spotS_t_1 > 0 ? (spotS_t - spotS_t_1) / spotS_t_1 : 0;
       const deltaPnl = deltaCashT1 * stockReturn;
-      const gammaPnl = 0.5 * Math.pow(stockReturn, 2) * Math.pow(spotS_t, 2) * gammaAmtPctT1 * balanceT1;
+      const gammaPnl = 0.5 * Math.pow(stockReturn, 2) * Math.pow(spotS_t_1, 2) * gammaAmtPctT1 * balanceT1;
 
       // Gamma(T) = (Delta(S * 1.0001) - Delta(S * 0.9999)) / (S * 0.0002)
-      // %GammaAmt(T) = Gamma(T) * 0.01 * S * Balance
+      // %GammaAmt(T) = Gamma(T) * 0.01 * S^2 * Balance
       let gammaT: number | null = null;
       let gammaAmtPctT = 0;
       if (strikeK && tteT !== null && spotS_t > 0) {
-        const delta_up = (bsCallPrice(spotS_t * 1.0001 * 1.0001, strikeK, tteT, rate, sigma, ratioNum) - bsCallPrice(spotS_t * 1.0001 * 0.9999, strikeK, tteT, rate, sigma, ratioNum)) / (spotS_t * 1.0001 * 0.0002);
-        const delta_down = (bsCallPrice(spotS_t * 0.9999 * 1.0001, strikeK, tteT, rate, sigma, ratioNum) - bsCallPrice(spotS_t * 0.9999 * 0.9999, strikeK, tteT, rate, sigma, ratioNum)) / (spotS_t * 0.9999 * 0.0002);
+        const delta_up = bsCallDelta(spotS_t * 1.0001, strikeK, tteT, rate, sigma) / ratioNum;
+        const delta_down = bsCallDelta(spotS_t * 0.9999, strikeK, tteT, rate, sigma) / ratioNum;
         gammaT = (delta_up - delta_down) / (spotS_t * 0.0002);
-        gammaAmtPctT = gammaT * 0.01 * spotS_t * balance;
+        gammaAmtPctT = gammaT * 0.01 * Math.pow(spotS_t, 2) * balance;
       }
 
       // thetapnl = 0.5 * (Theta(T-1) + Theta(T)) * DailyDecay(X)
