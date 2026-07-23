@@ -807,6 +807,57 @@ export function App() {
       const totalPnlTheoCum = totalPnlTheo;
       const totalPnlMtmCum = totalPnlMtm;
 
+      const isMockWarrant = !isHedging && (strikeK === null || strikeK === undefined || strikeK <= 0);
+      if (isMockWarrant) {
+        return {
+          ...row,
+          cvr: null,
+          expiry: null,
+          dte: null,
+          strike_k: null,
+          hedge_v_t: null,
+          hedge_v_t_1: null,
+          rate: null,
+          spot_prc_s: null,
+          last_prc_t: null,
+          last_prc_t_1: null,
+          net_chg_pct: null,
+          balance: 0,
+          balance_t_1: 0,
+          sold_qty: 0,
+          sold_amt: 0,
+          sold_avg: 0,
+          bought_qty: 0,
+          bought_amt: 0,
+          bought_avg: 0,
+          theo_prc_t: 0,
+          theo_prc_t_1: 0,
+          delta_lots_t: 0,
+          delta_cash_t: 0,
+          delta_cash_t_1: 0,
+          trd_delta_lots_t: 0,
+          trd_delta_cash_t: 0,
+          gamma_amt_pct_t: 0,
+          vega_pct_t: 0,
+          cash_vega_t: 0,
+          theta_t: 0,
+          cash_theta_t: 0,
+          position_pnl_mtm: 0,
+          trading_pnl_mtm: 0,
+          total_pnl_mtm: 0,
+          position_pnl_theo: 0,
+          trading_pnl_theo: 0,
+          total_pnl_theo: 0,
+          delta_pnl: 0,
+          gamma_pnl: 0,
+          theta_pnl: 0,
+          vega_pnl: 0,
+          unexplained_pnl: 0,
+          total_pnl_theo_cum: 0,
+          total_pnl_mtm_cum: 0,
+        };
+      }
+
       return {
         ...row,
         cvr: cvrVal,
