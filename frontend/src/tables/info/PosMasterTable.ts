@@ -586,7 +586,13 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "Gamma",
         widthPx: 85,
         align: "right",
-        format: (v) => (this.activeGroup === "summary" ? formatNum(v, 2) : formatNum(v, 6)),
+        format: (v) => {
+          if (v === null || v === undefined || v === "") return "N/A";
+          const num = typeof v === "number" ? v : parseFloat(String(v));
+          if (isNaN(num)) return "N/A";
+          const scaled = num * 1000;
+          return this.activeGroup === "summary" ? formatNum(scaled, 2) : formatNum(scaled, 6);
+        },
         color: colors.increase,
       }),
 
@@ -677,11 +683,12 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
           const num = typeof v === "number" ? v : parseFloat(String(v));
           if (isNaN(num)) return "N/A";
 
-          // Raw value is already the price change in VND for a 1% vol change
+          // Divide by 1000 to display in thousands of VND (matching UI warrant price scale)
+          const scaled = num / 1000;
           const decimals = this.activeGroup === "summary" ? 2 : 4;
-          const effDec = getEffectiveDecimals(num, decimals);
+          const effDec = getEffectiveDecimals(scaled, decimals);
 
-          return num.toLocaleString(undefined, {
+          return scaled.toLocaleString(undefined, {
             minimumFractionDigits: 0,
             maximumFractionDigits: effDec,
           });
@@ -705,7 +712,14 @@ export class PosMasterTable extends TableBase<Record<string, unknown> & PosMaste
         header: "Theta(T)",
         widthPx: 90,
         align: "right",
-        format: (v) => formatNum(v, this.activeGroup === "summary" ? 2 : 6),
+        format: (v) => {
+          if (v === null || v === undefined || v === "") return "N/A";
+          const num = typeof v === "number" ? v : parseFloat(String(v));
+          if (isNaN(num)) return "N/A";
+          // Divide by 1000 to display in thousands of VND (matching UI warrant price scale)
+          const scaled = num / 1000;
+          return formatNum(scaled, this.activeGroup === "summary" ? 2 : 6);
+        },
         color: colors.increase,
       }),
 
