@@ -105,10 +105,10 @@ const formatNum = (v: unknown, decimals: number = 2, minDecimals: number = 0): s
   if (v === null || v === undefined || v === "") return "N/A";
   const num = typeof v === "number" ? v : parseFloat(String(v));
   if (isNaN(num)) return "N/A";
-  if (num === 0) return minDecimals > 0 ? "0".padStart(minDecimals + 2, "0.") : "0";
+  if (num === 0) return num.toFixed(minDecimals);
   const effDec = getEffectiveDecimals(num, decimals);
   const res = num.toLocaleString(undefined, { minimumFractionDigits: minDecimals, maximumFractionDigits: effDec });
-  if (res === "-0" || res === "-0.00" || res === "-0.0") return minDecimals > 0 ? "0".padStart(minDecimals + 2, "0.") : "0";
+  if (parseFloat(res) === 0) return (0).toFixed(minDecimals);
   return res;
 };
 
