@@ -37,7 +37,7 @@ performance_test_cw.js
 docs/
 
 # tests
-tests/
+/tests/
 
 # .agents
 .agents/

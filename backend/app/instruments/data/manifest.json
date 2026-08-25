@@ -1,0 +1,10 @@
+{
+  "snapshot_updated_at": "2026-08-25T10:20:53.038709+07:00",
+  "total_instruments": 533,
+  "verified_active_count": 14,
+  "verified_expired_count": 3,
+  "unknown_lifecycle_count": 516,
+  "metadata_complete_count": 17,
+  "metadata_partial_count": 516,
+  "provenance_description": "Canonical cached metadata snapshot refreshed via public broker search & manual canonical curation"
+}

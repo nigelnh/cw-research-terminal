@@ -1,0 +1,18 @@
+[
+  { "symbol": "HPG", "date": "2024-05-15", "close": 28800, "rawClose": 28800 },
+  { "symbol": "HPG", "date": "2024-05-16", "close": 29100, "rawClose": 29100 },
+  { "symbol": "HPG", "date": "2024-05-17", "close": 29200, "rawClose": 29200 },
+  { "symbol": "HPG", "date": "2024-05-20", "close": 29500, "rawClose": 29500 },
+  { "symbol": "FPT", "date": "2024-05-15", "close": 128000, "rawClose": 128000 },
+  { "symbol": "FPT", "date": "2024-05-16", "close": 130000, "rawClose": 130000 },
+  { "symbol": "FPT", "date": "2024-05-17", "close": 130500, "rawClose": 130500 },
+  { "symbol": "FPT", "date": "2024-05-20", "close": 132000, "rawClose": 132000 },
+  { "symbol": "MWG", "date": "2024-05-15", "close": 63500, "rawClose": 63500 },
+  { "symbol": "MWG", "date": "2024-05-16", "close": 64200, "rawClose": 64200 },
+  { "symbol": "MWG", "date": "2024-05-17", "close": 64500, "rawClose": 64500 },
+  { "symbol": "MWG", "date": "2024-05-20", "close": 65000, "rawClose": 65000 },
+  { "symbol": "VIC", "date": "2024-05-15", "close": 44200, "rawClose": 44200 },
+  { "symbol": "VIC", "date": "2024-05-16", "close": 43800, "rawClose": 43800 },
+  { "symbol": "VIC", "date": "2024-05-17", "close": 43500, "rawClose": 43500 },
+  { "symbol": "VIC", "date": "2024-05-20", "close": 43000, "rawClose": 43000 }
+]

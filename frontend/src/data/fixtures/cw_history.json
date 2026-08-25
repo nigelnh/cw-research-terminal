@@ -1,0 +1,10 @@
+[
+  { "symbol": "CHPG2401", "date": "2024-05-15", "open": 1150, "high": 1200, "low": 1120, "close": 1180, "volume": 320000, "value": 377600000 },
+  { "symbol": "CHPG2401", "date": "2024-05-16", "open": 1190, "high": 1240, "low": 1170, "close": 1220, "volume": 410000, "value": 500200000 },
+  { "symbol": "CHPG2401", "date": "2024-05-17", "open": 1230, "high": 1280, "low": 1210, "close": 1250, "volume": 380000, "value": 475000000 },
+  { "symbol": "CHPG2401", "date": "2024-05-20", "open": 1280, "high": 1380, "low": 1260, "close": 1350, "volume": 450000, "value": 603000000 },
+  { "symbol": "CFPT2401", "date": "2024-05-15", "open": 2800, "high": 2950, "low": 2780, "close": 2900, "volume": 150000, "value": 435000000 },
+  { "symbol": "CFPT2401", "date": "2024-05-16", "open": 2920, "high": 3050, "low": 2900, "close": 3000, "volume": 180000, "value": 540000000 },
+  { "symbol": "CFPT2401", "date": "2024-05-17", "open": 3020, "high": 3100, "low": 2980, "close": 3000, "volume": 160000, "value": 480000000 },
+  { "symbol": "CFPT2401", "date": "2024-05-20", "open": 3050, "high": 3250, "low": 3020, "close": 3200, "volume": 210000, "value": 661500000 }
+]

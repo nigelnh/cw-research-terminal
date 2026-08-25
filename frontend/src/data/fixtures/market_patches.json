@@ -1,0 +1,104 @@
+[
+  {
+    "symbol": "CHPG2401",
+    "patch": {
+      "Traded": 1360,
+      "Traded_Qty": 5000,
+      "Bid1_Prc": 1350,
+      "Bid1_Qty": 28000,
+      "Ask1_Prc": 1370,
+      "Ask1_Qty": 36000,
+      "Total_Vol": 455000,
+      "Trading_Val": 609800000,
+      "change": 110,
+      "ChangePercent": 8.80,
+      "Vol2": 0.321,
+      "_ts_source": 1716200001000
+    }
+  },
+  {
+    "symbol": "CFPT2401",
+    "patch": {
+      "Traded": 3220,
+      "Traded_Qty": 3000,
+      "Bid1_Prc": 3200,
+      "Bid1_Qty": 21000,
+      "Ask1_Prc": 3240,
+      "Ask1_Qty": 19000,
+      "Total_Vol": 213000,
+      "Trading_Val": 671160000,
+      "change": 220,
+      "ChangePercent": 7.33,
+      "Vol2": 0.287,
+      "_ts_source": 1716200002000
+    }
+  },
+  {
+    "symbol": "CHPG2402",
+    "patch": {
+      "Traded": 760,
+      "Traded_Qty": 10000,
+      "Bid1_Prc": 750,
+      "Bid1_Qty": 42000,
+      "Ask1_Prc": 770,
+      "Ask1_Qty": 55000,
+      "Total_Vol": 630000,
+      "Trading_Val": 469500000,
+      "change": 60,
+      "ChangePercent": 8.57,
+      "Vol2": 0.343,
+      "_ts_source": 1716200003000
+    }
+  },
+  {
+    "symbol": "CMWG2401",
+    "patch": {
+      "Traded": 1460,
+      "Traded_Qty": 4000,
+      "Bid1_Prc": 1450,
+      "Bid1_Qty": 31000,
+      "Ask1_Prc": 1470,
+      "Ask1_Qty": 33000,
+      "Total_Vol": 314000,
+      "Trading_Val": 453790000,
+      "change": 60,
+      "ChangePercent": 4.29,
+      "Vol2": 0.331,
+      "_ts_source": 1716200004000
+    }
+  },
+  {
+    "symbol": "CFPT2402",
+    "patch": {
+      "Traded": 1860,
+      "Traded_Qty": 8000,
+      "Bid1_Prc": 1850,
+      "Bid1_Qty": 19000,
+      "Ask1_Prc": 1870,
+      "Ask1_Qty": 22000,
+      "Total_Vol": 188000,
+      "Trading_Val": 349680000,
+      "change": 60,
+      "ChangePercent": 3.33,
+      "Vol2": 0.312,
+      "_ts_source": 1716200005000
+    }
+  },
+  {
+    "symbol": "CVIC2401",
+    "patch": {
+      "Traded": 470,
+      "Traded_Qty": 15000,
+      "Bid1_Prc": 460,
+      "Bid1_Qty": 40000,
+      "Ask1_Prc": 480,
+      "Ask1_Qty": 48000,
+      "Total_Vol": 435000,
+      "Trading_Val": 210750000,
+      "change": -30,
+      "ChangePercent": -6.0,
+      "Vol2": 0.368,
+      "_ts_source": 1716200006000
+    }
+  }
+]

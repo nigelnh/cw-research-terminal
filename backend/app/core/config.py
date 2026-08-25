@@ -1,0 +1,58 @@
+import os
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
+
+# Determine project root (.env location)
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = BACKEND_DIR.parent
+
+class Settings(BaseSettings):
+    # Application Mode & Ports
+    ENVIRONMENT: str = Field(default="development", description="Runtime environment")
+    PORT: int = Field(default=8501, description="Backend service port")
+    HOST: str = Field(default="0.0.0.0", description="Bind host")
+
+    # AI Service Configuration
+    AI_ENABLED: bool = Field(default=True, description="Enable AI research assistant")
+    OPENROUTER_API_KEY: str = Field(default="", description="OpenRouter API Key (Server-Side Only)")
+    OPENROUTER_MODEL: str = Field(default="stealth/ox-alpha", description="Target OpenRouter model")
+    OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter Base URL")
+    OPENROUTER_SITE_URL: str = Field(default="https://github.com/nigelnh/cw-research-platform", description="App Site URL header")
+    OPENROUTER_APP_NAME: str = Field(default="CW Research Platform", description="App Name header")
+
+    # Request Bounds & Limits
+    AI_MAX_MESSAGES: int = Field(default=20, description="Max conversation turns accepted")
+    AI_MAX_MESSAGE_LENGTH: int = Field(default=4000, description="Max characters per single message")
+    AI_TIMEOUT_SECONDS: float = Field(default=60.0, description="HTTP timeout for AI inference")
+    AI_TEMPERATURE: float = Field(default=0.2, description="Sampling temperature for quantitative research")
+
+    # Market Data Provider Configuration (FiinQuant)
+    MARKET_DATA_PROVIDER: str = Field(default="fiinquant", description="Active provider: 'fiinquant' | 'mock'")
+    FIINQUANT_USERNAME: str = Field(default="", description="FiinQuant account username (server-side only)")
+    FIINQUANT_PASSWORD: str = Field(default="", description="FiinQuant account password (server-side only)")
+    FIINQUANT_MAX_REALTIME_SYMBOLS: int = Field(default=33, description="Maximum realtime subscription capacity")
+    FIINQUANT_ENABLED: bool = Field(default=True, description="Enable live FiinQuant upstream connection")
+    FIINQUANT_DEBOUNCE_MS: int = Field(default=300, description="Subscription debounce delay in milliseconds")
+
+    # Quantitative Engine Configuration
+    QUANT_RISK_FREE_RATE: float = Field(default=0.05, description="Default annual risk-free interest rate (5.0%)")
+    QUANT_DIVIDEND_YIELD: float = Field(default=0.0, description="Default annual dividend yield assumption (0.0%)")
+    QUANT_HV_LOOKBACK_DAYS: int = Field(default=30, description="Default Historical Volatility lookback window")
+    QUANT_IV_MAX_ITERATIONS: int = Field(default=100, description="Max iterations for IV root solver")
+    QUANT_IV_PRICE_TOLERANCE: float = Field(default=1e-4, description="Price tolerance for IV solver convergence")
+    QUANT_IV_SIGMA_TOLERANCE: float = Field(default=1e-4, description="Sigma tolerance for IV solver convergence")
+    QUANT_IV_SIGMA_MIN: float = Field(default=1e-4, description="Minimum sigma lower bound (0.01%)")
+    QUANT_IV_SIGMA_MAX: float = Field(default=5.0, description="Maximum sigma upper bound (500%)")
+
+    model_config = SettingsConfigDict(
+        env_file=(
+            str(PROJECT_ROOT / ".env"),
+            str(BACKEND_DIR / ".env"),
+            str(BACKEND_DIR / "poc" / "fiinquant" / ".env"),
+        ),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+settings = Settings()

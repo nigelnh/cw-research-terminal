@@ -1,5 +1,5 @@
 export * from "./types";
-export * from "./ColumnBase";
-export * from "./TableBase";
-export { TableView } from "./TableView";
+export * from "./column_base";
+export * from "./table_base";
+export { TableView } from "./table_view";
 
