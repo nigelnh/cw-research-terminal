@@ -1,0 +1,9 @@
+# FiinQuant Official Python SDK & POC Dependencies
+--extra-index-url https://fiinquant.github.io/fiinquantx/simple
+fiinquantx>=0.1.67
+signalrcore==0.9.71
+msgpack==1.0.2
+python-dotenv>=1.0.0
+pandas>=2.0.0
+pytest>=8.0.0
+matplotlib>=3.8.0

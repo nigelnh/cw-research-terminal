@@ -1,5 +1,8 @@
 /**
- * Global styles
+ * CW Research Terminal — Quantitative Terminal Design System
+ * Visual Source of Truth: Lovable Redesign
+ * Dark only. Hoarfrost (#D4E8FA) is the single UI accent.
+ * Green / red / yellow are reserved strictly for market meaning.
  */
 
 * {
@@ -8,26 +11,86 @@
   box-sizing: border-box;
 }
 
+:root {
+  --background: #0f1218;
+  --foreground: #f2f4f8;
+  --surface: #141720;
+  --surface-hover: #1a1e29;
+  --primary: #D4E8FA; /* Hoarfrost */
+  --primary-foreground: #0f1218;
+  --muted-foreground: #99a2b2;
+  --subtle-foreground: #737c8e;
+  --destructive: #ef4444;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --up: #22c55e;
+  --down: #ef4444;
+  --flat: #eab308;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
 html,
 body,
 #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
-}
-
-body {
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: #0e1117;
-  color: #ffffff;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Typography & Numerics */
+.tnum,
+.font-mono,
+.num-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.col-head {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--subtle-foreground);
+  font-weight: 500;
+}
+
+/* Colors */
+.text-primary { color: var(--primary); }
+.text-muted-foreground { color: var(--muted-foreground); }
+.text-subtle { color: var(--subtle-foreground); }
+.text-foreground { color: var(--foreground); }
+.text-up { color: var(--up); }
+.text-down { color: var(--down); }
+.text-flat { color: var(--flat); }
+.text-destructive { color: var(--destructive); }
+
+.bg-background { background-color: var(--background); }
+.bg-surface { background-color: var(--surface); }
+.bg-surface-hover { background-color: var(--surface-hover); }
+.bg-primary { background-color: var(--primary); }
+
+.border-border { border-color: var(--border); }
+.border-border-strong { border-color: var(--border-strong); }
+
+/* Focus Ring for Accessibility */
+.focus-ring:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--primary) 70%, transparent) !important;
+  outline-offset: 1px;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -35,60 +98,31 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border: 2.5px solid transparent;
-  background-clip: padding-box;
+  background: var(--border-strong);
   border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.35);
-  border: 2.5px solid transparent;
-  background-clip: padding-box;
+  background: rgba(255, 255, 255, 0.25);
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
-/* Table Row Hover Blending */
+/* Table Row Hover */
 .table-row {
-  transition: background-color 0.05s ease;
+  transition: background-color 0.12s ease;
 }
 .table-row:hover {
-  background-color: rgba(255, 255, 255, 0.08) !important;
-}
-.table-row:hover .table-cell-custom-bg {
-  background-image: linear-gradient(rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.08)) !important;
+  background-color: var(--surface) !important;
 }
 
-/* Hide horizontal scrollbars on WebKit and Firefox */
-.no-scrollbar-x::-webkit-scrollbar:horizontal {
-  display: none !important;
-}
-.no-scrollbar-x {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+.table-row-selected {
+  background-color: var(--surface) !important;
+  border-left: 2px solid var(--primary) !important;
 }
 
-/* Disable native browser password reveal eye and clear buttons */
-input::-ms-reveal,
-input::-ms-clear {
-  display: none !important;
+::selection {
+  background: color-mix(in srgb, var(--primary) 25%, transparent);
 }
-
-/* Map material-symbols-outlined to self-hosted material-icons-outlined local font */
-.material-symbols-outlined {
-  font-family: "Material Icons Outlined" !important;
-  font-weight: normal;
-  font-style: normal;
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
-  display: inline-block;
-  white-space: nowrap;
-  word-wrap: normal;
-  direction: ltr;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-  font-feature-settings: "liga";
-}
-

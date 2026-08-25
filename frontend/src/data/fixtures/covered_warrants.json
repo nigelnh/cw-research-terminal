@@ -1,0 +1,232 @@
+[
+  {
+    "symbol": "CHPG2602",
+    "issuer": "SSI",
+    "underlyingSymbol": "HPG",
+    "strikePrice": 22000,
+    "exerciseRatio": 2.0,
+    "lastTradingDate": "2026-11-18",
+    "maturityDate": "2026-11-20",
+    "listedVolume": 10000000
+  },
+  {
+    "symbol": "CFPT2602",
+    "issuer": "VND",
+    "underlyingSymbol": "FPT",
+    "strikePrice": 125000,
+    "exerciseRatio": 5.0,
+    "lastTradingDate": "2026-11-25",
+    "maturityDate": "2026-11-27",
+    "listedVolume": 8000000
+  },
+  {
+    "symbol": "CMWG2602",
+    "issuer": "HSC",
+    "underlyingSymbol": "MWG",
+    "strikePrice": 65000,
+    "exerciseRatio": 4.0,
+    "lastTradingDate": "2026-12-16",
+    "maturityDate": "2026-12-18",
+    "listedVolume": 12000000
+  },
+  {
+    "symbol": "CHPG2401",
+    "issuer": "SSI",
+    "underlyingSymbol": "HPG",
+    "strikePrice": 28000,
+    "exerciseRatio": 2.0,
+    "lastTradingDate": "2024-11-18",
+    "maturityDate": "2024-11-20",
+    "listedVolume": 10000000
+  },
+  {
+    "symbol": "CHPG2402",
+    "issuer": "HSC",
+    "underlyingSymbol": "HPG",
+    "strikePrice": 30000,
+    "exerciseRatio": 2.0,
+    "lastTradingDate": "2024-12-16",
+    "maturityDate": "2024-12-18",
+    "listedVolume": 15000000
+  },
+  {
+    "symbol": "CHPG2403",
+    "issuer": "KIS",
+    "underlyingSymbol": "HPG",
+    "strikePrice": 29000,
+    "exerciseRatio": 3.0,
+    "lastTradingDate": "2025-01-15",
+    "maturityDate": "2025-01-17",
+    "listedVolume": 12000000
+  },
+  {
+    "symbol": "CFPT2401",
+    "issuer": "VND",
+    "underlyingSymbol": "FPT",
+    "strikePrice": 120000,
+    "exerciseRatio": 5.0,
+    "lastTradingDate": "2024-11-25",
+    "maturityDate": "2024-11-27",
+    "listedVolume": 8000000
+  },
+  {
+    "symbol": "CFPT2402",
+    "issuer": "SSI",
+    "underlyingSymbol": "FPT",
+    "strikePrice": 130000,
+    "exerciseRatio": 10.0,
+    "lastTradingDate": "2025-01-20",
+    "maturityDate": "2025-01-22",
+    "listedVolume": 12000000
+  },
+  {
+    "symbol": "CFPT2403",
+    "issuer": "MBS",
+    "underlyingSymbol": "FPT",
+    "strikePrice": 135000,
+    "exerciseRatio": 8.0,
+    "lastTradingDate": "2025-02-18",
+    "maturityDate": "2025-02-20",
+    "listedVolume": 6000000
+  },
+  {
+    "symbol": "CMWG2401",
+    "issuer": "KBSV",
+    "underlyingSymbol": "MWG",
+    "strikePrice": 62000,
+    "exerciseRatio": 4.0,
+    "lastTradingDate": "2024-12-09",
+    "maturityDate": "2024-12-11",
+    "listedVolume": 5000000
+  },
+  {
+    "symbol": "CMWG2402",
+    "issuer": "HSC",
+    "underlyingSymbol": "MWG",
+    "strikePrice": 65000,
+    "exerciseRatio": 5.0,
+    "lastTradingDate": "2025-01-10",
+    "maturityDate": "2025-01-14",
+    "listedVolume": 9000000
+  },
+  {
+    "symbol": "CVIC2401",
+    "issuer": "SSI",
+    "underlyingSymbol": "VIC",
+    "strikePrice": 45000,
+    "exerciseRatio": 4.0,
+    "lastTradingDate": "2024-10-21",
+    "maturityDate": "2024-10-23",
+    "listedVolume": 7000000
+  },
+  {
+    "symbol": "CVIC2402",
+    "issuer": "KIS",
+    "underlyingSymbol": "VIC",
+    "strikePrice": 48000,
+    "exerciseRatio": 4.0,
+    "lastTradingDate": "2024-12-23",
+    "maturityDate": "2024-12-25",
+    "listedVolume": 8000000
+  },
+  {
+    "symbol": "CVNM2401",
+    "issuer": "VND",
+    "underlyingSymbol": "VNM",
+    "strikePrice": 70000,
+    "exerciseRatio": 5.0,
+    "lastTradingDate": "2024-11-15",
+    "maturityDate": "2024-11-19",
+    "listedVolume": 10000000
+  },
+  {
+    "symbol": "CVNM2402",
+    "issuer": "MBS",
+    "underlyingSymbol": "VNM",
+    "strikePrice": 72000,
+    "exerciseRatio": 6.0,
+    "lastTradingDate": "2024-12-30",
+    "maturityDate": "2025-01-03",
+    "listedVolume": 8000000
+  },
+  {
+    "symbol": "CTCB2401",
+    "issuer": "SSI",
+    "underlyingSymbol": "TCB",
+    "strikePrice": 24000,
+    "exerciseRatio": 2.0,
+    "lastTradingDate": "2024-11-28",
+    "maturityDate": "2024-12-02",
+    "listedVolume": 15000000
+  },
+  {
+    "symbol": "CTCB2402",
+    "issuer": "KBSV",
+    "underlyingSymbol": "TCB",
+    "strikePrice": 25500,
+    "exerciseRatio": 3.0,
+    "lastTradingDate": "2025-01-22",
+    "maturityDate": "2025-01-24",
+    "listedVolume": 11000000
+  },
+  {
+    "symbol": "CMSN2401",
+    "issuer": "HSC",
+    "underlyingSymbol": "MSN",
+    "strikePrice": 75000,
+    "exerciseRatio": 8.0,
+    "lastTradingDate": "2024-12-05",
+    "maturityDate": "2024-12-09",
+    "listedVolume": 6000000
+  },
+  {
+    "symbol": "CSTB2401",
+    "issuer": "KIS",
+    "underlyingSymbol": "STB",
+    "strikePrice": 32000,
+    "exerciseRatio": 3.0,
+    "lastTradingDate": "2024-11-12",
+    "maturityDate": "2024-11-14",
+    "listedVolume": 14000000
+  },
+  {
+    "symbol": "CSTB2402",
+    "issuer": "SSI",
+    "underlyingSymbol": "STB",
+    "strikePrice": 34000,
+    "exerciseRatio": 4.0,
+    "lastTradingDate": "2025-02-10",
+    "maturityDate": "2025-02-12",
+    "listedVolume": 10000000
+  },
+  {
+    "symbol": "CMBB2401",
+    "issuer": "MBS",
+    "underlyingSymbol": "MBB",
+    "strikePrice": 24000,
+    "exerciseRatio": 2.0,
+    "lastTradingDate": "2024-12-18",
+    "maturityDate": "2024-12-20",
+    "listedVolume": 16000000
+  },
+  {
+    "symbol": "CSSI2401",
+    "issuer": "HSC",
+    "underlyingSymbol": "SSI",
+    "strikePrice": 34000,
+    "exerciseRatio": 3.0,
+    "lastTradingDate": "2024-11-20",
+    "maturityDate": "2024-11-22",
+    "listedVolume": 12000000
+  },
+  {
+    "symbol": "CSSI2402",
+    "issuer": "KBSV",
+    "underlyingSymbol": "SSI",
+    "strikePrice": 36000,
+    "exerciseRatio": 4.0,
+    "lastTradingDate": "2025-01-08",
+    "maturityDate": "2025-01-10",
+    "listedVolume": 9000000
+  }
+]

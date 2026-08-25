@@ -1,0 +1,33 @@
+{
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Darwin",
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": [
+    "backend/app",
+    "backend/tests"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/dist",
+    "backend/poc",
+    "frontend"
+  ],
+  "extraPaths": [
+    "backend",
+    "backend/.venv/lib/python3.13/site-packages",
+    "backend/poc/fiinquant",
+    "backend/poc/fiinquant/.venv/lib/python3.13/site-packages"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "backend",
+      "extraPaths": [
+        "backend",
+        "backend/.venv/lib/python3.13/site-packages",
+        "backend/poc/fiinquant/.venv/lib/python3.13/site-packages"
+      ]
+    }
+  ]
+}
