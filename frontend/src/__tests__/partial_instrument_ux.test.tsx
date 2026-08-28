@@ -39,10 +39,10 @@ describe("Partial Instrument UX & Complete Contract Differentiation", () => {
       name: "Partial Test",
       items: [
         {
-          symbol: "CVHM2615",
+          symbol: "CVPB2615",
           instrumentType: "CW" as const,
-          underlyingSymbol: "VHM",
-          issuer: "MBS",
+          underlyingSymbol: "VPB",
+          issuer: "ACBS",
           strikePrice: null,
           exerciseRatio: null,
           maturityDate: null,
@@ -59,7 +59,7 @@ describe("Partial Instrument UX & Complete Contract Differentiation", () => {
     const html = renderToStaticMarkup(<PersonalDashboard />);
 
     // Symbol is rendered
-    expect(html).toContain("CVHM2615");
+    expect(html).toContain("CVPB2615");
     // Subtle 'partial' indicator is present
     expect(html).toContain("partial");
     expect(html).toContain('title="Unverified / Partial specification in registry');
@@ -71,13 +71,13 @@ describe("Partial Instrument UX & Complete Contract Differentiation", () => {
       name: "Complete Test",
       items: [
         {
-          symbol: "CHPG2602",
+          symbol: "CTCB2601",
           instrumentType: "CW" as const,
-          underlyingSymbol: "HPG",
-          issuer: "TCBS",
-          strikePrice: 25885,
-          exerciseRatio: 3.5704,
-          maturityDate: "2026-09-21",
+          underlyingSymbol: "TCB",
+          issuer: "KIS",
+          strikePrice: 25000,
+          exerciseRatio: 2,
+          maturityDate: "2026-12-10",
           addedAt: 0,
         },
       ],
@@ -91,9 +91,9 @@ describe("Partial Instrument UX & Complete Contract Differentiation", () => {
     const html = renderToStaticMarkup(<PersonalDashboard />);
 
     // Symbol and strike/ratio are rendered
-    expect(html).toContain("CHPG2602");
-    expect(html).toContain("25,885");
-    expect(html).toContain("3.5704:1");
+    expect(html).toContain("CTCB2601");
+    expect(html).toContain("25,000");
+    expect(html).toContain("2:1");
     // 'partial' tag is NOT present
     expect(html).not.toContain("partial");
   });
