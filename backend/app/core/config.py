@@ -43,6 +43,9 @@ class Settings(BaseSettings):
 
     # Quantitative Engine Configuration
     QUANT_RISK_FREE_RATE: float = Field(default=0.05, description="Default annual risk-free interest rate (5.0%)")
+    # Live analytics scheduler: max Covered Warrants whose analytics may be recomputed concurrently.
+    # Per-symbol work is already single-flighted; this bounds the global fan-out.
+    QUANT_MAX_CONCURRENT_COMPUTES: int = Field(default=8, description="Max concurrent live CW analytics recomputations")
     # NOTE: dividend yield q is NOT configurable. HOSE covered warrants are dividend-protected
     # (strike/ratio adjusted on ex-date), so the CW analytics engine pins q = 0 by convention
     # -- see app.quant.dividend_convention.CW_DIVIDEND_YIELD_CONVENTION and QUANT_CONTRACT.md section 7.
