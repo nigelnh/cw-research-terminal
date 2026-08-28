@@ -8,7 +8,9 @@ export interface ResearchMarketState {
   connectionState: GatewayConnectionState;
   gatewayState: GatewayConnectionState;
   upstreamFeedState: UpstreamFeedState;
-  dataMode: "mock" | "live" | "hybrid";
+  marketSession: string;
+  marketSessionActive: boolean;
+  dataMode: "live" | "hybrid";
   isDemo: boolean;
   warrants: Map<string, CoveredWarrant>;
   quotes: Map<string, MarketQuote>;
@@ -26,6 +28,12 @@ export function useResearchMarket() {
   );
   const [upstreamFeedState, setUpstreamFeedState] = useState<UpstreamFeedState>(
     provider.getUpstreamFeedState()
+  );
+  const [marketSession, setMarketSession] = useState<string>(
+    typeof provider.getMarketSession === "function" ? provider.getMarketSession() : "UNKNOWN"
+  );
+  const [marketSessionActive, setMarketSessionActive] = useState<boolean>(
+    typeof provider.isMarketSessionActive === "function" ? provider.isMarketSessionActive() : false
   );
   const [warrants, setWarrants] = useState<Map<string, CoveredWarrant>>(
     new Map(provider.getAllCoveredWarrants())
@@ -45,6 +53,22 @@ export function useResearchMarket() {
       setUpstreamFeedState(feedState);
     });
 
+    const unsubSession =
+      typeof provider.onMarketSessionChange === "function"
+        ? provider.onMarketSessionChange((sess) => {
+            setMarketSession(sess.status);
+            setMarketSessionActive(sess.active);
+          })
+        : () => {};
+
+    const unsubQuote = provider.onQuoteUpdate((q) => {
+      setQuotes((prev) => {
+        const next = new Map(prev);
+        next.set(q.symbol, q);
+        return next;
+      });
+    });
+
     const unsubCw = provider.onCoveredWarrantUpdate((cw) => {
       setWarrants((prev) => {
         const next = new Map(prev);
@@ -61,6 +85,8 @@ export function useResearchMarket() {
     return () => {
       unsubState();
       unsubFeed();
+      unsubSession();
+      unsubQuote();
       unsubCw();
     };
   }, [provider]);
@@ -69,8 +95,10 @@ export function useResearchMarket() {
     connectionState,
     gatewayState: connectionState,
     upstreamFeedState,
+    marketSession,
+    marketSessionActive,
     dataMode: config.dataMode,
-    isDemo: config.dataMode === "mock",
+    isDemo: false,
     warrants,
     quotes,
     getWarrant: (symbol: string) => warrants.get(symbol.toUpperCase()),

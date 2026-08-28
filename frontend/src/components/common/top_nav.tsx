@@ -7,54 +7,68 @@ interface TopNavProps {
 }
 
 export function TopNav({ activeTab, onTabChange }: TopNavProps) {
-  const { connectionState, upstreamFeedState, dataMode } = useResearchMarket();
+  const { connectionState, upstreamFeedState, marketSession, marketSessionActive } = useResearchMarket();
   const { plan } = useWatchlist();
 
   const capacity = plan.capacity ?? 33;
   const ratio = Math.min(plan.symbolCount / (plan.capacity || 33), 1);
 
   const getStatusLabel = () => {
-    if (dataMode === "mock") {
+    if (connectionState === "DISCONNECTED" || connectionState === "ERROR") {
       return (
         <span className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-          <span className="h-1 w-1 rounded-full bg-primary" aria-hidden />
-          Demo
+          <span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden />
+          Backend offline
         </span>
       );
     }
 
-    if (connectionState === "DISCONNECTED") {
-      return (
-        <span className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-          <span className="h-1 w-1 rounded-full bg-border-strong" aria-hidden />
-          Disconnected
-        </span>
-      );
-    }
-
-    if (connectionState === "CONNECTING" || connectionState === "RECONNECTING") {
+    if (connectionState === "RECONNECTING") {
       return (
         <span className="flex items-center gap-1.5 text-[12px] text-flat">
-          <span className="h-1 w-1 rounded-full bg-flat" aria-hidden />
+          <span className="h-1.5 w-1.5 rounded-full bg-flat" aria-hidden />
+          Reconnecting feed
+        </span>
+      );
+    }
+
+    if (connectionState === "CONNECTING") {
+      return (
+        <span className="flex items-center gap-1.5 text-[12px] text-flat">
+          <span className="h-1.5 w-1.5 rounded-full bg-flat" aria-hidden />
           Connecting
         </span>
       );
     }
 
-    if (connectionState === "ERROR") {
+    // When gateway is connected:
+    if (marketSession === "LUNCH_BREAK") {
       return (
-        <span className="flex items-center gap-1.5 text-[12px] text-destructive">
-          <span className="h-1 w-1 rounded-full bg-destructive" aria-hidden />
-          Gateway Error
+        <span className="flex items-center gap-1.5 text-[12px] text-flat">
+          <span className="h-1.5 w-1.5 rounded-full bg-flat" aria-hidden />
+          Lunch break
         </span>
       );
     }
 
-    if (upstreamFeedState === "CONNECTED") {
+    if (
+      marketSession === "CLOSED_PRE_OPEN" ||
+      marketSession === "CLOSED_POST_MARKET" ||
+      marketSession === "CLOSED_WEEKEND"
+    ) {
+      return (
+        <span className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+          <span className="h-1.5 w-1.5 rounded-full bg-border-strong" aria-hidden />
+          Market closed
+        </span>
+      );
+    }
+
+    if (upstreamFeedState === "CONNECTED" || marketSessionActive) {
       return (
         <span className="flex items-center gap-1.5 text-[12px] text-up">
-          <span className="h-1 w-1 rounded-full bg-up" aria-hidden />
-          Live
+          <span className="h-1.5 w-1.5 rounded-full bg-up" aria-hidden />
+          Market open
         </span>
       );
     }
@@ -62,16 +76,16 @@ export function TopNav({ activeTab, onTabChange }: TopNavProps) {
     if (upstreamFeedState === "UNKNOWN" || upstreamFeedState === "CONNECTING") {
       return (
         <span className="flex items-center gap-1.5 text-[12px] text-flat">
-          <span className="h-1 w-1 rounded-full bg-flat" aria-hidden />
-          Connecting Feed
+          <span className="h-1.5 w-1.5 rounded-full bg-flat" aria-hidden />
+          Connecting feed
         </span>
       );
     }
 
     return (
       <span className="flex items-center gap-1.5 text-[12px] text-destructive">
-        <span className="h-1 w-1 rounded-full bg-destructive" aria-hidden />
-        Feed Unavailable
+        <span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden />
+        Feed unavailable
       </span>
     );
   };
@@ -210,7 +224,7 @@ export function TopNav({ activeTab, onTabChange }: TopNavProps) {
             style={{ display: "flex", alignItems: "center", gap: "8px" }}
           >
             <span className="tnum" style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>
-              <span style={{ color: "var(--foreground)" }}>{plan.symbolCount}</span> / {capacity} live
+              <span style={{ color: "var(--foreground)" }}>{plan.symbolCount}</span> / {capacity} slots
             </span>
             <span
               style={{

@@ -15,14 +15,14 @@ import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 from app.main import app
-from app.instruments.registry import InstrumentRegistry
+from app.instruments.instrument_registry import InstrumentRegistry
 from app.instruments.providers.canonical_provider import CanonicalInstrumentProvider
-from app.instruments.schemas import (
+from app.instruments.instrument_schemas import (
     InstrumentLifecycleStatus,
     DataQualityStatus,
     LifecycleEvidenceLevel,
 )
-from app.instruments.refresh import merge_records, atomic_write_snapshot, refresh_instruments
+from app.instruments.instrument_refresh import merge_records, atomic_write_snapshot, refresh_instruments
 
 client = TestClient(app)
 
@@ -338,7 +338,7 @@ async def test_verified_current_requires_concrete_source_evidence():
     spec_label = provider._parse_row(raw_label_only)
     assert spec_label is not None
     # Invariant: Must be downgraded to UNVERIFIED
-    from app.instruments.schemas import MetadataVerificationStatus
+    from app.instruments.instrument_schemas import MetadataVerificationStatus
     assert spec_label.metadata_verification == MetadataVerificationStatus.UNVERIFIED
 
     # 2. Row with concrete provenance document ID -> gets VERIFIED_CURRENT

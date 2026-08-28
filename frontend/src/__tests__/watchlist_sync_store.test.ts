@@ -116,6 +116,7 @@ describe("Watchlist useSyncExternalStore Synchronization & Store Integrity", () 
   });
 
   it("4. Realtime subscription plan slot counts compute synchronously upon state changes", () => {
+    resetWatchlistMemoryForTests({ ...createDefaultWatchlist(), items: [] });
     let plan = SubscriptionPlanner.computePlan(getWatchlistSnapshot().items, ["VNINDEX"], 33);
     expect(plan.symbolCount).toBe(1); // Only default VNINDEX
 

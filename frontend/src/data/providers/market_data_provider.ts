@@ -29,11 +29,16 @@ export interface MarketDataProvider {
   
   subscribeSymbols(symbols: string[]): void;
   unsubscribeSymbols(symbols: string[]): void;
+  syncSubscriptions(symbols: string[]): void;
   
   onQuoteUpdate(listener: (quote: MarketQuote) => void): () => void;
   onCoveredWarrantUpdate(listener: (cw: CoveredWarrant) => void): () => void;
   onIndexUpdate(listener: (indexData: { name: string; value: number; change: number; changePercent: number }) => void): () => void;
   
+  getMarketSession?(): string;
+  isMarketSessionActive?(): boolean;
+  onMarketSessionChange?(listener: (session: { status: string; active: boolean }) => void): () => void;
+
   connect(): void;
   disconnect(): void;
 }

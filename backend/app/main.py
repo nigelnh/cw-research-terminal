@@ -4,21 +4,56 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.ai.router import ai_router
-from app.market.router import market_router
-from app.market.websocket import ws_router
-from app.market.subscription_manager import subscription_manager
-from app.instruments.router import instruments_router
-from app.instruments.registry import instrument_registry
-from app.quant.router import quant_router
-from app.quant.engine import live_quant_engine
-from app.market.state import market_state
-from app.market.websocket import manager
+from app.ai.ai_router import ai_router
+from app.market_data.market_router import market_router
+from app.market_data.market_websocket import ws_router
+from app.market_data.market_subscription_manager import subscription_manager
+from app.instruments.instrument_router import instruments_router
+from app.instruments.instrument_registry import instrument_registry
+from app.quant.quant_router import quant_router
+from app.quant.quant_engine import live_quant_engine
+from app.quant.historical_volatility_service import historical_volatility_service
+from app.market_data.market_state import market_state
+from app.market_data.market_websocket import manager
+
+import re
+
+class SensitiveDataRedactor(logging.Filter):
+    """
+    Sanitizes log messages across all subsystems by masking Bearer tokens and credentials.
+    """
+    BEARER_PATTERN = re.compile(r"(Bearer\s+)[A-Za-z0-9_\-\.]+", re.IGNORECASE)
+    AUTH_HEADER_PATTERN = re.compile(r"('Authorization':\s*'?Bearer\s+)[^']+'?", re.IGNORECASE)
+    AUTH_RESULT_PATTERN = re.compile(r"(auth function result\s+)\S+", re.IGNORECASE)
+    JWT_PATTERN = re.compile(r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+", re.IGNORECASE)
+    PASSWORD_PATTERN = re.compile(r"(password['\"]?\s*[:=]\s*['\"])[^'\"]+(['\"])", re.IGNORECASE)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = self.BEARER_PATTERN.sub(r"\1[REDACTED]", record.msg)
+            record.msg = self.AUTH_HEADER_PATTERN.sub(r"\1[REDACTED]", record.msg)
+            record.msg = self.AUTH_RESULT_PATTERN.sub(r"\1[REDACTED_TOKEN]", record.msg)
+            record.msg = self.JWT_PATTERN.sub("[REDACTED_JWT]", record.msg)
+            record.msg = self.PASSWORD_PATTERN.sub(r"\1[REDACTED]\2", record.msg)
+        return True
+
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
+
+# Suppress verbose vendor debug and transport frames
+logging.getLogger("signalrcore").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.INFO)
+logging.getLogger("websockets").setLevel(logging.INFO)
+
+# Apply redactor to root and existing handlers
+_redactor = SensitiveDataRedactor()
+for _h in logging.root.handlers:
+    _h.addFilter(_redactor)
+logging.root.addFilter(_redactor)
+
 logger = logging.getLogger("cw-research-backend")
 
 
@@ -49,9 +84,44 @@ async def lifespan(app: FastAPI):
         await subscription_manager.initialize()
     except Exception as e:
         logger.warning(f"Market provider initialization warning: {e}")
+
+    # Wire the Historical Volatility Service AFTER the market provider is initialized so its
+    # upstream historical source is usable. The engine getter (get_estimate) is a pure
+    # in-memory lookup; all fetching happens here / in the background refresh loop / ensure().
+    # Startup warm-up must never make the application fail to boot.
+    historical_volatility_service.set_bar_source(subscription_manager.provider)
+    live_quant_engine.set_historical_vol_getter(historical_volatility_service.get_estimate)
+
+    _startup_underlyings: list[str] = []
+    try:
+        _startup_underlyings = await instrument_registry.get_underlyings(active_only=True)
+        warmed = await historical_volatility_service.warm(
+            _startup_underlyings, timeout=settings.QUANT_HV_WARMUP_TIMEOUT_SECONDS
+        )
+        ready = sum(1 for v in warmed.values() if v is not None)
+        logger.info(
+            f"Historical volatility warm-up: {ready}/{len(_startup_underlyings)} underlyings ready "
+            f"(window HV_{historical_volatility_service.window})."
+        )
+    except Exception as e:
+        logger.warning(
+            f"Historical volatility warm-up incomplete (non-fatal): {e.__class__.__name__}: {e}"
+        )
+
+    def _hv_refresh_symbols() -> list[str]:
+        # Re-warm the startup universe plus anything ensure() has since pulled in.
+        seen = set(_startup_underlyings) | set(historical_volatility_service.cached_underlyings())
+        return sorted(seen)
+
+    historical_volatility_service.start_periodic_refresh(_hv_refresh_symbols)
+
     yield
     # Shutdown: clean up streams
     logger.info("Shutting down CW Research Platform Backend...")
+    try:
+        await historical_volatility_service.stop_periodic_refresh()
+    except Exception as e:
+        logger.warning(f"Historical volatility refresh shutdown warning: {e}")
     try:
         await subscription_manager.shutdown()
     except Exception as e:
@@ -90,6 +160,11 @@ app.include_router(ws_router)
 @app.get("/health", tags=["System"])
 async def root_health():
     health_data = subscription_manager.provider.get_health()
+    store_health = await subscription_manager.store.health()
+    from app.market_data.market_session import market_session
+    sess_status = market_session.get_session_status().value
+    sess_active = market_session.is_trading_active()
+
     return {
         "status": "ok",
         "service": "cw-research-backend",
@@ -97,6 +172,12 @@ async def root_health():
         "ai_enabled": settings.AI_ENABLED,
         "market_provider": health_data.get("provider", "unknown"),
         "market_upstream_status": health_data.get("upstream_status", "UNKNOWN"),
+        "market_session": sess_status,
+        "market_session_active": sess_active,
+        "quote_display_eligible": sess_active,
+        "redis_enabled": store_health.get("redis_enabled", False),
+        "redis_connected": store_health.get("redis_connected", False),
+        "market_cache_available": store_health.get("market_cache_available", False),
     }
 
 

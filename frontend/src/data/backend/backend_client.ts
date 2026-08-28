@@ -100,20 +100,36 @@ export class BackendClient {
     return this.get<any[]>("/api/cw/market", { issuer_name, symbol, fromDate, toDate });
   }
 
+  async getMarketHistory(
+    symbol: string,
+    timeframe: string = "1D",
+    fromDate?: string,
+    toDate?: string,
+    adjusted: boolean = true
+  ): Promise<any[]> {
+    return this.get<any[]>(`/api/market/history/${encodeURIComponent(symbol)}`, {
+      timeframe,
+      from_date: fromDate,
+      to_date: toDate,
+      adjusted: adjusted ? "true" : "false",
+    });
+  }
+
   async getHistoricalCWData(symbol?: string, fromDate?: string, toDate?: string): Promise<any[]> {
-    return this.get<any[]>("/api/cw/data", { symbol, fromDate, toDate });
+    if (!symbol) return [];
+    return this.getMarketHistory(symbol, "1D", fromDate, toDate, true);
   }
 
   async getComparison(stockCode: string, fromDate?: string, toDate?: string): Promise<any[]> {
-    return this.get<any[]>("/api/cw/comparison", { stockcode: stockCode, fromDate, toDate });
+    return this.getMarketHistory(stockCode, "1D", fromDate, toDate, true);
   }
 
   async getStockCloseHistory(symbol: string, fromDate?: string, toDate?: string): Promise<any[]> {
-    return this.get<any[]>("/api/v1/history/stocks/close", { symbol, fromDate, toDate });
+    return this.getMarketHistory(symbol, "1D", fromDate, toDate, true);
   }
 
   async getIndexHistory(name: string = "VNINDEX", fromDate?: string, toDate?: string): Promise<any[]> {
-    return this.get<any[]>("/api/v1/history/index", { name, fromDate, toDate });
+    return this.getMarketHistory(name, "1D", fromDate, toDate, true);
   }
 
   async getVolatility(symbol: string, fromDate?: string, toDate?: string): Promise<any[]> {

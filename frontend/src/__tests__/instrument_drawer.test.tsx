@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { InstrumentDrawer } from "../components/InstrumentDetail/instrument_drawer";
+import { InstrumentDrawer } from "../features/warrant_info/instrument_drawer";
 import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
 
@@ -91,8 +91,39 @@ describe("InstrumentDrawer Rendering, Interaction & Accessibility Correctness", 
 
     listeners["keydown"]({ key: "Enter" });
     expect(onClose).toHaveBeenCalledTimes(1); // Still 1
+  });
 
-    mockWindow.removeEventListener("keydown");
-    expect(listeners["keydown"]).toBeUndefined();
+  it("6. Stock drawer does not show warrant-only analytics (Contract, Volatility, Quant tab)", () => {
+    const mockStock = {
+      symbol: "HPG",
+      instrumentType: "STOCK" as const,
+      quote: {
+        symbol: "HPG",
+        lastPrice: 21850,
+        referencePrice: 21800,
+        priceChange: 50,
+        priceChangePercent: 0.0023,
+        totalVolume: 15000000,
+        bidPrice: 21800,
+        askPrice: 21850,
+        sourceTimestamp: new Date().toISOString(),
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      <InstrumentDrawer instrument={mockStock as any} onClose={vi.fn()} />
+    );
+
+    expect(html).toContain("HPG");
+    expect(html).toContain("Stock");
+    expect(html).toContain("Overview");
+    expect(html).toContain("History");
+    // Quant tab should NOT be rendered for stock
+    expect(html).not.toContain("Quant");
+    // Contract & Volatility sections should NOT be rendered in Overview for stock
+    expect(html).not.toContain("Contract");
+    expect(html).not.toContain("Volatility");
+    expect(html).not.toContain("Moneyness (S/K)");
+    expect(html).not.toContain("IV bid");
   });
 });

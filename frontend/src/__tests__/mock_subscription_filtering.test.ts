@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { MockMarketDataProvider } from "../data/mock/mock_market_data_provider";
-import { MockInstrumentProvider } from "../data/mock/mock_instrument_provider";
+import { MockMarketDataProvider } from "./test_fixtures/mock_market_data_provider";
+import { MockInstrumentProvider } from "./test_fixtures/mock_instrument_provider";
 import type { MarketQuote } from "../domain/models";
 
 describe("Mock Subscription Filtering & Research Universe Independence", () => {

@@ -25,26 +25,11 @@ export function normalizeTransportIVToDecimal(val: any): number | null {
 }
 
 /**
- * Normalizes raw gateway snapshot row into canonical CoveredWarrant & MarketQuote models.
+ * Normalizes raw gateway snapshot row into canonical MarketQuote model.
  */
-export function mapRawSnapshotToCoveredWarrant(raw: any): CoveredWarrant {
+export function mapRawSnapshotToQuote(raw: any): MarketQuote {
   const symbol = String(raw.Symbol || "").toUpperCase();
-  const underlyingSymbol = String(raw.Under_Symbol || raw.Underlying || "").toUpperCase();
-  
-  const rawUnderPrc = raw.Under_Prc !== undefined ? raw.Under_Prc : raw.under_prc;
-  const underlyingPrice = normalizeTransportPriceToRawVnd(rawUnderPrc);
-
-  const rawStrikePrc = raw.Strike_Prc !== undefined ? raw.Strike_Prc : (raw.strike_prc !== undefined ? raw.strike_prc : raw.Exercise_Prc);
-  const strikePrice = normalizeTransportPriceToRawVnd(rawStrikePrc) ?? 0;
-
-  // Exercise ratio is dimensionless (e.g. 2.0 for 2:1) - DO NOT MULTIPLY
-  const exerciseRatio = typeof raw.Ratio === "number" ? raw.Ratio : (typeof raw.ratio === "number" ? raw.ratio : (typeof raw.Exercise_Ratio === "number" ? raw.Exercise_Ratio : 1.0));
-
-  const lastTradingDate = raw.LastTradingDate || raw.last_trading_date || null;
-  const maturityDate = raw.MaturityDate || raw.maturity_date || raw.Expiry || "";
-
-  // Canonical Quote with all prices converted from thousand-VND to raw VND
-  const quote: MarketQuote = {
+  return {
     symbol,
     lastPrice: normalizeTransportPriceToRawVnd(raw.Traded ?? raw.last_prc_t),
     referencePrice: normalizeTransportPriceToRawVnd(raw.Ref ?? raw.last_prc_t_1),
@@ -80,6 +65,29 @@ export function mapRawSnapshotToCoveredWarrant(raw: any): CoveredWarrant {
     sourceTimestamp: raw._ts_source ? Number(raw._ts_source) : null,
     receivedTimestamp: Date.now(),
   };
+}
+
+/**
+ * Normalizes raw gateway snapshot row into canonical CoveredWarrant & MarketQuote models.
+ */
+export function mapRawSnapshotToCoveredWarrant(raw: any): CoveredWarrant {
+  const symbol = String(raw.Symbol || "").toUpperCase();
+  const underlyingSymbol = String(raw.Under_Symbol || raw.Underlying || "").toUpperCase();
+  
+  const rawUnderPrc = raw.Under_Prc !== undefined ? raw.Under_Prc : raw.under_prc;
+  const underlyingPrice = normalizeTransportPriceToRawVnd(rawUnderPrc);
+
+  const rawStrikePrc = raw.Strike_Prc !== undefined ? raw.Strike_Prc : (raw.strike_prc !== undefined ? raw.strike_prc : raw.Exercise_Prc);
+  const strikePrice = normalizeTransportPriceToRawVnd(rawStrikePrc) ?? 0;
+
+  // Exercise ratio is dimensionless (e.g. 2.0 for 2:1 ratio) - DO NOT MULTIPLY, missing ratio is null
+  const exerciseRatio = typeof raw.Ratio === "number" ? raw.Ratio : (typeof raw.ratio === "number" ? raw.ratio : (typeof raw.Exercise_Ratio === "number" ? raw.Exercise_Ratio : null));
+
+  const lastTradingDate = raw.LastTradingDate || raw.last_trading_date || null;
+  const maturityDate = raw.MaturityDate || raw.maturity_date || raw.Expiry || "";
+
+  // Canonical Quote with all prices converted from thousand-VND to raw VND
+  const quote = mapRawSnapshotToQuote(raw);
 
   // Vol1 (Ask), Vol2 (Trade/Mid), Vol3 (Bid) converted from percentage to canonical decimal
   const ivAsk = normalizeTransportIVToDecimal(raw.Vol1 ?? raw.iv_ask);
@@ -92,7 +100,7 @@ export function mapRawSnapshotToCoveredWarrant(raw: any): CoveredWarrant {
     underlyingSymbol,
     underlyingPrice,
     strikePrice,
-    exerciseRatio,
+    exerciseRatio: exerciseRatio as any,
     lastTradingDate,
     maturityDate,
     listedVolume: typeof raw.Listed_Vol === "number" ? raw.Listed_Vol : null,

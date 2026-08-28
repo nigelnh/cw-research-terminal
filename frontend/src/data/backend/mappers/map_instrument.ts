@@ -36,8 +36,24 @@ export function mapInstrumentToCoveredWarrant(item: any): CoveredWarrant {
     issuer: item.issuer || item.issuer_name || item.ISSUER_NAME || null,
     underlyingSymbol,
     underlyingPrice: null,
-    strikePrice: typeof item.strike_price === "number" ? item.strike_price : (typeof item.strikePrice === "number" ? item.strikePrice : (typeof item.exercise_price === "number" ? item.exercise_price : parseFloat(item.strike_price || item.exercise_price || "0"))),
-    exerciseRatio: typeof item.exercise_ratio === "number" ? item.exercise_ratio : (typeof item.exerciseRatio === "number" ? item.exerciseRatio : parseFloat(item.exercise_ratio || item.exerciseRatio || "1")),
+    strikePrice:
+      typeof item.strike_price === "number"
+        ? item.strike_price
+        : typeof item.strikePrice === "number"
+        ? item.strikePrice
+        : typeof item.exercise_price === "number"
+        ? item.exercise_price
+        : item.strike_price || item.exercise_price
+        ? parseFloat(item.strike_price || item.exercise_price)
+        : null,
+    exerciseRatio:
+      typeof item.exercise_ratio === "number"
+        ? item.exercise_ratio
+        : typeof item.exerciseRatio === "number"
+        ? item.exerciseRatio
+        : item.exercise_ratio || item.exerciseRatio
+        ? parseFloat(item.exercise_ratio || item.exerciseRatio)
+        : null,
     lastTradingDate: item.lastTradingDate || item.last_trading_date || item.LAST_TRADING_DATE || null,
     maturityDate: item.maturityDate || item.maturity_date || item.MATURITY_DATE || "",
     quote: emptyQuote,

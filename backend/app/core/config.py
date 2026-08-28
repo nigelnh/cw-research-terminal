@@ -28,17 +28,33 @@ class Settings(BaseSettings):
     AI_TEMPERATURE: float = Field(default=0.2, description="Sampling temperature for quantitative research")
 
     # Market Data Provider Configuration (FiinQuant)
-    MARKET_DATA_PROVIDER: str = Field(default="fiinquant", description="Active provider: 'fiinquant' | 'mock'")
+    MARKET_DATA_PROVIDER: str = Field(default="fiinquant", description="Active provider: 'fiinquant'")
     FIINQUANT_USERNAME: str = Field(default="", description="FiinQuant account username (server-side only)")
     FIINQUANT_PASSWORD: str = Field(default="", description="FiinQuant account password (server-side only)")
     FIINQUANT_MAX_REALTIME_SYMBOLS: int = Field(default=33, description="Maximum realtime subscription capacity")
     FIINQUANT_ENABLED: bool = Field(default=True, description="Enable live FiinQuant upstream connection")
     FIINQUANT_DEBOUNCE_MS: int = Field(default=300, description="Subscription debounce delay in milliseconds")
 
+    # Redis Warm Market State Cache Configuration
+    REDIS_ENABLED: bool = Field(default=True, description="Enable Redis warm market state cache")
+    REDIS_URL: str = Field(default="redis://localhost:6379/0", description="Redis connection URL")
+    MARKET_STATE_CACHE_TTL_SECONDS: int = Field(default=86400, description="Warm cache key TTL in seconds (24h)")
+    MARKET_STATE_MAX_STALENESS_SECONDS: int = Field(default=86400, description="Max acceptable age for restored cached quotes in seconds")
+
     # Quantitative Engine Configuration
     QUANT_RISK_FREE_RATE: float = Field(default=0.05, description="Default annual risk-free interest rate (5.0%)")
     QUANT_DIVIDEND_YIELD: float = Field(default=0.0, description="Default annual dividend yield assumption (0.0%)")
-    QUANT_HV_LOOKBACK_DAYS: int = Field(default=30, description="Default Historical Volatility lookback window")
+    # Historical Volatility (theoretical fair value input).
+    # Canonical window = HV_22 (22 trading sessions). Evidence: docs/data_dictionary/warrant_info_columns.md
+    # ("Theoretical Price priced at sigma_HV22"), docs/domain/historical_formula_catalog.md F-05 (recovered
+    # legacy theo_prc_t.js used sigma_HV22), and the calculate_historical_volatility() primitive default.
+    # This is the single authoritative window; no other HV lookback value is defined elsewhere.
+    QUANT_HV_WINDOW_SESSIONS: int = Field(default=22, description="Canonical historical volatility window in trading sessions (HV_22)")
+    QUANT_HV_MIN_SESSIONS: int = Field(default=10, description="Minimum trading sessions of log-returns required to compute HV")
+    QUANT_HV_MAX_STALE_DAYS: int = Field(default=6, description="Max age (VN calendar days) of a cached HV estimate before it is treated as unavailable")
+    QUANT_HV_WARMUP_TIMEOUT_SECONDS: float = Field(default=20.0, description="Max seconds to block on HV warm-up during application startup")
+    QUANT_HV_REFRESH_INTERVAL_SECONDS: int = Field(default=21600, description="Interval for the background HV refresh loop (default 6h)")
+    QUANT_HV_MAX_CONCURRENT_REFRESHES: int = Field(default=4, description="Max concurrent upstream historical fetches during HV refresh")
     QUANT_IV_MAX_ITERATIONS: int = Field(default=100, description="Max iterations for IV root solver")
     QUANT_IV_PRICE_TOLERANCE: float = Field(default=1e-4, description="Price tolerance for IV solver convergence")
     QUANT_IV_SIGMA_TOLERANCE: float = Field(default=1e-4, description="Sigma tolerance for IV solver convergence")

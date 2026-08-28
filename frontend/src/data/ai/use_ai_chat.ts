@@ -1,8 +1,21 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import {
+  type StoredChatMessage,
+  type CopilotHistoryStore,
+  loadCopilotHistory,
+  saveCopilotHistory,
+  createEmptyConversation,
+  generateConversationTitle,
+  generateId,
+  COPILOT_STORAGE_KEY_V2,
+  LEGACY_STORAGE_KEY_V1,
+} from "./copilot_history_store";
 
 export interface ChatMessage {
+  id?: string;
   role: "user" | "assistant" | "system";
   content: string;
+  createdAt?: number;
 }
 
 export interface SelectedInstrumentContext {
@@ -42,46 +55,232 @@ export interface ResearchContextEnvelope {
   dataMode?: string;
 }
 
+export { COPILOT_STORAGE_KEY_V2, LEGACY_STORAGE_KEY_V1 };
+export const CHAT_STORAGE_KEY = COPILOT_STORAGE_KEY_V2;
+
+/**
+ * Normalizes assistant response text by removing stray Markdown syntax
+ * (bold asterisks, headings, bullet markers) while preserving paragraph breaks and mathematical notation.
+ */
+export function normalizePlainResponse(text: string): string {
+  if (!text) return "";
+  return text
+    // Strip markdown bold markers **text** -> text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    // Strip markdown bold markers __text__ -> text
+    .replace(/__([^_]+)__/g, "$1")
+    // Strip markdown header hashes # Header -> Header
+    .replace(/^#{1,6}\s+/gm, "")
+    // Strip bullet markers at line start: "- " or "* " -> ""
+    .replace(/^[\*\-]\s+/gm, "")
+    .trim();
+}
+
 export function useAiChat(apiEndpoint: string = "/api/ai/chat") {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [store, setStore] = useState<CopilotHistoryStore>(() => loadCopilotHistory());
+  const [hasHydrated, setHasHydrated] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [activity, setActivity] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Synchronous hydration flag
+  useEffect(() => {
+    setHasHydrated(true);
+  }, []);
+
+  // Compute active conversation
+  const activeConversation = useMemo(() => {
+    if (!store.activeConversationId) {
+      return store.conversations[0] || null;
+    }
+    return store.conversations.find((c) => c.id === store.activeConversationId) || store.conversations[0] || null;
+  }, [store]);
+
+  // Messages of the active conversation
+  const messages: ChatMessage[] = useMemo(() => {
+    return activeConversation ? activeConversation.messages : [];
+  }, [activeConversation]);
+
+  // Conversations sorted by updatedAt descending
+  const conversations = useMemo(() => {
+    return [...store.conversations].sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [store.conversations]);
+
+  /**
+   * Starts a brand new conversation without removing previous conversations in history.
+   */
+  const startNewConversation = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setIsLoading(false);
+    setError(null);
+
+    const newConv = createEmptyConversation();
+    setStore((prev) => {
+      // If current active conversation is already empty with no messages, reuse it
+      const currentActive = prev.conversations.find((c) => c.id === prev.activeConversationId);
+      if (currentActive && currentActive.messages.length === 0) {
+        return prev;
+      }
+
+      const nextStore: CopilotHistoryStore = {
+        version: 2,
+        activeConversationId: newConv.id,
+        conversations: [newConv, ...prev.conversations],
+      };
+      saveCopilotHistory(nextStore);
+      return nextStore;
+    });
+  }, []);
+
+  /**
+   * Switches to an existing conversation from history without re-sending AI requests.
+   */
+  const selectConversation = useCallback((convId: string) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setIsLoading(false);
+    setError(null);
+
+    setStore((prev) => {
+      if (prev.activeConversationId === convId) return prev;
+      const target = prev.conversations.find((c) => c.id === convId);
+      if (!target) return prev;
+
+      const nextStore: CopilotHistoryStore = {
+        ...prev,
+        activeConversationId: convId,
+      };
+      saveCopilotHistory(nextStore);
+      return nextStore;
+    });
+  }, []);
+
+  /**
+   * Deletes a specific conversation from history.
+   */
+  const deleteConversation = useCallback((convId: string) => {
+    setStore((prev) => {
+      const filtered = prev.conversations.filter((c) => c.id !== convId);
+      let nextActiveId = prev.activeConversationId;
+
+      if (prev.activeConversationId === convId) {
+        if (filtered.length > 0) {
+          nextActiveId = filtered[0].id;
+        } else {
+          const fresh = createEmptyConversation();
+          filtered.push(fresh);
+          nextActiveId = fresh.id;
+        }
+      }
+
+      const nextStore: CopilotHistoryStore = {
+        version: 2,
+        activeConversationId: nextActiveId,
+        conversations: filtered,
+      };
+      saveCopilotHistory(nextStore);
+      return nextStore;
+    });
+  }, []);
+
+  /**
+   * Resets/clears active conversation messages and restarts.
+   */
   const clearMessages = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    setMessages([]);
     setError(null);
     setIsLoading(false);
-  }, []);
+    startNewConversation();
+  }, [startNewConversation]);
 
+  /**
+   * Sends user message to AI and streams response into the active conversation.
+   */
   const sendMessage = useCallback(
     async (userInput: string, context?: ResearchContextEnvelope) => {
       const trimmed = userInput.trim();
       if (!trimmed || isLoading) return;
 
       setError(null);
-      const userMessage: ChatMessage = { role: "user", content: trimmed };
-      const updatedMessages = [...messages, userMessage];
-      setMessages(updatedMessages);
+      const userMsgId = generateId("msg");
+      const userMsg: StoredChatMessage = {
+        id: userMsgId,
+        role: "user",
+        content: trimmed,
+        createdAt: Date.now(),
+      };
+
+      const assistantMsgId = generateId("msg");
+      const assistantPlaceholder: StoredChatMessage = {
+        id: assistantMsgId,
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+      };
+
+      // Target conversation ID
+      let targetConvId = store.activeConversationId;
+      if (!targetConvId || !store.conversations.some((c) => c.id === targetConvId)) {
+        const fresh = createEmptyConversation();
+        targetConvId = fresh.id;
+      }
+
+      // Update store with user message immediately (and generate title if first message)
+      setStore((prev) => {
+        let convs = [...prev.conversations];
+        let convIndex = convs.findIndex((c) => c.id === targetConvId);
+
+        if (convIndex === -1) {
+          const fresh = createEmptyConversation();
+          fresh.id = targetConvId!;
+          convs.unshift(fresh);
+          convIndex = 0;
+        }
+
+        const conv = convs[convIndex];
+        const isFirstMessage = conv.messages.length === 0;
+        const newTitle = isFirstMessage ? generateConversationTitle(trimmed) : conv.title;
+        const updatedMsgs = [...conv.messages, userMsg, assistantPlaceholder];
+
+        convs[convIndex] = {
+          ...conv,
+          title: newTitle,
+          updatedAt: Date.now(),
+          messages: updatedMsgs,
+        };
+
+        const nextStore: CopilotHistoryStore = {
+          version: 2,
+          activeConversationId: targetConvId,
+          conversations: convs,
+        };
+        // Persist user message immediately
+        saveCopilotHistory(nextStore);
+        return nextStore;
+      });
+
       setIsLoading(true);
-
-      // Create placeholder assistant message for streaming
-      const assistantMessageIndex = updatedMessages.length;
-      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
-
       abortControllerRef.current = new AbortController();
 
       try {
+        const outboundMessages = [
+          ...(activeConversation?.messages || []),
+          { role: "user", content: trimmed },
+        ];
+
         const response = await fetch(apiEndpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            messages: updatedMessages,
+            messages: outboundMessages,
             context: context || null,
             stream: true,
           }),
@@ -128,17 +327,25 @@ export function useAiChat(apiEndpoint: string = "/api/ai/chat") {
               if (data.error) {
                 throw new Error(data.error);
               }
+              if (data.type === "activity" && data.label) {
+                setActivity(data.label);
+              }
               if (data.content) {
                 accumulatedText += data.content;
-                setMessages((prev) => {
-                  const copy = [...prev];
-                  if (copy[assistantMessageIndex]) {
-                    copy[assistantMessageIndex] = {
-                      role: "assistant",
-                      content: accumulatedText,
-                    };
+                setStore((prev) => {
+                  const convs = [...prev.conversations];
+                  const cIdx = convs.findIndex((c) => c.id === targetConvId);
+                  if (cIdx !== -1) {
+                    const conv = convs[cIdx];
+                    const msgs = [...conv.messages];
+                    const aIdx = msgs.findIndex((m) => m.id === assistantMsgId);
+                    if (aIdx !== -1) {
+                      msgs[aIdx] = { ...msgs[aIdx], content: accumulatedText };
+                    }
+                    convs[cIdx] = { ...conv, messages: msgs };
+                    return { ...prev, conversations: convs };
                   }
-                  return copy;
+                  return prev;
                 });
               }
             } catch (err: any) {
@@ -148,33 +355,76 @@ export function useAiChat(apiEndpoint: string = "/api/ai/chat") {
             }
           }
         }
+
+        // Finalize plain text and persist completed assistant message
+        const normalized = normalizePlainResponse(accumulatedText);
+        setStore((prev) => {
+          const convs = [...prev.conversations];
+          const cIdx = convs.findIndex((c) => c.id === targetConvId);
+          if (cIdx !== -1) {
+            const conv = convs[cIdx];
+            const msgs = [...conv.messages];
+            const aIdx = msgs.findIndex((m) => m.id === assistantMsgId);
+            if (aIdx !== -1) {
+              msgs[aIdx] = {
+                ...msgs[aIdx],
+                content: normalized || accumulatedText,
+              };
+            }
+            convs[cIdx] = {
+              ...conv,
+              updatedAt: Date.now(),
+              messages: msgs,
+            };
+            const nextStore = { ...prev, conversations: convs };
+            saveCopilotHistory(nextStore);
+            return nextStore;
+          }
+          return prev;
+        });
       } catch (err: any) {
         if (err.name === "AbortError") {
           return;
         }
         const errorMsg = err.message || "An unexpected error occurred.";
         setError(errorMsg);
-        // Remove empty assistant placeholder if failed completely
-        setMessages((prev) => {
-          const copy = [...prev];
-          if (copy[assistantMessageIndex] && !copy[assistantMessageIndex].content) {
-            copy.splice(assistantMessageIndex, 1);
+
+        // Remove empty assistant placeholder if failed before receiving content
+        setStore((prev) => {
+          const convs = [...prev.conversations];
+          const cIdx = convs.findIndex((c) => c.id === targetConvId);
+          if (cIdx !== -1) {
+            const conv = convs[cIdx];
+            const msgs = conv.messages.filter((m) => m.id !== assistantMsgId || (m.content && m.content.trim().length > 0));
+            convs[cIdx] = { ...conv, messages: msgs };
+            const nextStore = { ...prev, conversations: convs };
+            saveCopilotHistory(nextStore);
+            return nextStore;
           }
-          return copy;
+          return prev;
         });
       } finally {
         setIsLoading(false);
+        setActivity(null);
         abortControllerRef.current = null;
       }
     },
-    [messages, isLoading, apiEndpoint]
+    [store, activeConversation, isLoading, apiEndpoint]
   );
 
   return {
     messages,
+    conversations,
+    activeConversationId: store.activeConversationId,
+    activeConversationTitle: activeConversation?.title || "New conversation",
     isLoading,
+    activity,
     error,
+    hasHydrated,
     sendMessage,
+    startNewConversation,
+    selectConversation,
+    deleteConversation,
     clearMessages,
   };
 }

@@ -1,4 +1,4 @@
-import { MarketExplorer } from "@/components/MarketExplorer/market_explorer";
+import { MarketExplorer } from "@/features/market_overview/market_explorer";
 
 /**
  * Main Application Shell for Covered Warrant Research Platform.

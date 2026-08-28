@@ -4,7 +4,7 @@ Abstract base class for Instrument Registry providers.
 
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from app.instruments.schemas import CoveredWarrantSpecification
+from app.instruments.instrument_schemas import CoveredWarrantSpecification
 
 
 class InstrumentRegistryProvider(ABC):
