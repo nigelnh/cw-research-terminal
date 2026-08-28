@@ -67,6 +67,29 @@ def calculate_time_to_maturity(maturity_date_str: str, current_time: Optional[da
 
 
 class LiveQuantEngine:
+    """Live Covered-Warrant analytics with latest-wins, single-flight-per-symbol scheduling.
+
+    Concurrency contract
+    --------------------
+    * Every market tick calls ``notify_market_tick(symbol)`` (synchronous, event-loop thread).
+      It resolves affected CW symbols and, for each, records a strictly increasing
+      *generation* in ``_pending`` and ensures exactly one worker task is running for that
+      symbol (``_inflight``). A burst of ticks for one symbol is coalesced to a single
+      pending generation - intermediate states are skipped, the newest is always computed.
+    * A per-symbol worker (``_symbol_worker``) drains ``_pending[symbol]``: it takes a
+      COHERENT input snapshot (spec + underlying quote + CW quote, read back-to-back with
+      no ``await`` between them), computes analytics via the unchanged
+      ``compute_warrant_analytics``, and publishes ONLY if its generation is >= the
+      generation already in the cache. A stale computation therefore cannot overwrite a
+      newer one (double-guarded: single-flight + generation check).
+    * Different symbols run independently, bounded globally by ``_compute_sem``
+      (``QUANT_MAX_CONCURRENT_COMPUTES``). No global lock serialises unrelated symbols.
+    * ``_analytics_cache`` is written ONLY by ``_publish`` (generation-guarded).
+      ``compute_warrant_analytics`` is a pure function with no cache side effect.
+    * All engine tasks are retained in ``_tasks`` with done-callbacks that consume
+      exceptions; ``shutdown()`` cancels them and blocks new scheduling.
+    """
+
     def __init__(self):
         self._analytics_cache: Dict[str, WarrantAnalytics] = {}
         self._watched_cw_symbols: Set[str] = set()
@@ -76,7 +99,26 @@ class LiveQuantEngine:
         # (no network / disk / blocking I/O): it is invoked on the per-tick calculation path.
         self._historical_vol_getter: Optional[Callable[[str], "Optional[VolEstimate]"]] = None
         self._broadcaster = None
-        self._lock = asyncio.Lock()
+
+        # ---- latest-wins scheduling state (all mutated only on the event-loop thread) ----
+        self._generation: int = 0                          # monotonic; ++ on every schedule
+        self._pending: Dict[str, int] = {}                 # cw_sym -> newest requested generation
+        self._inflight: Dict[str, asyncio.Task] = {}       # cw_sym -> its running worker task
+        self._cache_generation: Dict[str, int] = {}        # cw_sym -> generation of cached analytics
+        self._tasks: Set[asyncio.Task] = set()             # strong refs to every engine task
+        self._compute_sem = asyncio.Semaphore(
+            max(1, int(settings.QUANT_MAX_CONCURRENT_COMPUTES))
+        )
+        self._shutting_down: bool = False
+        self._counters: Dict[str, int] = {
+            "scheduled": 0,          # schedule requests recorded as pending
+            "coalesced": 0,          # ticks absorbed into an existing pending/inflight
+            "computed": 0,           # compute_warrant_analytics invocations from the scheduler
+            "published": 0,          # generation-guarded cache writes + broadcasts
+            "stale_discarded": 0,    # computed results dropped because a newer generation won
+            "failures": 0,           # compute exceptions (cache preserved, worker survives)
+            "broadcast_errors": 0,
+        }
 
     def set_market_state_getter(self, getter_func):
         """Injects function to query current market state: (symbol: str) -> Optional[MarketState]"""
@@ -95,11 +137,22 @@ class LiveQuantEngine:
         self._historical_vol_getter = getter_func
 
     def set_broadcaster(self, broadcaster_func):
-        """Injects WebSocket broadcast callback: (symbol: str, payload: dict) -> Coroutine"""
+        """Injects the analytics broadcast callback: ``(symbol: str, analytics: WarrantAnalytics)``.
+
+        CONTRACT: synchronous and non-blocking (it should hand off to the WS layer and
+        return immediately). It is invoked from the generation-guarded ``_publish``, so it
+        is only ever called with the latest accepted analytics, in generation order. A
+        coroutine return value is scheduled as a tracked task defensively, but the
+        supported contract is a plain function.
+        """
         self._broadcaster = broadcaster_func
 
     def register_watched_cw(self, cw_symbol: str, underlying_symbol: str) -> None:
-        """Registers a watched CW into the active quant evaluation pool and fan-out mapping."""
+        """Registers a watched CW into the active quant evaluation pool and fan-out mapping.
+
+        Also schedules an initial recompute so a freshly-subscribed CW gets analytics
+        promptly rather than only on its next tick.
+        """
         cw_clean = cw_symbol.strip().upper()
         und_clean = underlying_symbol.strip().upper()
 
@@ -108,12 +161,21 @@ class LiveQuantEngine:
             self._underlying_to_cw_map[und_clean] = set()
         self._underlying_to_cw_map[und_clean].add(cw_clean)
 
+        self._schedule_recompute(cw_clean)
+
     def unregister_watched_cw(self, cw_symbol: str) -> None:
-        """Removes a CW from the active evaluation pool."""
+        """Removes a CW from the active evaluation pool and tears down its scheduling state."""
         cw_clean = cw_symbol.strip().upper()
         self._watched_cw_symbols.discard(cw_clean)
-        for und, cw_set in self._underlying_to_cw_map.items():
+        for _und, cw_set in self._underlying_to_cw_map.items():
             cw_set.discard(cw_clean)
+
+        self._pending.pop(cw_clean, None)
+        self._cache_generation.pop(cw_clean, None)
+        self._analytics_cache.pop(cw_clean, None)
+        task = self._inflight.pop(cw_clean, None)
+        if task is not None and not task.done():
+            task.cancel()
 
     def get_analytics(self, symbol: str) -> Optional[WarrantAnalytics]:
         """Returns the latest cached quantitative analytics for a symbol."""
@@ -129,6 +191,12 @@ class LiveQuantEngine:
         """
         Computes full quantitative analytics for a Covered Warrant.
         Enforces strict Data-Quality guards: ACTIVE + COMPLETE + K>0 + CR>0 + T>0.
+
+        PURE: returns the analytics, does NOT write ``_analytics_cache``. The live cache is
+        owned exclusively by the generation-guarded ``_publish`` on the scheduler path.
+        Callers that want the live cached value use ``get_analytics``. When ``spec``,
+        ``cw_state`` and ``und_state`` are all supplied this coroutine has no suspension
+        point - it reads one coherent input and runs to completion atomically.
         """
         now_iso = get_vietnam_now().isoformat()
         cw_sym = cw_symbol.strip().upper()
@@ -382,47 +450,190 @@ class LiveQuantEngine:
             greeks=greeks,
             model_inputs=inputs,
         )
-
-        # Update cache
-        self._analytics_cache[cw_sym] = analytics
         return analytics
 
-    async def on_market_state_updated(self, symbol: str, state: CanonicalQuote) -> None:
+    # ------------------------------------------------------------------ #
+    # Latest-wins scheduling (all sync methods run on the loop thread)
+    # ------------------------------------------------------------------ #
+    def startup(self) -> None:
+        """Re-arm the scheduler (clears a prior ``shutdown``). Called from app startup."""
+        self._shutting_down = False
+
+    def notify_market_tick(self, symbol: str) -> None:
+        """Synchronous entry from the market-data tick path.
+
+        Resolves the CW symbols affected by a tick on ``symbol`` (the symbol itself if it
+        is a watched CW, plus every watched CW whose underlying is ``symbol``) and
+        schedules a latest-wins recompute for each. Never blocks, never awaits, never
+        raises. Creates at most one worker task per affected CW.
         """
-        Event-driven trigger called when a canonical quote is updated.
-        Fans out updates:
-        - If symbol is a watched CW: recalculates that CW.
-        - If symbol is an underlying equity: recalculates all watched CWs linked to that underlying.
-        """
+        if self._shutting_down:
+            return
         sym_upper = symbol.strip().upper()
 
-        targets_to_recompute: Set[str] = set()
-
-        # 1. Direct CW update
+        targets: Set[str] = set()
         if sym_upper in self._watched_cw_symbols:
-            targets_to_recompute.add(sym_upper)
+            targets.add(sym_upper)
+        linked = self._underlying_to_cw_map.get(sym_upper)
+        if linked:
+            targets.update(cw for cw in linked if cw in self._watched_cw_symbols)
 
-        # 2. Underlying equity fan-out update
-        if sym_upper in self._underlying_to_cw_map:
-            linked_cws = self._underlying_to_cw_map[sym_upper]
-            for cw in linked_cws:
-                if cw in self._watched_cw_symbols:
-                    targets_to_recompute.add(cw)
+        for cw_sym in targets:
+            self._schedule_recompute(cw_sym)
 
-        if not targets_to_recompute:
+    def _schedule_recompute(self, cw_sym: str) -> None:
+        """Record the newest generation for ``cw_sym`` and ensure a worker is running."""
+        if self._shutting_down:
+            return
+        if self._market_state_getter is None:
+            # Not wired yet (e.g. unit test constructed the engine directly); nothing to do.
             return
 
-        # Recompute all target warrants
-        for cw_sym in targets_to_recompute:
+        self._generation += 1
+        self._pending[cw_sym] = self._generation      # latest-wins: overwrite any older want
+        self._counters["scheduled"] += 1
+
+        existing = self._inflight.get(cw_sym)
+        if existing is not None and not existing.done():
+            # A worker is already draining this symbol; it will pick up the new generation.
+            self._counters["coalesced"] += 1
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop (sync context). The pending generation stays recorded; the
+            # next _schedule_recompute made under a loop will start the worker.
+            return
+
+        task = loop.create_task(self._symbol_worker(cw_sym))
+        self._inflight[cw_sym] = task
+        self._tasks.add(task)
+        task.add_done_callback(self._on_task_done)
+
+    def _on_task_done(self, task: asyncio.Task) -> None:
+        self._tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            # Should not happen (_symbol_worker guards internally) - retrieve so asyncio
+            # does not log "Task exception was never retrieved".
+            logger.error("LiveQuantEngine worker task crashed: %r", exc)
+
+    async def _symbol_worker(self, cw_sym: str) -> None:
+        """Drains ``_pending[cw_sym]`` one generation at a time. Single-flight per symbol."""
+        try:
+            while not self._shutting_down:
+                want = self._pending.pop(cw_sym, None)
+                if want is None:
+                    break
+
+                async with self._compute_sem:
+                    if self._shutting_down:
+                        break
+                    # Coalesce anything that arrived while we queued for the semaphore.
+                    newer = self._pending.pop(cw_sym, None)
+                    if newer is not None:
+                        self._counters["coalesced"] += 1
+                        want = newer
+                    try:
+                        analytics = await self._compute_for_symbol(cw_sym, want)
+                        self._counters["computed"] += 1
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - one bad tick must not kill the worker
+                        self._counters["failures"] += 1
+                        logger.warning(
+                            "Live quant recompute failed for %s (generation %d): %s: %s "
+                            "- cached analytics preserved",
+                            cw_sym, want, exc.__class__.__name__, exc,
+                        )
+                        # Advance nothing; loop to see if a newer tick is pending.
+                        await asyncio.sleep(0)
+                        continue
+
+                self._publish(cw_sym, want, analytics)
+                await asyncio.sleep(0)  # fairness: let other symbols' workers run
+        except asyncio.CancelledError:
+            raise
+        finally:
+            self._inflight.pop(cw_sym, None)
+            # A tick may have landed after our last pending-check; re-arm if so.
+            if not self._shutting_down and self._pending.get(cw_sym) is not None:
+                self._schedule_recompute(cw_sym)
+
+    async def _compute_for_symbol(self, cw_sym: str, generation: int) -> WarrantAnalytics:
+        """Resolve a COHERENT input snapshot, then compute. This is the scheduler's only
+        awaiting seam and the natural override point for concurrency tests.
+
+        ``generation`` is the monotonic ordering token for this recompute (used by the
+        caller for the latest-wins publish decision; passed here so tests can correlate).
+
+        The spec is resolved first (a registry lookup that only suspends on the very first
+        call before init). The two market-state reads are then issued back-to-back with no
+        ``await`` between them, so S (underlying) and the CW book come from the same instant.
+        ``compute_warrant_analytics`` with spec + both states supplied has no suspension
+        point, so the whole computation uses that one snapshot.
+        """
+        spec = await instrument_registry.get_instrument(cw_sym)
+        und_sym = spec.underlying_symbol.strip().upper() if (spec and spec.underlying_symbol) else None
+
+        getter = self._market_state_getter
+        cw_state = getter(cw_sym) if getter else None
+        und_state = getter(und_sym) if (getter and und_sym) else None
+
+        return await self.compute_warrant_analytics(
+            cw_sym, spec=spec, cw_state=cw_state, und_state=und_state
+        )
+
+    def _publish(self, cw_sym: str, generation: int, analytics: WarrantAnalytics) -> None:
+        """Generation-guarded cache write + broadcast. Older generations are discarded."""
+        if generation < self._cache_generation.get(cw_sym, -1):
+            self._counters["stale_discarded"] += 1
+            return
+
+        self._analytics_cache[cw_sym] = analytics
+        self._cache_generation[cw_sym] = generation
+        self._counters["published"] += 1
+
+        if self._broadcaster is not None and analytics.is_available and not self._shutting_down:
             try:
-                analytics = await self.compute_warrant_analytics(cw_sym)
-                # Broadcast analytics patch to connected WebSocket clients if broadcaster configured
-                if self._broadcaster and analytics.is_available:
-                    res = self._broadcaster(cw_sym, analytics)
-                    if asyncio.iscoroutine(res):
-                        await res
-            except Exception as e:
-                logger.warning(f"Error computing live quant analytics for {cw_sym}: {e}")
+                res = self._broadcaster(cw_sym, analytics)
+                if asyncio.iscoroutine(res):
+                    try:
+                        t = asyncio.get_running_loop().create_task(res)
+                        self._tasks.add(t)
+                        t.add_done_callback(self._on_task_done)
+                    except RuntimeError:
+                        res.close()
+            except Exception as exc:  # noqa: BLE001
+                self._counters["broadcast_errors"] += 1
+                logger.warning("Analytics broadcast failed for %s: %s", cw_sym, exc)
+
+    async def shutdown(self) -> None:
+        """Block new scheduling and cancel/await every engine task. Idempotent."""
+        self._shutting_down = True
+        tasks = list(self._tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._tasks.clear()
+        self._inflight.clear()
+        self._pending.clear()
+        logger.info("LiveQuantEngine scheduler shut down (%s).", self.stats())
+
+    def stats(self) -> Dict[str, int]:
+        """Lightweight observability snapshot for logs and tests."""
+        return {
+            **self._counters,
+            "inflight_workers": len(self._inflight),
+            "pending_symbols": len(self._pending),
+            "tracked_tasks": len(self._tasks),
+            "cached_symbols": len(self._analytics_cache),
+            "generation": self._generation,
+        }
 
 
 # Global singleton instance

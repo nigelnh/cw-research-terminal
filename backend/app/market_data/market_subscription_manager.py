@@ -175,13 +175,23 @@ class SubscriptionManager:
             self._debounce_task.cancel()
 
         async def _do_restart():
-            await asyncio.sleep(self.debounce_ms / 1000.0)
+            try:
+                await asyncio.sleep(self.debounce_ms / 1000.0)
+            except asyncio.CancelledError:
+                # A newer watchlist change superseded this one before the debounce elapsed.
+                # Nothing was started yet, so there is nothing to unwind.
+                return
+
             target = sorted(list(self._desired_symbols))
             if set(target) == self._active_symbols:
                 return
 
             logger.info(f"Applying debounced subscription change: {target}")
-            success = await self.provider.set_subscriptions(target)
+            # Shield the actual stream restart: if this debounce task is cancelled mid-restart
+            # (e.g. another watchlist change lands), the provider must still finish retiring the
+            # old SignalR lifecycle and bringing the new one up atomically. The provider
+            # serialises lifecycle transitions on its own lock, so the next restart simply waits.
+            success = await asyncio.shield(self.provider.set_subscriptions(target))
             if success:
                 self._active_symbols = set(target)
             self._notify_status_change()

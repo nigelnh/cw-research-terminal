@@ -43,10 +43,17 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 
-# Suppress verbose vendor debug and transport frames
+# Suppress verbose vendor debug and transport frames.
+# NOTE: signalrcore logs under the logger name "SignalRCoreClient" (see
+# signalrcore.helpers.Helpers.get_logger), NOT "signalrcore". The FiinQuantX SDK also
+# forcibly re-enables DEBUG on the root logger and on "SignalRCoreClient" every time it
+# constructs a stream; FiinQuantProvider._tame_sdk_side_effects re-suppresses them after
+# each stream operation at runtime.
+logging.getLogger("SignalRCoreClient").setLevel(logging.WARNING)
 logging.getLogger("signalrcore").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.INFO)
 logging.getLogger("websockets").setLevel(logging.INFO)
+logging.getLogger("websocket").setLevel(logging.WARNING)
 
 # Apply redactor to root and existing handlers
 _redactor = SensitiveDataRedactor()
@@ -67,16 +74,14 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Instrument registry initialization warning: {e}")
 
     # Wire Quant Engine
+    live_quant_engine.startup()
     live_quant_engine.set_market_state_getter(lambda sym: market_state.get_quote(sym))
     live_quant_engine.set_broadcaster(manager.broadcast_analytics_patch)
 
     def on_market_state_change(sym: str, quote):
-        import asyncio
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(live_quant_engine.on_market_state_updated(sym, quote))
-        except Exception:
-            pass
+        # Synchronous, event-loop-thread hand-off. The engine records a latest-wins
+        # generation and owns its own bounded task lifecycle - no create_task here.
+        live_quant_engine.notify_market_tick(sym)
 
     subscription_manager.register_update_listener(on_market_state_change)
 
@@ -116,16 +121,21 @@ async def lifespan(app: FastAPI):
     historical_volatility_service.start_periodic_refresh(_hv_refresh_symbols)
 
     yield
-    # Shutdown: clean up streams
+    # Shutdown: stop ingestion first (no new ticks), then drain the analytics scheduler,
+    # then background refreshers.
     logger.info("Shutting down CW Research Platform Backend...")
-    try:
-        await historical_volatility_service.stop_periodic_refresh()
-    except Exception as e:
-        logger.warning(f"Historical volatility refresh shutdown warning: {e}")
     try:
         await subscription_manager.shutdown()
     except Exception as e:
         logger.warning(f"Market provider shutdown warning: {e}")
+    try:
+        await live_quant_engine.shutdown()
+    except Exception as e:
+        logger.warning(f"Quant engine shutdown warning: {e}")
+    try:
+        await historical_volatility_service.stop_periodic_refresh()
+    except Exception as e:
+        logger.warning(f"Historical volatility refresh shutdown warning: {e}")
 
 
 app = FastAPI(
@@ -178,6 +188,7 @@ async def root_health():
         "redis_enabled": store_health.get("redis_enabled", False),
         "redis_connected": store_health.get("redis_connected", False),
         "market_cache_available": store_health.get("market_cache_available", False),
+        "quant_scheduler": live_quant_engine.stats(),
     }
 
 
