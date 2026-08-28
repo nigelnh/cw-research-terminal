@@ -16,8 +16,11 @@ import pandas as pd
 import pytest
 
 from app.market_data.market_schemas import (
+    CIRCUIT_REASON_AUTH,
+    CIRCUIT_REASON_RATE_LIMIT,
     HistoricalAuthError,
     HistoricalBar,
+    HistoricalCircuitOpenError,
     HistoricalEntitlementError,
     HistoricalRangeLimitError,
     HistoricalRateLimitError,
@@ -135,22 +138,47 @@ async def test_range_limit_does_not_open_circuit_breaker_and_subsequent_short_re
 async def test_auth_failure_opens_circuit_breaker_and_cooldown_blocks_subsequent_calls():
     p, sess = _make_history_provider("auth_401")
 
-    # 1. Auth failure raises HistoricalAuthError
+    # 1. A genuine auth failure raises HistoricalAuthError (NOT the circuit-open type)
     with pytest.raises(HistoricalAuthError) as exc_info:
         await p.get_historical_bars("HPG", timeframe="1D")
-
+    assert not isinstance(exc_info.value, HistoricalCircuitOpenError)
     assert "auth failure" in str(exc_info.value).lower()
     health = p.get_health()
     assert health["historical_circuit_open"] is True
     assert health["historical_status"] == "DEGRADED"
 
-    # 2. Subsequent immediate call is blocked by circuit breaker without hitting upstream
+    # 2. A subsequent call is blocked by the OPEN circuit without hitting upstream. It
+    #    raises the typed HistoricalCircuitOpenError carrying the canonical reason.
     calls_before = len(sess.call_log)
-    with pytest.raises(HistoricalAuthError) as exc_info2:
+    with pytest.raises(HistoricalCircuitOpenError) as exc_info2:
         await p.get_historical_bars("SSI", timeframe="1D")
+    err = exc_info2.value
+    assert err.reason == CIRCUIT_REASON_AUTH
+    assert err.is_retryable is False                       # an auth circuit does not self-heal
+    assert err.retry_after_seconds > 0
+    assert "circuit breaker is OPEN" in str(err)
+    assert len(sess.call_log) == calls_before              # no new upstream hit while circuit is open
 
-    assert "circuit breaker is OPEN" in str(exc_info2.value)
-    assert len(sess.call_log) == calls_before  # no new upstream hit while circuit is open
+
+async def test_rate_limit_opens_circuit_and_subsequent_call_is_retryable_circuit_open():
+    p, sess = _make_history_provider("rate_limit_429")
+
+    # 1. A 429 raises HistoricalRateLimitError and opens the circuit with a short cooldown
+    with pytest.raises(HistoricalRateLimitError) as exc_info:
+        await p.get_historical_bars("HPG", timeframe="1D")
+    assert not isinstance(exc_info.value, HistoricalCircuitOpenError)
+    assert p.get_health()["historical_circuit_open"] is True
+
+    # 2. A subsequent call is blocked by the OPEN circuit -> HistoricalCircuitOpenError,
+    #    reason RATE_LIMIT, and it IS retryable (the circuit clears on its own).
+    calls_before = len(sess.call_log)
+    with pytest.raises(HistoricalCircuitOpenError) as exc_info2:
+        await p.get_historical_bars("SSI", timeframe="1D")
+    err = exc_info2.value
+    assert err.reason == CIRCUIT_REASON_RATE_LIMIT
+    assert err.is_retryable is True
+    assert 0 < err.retry_after_seconds <= 10.0
+    assert len(sess.call_log) == calls_before
 
 
 async def test_entitlement_failure_classification():

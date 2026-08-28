@@ -8,10 +8,12 @@ from app.market_data.market_schemas import (
     MarketHealthResponse,
     HistoricalRangeLimitError,
     HistoricalAuthError,
+    HistoricalCircuitOpenError,
     HistoricalEntitlementError,
     HistoricalRateLimitError,
     HistoricalUpstreamError,
     HistoricalTransportError,
+    CIRCUIT_REASON_RATE_LIMIT,
 )
 from app.market_data.market_state import market_state
 from app.market_data.market_subscription_manager import subscription_manager
@@ -80,11 +82,15 @@ async def get_historical_data(
         return bars
     except HistoricalRangeLimitError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HistoricalCircuitOpenError as e:
+        # circuit is open without contacting upstream; map by the reason it opened
+        status = 429 if e.reason == CIRCUIT_REASON_RATE_LIMIT else 503
+        raise HTTPException(status_code=status, detail=str(e))
     except HistoricalAuthError as e:
         raise HTTPException(status_code=503, detail=f"Market data provider authentication error: {e}")
     except HistoricalEntitlementError as e:
         raise HTTPException(status_code=403, detail=str(e))
-    except HistoricalRateLimitError as e:
+    except HistoricalRateLimitError:
         raise HTTPException(status_code=429, detail="Upstream provider rate limited")
     except (HistoricalUpstreamError, HistoricalTransportError) as e:
         raise HTTPException(status_code=503, detail=f"Upstream market data provider unavailable: {e}")

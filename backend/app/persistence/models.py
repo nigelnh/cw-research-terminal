@@ -23,6 +23,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Numeric,
     String,
@@ -47,7 +48,7 @@ _RUN_STATUS_CHECK = "status IN ('RUNNING','SUCCEEDED','FAILED','PARTIAL')"
 class Instrument(Base):
     __tablename__ = "instruments"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
     symbol: Mapped[str] = mapped_column(String(32), nullable=False)
     instrument_type: Mapped[str] = mapped_column(String(16), nullable=False)
     exchange: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'HOSE'"))
@@ -90,7 +91,7 @@ class Instrument(Base):
 class MarketBar(Base):
     __tablename__ = "market_bars"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
     instrument_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("instruments.id", ondelete="CASCADE"), nullable=False
     )
@@ -136,7 +137,7 @@ class MarketBar(Base):
 class IngestionRun(Base):
     __tablename__ = "ingestion_runs"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     timeframe: Mapped[str] = mapped_column(String(4), nullable=False)
     price_basis: Mapped[str] = mapped_column(String(8), nullable=False)
@@ -174,7 +175,7 @@ class IngestionRun(Base):
 class IngestionState(Base):
     __tablename__ = "ingestion_state"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     instrument_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("instruments.id", ondelete="CASCADE"), nullable=False

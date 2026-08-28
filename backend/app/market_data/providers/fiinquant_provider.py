@@ -9,10 +9,14 @@ from datetime import datetime, timedelta
 
 from app.core.config import settings
 from app.market_data.market_schemas import (
+    CIRCUIT_REASON_AUTH,
+    CIRCUIT_REASON_RATE_LIMIT,
+    CIRCUIT_REASON_UNKNOWN,
     HistoricalBar,
     HistoricalDataError,
     HistoricalRangeLimitError,
     HistoricalAuthError,
+    HistoricalCircuitOpenError,
     HistoricalEntitlementError,
     HistoricalRateLimitError,
     HistoricalTransportError,
@@ -647,13 +651,18 @@ class FiinQuantProvider(MarketDataProvider):
             except ValueError:
                 pass  # allow non-standard format strings to pass to upstream validation
 
-        # Circuit breaker check: if auth circuit is open, reject immediately without hitting upstream
+        # Circuit breaker check: if the historical circuit is open, reject immediately
+        # without hitting upstream. The typed error carries the canonical reason the
+        # circuit opened so callers decide retryability without inspecting message strings.
         now_mono = time.monotonic()
         if self._historical_circuit_open_until > now_mono:
-            reason = self._historical_circuit_reason or "previous auth failure"
-            rem = int(self._historical_circuit_open_until - now_mono)
-            raise HistoricalAuthError(
-                f"Historical market data provider circuit breaker is OPEN ({reason}). Next retry allowed in {rem}s."
+            reason = self._historical_circuit_reason or CIRCUIT_REASON_UNKNOWN
+            rem = self._historical_circuit_open_until - now_mono
+            raise HistoricalCircuitOpenError(
+                f"Historical market data provider circuit breaker is OPEN ({reason}). "
+                f"Next retry allowed in ~{int(rem) + 1}s.",
+                reason=reason,
+                retry_after_seconds=rem,
             )
 
         if not self._session or not self._is_connected:
@@ -662,7 +671,7 @@ class FiinQuantProvider(MarketDataProvider):
                 self._historical_last_status = "DEGRADED"
                 self._historical_last_error = "Authentication failed"
                 self._historical_circuit_open_until = time.monotonic() + 60.0
-                self._historical_circuit_reason = "AUTH_FAILURE"
+                self._historical_circuit_reason = CIRCUIT_REASON_AUTH
                 raise HistoricalAuthError(f"FiinQuant authentication failed while fetching historical bars for {sym}")
 
         def _fetch() -> List[HistoricalBar]:
@@ -732,7 +741,7 @@ class FiinQuantProvider(MarketDataProvider):
                 if "401" in exc_str or "invalid_token" in exc_str or "invalid_grant" in exc_str or "Unauthorized" in exc_str:
                     self._historical_consecutive_auth_errors += 1
                     self._historical_circuit_open_until = time.monotonic() + 60.0
-                    self._historical_circuit_reason = "AUTH_FAILURE"
+                    self._historical_circuit_reason = CIRCUIT_REASON_AUTH
                     self._historical_last_status = "DEGRADED"
                     self._historical_last_error = f"Auth failure: {exc_str}"
                     logger.error("Historical authentication failure for %s. Circuit breaker OPEN for 60s: %s", sym, exc)
@@ -748,7 +757,7 @@ class FiinQuantProvider(MarketDataProvider):
                 # 4. Rate limit (429) -> Transient backoff
                 if "429" in exc_str or "RateLimit" in exc_str:
                     self._historical_circuit_open_until = time.monotonic() + 10.0
-                    self._historical_circuit_reason = "RATE_LIMIT"
+                    self._historical_circuit_reason = CIRCUIT_REASON_RATE_LIMIT
                     logger.warning("Historical rate limit hit for %s. Backoff 10s: %s", sym, exc)
                     raise HistoricalRateLimitError(f"FiinQuant rate limit for {sym}: {exc_str}") from exc
 

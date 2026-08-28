@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -110,6 +110,27 @@ class IngestionRepository:
         await self._session.flush()
         return _run_row(m)
 
+    async def add_progress(
+        self,
+        run_id: int,
+        *,
+        rows_fetched: int = 0,
+        rows_inserted: int = 0,
+        rows_updated: int = 0,
+    ) -> None:
+        """Atomically INCREMENT a still-RUNNING run's counters (concurrency-safe: each
+        caller reports only its own delta). No-op once the run is completed."""
+        await self._session.execute(
+            update(IngestionRun)
+            .where(IngestionRun.id == run_id, IngestionRun.status == "RUNNING")
+            .values(
+                rows_fetched=IngestionRun.rows_fetched + int(rows_fetched),
+                rows_inserted=IngestionRun.rows_inserted + int(rows_inserted),
+                rows_updated=IngestionRun.rows_updated + int(rows_updated),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+
     async def get_run(self, run_id: int) -> IngestionRunRow | None:
         m = await self._session.get(IngestionRun, run_id)
         return _run_row(m) if m is not None else None
@@ -159,13 +180,26 @@ class IngestionRepository:
             else None,
             "last_run_id": last_run_id,
         }
-        update_cols = {k: v for k, v in values.items() if v is not None and k not in ("source", "instrument_id", "timeframe", "price_basis")}
-        update_cols["updated_at"] = func.now()
+        stmt = pg_insert(IngestionState).values(**values)
+        # The cursor is monotonic: last_bar_ts only advances (GREATEST), backfilled_from_ts
+        # only recedes (LEAST). last_success_at / last_run_id take the newest non-null value.
+        update_cols: dict = {"updated_at": func.now()}
+        if values["last_bar_ts"] is not None:
+            update_cols["last_bar_ts"] = func.greatest(
+                func.coalesce(IngestionState.last_bar_ts, values["last_bar_ts"]), stmt.excluded.last_bar_ts
+            )
+        if values["backfilled_from_ts"] is not None:
+            update_cols["backfilled_from_ts"] = func.least(
+                func.coalesce(IngestionState.backfilled_from_ts, values["backfilled_from_ts"]),
+                stmt.excluded.backfilled_from_ts,
+            )
+        if values["last_success_at"] is not None:
+            update_cols["last_success_at"] = stmt.excluded.last_success_at
+        if values["last_run_id"] is not None:
+            update_cols["last_run_id"] = stmt.excluded.last_run_id
 
         stmt = (
-            pg_insert(IngestionState)
-            .values(**values)
-            .on_conflict_do_update(constraint="uq_ingestion_state_key", set_=update_cols)
+            stmt.on_conflict_do_update(constraint="uq_ingestion_state_key", set_=update_cols)
             .returning(IngestionState)
         )
         m = (await self._session.execute(stmt)).scalar_one()
