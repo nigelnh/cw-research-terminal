@@ -112,7 +112,7 @@ async def detect_gaps(
     expected = [d for d in _iter(lo, hi) if is_expected_trading_day(d)]
     missing = [d for d in expected if d not in present]
 
-    segments = _classify_missing(missing)
+    segments = classify_missing_runs(missing)
     return GapReport(
         symbol=sym, timeframe=tf, price_basis=pb, scan_start=lo, scan_end=hi, seeded=True,
         bar_count=len(bars), expected_sessions=len(expected), present_sessions=len(expected) - len(missing),
@@ -127,7 +127,7 @@ def _iter(lo: date, hi: date):
         d += timedelta(days=1)
 
 
-def _classify_missing(missing: list[date]) -> list[GapSegment]:
+def classify_missing_runs(missing: list[date]) -> list[GapSegment]:
     """Group consecutive *expected trading days* that are missing into runs, then classify.
 
     Two missing expected days separated only by a weekend still count as one run (the

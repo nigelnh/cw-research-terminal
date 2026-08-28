@@ -95,9 +95,12 @@ def fake_provider() -> FakeHistoricalProvider:
 
 
 @pytest_asyncio.fixture
-async def ingestion_service(engine, sessionmaker_, fake_provider) -> IngestionService:
+async def ingestion_service(engine, sessionmaker_, fake_provider, monkeypatch) -> IngestionService:
+    from app.core.config import settings
     from app.persistence.ingestion.retry import RetryPolicy
 
+    # tests must not eat the 2s production inter-request throttle
+    monkeypatch.setattr(settings, "INGEST_MIN_REQUEST_INTERVAL_SECONDS", 0.0)
     return IngestionService(
         engine=engine,
         sessionmaker=sessionmaker_,
@@ -105,3 +108,28 @@ async def ingestion_service(engine, sessionmaker_, fake_provider) -> IngestionSe
         source="fiinquant",
         retry_policy=RetryPolicy(max_retries=3, base_seconds=0.001, max_seconds=0.01),
     )
+
+
+@pytest_asyncio.fixture
+async def history_service(engine, sessionmaker_, fake_provider, ingestion_service, monkeypatch):
+    """`history_read_service` singleton wired to the test cluster in postgres_first mode."""
+    from app.core.config import settings
+    from app.market_data.history_read_service import history_read_service
+
+    monkeypatch.setattr(settings, "DATABASE_ENABLED", True)
+    monkeypatch.setattr(settings, "HISTORY_SOURCE_MODE", "postgres_first")
+    monkeypatch.setattr(settings, "HISTORY_GAPFILL_ENABLED", True)
+    monkeypatch.setattr(settings, "HISTORY_GAPFILL_LOCK_WAIT_SECONDS", 10.0)
+
+    history_read_service.configure(
+        engine=engine, sessionmaker=sessionmaker_, provider=fake_provider,
+        ingestion_service=ingestion_service,
+    )
+    # reset per-test counters / cooldowns
+    for k in history_read_service._counters:  # noqa: SLF001
+        history_read_service._counters[k] = 0
+    history_read_service._fill_failure_until.clear()  # noqa: SLF001
+    history_read_service._last_fill = None  # noqa: SLF001
+    yield history_read_service
+    history_read_service.reset()
+    history_read_service.set_provider(None)

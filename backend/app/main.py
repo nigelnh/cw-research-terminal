@@ -14,6 +14,7 @@ from app.quant.quant_router import quant_router
 from app.quant.quant_engine import live_quant_engine
 from app.quant.historical_volatility_service import historical_volatility_service
 from app.persistence import database as persistence_db
+from app.market_data.history_read_service import history_read_service
 from app.market_data.market_state import market_state
 from app.market_data.market_websocket import manager
 
@@ -77,10 +78,12 @@ async def lifespan(app: FastAPI):
     # Durable historical persistence (PostgreSQL). OFF unless DATABASE_ENABLED. Storage
     # foundation only - the realtime path and the public historical API do NOT depend on
     # it yet. A failed connection is non-fatal unless DATABASE_REQUIRE_ON_STARTUP is set.
+    _persistence_ready = False
     if settings.DATABASE_ENABLED:
         try:
             await persistence_db.init_engine()
             await persistence_db.ping()
+            _persistence_ready = True
             logger.info("PostgreSQL persistence layer: connected.")
         except Exception as e:
             if settings.DATABASE_REQUIRE_ON_STARTUP:
@@ -108,11 +111,36 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Market provider initialization warning: {e}")
 
+    # ---- Historical read path (Step 7) ----
+    # The direct provider is always available for provider-direct mode / non-daily / unseeded.
+    history_read_service.set_provider(subscription_manager.provider)
+    if _persistence_ready:
+        history_read_service.configure(
+            engine=persistence_db.get_engine(),
+            sessionmaker=persistence_db.get_sessionmaker(),
+            provider=subscription_manager.provider,
+        )
+        logger.info("Historical reads: PostgreSQL-first (mode=%s).", settings.HISTORY_SOURCE_MODE)
+    else:
+        logger.info("Historical reads: provider-direct (persistence not enabled/reachable).")
+
     # Wire the Historical Volatility Service AFTER the market provider is initialized so its
     # upstream historical source is usable. The engine getter (get_estimate) is a pure
     # in-memory lookup; all fetching happens here / in the background refresh loop / ensure().
-    # Startup warm-up must never make the application fail to boot.
-    historical_volatility_service.set_bar_source(subscription_manager.provider)
+    # Startup warm-up must never make the application fail to boot. When PostgreSQL has the
+    # adjusted daily bars, HV warm-up makes ZERO historical FiinQuant calls.
+    if _persistence_ready:
+        from app.persistence.bar_source import PostgresHistoricalBarSource
+
+        hv_source = PostgresHistoricalBarSource(
+            persistence_db.get_sessionmaker(),
+            gap_filler=history_read_service.ingestion_service(),
+            min_bars_for_fill=settings.HV_POSTGRES_MIN_BARS_FOR_FILL,
+        )
+        historical_volatility_service.set_bar_source(hv_source)
+        logger.info("Historical volatility source: PostgreSQL (PostgresHistoricalBarSource).")
+    else:
+        historical_volatility_service.set_bar_source(subscription_manager.provider)
     live_quant_engine.set_historical_vol_getter(historical_volatility_service.get_estimate)
 
     _startup_underlyings: list[str] = []
@@ -212,6 +240,7 @@ async def root_health():
         "market_cache_available": store_health.get("market_cache_available", False),
         "quant_scheduler": live_quant_engine.stats(),
         "database": await persistence_db.health(),
+        "history_reads": history_read_service.health(),
     }
 
 

@@ -139,7 +139,9 @@ def _truncate(pg_cluster: dict) -> Iterator[None]:
 
 @pytest_asyncio.fixture
 async def engine(pg_cluster: dict):
-    eng = create_async_engine(pg_cluster["async_url"])
+    # Generous pool: concurrency tests fan out ~20 simultaneous sessions + advisory-lock
+    # connections against this one engine.
+    eng = create_async_engine(pg_cluster["async_url"], pool_size=25, max_overflow=25, pool_timeout=15)
     try:
         yield eng
     finally:
