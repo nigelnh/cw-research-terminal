@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
@@ -66,6 +65,40 @@ class Settings(BaseSettings):
     QUANT_IV_SIGMA_TOLERANCE: float = Field(default=1e-4, description="Sigma tolerance for IV solver convergence")
     QUANT_IV_SIGMA_MIN: float = Field(default=1e-4, description="Minimum sigma lower bound (0.01%)")
     QUANT_IV_SIGMA_MAX: float = Field(default=5.0, description="Maximum sigma upper bound (500%)")
+
+    # ------------------------------------------------------------------ #
+    # Durable Historical Market-Data Persistence (PostgreSQL)             #
+    # ------------------------------------------------------------------ #
+    # OFF by default: the realtime market path and every existing test boot
+    # unchanged when DATABASE_ENABLED is false. This is storage foundation only;
+    # the public historical API still serves from FiinQuant until Step 7.
+    DATABASE_ENABLED: bool = Field(default=False, description="Enable the PostgreSQL persistence layer")
+    DATABASE_URL: str = Field(
+        default="",
+        description="Async SQLAlchemy URL, e.g. postgresql+asyncpg://user:pass@host:5432/cw_research (server-side only)",
+    )
+    DATABASE_REQUIRE_ON_STARTUP: bool = Field(
+        default=False,
+        description="If true and DATABASE_ENABLED, a failed DB connection aborts application startup instead of degrading",
+    )
+    DATABASE_POOL_SIZE: int = Field(default=5, description="SQLAlchemy async engine connection pool size")
+    DATABASE_MAX_OVERFLOW: int = Field(default=5, description="Extra connections allowed beyond the pool size under load")
+    DATABASE_POOL_TIMEOUT_SECONDS: float = Field(default=10.0, description="Seconds to wait for a pooled connection before erroring")
+    DATABASE_POOL_RECYCLE_SECONDS: int = Field(default=1800, description="Recycle pooled connections older than this (hosted PG idle cutoffs)")
+    DATABASE_STATEMENT_TIMEOUT_MS: int = Field(default=30000, description="Per-statement timeout applied to every DB session (0 disables)")
+    DATABASE_ECHO_SQL: bool = Field(default=False, description="Log every emitted SQL statement (debug only)")
+    DATABASE_BULK_CHUNK_SIZE: int = Field(default=5000, description="Rows per INSERT ... ON CONFLICT statement during bulk bar upserts")
+
+    def sync_database_url(self) -> str:
+        """The synchronous (psycopg2) form of DATABASE_URL, used by Alembic migrations."""
+        url = self.DATABASE_URL
+        if url.startswith("postgresql+asyncpg://"):
+            return "postgresql+psycopg2://" + url[len("postgresql+asyncpg://"):]
+        if url.startswith("postgres://"):
+            return "postgresql+psycopg2://" + url[len("postgres://"):]
+        if url.startswith("postgresql://"):
+            return "postgresql+psycopg2://" + url[len("postgresql://"):]
+        return url
 
     model_config = SettingsConfigDict(
         env_file=(

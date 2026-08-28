@@ -20,6 +20,14 @@ msgpack==1.0.2
 # Cache & State Persistence
 redis>=5.0.0
 
+# Durable Historical Market-Data Persistence (PostgreSQL)
+# SQLAlchemy 2.0 async ORM + Alembic migrations. asyncpg is the runtime async driver;
+# psycopg2-binary is the synchronous driver Alembic uses to run migrations.
+sqlalchemy[asyncio]>=2.0,<2.1
+alembic>=1.13,<2.0
+asyncpg>=0.29,<0.32
+psycopg2-binary>=2.9,<3.0
+
 # Vendor Runtime Dependencies (Required by FiinQuantX at import time)
 matplotlib>=3.8.0
 pandas>=2.0.0
