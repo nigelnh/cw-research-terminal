@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type { CoveredWarrant, MarketQuote } from "@/domain/models";
 import type { GatewayConnectionState, UpstreamFeedState } from "@/data/providers";
 import { providers } from "@/data/providers";
+import { backendWebSocketClient } from "@/data/backend/backend_websocket_client";
 import { config } from "@/config";
 
 export interface ResearchMarketState {
@@ -16,92 +17,58 @@ export interface ResearchMarketState {
   quotes: Map<string, MarketQuote>;
 }
 
+const ws = backendWebSocketClient;
+
 /**
- * React hook to consume canonical real-time market data from the active provider.
- * Tracks both browser WebSocket gateway connection and upstream exchange market feed state.
+ * Subscribe to the ONE canonical realtime store (BackendWebSocketClient) via
+ * useSyncExternalStore. The client owns the quote/warrant maps and connection scalars and
+ * mutates them in place; a monotonic `revision` is the snapshot that drives re-renders.
+ * Nothing is copied into React state and no new Map is allocated per tick.
  */
 export function useResearchMarket() {
   const provider = providers.marketData;
 
-  const [connectionState, setConnectionState] = useState<GatewayConnectionState>(
-    provider.getConnectionState()
-  );
-  const [upstreamFeedState, setUpstreamFeedState] = useState<UpstreamFeedState>(
-    provider.getUpstreamFeedState()
-  );
-  const [marketSession, setMarketSession] = useState<string>(
-    typeof provider.getMarketSession === "function" ? provider.getMarketSession() : "UNKNOWN"
-  );
-  const [marketSessionActive, setMarketSessionActive] = useState<boolean>(
-    typeof provider.isMarketSessionActive === "function" ? provider.isMarketSessionActive() : false
-  );
-  const [warrants, setWarrants] = useState<Map<string, CoveredWarrant>>(
-    new Map(provider.getAllCoveredWarrants())
-  );
-  const [quotes, setQuotes] = useState<Map<string, MarketQuote>>(
-    new Map(provider.getAllQuotes())
-  );
-
   useEffect(() => {
     provider.connect();
-
-    const unsubState = provider.onConnectionStateChange((state) => {
-      setConnectionState(state);
-    });
-
-    const unsubFeed = provider.onUpstreamFeedStateChange((feedState) => {
-      setUpstreamFeedState(feedState);
-    });
-
-    const unsubSession =
-      typeof provider.onMarketSessionChange === "function"
-        ? provider.onMarketSessionChange((sess) => {
-            setMarketSession(sess.status);
-            setMarketSessionActive(sess.active);
-          })
-        : () => {};
-
-    const unsubQuote = provider.onQuoteUpdate((q) => {
-      setQuotes((prev) => {
-        const next = new Map(prev);
-        next.set(q.symbol, q);
-        return next;
-      });
-    });
-
-    const unsubCw = provider.onCoveredWarrantUpdate((cw) => {
-      setWarrants((prev) => {
-        const next = new Map(prev);
-        next.set(cw.symbol, cw);
-        return next;
-      });
-      setQuotes((prev) => {
-        const next = new Map(prev);
-        next.set(cw.symbol, cw.quote);
-        return next;
-      });
-    });
-
-    return () => {
-      unsubState();
-      unsubFeed();
-      unsubSession();
-      unsubQuote();
-      unsubCw();
-    };
   }, [provider]);
 
+  // Re-render on any observable change (quote / warrant / connection / feed / session).
+  useSyncExternalStore(ws.subscribe, ws.getRevision, () => 0);
+
   return {
-    connectionState,
-    gatewayState: connectionState,
-    upstreamFeedState,
-    marketSession,
-    marketSessionActive,
+    connectionState: ws.getGatewayState(),
+    gatewayState: ws.getGatewayState(),
+    upstreamFeedState: ws.getUpstreamFeedState(),
+    marketSession: ws.getMarketSession(),
+    marketSessionActive: ws.isMarketSessionActive(),
     dataMode: config.dataMode,
     isDemo: false,
-    warrants,
-    quotes,
-    getWarrant: (symbol: string) => warrants.get(symbol.toUpperCase()),
-    getQuote: (symbol: string) => quotes.get(symbol.toUpperCase()),
+    warrants: ws.getAllCoveredWarrants(),
+    quotes: ws.getAllQuotes(),
+    getWarrant: (symbol: string) => ws.getCoveredWarrant(symbol.toUpperCase()),
+    getQuote: (symbol: string) => ws.getQuote(symbol.toUpperCase()),
   };
+}
+
+/**
+ * Fine-grained per-symbol quote subscription. A consumer using this only re-renders when
+ * THAT symbol's quote object is replaced (the client swaps the object on each patch), not
+ * on every unrelated tick.
+ */
+export function useQuote(symbol: string | null | undefined): MarketQuote | undefined {
+  const sym = (symbol ?? "").toUpperCase();
+  return useSyncExternalStore(
+    ws.subscribe,
+    () => (sym ? ws.getQuote(sym) : undefined),
+    () => undefined
+  );
+}
+
+export function useCoveredWarrant(symbol: string | null | undefined): CoveredWarrant | undefined {
+  const sym = (symbol ?? "").toUpperCase();
+  return useSyncExternalStore(
+    ws.subscribe,
+    () => (sym ? ws.getCoveredWarrant(sym) : undefined),
+    () => undefined
+  );
 }

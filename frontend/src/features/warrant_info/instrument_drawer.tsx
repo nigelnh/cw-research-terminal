@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { X, Check, Plus, Layers } from "lucide-react";
-import type { CoveredWarrant, MarketQuote, HistoricalBar, UnderlyingClosePoint } from "@/domain/models";
+import type { CoveredWarrant, MarketQuote, UnderlyingClosePoint } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
-import { providers } from "@/data/providers";
+import { useHistoricalBars } from "@/data/query";
+import { useSearchParam } from "@/data/url/use_url_state";
 import { Change } from "@/components/common/change";
 import { LiquidityDonut } from "@/components/common/liquidity_donut";
 import { TradingChart } from "@/components/common/trading_chart";
@@ -16,6 +17,11 @@ import {
   RANGE_INTERVAL_COMPATIBILITY,
   DEFAULT_INTERVAL_FOR_RANGE,
 } from "@/domain/historical/types";
+
+const RANGES: readonly ChartRange[] = ["1D", "5D", "1M", "3M", "6M", "1Y", "MAX"];
+const INTERVALS: readonly ChartInterval[] = ["1m", "5m", "15m", "30m", "1h", "1D", "1W", "1M"];
+const isChartRange = (v: string): v is ChartRange => (RANGES as readonly string[]).includes(v);
+const isChartInterval = (v: string): v is ChartInterval => (INTERVALS as readonly string[]).includes(v);
 
 interface InstrumentDrawerProps {
   instrument: {
@@ -71,7 +77,25 @@ const calculateSpreadPct = (bid?: number | null, ask?: number | null): string =>
   return `${((diff / bid) * 100).toFixed(2)}%`;
 };
 
-const ALL_RANGES: ChartRange[] = ["1D", "5D", "1M", "3M", "6M", "1Y", "MAX"];
+function ChartPlaceholder({ children, tone }: { children: React.ReactNode; tone: "muted" | "error" }) {
+  return (
+    <div
+      style={{
+        height: "320px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: "12px",
+        color: tone === "error" ? "var(--destructive)" : "var(--subtle-foreground)",
+        backgroundColor: "#111418",
+        borderRadius: "4px",
+        border: "1px solid var(--border)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
 function Row({
   label,
@@ -115,16 +139,16 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
   const { isInWatchlist, addToWatchlist, removeFromWatchlist, canAdd } = useWatchlist();
   const [activeTab, setActiveTab] = useState<"overview" | "history" | "quant">("overview");
 
-  // Chart configuration state
-  const [chartRange, setChartRange] = useState<ChartRange>("1M");
-  const [chartInterval, setChartInterval] = useState<ChartInterval>("1D");
+  // Shareable chart config in the URL: ?range= & ?interval=
+  const [rangeParam, setRangeParam] = useSearchParam("range", "1M");
+  const [intervalParam, setIntervalParam] = useSearchParam("interval", "1D");
+  const chartRange: ChartRange = isChartRange(rangeParam) ? rangeParam : "1M";
+  const chartInterval: ChartInterval = isChartInterval(intervalParam) ? intervalParam : "1D";
+
+  // Ephemeral chart UI state
   const [cwMode, setCwMode] = useState<CWHistoryMode>("BOTH");
   const [overlays, setOverlays] = useState<Set<TechnicalOverlay>>(new Set(["REF"]));
   const [showOverlayMenu, setShowOverlayMenu] = useState(false);
-
-  const [cwBars, setCwBars] = useState<HistoricalBar[]>([]);
-  const [undBars, setUndBars] = useState<UnderlyingClosePoint[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
 
   const isCW = Boolean(
     instrument &&
@@ -134,14 +158,45 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
         instrument.symbol.startsWith("C"))
   );
 
+  // Historical bars: server state owned by TanStack Query. Cache reuse across open/close
+  // and symbol re-selection; distinct entries per symbol/range/interval; superseded
+  // requests are aborted; no localStorage, no manual race guard.
+  const wantHistory = Boolean(instrument) && activeTab === "history";
+  const cwHistory = useHistoricalBars({
+    symbol: instrument?.symbol,
+    timeframe: chartRange,
+    interval: chartInterval,
+    adjusted: true,
+    enabled: wantHistory,
+  });
+  const undHistory = useHistoricalBars({
+    symbol: isCW ? instrument?.underlyingSymbol : null,
+    timeframe: chartRange,
+    interval: chartInterval,
+    adjusted: true,
+    enabled: wantHistory && isCW && Boolean(instrument?.underlyingSymbol),
+  });
+
+  const cwBars = cwHistory.bars;
+  const undBars: UnderlyingClosePoint[] = undHistory.bars.map((b) => ({
+    symbol: instrument?.underlyingSymbol || "",
+    date: b.date,
+    close: b.close,
+    rawClose: b.close,
+  }));
+  const historyLoading = cwHistory.isLoading || undHistory.isLoading;
+  const historyError = cwHistory.isError || undHistory.isError;
+  const historyEmpty = cwHistory.isEmpty && (!isCW || undHistory.isEmpty || undHistory.bars.length === 0);
+
   // Handle Range change with sensible interval adjustment
   const handleRangeChange = (newRange: ChartRange) => {
-    setChartRange(newRange);
+    setRangeParam(newRange, "push");
     const compatible = RANGE_INTERVAL_COMPATIBILITY[newRange];
     if (!compatible.includes(chartInterval)) {
-      setChartInterval(DEFAULT_INTERVAL_FOR_RANGE[newRange]);
+      setIntervalParam(DEFAULT_INTERVAL_FOR_RANGE[newRange], "replace");
     }
   };
+  const setChartInterval = (i: ChartInterval) => setIntervalParam(i, "push");
 
   // Toggle individual technical overlay
   const handleToggleOverlay = (ov: TechnicalOverlay) => {
@@ -167,59 +222,6 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  // Load historical bars when History tab is selected or range/interval changes
-  useEffect(() => {
-    if (!instrument || activeTab !== "history") return;
-
-    let mounted = true;
-    async function loadHistory() {
-      setHistoryLoading(true);
-      try {
-        const symbol = instrument!.symbol;
-        const und = instrument!.underlyingSymbol;
-
-        const histProvider = providers.historicalData as any;
-        const getBars = histProvider.getHistoricalBars
-          ? (s: string, tf: string, intv?: string) =>
-              histProvider.getHistoricalBars(s, tf, true, false, intv)
-          : (s: string, tf: string) => {
-              const days = tf === "1D" ? 1 : tf === "5D" ? 5 : tf === "1M" ? 30 : tf === "3M" ? 90 : tf === "6M" ? 180 : 365;
-              const from = new Date(Date.now() - days * 86400000).toISOString().split("T")[0];
-              const to = new Date().toISOString().split("T")[0];
-              return histProvider.getHistoricalWarrantBars(s, { fromDate: from, toDate: to });
-            };
-
-        const cwData = await getBars(symbol, chartRange, chartInterval);
-        let undData: UnderlyingClosePoint[] = [];
-        if (und && isCW) {
-          const rawUndBars = await getBars(und, chartRange, chartInterval);
-          undData = (rawUndBars || []).map((b: any) => ({
-            symbol: und,
-            date: b.date,
-            close: b.close,
-            rawClose: b.close,
-          }));
-        }
-
-        if (mounted) {
-          setCwBars(cwData || []);
-          setUndBars(undData || []);
-          setHistoryLoading(false);
-        }
-      } catch {
-        if (mounted) {
-          setCwBars([]);
-          setUndBars([]);
-          setHistoryLoading(false);
-        }
-      }
-    }
-
-    loadHistory();
-    return () => {
-      mounted = false;
-    };
-  }, [instrument?.symbol, activeTab, chartRange, chartInterval, isCW]);
 
   if (!instrument) return null;
 
@@ -631,7 +633,7 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
               <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                 {/* Range Selector */}
                 <div style={{ display: "flex", gap: "2px", backgroundColor: "rgba(255, 255, 255, 0.04)", padding: "2px", borderRadius: "4px" }}>
-                  {ALL_RANGES.map((rg) => (
+                  {RANGES.map((rg) => (
                     <button
                       key={rg}
                       onClick={() => handleRangeChange(rg)}
@@ -787,23 +789,17 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
               </div>
             </div>
 
-            {/* Trading-Grade Interactive Chart */}
+            {/* Trading-Grade Interactive Chart - explicit loading / error / empty states */}
             {historyLoading && cwBars.length === 0 ? (
-              <div
-                style={{
-                  height: "320px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "12px",
-                  color: "var(--subtle-foreground)",
-                  backgroundColor: "#111418",
-                  borderRadius: "4px",
-                  border: "1px solid var(--border)",
-                }}
-              >
-                Loading historical bars...
-              </div>
+              <ChartPlaceholder tone="muted">Loading historical bars…</ChartPlaceholder>
+            ) : historyError && cwBars.length === 0 ? (
+              <ChartPlaceholder tone="error">
+                Could not load historical data. It will retry automatically.
+              </ChartPlaceholder>
+            ) : historyEmpty ? (
+              <ChartPlaceholder tone="muted">
+                No historical bars for this instrument in the selected range.
+              </ChartPlaceholder>
             ) : (
               <TradingChart
                 symbol={instrument.symbol}

@@ -49,6 +49,12 @@ export class BackendWebSocketClient {
   private cwListeners = new Set<(cw: CoveredWarrant) => void>();
   private indexListeners = new Set<(data: any) => void>();
 
+  // Unified store subscription for useSyncExternalStore consumers. `revision` bumps on
+  // ANY observable change (quote, warrant, connection/feed/session state). Consumers read
+  // the in-place maps/scalars via the getters; there is exactly ONE quote/warrant store.
+  private storeListeners = new Set<() => void>();
+  private revision = 0;
+
   private marketSession: string = "UNKNOWN";
   private marketSessionActive: boolean = false;
 
@@ -153,6 +159,20 @@ export class BackendWebSocketClient {
     }
   }
 
+  /** useSyncExternalStore subscribe: fires on any quote/warrant/state change. */
+  public subscribe = (listener: () => void): (() => void) => {
+    this.storeListeners.add(listener);
+    return () => this.storeListeners.delete(listener);
+  };
+
+  /** useSyncExternalStore snapshot: a monotonic revision number. */
+  public getRevision = (): number => this.revision;
+
+  private bumpRevision(): void {
+    this.revision++;
+    this.storeListeners.forEach((fn) => fn());
+  }
+
   public onConnectionStateChange(listener: GatewayStateHandler): () => void {
     this.gatewayStateListeners.add(listener);
     listener(this.gatewayState);
@@ -184,6 +204,7 @@ export class BackendWebSocketClient {
     if (this.gatewayState !== newState) {
       this.gatewayState = newState;
       this.gatewayStateListeners.forEach((fn) => fn(newState));
+      this.bumpRevision();
     }
   }
 
@@ -191,6 +212,7 @@ export class BackendWebSocketClient {
     if (this.upstreamFeedState !== newState) {
       this.upstreamFeedState = newState;
       this.upstreamFeedListeners.forEach((fn) => fn(newState));
+      this.bumpRevision();
     }
   }
 
@@ -315,7 +337,13 @@ export class BackendWebSocketClient {
     if (!msg || typeof msg !== "object" || !msg.type) {
       return; // Unknown or invalid message format
     }
+    this.routeIncomingMessage(msg);
+    // Single revision bump after routing so useSyncExternalStore consumers re-render once
+    // per inbound frame regardless of how many maps/scalars it touched.
+    this.bumpRevision();
+  }
 
+  private routeIncomingMessage(msg: any): void {
     switch (msg.type) {
       case "status": {
         if (msg.market_session) {

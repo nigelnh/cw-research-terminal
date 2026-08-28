@@ -1,14 +1,16 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import { Search, Plus, Check } from "lucide-react";
 import type { CoveredWarrant } from "@/domain/models";
-import { providers } from "@/data/providers";
 import { useWatchlist } from "@/data/watchlist";
+import { useActiveWarrants } from "@/data/query";
+import { useQuote, useCoveredWarrant } from "@/data/use_research_market";
+import { deriveSelectedInstrument } from "@/data/selected_instrument";
 import { InstrumentDrawer } from "@/features/warrant_info/instrument_drawer";
 
 interface ResearchUniverseProps {
   onNavigateToDashboard?: () => void;
-  selectedInstrument?: any | null;
-  onSelectInstrument?: (inst: any | null) => void;
+  selectedSymbol?: string | null;
+  onSelectSymbol?: (symbol: string | null) => void;
 }
 
 const H = ({ children, right }: { children: React.ReactNode; right?: boolean }) => (
@@ -39,41 +41,36 @@ const selectStyle: React.CSSProperties = {
 
 export function ResearchUniverse({
   onNavigateToDashboard,
-  selectedInstrument: controlledSelected,
-  onSelectInstrument: controlledOnSelect,
+  selectedSymbol = null,
+  onSelectSymbol,
 }: ResearchUniverseProps) {
+  // Local, transient UI state - search/filter are not shareable navigation state.
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIssuer, setSelectedIssuer] = useState<string>("all");
   const [selectedUnderlying, setSelectedUnderlying] = useState<string>("all");
-  const [instruments, setInstruments] = useState<CoveredWarrant[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [internalSelected, setInternalSelected] = useState<any | null>(null);
 
-  const selectedInstrument = controlledSelected !== undefined ? controlledSelected : internalSelected;
-  const setSelectedInstrument = controlledOnSelect || setInternalSelected;
-
+  const setSelectedSymbol = onSelectSymbol ?? (() => {});
   const { isInWatchlist, addToWatchlist, removeFromWatchlist, canAdd } = useWatchlist();
 
-  // Load static universe metadata without subscribing to realtime ticks
-  useEffect(() => {
-    let mounted = true;
-    async function loadUniverse() {
-      setLoading(true);
-      try {
-        const list = await providers.instruments.getActiveCoveredWarrants();
-        if (mounted) {
-          setInstruments(list);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (mounted) setLoading(false);
-      }
-    }
-    loadUniverse();
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  // Static universe metadata: server state owned by TanStack Query (cached, deduped).
+  const { instruments, isLoading: loading, isError } = useActiveWarrants();
+
+  // Drawer instrument DERIVED from the universe record + realtime store (not stored).
+  const selectedQuote = useQuote(selectedSymbol);
+  const selectedCw = useCoveredWarrant(selectedSymbol);
+  const selectedUniverseCw = useMemo(
+    () => instruments.find((cw) => cw.symbol.toUpperCase() === (selectedSymbol ?? "").toUpperCase()) ?? null,
+    [instruments, selectedSymbol]
+  );
+  const selectedInstrument = useMemo(
+    () =>
+      deriveSelectedInstrument(selectedSymbol, {
+        universeCw: selectedUniverseCw,
+        quote: selectedQuote,
+        cw: selectedCw,
+      }),
+    [selectedSymbol, selectedUniverseCw, selectedQuote, selectedCw]
+  );
 
   const underlyings = useMemo(() => {
     const set = new Set<string>();
@@ -279,6 +276,12 @@ export function ResearchUniverse({
                   Loading research universe...
                 </td>
               </tr>
+            ) : isError ? (
+              <tr>
+                <td colSpan={9} style={{ padding: "64px 0", textAlign: "center", fontSize: "12px", color: "var(--destructive)" }}>
+                  Could not load the research universe. Retry shortly.
+                </td>
+              </tr>
             ) : filteredInstruments.length === 0 ? (
               <tr>
                 <td colSpan={9} style={{ padding: "64px 0", textAlign: "center", fontSize: "12px", color: "var(--subtle-foreground)" }}>
@@ -288,14 +291,14 @@ export function ResearchUniverse({
             ) : (
               filteredInstruments.map((cw) => {
                 const watched = isInWatchlist(cw.symbol);
-                const isSelected = selectedInstrument?.symbol === cw.symbol;
+                const isSelected = selectedSymbol === cw.symbol;
 
                 return (
                   <tr
                     key={cw.symbol}
                     tabIndex={0}
-                    onClick={() => setSelectedInstrument({ ...cw, instrumentType: "CW", cw })}
-                    onKeyDown={(e) => e.key === "Enter" && setSelectedInstrument({ ...cw, instrumentType: "CW", cw })}
+                    onClick={() => setSelectedSymbol(cw.symbol)}
+                    onKeyDown={(e) => e.key === "Enter" && setSelectedSymbol(cw.symbol)}
                     className={`table-row ${isSelected ? "table-row-selected" : ""}`}
                     style={{
                       height: "40px",
@@ -383,7 +386,7 @@ export function ResearchUniverse({
       {/* Detail Drawer */}
       <InstrumentDrawer
         instrument={selectedInstrument}
-        onClose={() => setSelectedInstrument(null)}
+        onClose={() => setSelectedSymbol(null)}
       />
     </div>
   );

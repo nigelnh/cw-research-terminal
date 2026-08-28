@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderMarkup } from "./test_fixtures/render_markup";
 import { PersonalDashboard } from "../features/watchlist/personal_dashboard";
 import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
@@ -40,7 +40,7 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
   });
 
   it("1, 2, 3, 4. Dashboard contains Stocks (3) [HPG, NVL, VHM] and Covered Warrants (2) [CTCB2601, CVPB2615]", () => {
-    const html = renderToStaticMarkup(<PersonalDashboard />);
+    const html = renderMarkup(<PersonalDashboard />);
 
     // Section 1: Stocks (3)
     expect(html).toContain("Stocks (3)");
@@ -58,7 +58,7 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
   });
 
   it("5. Stocks never render CW ratio/strike/DTE/IV columns", () => {
-    const html = renderToStaticMarkup(<PersonalDashboard />);
+    const html = renderMarkup(<PersonalDashboard />);
     const stocksSection = html.split("Covered Warrants")[0];
 
     // Stocks section table must only have stock headers

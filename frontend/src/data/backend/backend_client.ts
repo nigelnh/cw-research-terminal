@@ -7,7 +7,11 @@ export class BackendClient {
     this.baseUrl = (baseUrl || config.apiUrl || "http://localhost:8000").replace(/\/$/, "");
   }
 
-  private async get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+  private async get<T>(
+    path: string,
+    params?: Record<string, string | number | undefined>,
+    signal?: AbortSignal
+  ): Promise<T> {
     const url = new URL(`${this.baseUrl}${path}`);
     if (params) {
       Object.entries(params).forEach(([key, val]) => {
@@ -21,6 +25,7 @@ export class BackendClient {
       headers: {
         Accept: "application/json",
       },
+      signal,
     });
 
     if (!res.ok) {
@@ -62,14 +67,18 @@ export class BackendClient {
   }
 
   // Active Instruments from Instrument Registry
-  async getActiveInstruments(issuer?: string, underlying?: string, search?: string): Promise<any[]> {
+  async getActiveInstruments(
+    issuer?: string,
+    underlying?: string,
+    search?: string,
+    signal?: AbortSignal
+  ): Promise<any[]> {
     try {
-      const res = await this.get<{ total: number; active_count: number; items: any[] }>("/api/instruments", {
-        issuer,
-        underlying,
-        search,
-        active_only: "true",
-      });
+      const res = await this.get<{ total: number; active_count: number; items: any[] }>(
+        "/api/instruments",
+        { issuer, underlying, search, active_only: "true" },
+        signal
+      );
       return res.items || [];
     } catch (err) {
       console.warn("[BackendClient] Failed to fetch /api/instruments:", err);
@@ -77,8 +86,8 @@ export class BackendClient {
     }
   }
 
-  async getInstrumentSpecification(symbol: string): Promise<any> {
-    return this.get<any>(`/api/instruments/${encodeURIComponent(symbol.toUpperCase())}`);
+  async getInstrumentSpecification(symbol: string, signal?: AbortSignal): Promise<any> {
+    return this.get<any>(`/api/instruments/${encodeURIComponent(symbol.toUpperCase())}`, undefined, signal);
   }
 
   async getCoverageMetrics(): Promise<any> {
@@ -105,14 +114,19 @@ export class BackendClient {
     timeframe: string = "1D",
     fromDate?: string,
     toDate?: string,
-    adjusted: boolean = true
+    adjusted: boolean = true,
+    signal?: AbortSignal
   ): Promise<any[]> {
-    return this.get<any[]>(`/api/market/history/${encodeURIComponent(symbol)}`, {
-      timeframe,
-      from_date: fromDate,
-      to_date: toDate,
-      adjusted: adjusted ? "true" : "false",
-    });
+    return this.get<any[]>(
+      `/api/market/history/${encodeURIComponent(symbol)}`,
+      {
+        timeframe,
+        from_date: fromDate,
+        to_date: toDate,
+        adjusted: adjusted ? "true" : "false",
+      },
+      signal
+    );
   }
 
   async getHistoricalCWData(symbol?: string, fromDate?: string, toDate?: string): Promise<any[]> {

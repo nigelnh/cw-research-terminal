@@ -1,28 +1,44 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { TopNav } from "@/components/common/top_nav";
 import { PersonalDashboard } from "@/features/watchlist/personal_dashboard";
 import { ResearchUniverse } from "@/features/stock_research/research_universe";
 import { AiAssistantBubble } from "@/features/ai_assistant/ai_assistant_bubble";
 import { useWatchlist } from "@/data/watchlist";
-import { useResearchMarket } from "@/data/use_research_market";
+import { useResearchMarket, useQuote, useCoveredWarrant } from "@/data/use_research_market";
+import { useSearchParam, useNullableSearchParam } from "@/data/url/use_url_state";
+import { deriveSelectedInstrument } from "@/data/selected_instrument";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
 
+type Tab = "dashboard" | "research";
+
 export function MarketExplorer() {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "research">("dashboard");
-  const [selectedInstrument, setSelectedInstrument] = useState<any | null>(null);
+  // Shareable/navigation state lives in the URL: ?tab= & ?symbol=
+  const [tabParam, setTabParam] = useSearchParam("tab", "dashboard");
+  const activeTab: Tab = tabParam === "research" ? "research" : "dashboard";
+  const [selectedSymbol, setSelectedSymbol] = useNullableSearchParam("symbol");
 
   const { items } = useWatchlist();
-  const { quotes, warrants, dataMode, connectionState, upstreamFeedState, marketSession, marketSessionActive } = useResearchMarket();
+  const { quotes, connectionState, upstreamFeedState, marketSession, marketSessionActive, dataMode } =
+    useResearchMarket();
 
-  // Construct compact, canonical research context envelope (zero DOM scraping)
+  // Derived (never stored): the selected instrument's contract metadata comes from the
+  // watchlist; its live quote/analytics come from the realtime store.
+  const selectedQuote = useQuote(selectedSymbol);
+  const selectedCw = useCoveredWarrant(selectedSymbol);
+  const watchlistItem = useMemo(
+    () => items.find((i) => i.symbol.toUpperCase() === (selectedSymbol ?? "").toUpperCase()) ?? null,
+    [items, selectedSymbol]
+  );
+  const selected = useMemo(
+    () => deriveSelectedInstrument(selectedSymbol, { watchlistItem, quote: selectedQuote, cw: selectedCw }),
+    [selectedSymbol, watchlistItem, selectedQuote, selectedCw]
+  );
+
   const contextEnvelope = useMemo<ResearchContextEnvelope>(() => {
     let selectedContext = null;
-
-    if (selectedInstrument) {
-      const sym = selectedInstrument.symbol;
-      const q = selectedInstrument.quote || quotes.get(sym);
-      const cw = selectedInstrument.cw || warrants.get(sym);
-
+    if (selected) {
+      const q = selected.quote;
+      const cw = selected.cw;
       const lastPrice = q?.lastPrice ?? cw?.quote?.lastPrice;
       const bidPrice = q?.bidPrice ?? cw?.quote?.bidPrice;
       const askPrice = q?.askPrice ?? cw?.quote?.askPrice;
@@ -30,25 +46,21 @@ export function MarketExplorer() {
       const volume = q?.totalVolume ?? cw?.quote?.totalVolume;
       const underlyingPrice =
         cw?.underlyingPrice ??
-        (selectedInstrument.underlyingSymbol ? quotes.get(selectedInstrument.underlyingSymbol)?.lastPrice : null);
-
+        (selected.underlyingSymbol ? quotes.get(selected.underlyingSymbol)?.lastPrice ?? null : null);
       const moneynessRatio =
-        underlyingPrice && selectedInstrument.strikePrice
-          ? (underlyingPrice / selectedInstrument.strikePrice) * 100
-          : null;
-
-      const spread = bidPrice !== undefined && askPrice !== undefined ? askPrice - bidPrice : null;
-      const spreadPercent = spread !== null && lastPrice ? (spread / lastPrice) * 100 : null;
+        underlyingPrice && selected.strikePrice ? (underlyingPrice / selected.strikePrice) * 100 : null;
+      const spread = bidPrice != null && askPrice != null ? askPrice - bidPrice : null;
+      const spreadPercent = spread != null && lastPrice ? (spread / lastPrice) * 100 : null;
 
       selectedContext = {
-        symbol: sym,
-        instrumentType: selectedInstrument.instrumentType || "CW",
-        issuer: selectedInstrument.issuer || cw?.issuer || null,
-        underlyingSymbol: selectedInstrument.underlyingSymbol || cw?.underlyingSymbol || null,
-        strikePrice: selectedInstrument.strikePrice || cw?.strikePrice || null,
-        exerciseRatio: selectedInstrument.exerciseRatio || cw?.exerciseRatio || null,
-        maturityDate: selectedInstrument.maturityDate || cw?.maturityDate || null,
-        lastTradingDate: selectedInstrument.lastTradingDate || cw?.lastTradingDate || null,
+        symbol: selected.symbol,
+        instrumentType: selected.instrumentType,
+        issuer: selected.issuer ?? null,
+        underlyingSymbol: selected.underlyingSymbol ?? null,
+        strikePrice: selected.strikePrice ?? null,
+        exerciseRatio: selected.exerciseRatio ?? null,
+        maturityDate: selected.maturityDate ?? null,
+        lastTradingDate: selected.lastTradingDate ?? null,
         underlyingPrice: underlyingPrice ?? null,
         bidPrice: bidPrice ?? null,
         askPrice: askPrice ?? null,
@@ -72,7 +84,9 @@ export function MarketExplorer() {
         ? "Reconnecting feed"
         : marketSession === "LUNCH_BREAK"
         ? "Lunch break"
-        : marketSession === "CLOSED_PRE_OPEN" || marketSession === "CLOSED_POST_MARKET" || marketSession === "CLOSED_WEEKEND"
+        : marketSession === "CLOSED_PRE_OPEN" ||
+          marketSession === "CLOSED_POST_MARKET" ||
+          marketSession === "CLOSED_WEEKEND"
         ? "Market closed"
         : upstreamFeedState === "CONNECTED" || marketSessionActive
         ? "Market open"
@@ -90,7 +104,20 @@ export function MarketExplorer() {
       marketSessionActive,
       quoteDisplayEligible: marketSessionActive,
     };
-  }, [activeTab, selectedInstrument, items, quotes, warrants, dataMode, connectionState, upstreamFeedState, marketSession, marketSessionActive]);
+  }, [
+    activeTab,
+    selected,
+    items,
+    quotes,
+    dataMode,
+    connectionState,
+    upstreamFeedState,
+    marketSession,
+    marketSessionActive,
+  ]);
+
+  const goToTab = (tab: Tab) => setTabParam(tab, "push");
+  const selectSymbol = (sym: string | null) => setSelectedSymbol(sym, "push");
 
   return (
     <div
@@ -105,38 +132,24 @@ export function MarketExplorer() {
         overflowY: "auto",
       }}
     >
-      {/* Top Minimal Navigation Bar */}
-      <TopNav
-        activeTab={activeTab}
-        onTabChange={(tab) => setActiveTab(tab)}
-      />
+      <TopNav activeTab={activeTab} onTabChange={goToTab} />
 
-      {/* Main Workspace Page */}
-      <main
-        style={{
-          flex: 1,
-          padding: "28px",
-          maxWidth: "1600px",
-          width: "100%",
-          margin: "0 auto",
-        }}
-      >
+      <main style={{ flex: 1, padding: "28px", maxWidth: "1600px", width: "100%", margin: "0 auto" }}>
         {activeTab === "dashboard" ? (
           <PersonalDashboard
-            onNavigateToUniverse={() => setActiveTab("research")}
-            selectedInstrument={selectedInstrument}
-            onSelectInstrument={setSelectedInstrument}
+            onNavigateToUniverse={() => goToTab("research")}
+            selectedSymbol={selectedSymbol}
+            onSelectSymbol={selectSymbol}
           />
         ) : (
           <ResearchUniverse
-            onNavigateToDashboard={() => setActiveTab("dashboard")}
-            selectedInstrument={selectedInstrument}
-            onSelectInstrument={setSelectedInstrument}
+            onNavigateToDashboard={() => goToTab("dashboard")}
+            selectedSymbol={selectedSymbol}
+            onSelectSymbol={selectSymbol}
           />
         )}
       </main>
 
-      {/* Floating AI Assistant Shell with Context */}
       <AiAssistantBubble context={contextEnvelope} />
     </div>
   );
