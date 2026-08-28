@@ -133,6 +133,51 @@ class Settings(BaseSettings):
     )
     INGEST_SOURCE_LABEL: str = Field(default="fiinquant", description="`source` value written to market_bars / ingestion_* rows")
 
+    # ------------------------------------------------------------------ #
+    # Historical read path (Step 7) - PostgreSQL-first reads for /api/market/history  #
+    # ------------------------------------------------------------------ #
+    # auto           : postgres_first when DATABASE_ENABLED and the DB is reachable, else provider_direct
+    # postgres_first : always read PostgreSQL first, controlled gap-fill from the provider
+    # provider_direct: legacy behavior - every request goes straight to the provider (dev / DB off)
+    HISTORY_SOURCE_MODE: str = Field(
+        default="auto", description="Historical read mode: auto | postgres_first | provider_direct"
+    )
+    # PostgreSQL-first applies only to daily bars; other timeframes stay provider-direct
+    # (no intraday history is persisted yet).
+    HISTORY_POSTGRES_TIMEFRAMES: str = Field(
+        default="1d", description="Comma-separated timeframes served PostgreSQL-first (others go provider-direct)"
+    )
+    HISTORY_GAPFILL_ENABLED: bool = Field(
+        default=True, description="Allow the read path to trigger a controlled provider gap-fill for a missing in-horizon range"
+    )
+    HISTORY_GAPFILL_LOCK_WAIT_SECONDS: float = Field(
+        default=25.0,
+        description="Max seconds a concurrent cache-miss waits on the per-stream fill lock before serving the current DB result",
+    )
+    HISTORY_GAPFILL_FAILURE_COOLDOWN_SECONDS: float = Field(
+        default=120.0,
+        description="After a failed gap-fill for a stream, suppress further fill attempts for this long (thundering-herd guard)",
+    )
+    HISTORY_DEFAULT_LOOKBACK_DAYS: int = Field(
+        default=400, description="Default requested span (days back from today) when from_date/to_date are omitted"
+    )
+    HISTORY_MAX_RANGE_DAYS: int = Field(
+        default=1500,
+        description="Hard cap on the calendar span of a single /api/market/history request (~4y; PG may hold more than the 360d provider horizon)",
+    )
+    HISTORY_MAX_RESULT_BARS: int = Field(
+        default=6000, description="Hard cap on rows returned by a single /api/market/history request"
+    )
+    # Historical Volatility source: when DATABASE_ENABLED, HV reads PostgreSQL via
+    # PostgresHistoricalBarSource. If a symbol has fewer than this many persisted adjusted
+    # daily bars, a controlled off-tick gap-fill is triggered (never inside LiveQuantEngine).
+    HV_POSTGRES_MIN_BARS_FOR_FILL: int = Field(
+        default=40, description="Minimum persisted daily bars before HV triggers a controlled provider fill for a symbol"
+    )
+
+    def history_postgres_timeframes(self) -> set[str]:
+        return {t.strip().lower() for t in self.HISTORY_POSTGRES_TIMEFRAMES.split(",") if t.strip()}
+
     def sync_database_url(self) -> str:
         """The synchronous (psycopg2) form of DATABASE_URL, used by Alembic migrations."""
         url = self.DATABASE_URL

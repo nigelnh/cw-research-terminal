@@ -102,6 +102,12 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     return _sessionmaker
 
 
+def get_engine() -> AsyncEngine:
+    if _engine is None:
+        raise RuntimeError("persistence layer is not initialized; call init_engine()/configure() first")
+    return _engine
+
+
 @asynccontextmanager
 async def session_scope() -> AsyncIterator[AsyncSession]:
     """Transactional scope: commits on success, rolls back on exception, always closes."""

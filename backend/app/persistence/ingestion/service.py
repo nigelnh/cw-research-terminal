@@ -118,6 +118,26 @@ class StreamOutcome:
 
 
 @dataclass
+class GapFillOutcome:
+    """Result of an on-demand single-stream range fill (used by the read path)."""
+
+    symbol: str
+    timeframe: str
+    price_basis: str
+    status: str            # FILLED | ALREADY_COVERED | OUT_OF_HORIZON | LOCK_TIMEOUT | PROVIDER_FAILED | NO_INSTRUMENT
+    rows_inserted: int = 0
+    rows_updated: int = 0
+    provider_calls: int = 0
+    lookback_clamped: bool = False
+    error_class: str | None = None      # classify() of the provider error, if any
+    error: str | None = None
+
+    @property
+    def did_fetch(self) -> bool:
+        return self.provider_calls > 0
+
+
+@dataclass
 class IngestionResult:
     run_id: int | None
     operation: str
@@ -263,6 +283,11 @@ class IngestionService:
                 source=self._source, instrument_id=instrument_id, timeframe=tf, price_basis=price_basis
             )
 
+    async def get_stream_state(self, *, instrument_id: int, timeframe: str, price_basis: str):
+        """Public read of the ingestion cursor for one stream (used by the history read path
+        to tell 'already probed the provider for this range' from 'never fetched')."""
+        return await self._get_state(instrument_id, normalize_timeframe(timeframe), price_basis.strip().upper())
+
     # ---- fetch one chunk with retry + throttle ------------------ #
     async def _fetch_chunk(self, symbol: str, tf: str, f_iso: str, t_iso: str, adjusted: bool):
         await self._throttle.wait()
@@ -295,6 +320,98 @@ class IngestionService:
             to_date=None, concurrency=concurrency, dry_run=dry_run, force=False,
             include_forming=include_forming,
         )
+
+    async def fill_range(
+        self,
+        symbol: str,
+        *,
+        timeframe: str,
+        price_basis: str,
+        from_date: date,
+        to_date: date,
+        lock_wait_seconds: float | None = None,
+    ) -> GapFillOutcome:
+        """On-demand controlled fill of ONE stream's missing range for the read path.
+
+        Reuses the full ingestion machinery (chunking / retry / throttle / upsert /
+        transaction boundaries) and adds a **waiting** per-stream advisory lock so N
+        concurrent cache-misses for the same stream produce exactly ONE provider fill:
+        the lock holder fills, the waiters then find the range already covered and return
+        without touching the provider.
+
+        ``price_basis`` is pre-resolved by the caller (CW -> RAW). Never raises.
+        """
+        sym = symbol.strip().upper()
+        tf = normalize_timeframe(timeframe)
+        pb = price_basis.strip().upper()
+        if pb not in ("ADJUSTED", "RAW"):
+            return GapFillOutcome(sym, tf, pb, "NO_INSTRUMENT", error=f"bad price_basis {price_basis!r}")
+
+        try:
+            instrument_id, instrument_type = await self._ensure_instrument(sym)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("gap-fill %s: could not resolve instrument: %s", sym, exc)
+            return GapFillOutcome(sym, tf, pb, "NO_INSTRUMENT", error=str(exc))
+
+        base_plan = plan_backfill_windows(from_date, to_date, today=date.today())
+        outcome = GapFillOutcome(sym, tf, pb, "OUT_OF_HORIZON", lookback_clamped=base_plan.lookback_clamped)
+        if base_plan.is_empty:
+            return outcome  # requested range entirely older than the provider horizon
+
+        async with stream_lock(
+            self._engine, source=self._source, instrument_id=instrument_id, timeframe=tf,
+            price_basis=pb, wait=True,
+            wait_timeout=float(
+                lock_wait_seconds if lock_wait_seconds is not None
+                else settings.HISTORY_GAPFILL_LOCK_WAIT_SECONDS
+            ),
+        ) as acquired:
+            if not acquired:
+                outcome.status = "LOCK_TIMEOUT"
+                return outcome
+
+            # Re-plan under the lock: a previous holder may have just filled this range.
+            plan = await self._plan_stream(
+                operation="backfill", instrument_id=instrument_id, tf=tf, price_basis=pb,
+                from_date=base_plan.effective_start, to_date=base_plan.effective_end, force=False,
+            )
+            if plan.is_empty:
+                outcome.status = "ALREADY_COVERED"
+                return outcome
+
+            run_id: int | None = None
+            try:
+                async with self._sm() as session, session.begin():
+                    run = await IngestionRepository(session).start_run(
+                        source=self._source, timeframe=tf, price_basis=pb, requested_symbols=[sym],
+                        requested_from=_dt(base_plan.effective_start), requested_to=_dt(base_plan.effective_end),
+                    )
+                    run_id = run.id
+            except Exception:  # noqa: BLE001 - run bookkeeping must not block the fill
+                logger.debug("gap-fill %s: could not open ingestion_run", sym, exc_info=True)
+
+            stream = StreamOutcome(sym, instrument_id, instrument_type, tf, pb, "SUCCEEDED")
+            await self._run_chunks(
+                outcome=stream, symbol=sym, tf=tf, adjusted=(pb == "ADJUSTED"), price_basis=pb,
+                instrument_id=instrument_id, plan=plan, run_id=run_id, include_forming=False,
+            )
+            if run_id is not None:
+                await self._finalize_run(
+                    run_id, IngestionResult(run_id, "api_gap_fill", tf, pb, False, [stream])
+                )
+
+            outcome.rows_inserted = stream.inserted
+            outcome.rows_updated = stream.updated
+            outcome.provider_calls = sum(1 for c in stream.chunks if c.status in ("SUCCEEDED", "FAILED"))
+            outcome.lookback_clamped = base_plan.lookback_clamped or stream.lookback_clamped
+            failed = [c for c in stream.chunks if c.status == "FAILED"]
+            if failed:
+                outcome.status = "PROVIDER_FAILED" if not stream.inserted and not stream.updated else "FILLED"
+                outcome.error = failed[0].error
+                outcome.error_class = (failed[0].error or ":").split(":", 1)[0] or None
+            else:
+                outcome.status = "FILLED"
+        return outcome
 
     async def _drive(
         self, operation: str, symbols: list[str], *, timeframe: str, adjusted: bool,
@@ -386,14 +503,23 @@ class IngestionService:
         instrument_id: int, plan: BackfillPlan, run_id: int | None, include_forming: bool,
     ) -> None:
         any_ok = any_fail = False
-        # oldest window boundary we have deliberately requested this run - persisted as
-        # ingestion_state.backfilled_from_ts so a resume knows the range is covered even
-        # when the requested start precedes the first actual trading day (holiday/weekend).
-        requested_floor = min(
-            (datetime(c.start.year, c.start.month, c.start.day, tzinfo=timezone.utc) for c in plan.chunks),
-            default=None,
-        )
+        _ceil_cap = last_completed_session_date()
         for chunk in plan.chunks:
+            # Per-chunk cursor bounds, persisted only when THIS chunk commits:
+            #  * requested_floor  -> ingestion_state.backfilled_from_ts (LEAST): resume knows
+            #    the range is covered even when the requested start precedes the first real
+            #    trading day (holiday/weekend).
+            #  * requested_ceiling -> ingestion_state.last_bar_ts (GREATEST): records that we
+            #    deliberately probed through the chunk end even if the provider returned
+            #    nothing for a trailing non-trading / not-yet-published date - so a chart
+            #    read does not re-probe that empty tail every load. Capped at the last
+            #    completed session, so the *next* day's request re-probes normally.
+            requested_floor = datetime(chunk.start.year, chunk.start.month, chunk.start.day, tzinfo=timezone.utc)
+            _ce = min(chunk.end, _ceil_cap)
+            requested_ceiling = (
+                datetime(_ce.year, _ce.month, _ce.day, tzinfo=timezone.utc)
+                if chunk.start <= _ceil_cap else None
+            )
             co = ChunkOutcome(chunk.seq, chunk.start.isoformat(), chunk.end.isoformat(), "FAILED")
             outcome.chunks.append(co)
             try:
@@ -416,10 +542,13 @@ class IngestionService:
                     floor_candidates = [
                         ts for ts in (cov.earliest_ts, mapped.min_ts, requested_floor) if ts is not None
                     ]
+                    ceil_candidates = [
+                        ts for ts in (cov.latest_ts, mapped.max_ts, requested_ceiling) if ts is not None
+                    ]
                     ing_repo = IngestionRepository(session)
                     await ing_repo.upsert_state(
                         source=self._source, instrument_id=instrument_id, timeframe=tf, price_basis=price_basis,
-                        last_bar_ts=cov.latest_ts or mapped.max_ts,
+                        last_bar_ts=max(ceil_candidates) if ceil_candidates else None,
                         backfilled_from_ts=min(floor_candidates) if floor_candidates else None,
                         last_success_at=datetime.now(timezone.utc), last_run_id=run_id,
                     )

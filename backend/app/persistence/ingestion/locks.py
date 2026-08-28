@@ -7,7 +7,9 @@ on a dedicated connection for the lifetime of a :class:`StreamLock` context. No 
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import zlib
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
@@ -47,10 +49,17 @@ async def stream_lock(
     timeframe: str,
     price_basis: str,
     wait: bool = False,
+    wait_timeout: float | None = None,
 ) -> AsyncIterator[bool]:
     """Acquire the advisory lock for one logical stream.
 
-    Yields ``True`` if acquired, ``False`` if not (only possible when ``wait=False``).
+    Yields ``True`` if acquired, ``False`` if not.
+      * ``wait=False``                -> single ``pg_try_advisory_lock`` attempt.
+      * ``wait=True, wait_timeout=None`` -> block on ``pg_advisory_lock`` until acquired.
+      * ``wait=True, wait_timeout=N``  -> poll ``pg_try_advisory_lock`` for up to N seconds,
+        then give up (yield ``False``). Used by the read path so a concurrent cache-miss
+        never hangs an HTTP request indefinitely behind a slow fill.
+
     The lock is always released on exit, even on error, and the dedicated connection is
     returned to the pool.
     """
@@ -58,15 +67,23 @@ async def stream_lock(
     conn = await engine.connect()
     acquired = False
     try:
-        if wait:
+        if wait and wait_timeout is None:
             await conn.execute(text("SELECT pg_advisory_lock(:c, :o)"), {"c": classid, "o": objid})
             acquired = True
+        elif wait:
+            deadline = time.monotonic() + max(0.0, wait_timeout or 0.0)
+            while True:
+                row = await conn.execute(text("SELECT pg_try_advisory_lock(:c, :o)"), {"c": classid, "o": objid})
+                acquired = bool(row.scalar_one())
+                if acquired or time.monotonic() >= deadline:
+                    break
+                await asyncio.sleep(0.15)
         else:
             row = await conn.execute(text("SELECT pg_try_advisory_lock(:c, :o)"), {"c": classid, "o": objid})
             acquired = bool(row.scalar_one())
         if not acquired:
             logger.info(
-                "stream lock busy: %s instrument=%s %s/%s already being ingested elsewhere",
+                "stream lock busy: %s instrument=%s %s/%s already held elsewhere",
                 source, instrument_id, timeframe, price_basis,
             )
         yield acquired

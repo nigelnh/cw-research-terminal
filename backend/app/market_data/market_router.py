@@ -17,6 +17,7 @@ from app.market_data.market_schemas import (
 )
 from app.market_data.market_state import market_state
 from app.market_data.market_subscription_manager import subscription_manager
+from app.market_data.history_read_service import HistoryRequestError, history_read_service
 
 logger = logging.getLogger(__name__)
 from app.market_data.market_session import market_session
@@ -69,17 +70,26 @@ async def get_historical_data(
     to_date: Optional[str] = Query(default=None, description="End date (YYYY-MM-DD)"),
     adjusted: bool = Query(default=True, description="Whether historical prices are dividend/split adjusted"),
 ):
-    """Retrieves historical price bars from the active market provider."""
+    """Retrieves historical price bars.
+
+    PostgreSQL-first when the persistence layer is enabled (see HISTORY_SOURCE_MODE): a
+    complete PostgreSQL hit makes zero provider calls; a legitimate missing in-horizon
+    range triggers one controlled, single-flighted gap-fill. Otherwise (DB off, non-daily
+    timeframe, unseeded symbol) the request is served directly from the provider. The
+    response shape is identical either way.
+    """
     sym = symbol.strip().upper()
     try:
-        bars = await subscription_manager.provider.get_historical_bars(
-            symbol=sym,
+        bars = await history_read_service.get_history(
+            sym,
             timeframe=timeframe,
             from_date=from_date,
             to_date=to_date,
             adjusted=adjusted,
         )
         return bars
+    except HistoryRequestError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except HistoricalRangeLimitError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except HistoricalCircuitOpenError as e:
