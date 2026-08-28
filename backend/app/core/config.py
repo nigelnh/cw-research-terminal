@@ -43,7 +43,10 @@ class Settings(BaseSettings):
 
     # Quantitative Engine Configuration
     QUANT_RISK_FREE_RATE: float = Field(default=0.05, description="Default annual risk-free interest rate (5.0%)")
-    QUANT_DIVIDEND_YIELD: float = Field(default=0.0, description="Default annual dividend yield assumption (0.0%)")
+    # NOTE: dividend yield q is NOT configurable. HOSE covered warrants are dividend-protected
+    # (strike/ratio adjusted on ex-date), so the CW analytics engine pins q = 0 by convention
+    # -- see app.quant.dividend_convention.CW_DIVIDEND_YIELD_CONVENTION and QUANT_CONTRACT.md section 7.
+    # The stateless POST /api/quant/calculate endpoint still accepts an arbitrary what-if dividendYield.
     # Historical Volatility (theoretical fair value input).
     # Canonical window = HV_22 (22 trading sessions). Evidence: docs/data_dictionary/warrant_info_columns.md
     # ("Theoretical Price priced at sigma_HV22"), docs/domain/historical_formula_catalog.md F-05 (recovered

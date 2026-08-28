@@ -28,6 +28,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.core.config import settings
 from app.quant.black_scholes import bs_call_price_share
+from app.quant.dividend_convention import CW_DIVIDEND_YIELD_CONVENTION
 from app.quant.historical_volatility import calculate_historical_volatility
 from app.quant.historical_volatility_service import (
     HistoricalVolatilityService,
@@ -299,7 +300,8 @@ async def test_engine_theoretical_price_populated_with_real_service():
     assert T is not None
     expected = round(
         bs_call_price_share(
-            22150.0, 25885.0, T, settings.QUANT_RISK_FREE_RATE, settings.QUANT_DIVIDEND_YIELD, EXPECTED_HV
+            22150.0, 25885.0, T, settings.QUANT_RISK_FREE_RATE,
+            CW_DIVIDEND_YIELD_CONVENTION.value, EXPECTED_HV
         )
         / 3.5704,
         2,
@@ -359,6 +361,81 @@ async def test_engine_theoretical_price_none_without_service():
     assert analytics.theoretical_price is None
     assert analytics.theoretical_volatility is None
     assert analytics.theoretical_volatility_source == "UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_engine_analytics_provenance_is_internally_consistent():
+    """End-to-end: market/instrument inputs -> LiveQuantEngine -> WarrantAnalytics.
+
+    Every derived field must be reproducible from model_inputs + the volatility the
+    analytics claims it used. Catches a mismatch between the reported provenance and
+    the number that was actually produced.
+    """
+    from app.quant.black_scholes import bs_call_price_share, calculate_analytical_greeks
+
+    svc = HistoricalVolatilityService(bar_source=_hpg_source())
+    await svc.warm(["HPG"])
+    engine = LiveQuantEngine()
+    engine.set_historical_vol_getter(svc.get_estimate)
+
+    spec = _active_cw_spec()
+    und = CanonicalQuote(symbol="HPG", instrument_type="STOCK", last_price=22150.0)
+    cw = CanonicalQuote(symbol="CHPG2602", instrument_type="CW",
+                        bid1_price=42.0, ask1_price=48.0, last_price=45.0)
+
+    a = await engine.compute_warrant_analytics("CHPG2602", spec=spec, cw_state=cw, und_state=und)
+    mi = a.model_inputs
+    assert mi is not None
+    assert mi.underlying_price is not None and mi.strike_price is not None
+    assert mi.time_to_maturity is not None and mi.exercise_ratio is not None
+    assert a.theoretical_volatility is not None and a.moneyness is not None
+
+    # 1. model_inputs echo the settings and the effective contract terms
+    assert mi.risk_free_rate == settings.QUANT_RISK_FREE_RATE
+    assert mi.dividend_yield == CW_DIVIDEND_YIELD_CONVENTION.value == 0.0
+    assert mi.strike_price == spec.effective_strike == 25885.0
+    assert mi.exercise_ratio == spec.effective_ratio == 3.5704
+    assert mi.underlying_price == 22150.0
+
+    # 2. moneyness is exactly S / K
+    assert a.moneyness == round(mi.underlying_price / mi.strike_price, 5)
+
+    # 3. theoretical_price == BS(model_inputs, theoretical_volatility) / ratio, rounded 2 dp
+    assert a.theoretical_volatility_source == "HV_22"
+    assert a.theoretical_volatility == EXPECTED_HV == a.historical_volatility
+    reprice = round(
+        bs_call_price_share(mi.underlying_price, mi.strike_price, mi.time_to_maturity,
+                            mi.risk_free_rate, mi.dividend_yield, a.theoretical_volatility) / mi.exercise_ratio, 2
+    )
+    assert a.theoretical_price == pytest.approx(reprice, abs=0.01)
+
+    # 4. Greeks were computed at the volatility the analytics reports (IV_TRADE here,
+    #    because a last trade exists), and match a direct production call at that vol.
+    assert a.greeks.volatility_source == GreeksVolatilitySource.IV_TRADE
+    assert a.iv_trade is not None and a.greeks.volatility_used == round(a.iv_trade, 4)
+    direct = calculate_analytical_greeks(
+        mi.underlying_price, mi.strike_price, mi.time_to_maturity,
+        mi.risk_free_rate, mi.dividend_yield, a.iv_trade, exercise_ratio=mi.exercise_ratio,
+    )
+    assert a.greeks.delta == pytest.approx(direct.delta, abs=1e-5)
+    assert a.greeks.vega == pytest.approx(direct.vega, abs=0.01)
+    assert a.greeks.theta == pytest.approx(direct.theta, abs=0.01)
+
+    # 5. the independent theo price is NOT the circular IV-mid repricing
+    assert a.model_price_at_iv_mid is not None
+    assert a.theoretical_price != a.model_price_at_iv_mid
+
+
+@pytest.mark.asyncio
+async def test_service_requests_adjusted_daily_closes_from_upstream():
+    """At the FiinQuant boundary the service must ask for adjusted=True 1D bars
+    (unadjusted closes carry corporate-action jumps that inflate HV)."""
+    src = _hpg_source()
+    svc = HistoricalVolatilityService(bar_source=src)
+    await svc.refresh("HPG")
+    assert len(src.calls) == 1
+    assert src.calls[0]["adjusted"] is True
+    assert src.calls[0]["timeframe"] == "1D"
 
 
 # --------------------------------------------------------------------------- #

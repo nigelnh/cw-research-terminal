@@ -3,7 +3,6 @@ import {
   MockMarketDataProvider,
   MockInstrumentProvider,
   MockHistoricalDataProvider,
-  MockQuantProvider,
 } from "./test_fixtures";
 
 describe("CW Research Platform - Mock Providers Test Suite", () => {
@@ -128,63 +127,8 @@ describe("CW Research Platform - Mock Providers Test Suite", () => {
     });
   });
 
-  describe("mock_quant_provider", () => {
-    const provider = new MockQuantProvider();
-
-    it("calculates Black-Scholes Greeks analytically for standard parameters", async () => {
-      const greeks = await provider.calculateGreeks({
-        underlyingPrice: 29500,
-        strikePrice: 28000,
-        timeToMaturity: 0.42,
-        riskFreeRate: 0.065,
-        volatility: 0.35,
-        exerciseRatio: 2.0,
-      });
-
-      expect(greeks.theoreticalPrice).toBeGreaterThan(1800);
-      expect(greeks.theoreticalPrice).toBeLessThan(2300);
-      expect(greeks.delta).toBeGreaterThan(0.30);
-      expect(greeks.delta).toBeLessThan(0.50);
-      expect(greeks.gamma).toBeGreaterThan(0);
-      expect(greeks.theta).toBeLessThan(0);
-      expect(greeks.vega).toBeGreaterThan(0);
-    });
-
-    it("rejects invalid financial inputs with null values", async () => {
-      const invalidSpot = await provider.calculateGreeks({
-        underlyingPrice: -100,
-        strikePrice: 28000,
-        timeToMaturity: 0.42,
-        riskFreeRate: 0.065,
-        volatility: 0.35,
-        exerciseRatio: 2.0,
-      });
-      expect(invalidSpot.theoreticalPrice).toBeNull();
-      expect(invalidSpot.delta).toBeNull();
-
-      const invalidVol = await provider.calculateGreeks({
-        underlyingPrice: 29500,
-        strikePrice: 28000,
-        timeToMaturity: 0.42,
-        riskFreeRate: 0.065,
-        volatility: -0.5,
-        exerciseRatio: 2.0,
-      });
-      expect(invalidVol.theoreticalPrice).toBeNull();
-    });
-
-    it("handles boundary expiry cases (T=0) properly", async () => {
-      const expiredITM = await provider.calculateGreeks({
-        underlyingPrice: 32000,
-        strikePrice: 30000,
-        timeToMaturity: 0,
-        riskFreeRate: 0.05,
-        volatility: 0.30,
-        exerciseRatio: 2.0,
-      });
-      expect(expiredITM.theoreticalPrice).toBe(1000); // (32000 - 30000) / 2
-      expect(expiredITM.delta).toBe(0.5); // 1/k
-      expect(expiredITM.gamma).toBe(0);
-    });
-  });
+  // NOTE: there is no "mock_quant_provider" suite. Quant math (Black-Scholes, Greeks,
+  // IV, HV) lives only in the Python backend (app.quant.*) and is verified against
+  // independent numerical references in backend/tests/test_quant_*.py. The frontend's
+  // job is to consume the backend's quant contract correctly - see quant_api_contract.test.ts.
 });

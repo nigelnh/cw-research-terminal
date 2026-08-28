@@ -62,7 +62,7 @@ class QuantModelInputs(BaseModel):
     time_to_maturity: Optional[float] = Field(default=None, description="Time to maturity T in years (ACT/365)")
     days_to_expiry: Optional[int] = Field(default=None, description="Calendar days to expiry (DTE)")
     risk_free_rate: float = Field(default=0.05, description="Annual risk-free interest rate r (decimal, e.g. 0.05)")
-    dividend_yield: float = Field(default=0.0, description="Annual dividend yield assumption q (decimal, e.g. 0.0)")
+    dividend_yield: float = Field(default=0.0, description="Annualized decimal dividend yield q used for this valuation. Always 0.0 for CW analytics -- HOSE covered warrants are dividend-protected (see QUANT_CONTRACT.md section 7).")
     market_bid: Optional[float] = Field(default=None, description="Market Bid1 price in raw VND")
     market_ask: Optional[float] = Field(default=None, description="Market Ask1 price in raw VND")
     market_last: Optional[float] = Field(default=None, description="Market Last trade price in raw VND")

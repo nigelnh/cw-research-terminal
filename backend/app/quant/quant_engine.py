@@ -30,6 +30,7 @@ from app.quant.black_scholes import (
     calculate_analytical_greeks,
     bs_call_price_share,
 )
+from app.quant.dividend_convention import CW_DIVIDEND_YIELD_CONVENTION
 
 if TYPE_CHECKING:
     from app.quant.historical_volatility_service import VolEstimate
@@ -239,7 +240,11 @@ class LiveQuantEngine:
         K = eff_strike
         CR = eff_ratio
         r = settings.QUANT_RISK_FREE_RATE
-        q = settings.QUANT_DIVIDEND_YIELD
+        # Dividend yield is pinned to the CW convention (q = 0): HOSE covered warrants are
+        # dividend-protected via issuer strike/ratio adjustment, so a BSM q > 0 would
+        # double-count the protection. See app.quant.dividend_convention. This SAME q is
+        # used for the theoretical price, every IV inversion, and every Greek below.
+        q = CW_DIVIDEND_YIELD_CONVENTION.value
 
         # 5. Moneyness (S / K)
         moneyness = round(S / K, 5)
