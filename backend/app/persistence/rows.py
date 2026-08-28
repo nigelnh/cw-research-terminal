@@ -99,6 +99,29 @@ class IngestionRunRow:
 
 
 @dataclass(frozen=True, slots=True)
+class UserWatchlistItemRow:
+    symbol: str
+    instrument_type: str
+    position: int
+    underlying_symbol: str | None
+    issuer: str | None
+    strike_price: float | None
+    exercise_ratio: float | None
+    maturity_date: date | None
+    last_trading_date: date | None
+    notes: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class UserWatchlistRow:
+    owner_subject: str
+    name: str
+    items: tuple[UserWatchlistItemRow, ...]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class IngestionStateRow:
     id: int
     source: str

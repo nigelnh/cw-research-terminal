@@ -175,6 +175,81 @@ class Settings(BaseSettings):
         default=40, description="Minimum persisted daily bars before HV triggers a controlled provider fill for a symbol"
     )
 
+    # ------------------------------------------------------------------ #
+    # Authentication (Step 9) - Supabase Auth as the identity provider    #
+    # ------------------------------------------------------------------ #
+    # The backend NEVER issues sessions or stores passwords. It only VERIFIES the access
+    # token minted by Supabase for requests to the protected /api/me/* namespace. All public
+    # market-data / quant / history / websocket routes stay anonymous.
+    #
+    # Two verification modes, auto-selected:
+    #   - asymmetric (preferred): SUPABASE_URL is set -> fetch + cache the project JWKS at
+    #     {SUPABASE_URL}/auth/v1/.well-known/jwks.json, verify RS256/ES256 by `kid`.
+    #   - shared-secret (legacy): SUPABASE_JWT_SECRET is set -> verify HS256 locally.
+    # If BOTH are set, whichever matches the token's `alg` header is used.
+    SUPABASE_URL: str = Field(
+        default="",
+        description="Supabase project URL, e.g. https://abcxyz.supabase.co (used to derive issuer + JWKS URL)",
+    )
+    SUPABASE_JWT_SECRET: str = Field(
+        default="",
+        description="Legacy HS256 JWT signing secret from the Supabase dashboard (server-side only). Optional when SUPABASE_URL is set.",
+    )
+    SUPABASE_JWT_AUDIENCE: str = Field(
+        default="authenticated",
+        description="Expected `aud` claim on Supabase user access tokens",
+    )
+    SUPABASE_JWT_ISSUER: str = Field(
+        default="",
+        description="Expected `iss` claim. Empty -> derived as {SUPABASE_URL}/auth/v1",
+    )
+    SUPABASE_JWKS_URL: str = Field(
+        default="",
+        description="Override for the JWKS endpoint. Empty -> derived as {SUPABASE_URL}/auth/v1/.well-known/jwks.json",
+    )
+    SUPABASE_JWKS_CACHE_SECONDS: int = Field(
+        default=600, description="How long a fetched JWKS key set is reused before refetch"
+    )
+    AUTH_JWT_LEEWAY_SECONDS: int = Field(
+        default=30, description="Clock-skew leeway applied to exp/nbf/iat verification"
+    )
+
+    # Per-user primary watchlist (the one user-owned feature in Step 9).
+    ME_WATCHLIST_MAX_ITEMS: int = Field(
+        default=50, description="Hard cap on symbols in a user's persisted primary watchlist"
+    )
+
+    # TEST-ONLY escape hatch: when set to a non-empty value AND ENVIRONMENT != 'production',
+    # the JWT verifier accepts HS256 tokens signed with this secret. Used exclusively by the
+    # automated test-suite so no live Supabase project is needed. It is IGNORED in production
+    # regardless of value (see app.auth.jwt_verifier). Never set this in a deployed env.
+    AUTH_TEST_HS256_SECRET: str = Field(
+        default="",
+        description="TEST ONLY. Accept HS256 tokens signed with this secret. Ignored when ENVIRONMENT=production.",
+    )
+
+    def auth_configured(self) -> bool:
+        """True when the backend has enough config to verify real Supabase tokens."""
+        return bool(self.SUPABASE_URL.strip() or self.SUPABASE_JWT_SECRET.strip())
+
+    def supabase_issuer(self) -> str:
+        if self.SUPABASE_JWT_ISSUER.strip():
+            return self.SUPABASE_JWT_ISSUER.strip()
+        base = self.SUPABASE_URL.strip().rstrip("/")
+        return f"{base}/auth/v1" if base else ""
+
+    def supabase_jwks_url(self) -> str:
+        if self.SUPABASE_JWKS_URL.strip():
+            return self.SUPABASE_JWKS_URL.strip()
+        base = self.SUPABASE_URL.strip().rstrip("/")
+        return f"{base}/auth/v1/.well-known/jwks.json" if base else ""
+
+    def auth_test_secret_active(self) -> str:
+        """The test HS256 secret, or '' when it must not be honored (production)."""
+        if self.ENVIRONMENT.strip().lower() == "production":
+            return ""
+        return self.AUTH_TEST_HS256_SECRET.strip()
+
     def history_postgres_timeframes(self) -> set[str]:
         return {t.strip().lower() for t in self.HISTORY_POSTGRES_TIMEFRAMES.split(",") if t.strip()}
 

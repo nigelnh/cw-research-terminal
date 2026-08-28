@@ -11,6 +11,7 @@ from app.market_data.market_subscription_manager import subscription_manager
 from app.instruments.instrument_router import instruments_router
 from app.instruments.instrument_registry import instrument_registry
 from app.quant.quant_router import quant_router
+from app.me import me_router
 from app.quant.quant_engine import live_quant_engine
 from app.quant.historical_volatility_service import historical_volatility_service
 from app.persistence import database as persistence_db
@@ -214,6 +215,7 @@ app.include_router(ai_router)
 app.include_router(market_router)
 app.include_router(instruments_router)
 app.include_router(quant_router)
+app.include_router(me_router)
 app.include_router(ws_router)
 
 
@@ -241,6 +243,16 @@ async def root_health():
         "quant_scheduler": live_quant_engine.stats(),
         "database": await persistence_db.health(),
         "history_reads": history_read_service.health(),
+        "auth": {
+            "configured": settings.auth_configured(),
+            "mode": (
+                "asymmetric_jwks"
+                if settings.SUPABASE_URL.strip()
+                else "shared_secret"
+                if settings.SUPABASE_JWT_SECRET.strip()
+                else "disabled"
+            ),
+        },
     }
 
 

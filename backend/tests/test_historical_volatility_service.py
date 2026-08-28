@@ -19,7 +19,7 @@ No test performs a real FiinQuant request.
 """
 
 import asyncio
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from unittest.mock import AsyncMock
@@ -35,7 +35,13 @@ from app.quant.historical_volatility_service import (
     VolEstimate,
     historical_volatility_service,
 )
-from app.quant.quant_engine import LiveQuantEngine, live_quant_engine
+from app.quant.quant_engine import (
+    VN_TZ,
+    LiveQuantEngine,
+    calculate_time_to_maturity,
+    live_quant_engine,
+)
+import app.quant.quant_engine as quant_engine_module
 from app.quant.quant_schemas import GreeksVolatilitySource
 from app.instruments.instrument_schemas import (
     CoveredWarrantSpecification,
@@ -363,67 +369,132 @@ async def test_engine_theoretical_price_none_without_service():
     assert analytics.theoretical_volatility_source == "UNAVAILABLE"
 
 
+@pytest.fixture
+def frozen_vn_now(monkeypatch):
+    """Freeze the engine's Vietnam wall-clock. ``calculate_time_to_maturity`` resolves
+    ``get_vietnam_now`` from the engine module at call time, so this pins T for both the
+    engine and any reconstruction the test performs. Returns a setter for the instant."""
+
+    holder = {"now": datetime(2026, 8, 29, 10, 0, 0, tzinfo=VN_TZ)}
+    monkeypatch.setattr(quant_engine_module, "get_vietnam_now", lambda: holder["now"])
+
+    def _set(dt: datetime) -> None:
+        holder["now"] = dt
+
+    return _set
+
+
+async def _assert_engine_provenance_consistent(a, spec) -> None:
+    """Every reported figure is reproducible from the SAME canonical inputs the engine
+    used - not from the display-rounded ``model_inputs`` echoes. The clock is frozen by
+    the ``frozen_vn_now`` fixture, so ``T`` here is byte-identical to the engine's."""
+    from app.quant.black_scholes import bs_call_price_share, calculate_analytical_greeks
+
+    mi = a.model_inputs
+    assert mi is not None
+    assert a.theoretical_volatility is not None and a.moneyness is not None
+
+    # canonical inputs (full precision), recomputed exactly as production does
+    S = mi.underlying_price
+    K = mi.strike_price
+    r = mi.risk_free_rate
+    q = mi.dividend_yield
+    CR = mi.exercise_ratio
+    T_full, dte = calculate_time_to_maturity(spec.maturity_date)
+
+    # 1. model_inputs echo the settings + effective contract terms
+    assert r == settings.QUANT_RISK_FREE_RATE
+    assert q == CW_DIVIDEND_YIELD_CONVENTION.value == 0.0
+    assert K == spec.effective_strike == 25885.0
+    assert CR == spec.effective_ratio == 3.5704
+    assert S == 22150.0
+
+    # 1b. the ROUNDED echoes have the intended relationship to the internal values
+    #     (they are display values, deliberately not the numbers used in the math).
+    assert mi.time_to_maturity == round(T_full, 5)
+    assert mi.days_to_expiry == dte
+    assert a.iv_trade is not None
+    assert a.greeks.volatility_used == round(a.iv_trade, 4)  # 4dp display; greeks use a.iv_trade
+
+    # 2. moneyness is exactly S / K
+    assert a.moneyness == round(S / K, 5)
+
+    # 3. theoretical_price == round( BS(canonical inputs, HV) / ratio , 2 )
+    assert a.theoretical_volatility_source == "HV_22"
+    assert a.theoretical_volatility == EXPECTED_HV == a.historical_volatility
+    reprice = round(
+        bs_call_price_share(S, K, T_full, r, q, a.theoretical_volatility) / CR, 2
+    )
+    assert a.theoretical_price == reprice
+
+    # 4. Greeks reproduce EXACTLY from (canonical T, the iv_trade the analytics reports).
+    #    Both paths apply identical output rounding, so this is strict equality - no tolerance.
+    assert a.greeks.volatility_source == GreeksVolatilitySource.IV_TRADE
+    direct = calculate_analytical_greeks(S, K, T_full, r, q, a.iv_trade, exercise_ratio=CR)
+    assert a.greeks.delta == direct.delta
+    assert a.greeks.gamma == direct.gamma
+    assert a.greeks.vega == direct.vega
+    assert a.greeks.theta == direct.theta
+    assert a.greeks.rho == direct.rho
+
+    # 5. the independent theo price is NOT the circular IV-mid repricing
+    assert a.model_price_at_iv_mid is not None
+    assert a.theoretical_price != a.model_price_at_iv_mid
+
+
+async def _compute_reference_analytics(engine):
+    spec = _active_cw_spec()
+    und = CanonicalQuote(symbol="HPG", instrument_type="STOCK", last_price=22150.0)
+    cw = CanonicalQuote(
+        symbol="CHPG2602", instrument_type="CW",
+        bid1_price=42.0, ask1_price=48.0, last_price=45.0,
+    )
+    a = await engine.compute_warrant_analytics("CHPG2602", spec=spec, cw_state=cw, und_state=und)
+    return a, spec
+
+
 @pytest.mark.asyncio
-async def test_engine_analytics_provenance_is_internally_consistent():
+async def test_engine_analytics_provenance_is_internally_consistent(frozen_vn_now):
     """End-to-end: market/instrument inputs -> LiveQuantEngine -> WarrantAnalytics.
 
-    Every derived field must be reproducible from model_inputs + the volatility the
-    analytics claims it used. Catches a mismatch between the reported provenance and
-    the number that was actually produced.
+    Every derived field must be reproducible from the canonical inputs + the volatility the
+    analytics claims it used. Catches a mismatch between reported provenance and the number
+    actually produced.
     """
-    from app.quant.black_scholes import bs_call_price_share, calculate_analytical_greeks
+    svc = HistoricalVolatilityService(bar_source=_hpg_source())
+    await svc.warm(["HPG"])
+    engine = LiveQuantEngine()
+    engine.set_historical_vol_getter(svc.get_estimate)
+
+    a, spec = await _compute_reference_analytics(engine)
+    await _assert_engine_provenance_consistent(a, spec)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "frozen_date",
+    [
+        datetime(2026, 6, 1, 10, 0, tzinfo=VN_TZ),   # far from maturity
+        datetime(2026, 8, 29, 10, 0, tzinfo=VN_TZ),   # the wall-clock date that first tripped it
+        datetime(2026, 9, 5, 10, 0, tzinfo=VN_TZ),    # ~16 days out
+        datetime(2026, 9, 18, 15, 30, tzinfo=VN_TZ),  # ~3 days out, greeks most vol-sensitive
+    ],
+)
+async def test_engine_analytics_provenance_is_date_boundary_stable(frozen_vn_now, frozen_date):
+    """Regression: the provenance invariant holds regardless of 'today'. The previous
+    version reconstructed greeks from model_inputs.time_to_maturity (a 5dp-rounded echo)
+    while the engine used full-precision T; as maturity approached, that gap crossed the
+    1e-5 tolerance. There is no such gap anymore."""
+    frozen_vn_now(frozen_date)
 
     svc = HistoricalVolatilityService(bar_source=_hpg_source())
     await svc.warm(["HPG"])
     engine = LiveQuantEngine()
     engine.set_historical_vol_getter(svc.get_estimate)
 
-    spec = _active_cw_spec()
-    und = CanonicalQuote(symbol="HPG", instrument_type="STOCK", last_price=22150.0)
-    cw = CanonicalQuote(symbol="CHPG2602", instrument_type="CW",
-                        bid1_price=42.0, ask1_price=48.0, last_price=45.0)
-
-    a = await engine.compute_warrant_analytics("CHPG2602", spec=spec, cw_state=cw, und_state=und)
-    mi = a.model_inputs
-    assert mi is not None
-    assert mi.underlying_price is not None and mi.strike_price is not None
-    assert mi.time_to_maturity is not None and mi.exercise_ratio is not None
-    assert a.theoretical_volatility is not None and a.moneyness is not None
-
-    # 1. model_inputs echo the settings and the effective contract terms
-    assert mi.risk_free_rate == settings.QUANT_RISK_FREE_RATE
-    assert mi.dividend_yield == CW_DIVIDEND_YIELD_CONVENTION.value == 0.0
-    assert mi.strike_price == spec.effective_strike == 25885.0
-    assert mi.exercise_ratio == spec.effective_ratio == 3.5704
-    assert mi.underlying_price == 22150.0
-
-    # 2. moneyness is exactly S / K
-    assert a.moneyness == round(mi.underlying_price / mi.strike_price, 5)
-
-    # 3. theoretical_price == BS(model_inputs, theoretical_volatility) / ratio, rounded 2 dp
-    assert a.theoretical_volatility_source == "HV_22"
-    assert a.theoretical_volatility == EXPECTED_HV == a.historical_volatility
-    reprice = round(
-        bs_call_price_share(mi.underlying_price, mi.strike_price, mi.time_to_maturity,
-                            mi.risk_free_rate, mi.dividend_yield, a.theoretical_volatility) / mi.exercise_ratio, 2
-    )
-    assert a.theoretical_price == pytest.approx(reprice, abs=0.01)
-
-    # 4. Greeks were computed at the volatility the analytics reports (IV_TRADE here,
-    #    because a last trade exists), and match a direct production call at that vol.
-    assert a.greeks.volatility_source == GreeksVolatilitySource.IV_TRADE
-    assert a.iv_trade is not None and a.greeks.volatility_used == round(a.iv_trade, 4)
-    direct = calculate_analytical_greeks(
-        mi.underlying_price, mi.strike_price, mi.time_to_maturity,
-        mi.risk_free_rate, mi.dividend_yield, a.iv_trade, exercise_ratio=mi.exercise_ratio,
-    )
-    assert a.greeks.delta == pytest.approx(direct.delta, abs=1e-5)
-    assert a.greeks.vega == pytest.approx(direct.vega, abs=0.01)
-    assert a.greeks.theta == pytest.approx(direct.theta, abs=0.01)
-
-    # 5. the independent theo price is NOT the circular IV-mid repricing
-    assert a.model_price_at_iv_mid is not None
-    assert a.theoretical_price != a.model_price_at_iv_mid
+    a, spec = await _compute_reference_analytics(engine)
+    assert a.is_available is True
+    await _assert_engine_provenance_consistent(a, spec)
 
 
 @pytest.mark.asyncio

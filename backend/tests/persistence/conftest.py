@@ -39,7 +39,14 @@ _CANDIDATE_BIN_DIRS = [
     "/usr/local/opt/postgresql/bin",
 ]
 
-_ALL_TABLES = ("market_bars", "ingestion_state", "ingestion_runs", "instruments")
+_ALL_TABLES = (
+    "market_bars",
+    "ingestion_state",
+    "ingestion_runs",
+    "instruments",
+    "user_watchlist_items",
+    "user_watchlists",
+)
 
 
 def _find_pg_bin() -> Path | None:
