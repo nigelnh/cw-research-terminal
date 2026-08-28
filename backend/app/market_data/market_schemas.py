@@ -218,6 +218,41 @@ class HistoricalBar(BaseModel):
     adjusted: bool = Field(default=True, description="Whether prices are adjusted for corporate actions")
 
 
+class HistoricalDataError(Exception):
+    """Base exception for historical market data errors."""
+    pass
+
+
+class HistoricalRangeLimitError(HistoricalDataError):
+    """Raised when a requested historical range exceeds the upstream provider's max lookback window (e.g. FiinQuant 365-day limit)."""
+    pass
+
+
+class HistoricalAuthError(HistoricalDataError):
+    """Raised when historical request fails due to invalid or expired authentication credentials."""
+    pass
+
+
+class HistoricalEntitlementError(HistoricalDataError):
+    """Raised when account lacks entitlement/permissions for the requested historical entity or dataset."""
+    pass
+
+
+class HistoricalRateLimitError(HistoricalDataError):
+    """Raised when upstream returns HTTP 429 rate limit."""
+    pass
+
+
+class HistoricalTransportError(HistoricalDataError):
+    """Raised when a network timeout or transport connection error occurs."""
+    pass
+
+
+class HistoricalUpstreamError(HistoricalDataError):
+    """Raised when upstream server returns 5xx error."""
+    pass
+
+
 class MarketHealthResponse(BaseModel):
     status: str = "ok"
     provider: str

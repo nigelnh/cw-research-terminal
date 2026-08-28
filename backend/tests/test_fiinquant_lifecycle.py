@@ -97,6 +97,14 @@ class _FakeTransport:
 class _FakeHub:
     def __init__(self, ping_fn) -> None:
         self.transport = _FakeTransport(ping_fn)
+        self._close_cbs = []
+
+    def on_close(self, cb) -> None:
+        self._close_cbs.append(cb)
+
+    def trigger_close(self) -> None:
+        for cb in list(self._close_cbs):
+            cb()
 
 
 class _FakeStream:
@@ -112,7 +120,12 @@ class _FakeStream:
         self.hub_connection = None
         self.custom_handler = None
         self.ping_count = 0
+        self.sdk_reconnect_called = 0
+        self._handle_disconnect = self._orig_handle_disconnect
         _FakeStream.instances.append(self)
+
+    def _orig_handle_disconnect(self) -> None:
+        self.sdk_reconnect_called += 1
 
     # -- the SDK's PingMessage sender, invoked from the checker thread --
     def _send_ping(self) -> None:
@@ -424,3 +437,114 @@ async def test_reaper_spares_excluded_live_checkers(monkeypatch):
         s.hub_connection.transport.connection_checker.running for s in p._owned_streams
     )
     await p.disconnect()
+
+
+# --------------------------------------------------------------------------- #
+# T10 - SDK reconnect is disabled and compatibility-guarded
+# --------------------------------------------------------------------------- #
+async def test_T10_sdk_reconnect_disabled_and_compatibility_guarded(monkeypatch):
+    p, _ = _make_provider(monkeypatch)
+    await p.connect()
+    await p.set_subscriptions(["HPG", "SSI"])
+
+    for s in p._owned_streams:
+        # Invariant: transport.reconnection_handler was set to None
+        assert s.hub_connection.transport.reconnection_handler is None
+        # Invariant: stream._handle_disconnect was neutralized
+        s._handle_disconnect()
+        assert s.sdk_reconnect_called == 0
+
+    await p.disconnect()
+
+
+# --------------------------------------------------------------------------- #
+# T11 - unexpected disconnect triggers provider reconnect and reuses valid session
+# --------------------------------------------------------------------------- #
+async def test_T11_unexpected_disconnect_triggers_single_provider_reconnect_and_reuses_session(monkeypatch):
+    p, _ = _make_provider(monkeypatch)
+    await p.connect()
+    await p.set_subscriptions(["HPG", "SSI"])
+    assert len(p._owned_streams) == 2
+    first_trade = p._trade_stream
+
+    # Trigger transport close callback (simulating remote socket close)
+    first_trade.hub_connection.trigger_close()
+
+    # Reconnect worker runs: retires old streams, starts fresh streams with current symbols
+    assert await _wait_until(lambda: p._trade_stream is not None and p._trade_stream is not first_trade)
+    assert await _wait_until(lambda: count_signalr_ping_threads() == len(p._owned_streams))
+    assert count_signalr_ping_threads() == 2
+    assert p._stream_restart_count >= 2
+
+    # Invariant: Existing authenticated session was reused (no unnecessary login churn)
+    assert _FakeSession.created == 1
+    assert p.get_health()["upstream_status"] == "LIVE"
+
+    await p.disconnect()
+    assert await _wait_until(lambda: _alive_ping_threads() == 0)
+
+
+# --------------------------------------------------------------------------- #
+# T12 - re-auth occurs ONLY when session is invalid during reconnect
+# --------------------------------------------------------------------------- #
+async def test_T12_reauth_only_when_session_invalid_on_reconnect(monkeypatch):
+    p, _ = _make_provider(monkeypatch)
+    await p.connect()
+    await p.set_subscriptions(["HPG"])
+    assert _FakeSession.created == 1
+
+    # Invalidate session to simulate token expiration
+    p._session.is_login = False
+    old_trade = p._trade_stream
+    old_trade.hub_connection.trigger_close()
+
+    # Reconnect detects invalid session and re-authenticates
+    assert await _wait_until(lambda: p._trade_stream is not None and p._trade_stream is not old_trade)
+    assert _FakeSession.created == 2
+    assert p._session.is_login is True
+
+    await p.disconnect()
+    assert await _wait_until(lambda: _alive_ping_threads() == 0)
+
+
+# --------------------------------------------------------------------------- #
+# T13 - reconnect stops immediately when shutdown begins
+# --------------------------------------------------------------------------- #
+async def test_T13_reconnect_stops_immediately_on_shutdown(monkeypatch):
+    p, _ = _make_provider(monkeypatch)
+    await p.connect()
+    await p.set_subscriptions(["HPG"])
+
+    trade = p._trade_stream
+    # Trigger close callback then immediately call disconnect()
+    trade.hub_connection.trigger_close()
+    await p.disconnect()
+
+    assert p._shutting_down is True
+    assert p._owned_streams == []
+    assert await _wait_until(lambda: _alive_ping_threads() == 0)
+    assert count_signalr_ping_threads() == 0
+
+
+# --------------------------------------------------------------------------- #
+# T14 - repeated close callbacks are single-flighted
+# --------------------------------------------------------------------------- #
+async def test_T14_repeated_close_callbacks_are_single_flighted(monkeypatch):
+    p, _ = _make_provider(monkeypatch)
+    await p.connect()
+    await p.set_subscriptions(["HPG"])
+
+    trade = p._trade_stream
+    # Fire 5 close notifications rapidly
+    for _ in range(5):
+        trade.hub_connection.trigger_close()
+
+    # Wait for reconnect to complete
+    assert await _wait_until(lambda: p._stream_restart_count >= 2)
+    assert count_signalr_ping_threads() == len(p._owned_streams)
+    # Ping thread count must be strictly <= owned streams (never multiplied)
+    assert count_signalr_ping_threads() <= 2
+
+    await p.disconnect()
+    assert await _wait_until(lambda: _alive_ping_threads() == 0)
+

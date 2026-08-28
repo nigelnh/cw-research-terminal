@@ -127,15 +127,29 @@ class MarketState:
         if change is None:
             change = raw_event.get("PriceChange")
 
-        change_pct = raw_event.get("ChangePercent")
+        change_pct = raw_event.get("PercentPriceChange")
+        if change_pct is None:
+            change_pct = raw_event.get("ChangePercent")
         if change_pct is None:
             change_pct = raw_event.get("ChangeRate")
         if change_pct is None:
             change_pct = raw_event.get("change_percent")
+        if change_pct is None and match_price is not None and ref_price is not None:
+            try:
+                mp = float(match_price)
+                rp = float(ref_price)
+                if rp > 0:
+                    change_pct = round((mp - rp) / rp, 6)
+            except (ValueError, TypeError):
+                pass
 
         tot_vol = raw_event.get("TotalMatchVolume")
         if tot_vol is None:
             tot_vol = raw_event.get("TotalVolume")
+        if tot_vol is None:
+            tot_vol = raw_event.get("Total_Vol")
+        if tot_vol is None:
+            tot_vol = raw_event.get("total_volume")
         if tot_vol is None:
             tot_vol = raw_event.get("Volume")
 

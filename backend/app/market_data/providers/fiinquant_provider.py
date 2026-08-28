@@ -1,11 +1,23 @@
 import logging
 import asyncio
 import threading
+import time
+import io
+import contextlib
 from typing import Iterator, List, Dict, Any, Optional, Callable, Set
 from datetime import datetime, timedelta
 
 from app.core.config import settings
-from app.market_data.market_schemas import HistoricalBar
+from app.market_data.market_schemas import (
+    HistoricalBar,
+    HistoricalDataError,
+    HistoricalRangeLimitError,
+    HistoricalAuthError,
+    HistoricalEntitlementError,
+    HistoricalRateLimitError,
+    HistoricalTransportError,
+    HistoricalUpstreamError,
+)
 from app.market_data.providers.base_market_provider import MarketDataProvider
 
 logger = logging.getLogger(__name__)
@@ -125,6 +137,18 @@ class FiinQuantProvider(MarketDataProvider):
         self._stream_restart_count = 0
         self._orphans_reaped = 0
 
+        # ---- Adapter-owned Reconnect State ----
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._reconnect_backoff_index: int = 0
+        self._reconnect_backoffs = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
+
+        # ---- Historical provider health & circuit breaker ----
+        self._historical_circuit_open_until: float = 0.0
+        self._historical_circuit_reason: Optional[str] = None
+        self._historical_last_status: str = "HEALTHY"
+        self._historical_last_error: Optional[str] = None
+        self._historical_consecutive_auth_errors: int = 0
+
     def set_event_callback(self, callback: Callable[[str, Dict[str, Any], str], None]) -> None:
         self._event_callback = callback
         try:
@@ -194,8 +218,8 @@ class FiinQuantProvider(MarketDataProvider):
             return False
         if self._shutting_down:
             return False
-        if self._session is not None and self._is_connected:
-            return True  # idempotent: already authenticated with a live session
+        if self._session is not None and getattr(self._session, "is_login", False) and self._is_connected:
+            return True  # idempotent: already authenticated with a live valid session
 
         self._ensure_loop()
         session = await asyncio.to_thread(self._create_session)
@@ -225,6 +249,9 @@ class FiinQuantProvider(MarketDataProvider):
             self._shutting_down = True
             self._upstream_status = "DISCONNECTED"
             self._is_connected = False
+            if self._reconnect_task is not None and not self._reconnect_task.done():
+                self._reconnect_task.cancel()
+                self._reconnect_task = None
             await self._retire_streams_locked()
             self._session = None
             self._active_symbols = []
@@ -240,14 +267,7 @@ class FiinQuantProvider(MarketDataProvider):
     # Stream retirement & startup
     # ------------------------------------------------------------------ #
     async def _retire_streams_locked(self) -> None:
-        """Fully retire every stream this provider owns. Cancel-safe and time-bounded.
-
-        Order matters: (1) synchronous hard teardown of each transport (stops the ping
-        loop unconditionally, closes the socket, kills SDK reconnect, detaches the leaking
-        log handler); (2) reap any ``ConnectionStateChecker`` the SDK left running,
-        including from its internal reconnects; (3) best-effort SDK ``.stop()`` with a
-        timeout (it may ``.join()`` threads); (4) a final reap.
-        """
+        """Fully retire every stream this provider owns. Cancel-safe and time-bounded."""
         streams = list(self._owned_streams)
         self._owned_streams.clear()
 
@@ -321,11 +341,7 @@ class FiinQuantProvider(MarketDataProvider):
                 pass
 
     def _tame_sdk_side_effects(self) -> None:
-        """Undo FiinQuantX's global logging hijack after any stream operation.
-
-        The SDK forces the root logger (and ``SignalRCoreClient``) to DEBUG and attaches a
-        never-drained ``CustomHandler`` to root on every stream construction.
-        """
+        """Undo FiinQuantX's global logging hijack after any stream operation."""
         root = logging.getLogger()
         try:
             if root.level < logging.INFO:
@@ -344,6 +360,101 @@ class FiinQuantProvider(MarketDataProvider):
                     root.removeHandler(h)
                 except Exception:  # noqa: BLE001
                     pass
+
+    def _disable_sdk_reconnect_guarded(self, stream: Any, gen: int) -> None:
+        """Proactively disables signalrcore auto-reconnect and SDK unmanaged reconnect loops
+        with runtime compatibility checks.
+        """
+        # 1. Disable signalrcore transport auto-reconnect
+        hub = getattr(stream, "hub_connection", None)
+        transport = getattr(hub, "transport", None) if hub is not None else None
+        if transport is not None:
+            if hasattr(transport, "reconnection_handler"):
+                transport.reconnection_handler = None
+            else:
+                logger.warning("FiinQuantX SignalR transport missing expected reconnection_handler attribute.")
+
+            # Register transport close notification to trigger single provider-owned reconnect
+            if hub is not None and hasattr(hub, "on_close") and callable(getattr(hub, "on_close", None)):
+                try:
+                    hub.on_close(lambda: self._on_stream_closed_callback(gen))
+                except Exception as e:
+                    logger.warning("Could not register on_close callback on hub: %s", e)
+        else:
+            logger.warning("FiinQuantX stream missing expected hub_connection or transport.")
+
+        # 2. Neutralize SDK unmanaged thread reconnect loop (_handle_disconnect)
+        if hasattr(stream, "_handle_disconnect"):
+            try:
+                setattr(stream, "_handle_disconnect", lambda: None)
+            except Exception as e:
+                logger.warning("Could not neutralize stream._handle_disconnect: %s", e)
+        else:
+            logger.warning("FiinQuantX stream missing expected _handle_disconnect hook.")
+
+    def _on_stream_closed_callback(self, gen: int) -> None:
+        """Callback invoked on worker thread when SignalR transport drops."""
+        if self._shutting_down or gen != self._generation or not self._active_symbols:
+            return
+        self._ensure_loop()
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._schedule_reconnect)
+
+    def _schedule_reconnect(self) -> None:
+        if self._shutting_down or not self._active_symbols:
+            return
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            return
+        self._ensure_loop()
+        if self._loop and self._loop.is_running():
+            self._reconnect_task = self._loop.create_task(self._reconnect_worker())
+
+    async def _reconnect_worker(self) -> None:
+        """Single-flighted, bounded-backoff reconnect loop owned exclusively by FiinQuantProvider."""
+        delay = self._reconnect_backoffs[min(self._reconnect_backoff_index, len(self._reconnect_backoffs) - 1)]
+        logger.info(
+            "SignalR stream disconnected. Scheduling provider reconnect in %.1fs (generation %d)...",
+            delay, self._generation,
+        )
+        await asyncio.sleep(delay)
+
+        async with self._lifecycle_lock:
+            if self._shutting_down or not self._active_symbols:
+                return
+
+            self._upstream_status = "RESTARTING"
+            await self._retire_streams_locked()
+
+            # Reuse existing authenticated session if still valid; only re-authenticate if session is dead/invalid
+            is_valid_session = self._session is not None and getattr(self._session, "is_login", False)
+            if not is_valid_session:
+                logger.info("FiinQuant session invalid/expired. Re-authenticating for reconnect...")
+                if not await self._connect_locked():
+                    self._reconnect_backoff_index += 1
+                    self._upstream_status = "ERROR"
+                    self._schedule_reconnect()
+                    return
+
+            gen = self._generation
+            self._stream_restart_count += 1
+            err = await asyncio.to_thread(self._start_new_streams_sync, self._active_symbols, gen)
+            self._tame_sdk_side_effects()
+
+            if not self._owned_streams or err:
+                self._reconnect_backoff_index += 1
+                self._upstream_status = "ERROR"
+                self._last_error = err
+                logger.error("SignalR stream reconnect attempt failed: %s", err)
+                self._schedule_reconnect()
+                return
+
+            self._reconnect_backoff_index = 0
+            self._upstream_status = "CONNECTED"
+            self._last_error = None
+            logger.info(
+                "SignalR stream reconnect successful for %d symbols (generation %d).",
+                len(self._active_symbols), gen,
+            )
 
     async def set_subscriptions(self, symbols: List[str]) -> bool:
         """Replace the active streaming subscription set. Serialised; retires old streams first."""
@@ -379,8 +490,6 @@ class FiinQuantProvider(MarketDataProvider):
             self._stream_restart_count += 1
             gen = self._generation
 
-            # _start_new_streams_sync stores the stream refs into ``self`` from inside the
-            # worker thread, so a cancelled ``await`` here can never orphan a live stream.
             err = await asyncio.to_thread(self._start_new_streams_sync, clean_symbols, gen)
             self._last_error = err
             self._tame_sdk_side_effects()
@@ -404,15 +513,30 @@ class FiinQuantProvider(MarketDataProvider):
             ba_symbols = [s for s in clean_symbols if s not in ("VNINDEX", "VN30", "HNXINDEX", "UPCOM")]
 
             trade = self._session.Trading_Data_Stream(tickers=clean_symbols, callback=self._on_trade_raw)
+            if hasattr(trade, "_handle_disconnect"):
+                try:
+                    setattr(trade, "_handle_disconnect", lambda: None)
+                except Exception:
+                    pass
             trade.start()
             self._trade_stream = trade
             self._owned_streams.append(trade)
 
             if ba_symbols:
                 bidask = self._session.BidAsk(tickers=ba_symbols, callback=self._on_bidask_raw)
+                if hasattr(bidask, "_handle_disconnect"):
+                    try:
+                        setattr(bidask, "_handle_disconnect", lambda: None)
+                    except Exception:
+                        pass
                 bidask.start()
                 self._bidask_stream = bidask
                 self._owned_streams.append(bidask)
+
+            # Proactively disable broken SDK / signalrcore competing reconnect paths with compatibility guards
+            for s in [trade, self._bidask_stream]:
+                if s is not None:
+                    self._disable_sdk_reconnect_guarded(s, gen)
 
             return None
         except Exception as e:  # noqa: BLE001
@@ -459,6 +583,10 @@ class FiinQuantProvider(MarketDataProvider):
             "disconnect_count": self._disconnect_count,
             "stream_restart_count": self._stream_restart_count,
             "orphan_ping_threads_reaped": self._orphans_reaped,
+            # ---- Historical health observability ----
+            "historical_status": self._historical_last_status,
+            "historical_circuit_open": time.monotonic() < self._historical_circuit_open_until,
+            "historical_last_error": self._historical_last_error,
         }
 
     async def get_historical_bars(
@@ -469,17 +597,16 @@ class FiinQuantProvider(MarketDataProvider):
         to_date: Optional[str] = None,
         adjusted: bool = True,
     ) -> List[HistoricalBar]:
-        """Fetches historical EOD bars via FiinQuant Fetch_Trading_Data."""
-        if not self._session or not self._is_connected:
-            connected = await self.connect()
-            if not connected:
-                return []
+        """Fetches historical EOD bars via FiinQuant Fetch_Trading_Data.
 
+        Raises typed errors for range limits, auth/entitlement failures, rate limits, and transport drops.
+        Does NOT silently truncate explicit caller ranges.
+        """
         sym = symbol.strip().upper()
         tf_norm = timeframe.strip().lower()
         if tf_norm in ("1d", "daily", "d"):
             by_param = "1d"
-            default_days = 365
+            default_days = 360  # Safe ~360 days default lookback (~247 trading sessions)
         elif tf_norm in ("5m", "5min"):
             by_param = "5m"
             default_days = 5
@@ -497,27 +624,78 @@ class FiinQuantProvider(MarketDataProvider):
             default_days = 2
         else:
             by_param = "1d"
-            default_days = 365
+            default_days = 360
 
         default_from = (datetime.now() - timedelta(days=default_days)).strftime("%Y-%m-%d")
         f_date = from_date or default_from
         t_date = to_date or datetime.now().strftime("%Y-%m-%d")
 
-        def _fetch():
+        # Range verification: if explicit range > 365 calendar days, raise HistoricalRangeLimitError (do NOT clamp silently)
+        if from_date is not None:
             try:
-                res = self._session.Fetch_Trading_Data(
-                    realtime=False,
-                    tickers=[sym],
-                    fields=["open", "high", "low", "close", "volume"],
-                    by=by_param,
-                    from_date=f_date,
-                    to_date=t_date,
-                    adjusted=adjusted,
-                )
-                df = res.get_data() if hasattr(res, "get_data") else res
+                dt_from = datetime.strptime(f_date, "%Y-%m-%d").date()
+                dt_to = datetime.strptime(t_date, "%Y-%m-%d").date() if to_date else datetime.now().date()
+                span_days = (dt_to - dt_from).days
+                now_date = datetime.now().date()
+                lookback_days = (now_date - dt_from).days
+                if span_days > 365 or lookback_days > 365:
+                    raise HistoricalRangeLimitError(
+                        f"Historical request for {sym} ({f_date} to {t_date}) exceeds upstream timeframe limit "
+                        f"(requested lookback: {max(span_days, lookback_days)} days; upstream maximum: 365 days). "
+                        f"Use multi-window range chunking for longer lookbacks."
+                    )
+            except ValueError:
+                pass  # allow non-standard format strings to pass to upstream validation
+
+        # Circuit breaker check: if auth circuit is open, reject immediately without hitting upstream
+        now_mono = time.monotonic()
+        if self._historical_circuit_open_until > now_mono:
+            reason = self._historical_circuit_reason or "previous auth failure"
+            rem = int(self._historical_circuit_open_until - now_mono)
+            raise HistoricalAuthError(
+                f"Historical market data provider circuit breaker is OPEN ({reason}). Next retry allowed in {rem}s."
+            )
+
+        if not self._session or not self._is_connected:
+            connected = await self.connect()
+            if not connected:
+                self._historical_last_status = "DEGRADED"
+                self._historical_last_error = "Authentication failed"
+                self._historical_circuit_open_until = time.monotonic() + 60.0
+                self._historical_circuit_reason = "AUTH_FAILURE"
+                raise HistoricalAuthError(f"FiinQuant authentication failed while fetching historical bars for {sym}")
+
+        def _fetch() -> List[HistoricalBar]:
+            captured_output = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(captured_output), contextlib.redirect_stderr(captured_output):
+                    res = self._session.Fetch_Trading_Data(
+                        realtime=False,
+                        tickers=[sym],
+                        fields=["open", "high", "low", "close", "volume"],
+                        by=by_param,
+                        from_date=f_date,
+                        to_date=t_date,
+                        adjusted=adjusted,
+                    )
+                    df = res.get_data() if hasattr(res, "get_data") else res
+
+                captured_text = captured_output.getvalue()
+                if (df is None or len(df) == 0) and captured_text:
+                    if "TimeFrameLimitFailed" in captured_text or "365 days" in captured_text:
+                        raise HistoricalRangeLimitError(f"Upstream timeframe limit exceeded for {sym}: {captured_text}")
+                    if "401" in captured_text or "invalid_token" in captured_text or "Unauthorized" in captured_text:
+                        raise RuntimeError(f"401 Unauthorized: {captured_text}")
+                    if "403" in captured_text or "Forbidden" in captured_text:
+                        raise RuntimeError(f"403 Forbidden: {captured_text}")
+                    if "429" in captured_text or "RateLimit" in captured_text:
+                        raise RuntimeError(f"429 RateLimit: {captured_text}")
+                    if any(c in captured_text for c in ("500", "502", "503", "504", "timeout", "Timeout")):
+                        raise RuntimeError(f"Upstream error: {captured_text}")
+
                 bars: List[HistoricalBar] = []
 
-                if hasattr(df, "to_dict"):
+                if df is not None and hasattr(df, "to_dict"):
                     records = df.to_dict(orient="records")
                     for r in records:
                         d_str = str(r.get("timestamp") or r.get("TradingDate") or r.get("date") or "")
@@ -534,9 +712,57 @@ class FiinQuantProvider(MarketDataProvider):
                                     adjusted=adjusted,
                                 )
                             )
+                self._historical_last_status = "HEALTHY"
+                self._historical_last_error = None
+                self._historical_circuit_open_until = 0.0
+                self._historical_consecutive_auth_errors = 0
                 return bars
-            except Exception as e:
-                logger.error(f"Error fetching historical bars for {sym}: {e}")
-                return []
+            except HistoricalRangeLimitError:
+                raise
+            except Exception as exc:
+                exc_str = str(exc)
+                exc_cls = exc.__class__.__name__
+
+                # 1. Range limit failure (e.g. TimeFrameLimitFailed from gateway) - DO NOT open circuit breaker
+                if "TimeFrameLimitFailed" in exc_str or "365 days" in exc_str:
+                    logger.warning("Historical request for %s exceeded upstream timeframe limit: %s", sym, exc)
+                    raise HistoricalRangeLimitError(f"Upstream timeframe limit exceeded for {sym}: {exc_str}") from exc
+
+                # 2. Authentication failure (401 / invalid token) -> Open circuit breaker
+                if "401" in exc_str or "invalid_token" in exc_str or "invalid_grant" in exc_str or "Unauthorized" in exc_str:
+                    self._historical_consecutive_auth_errors += 1
+                    self._historical_circuit_open_until = time.monotonic() + 60.0
+                    self._historical_circuit_reason = "AUTH_FAILURE"
+                    self._historical_last_status = "DEGRADED"
+                    self._historical_last_error = f"Auth failure: {exc_str}"
+                    logger.error("Historical authentication failure for %s. Circuit breaker OPEN for 60s: %s", sym, exc)
+                    raise HistoricalAuthError(f"FiinQuant auth failure for {sym}: {exc_str}") from exc
+
+                # 3. Entitlement failure (403 forbidden without TimeFrameLimitFailed)
+                if "403" in exc_str or "Forbidden" in exc_str:
+                    self._historical_last_status = "DEGRADED"
+                    self._historical_last_error = f"Entitlement failure: {exc_str}"
+                    logger.error("Historical entitlement failure for %s: %s", sym, exc)
+                    raise HistoricalEntitlementError(f"FiinQuant entitlement failure for {sym}: {exc_str}") from exc
+
+                # 4. Rate limit (429) -> Transient backoff
+                if "429" in exc_str or "RateLimit" in exc_str:
+                    self._historical_circuit_open_until = time.monotonic() + 10.0
+                    self._historical_circuit_reason = "RATE_LIMIT"
+                    logger.warning("Historical rate limit hit for %s. Backoff 10s: %s", sym, exc)
+                    raise HistoricalRateLimitError(f"FiinQuant rate limit for {sym}: {exc_str}") from exc
+
+                # 5. Upstream server error (500, 502, 503, 504, Timeout)
+                if any(code in exc_str for code in ("500", "502", "503", "504", "timeout", "Timeout")):
+                    self._historical_last_status = "DEGRADED"
+                    self._historical_last_error = f"Upstream error: {exc_str}"
+                    logger.warning("Historical upstream error for %s: %s", sym, exc)
+                    raise HistoricalUpstreamError(f"FiinQuant upstream server error for {sym}: {exc_str}") from exc
+
+                # 6. Transport / Network error
+                self._historical_last_error = f"Transport error: {exc_cls}: {exc_str}"
+                logger.warning("Historical transport error for %s: %s: %s", sym, exc_cls, exc_str)
+                raise HistoricalTransportError(f"Transport error fetching {sym}: {exc_str}") from exc
 
         return await asyncio.to_thread(_fetch)
+

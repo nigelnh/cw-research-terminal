@@ -472,3 +472,28 @@ def test_startup_survives_hv_provider_failure(monkeypatch):
         assert c.get("/health").status_code == 200
 
     assert historical_volatility_service.stats()["source_wired"] is True
+
+
+@pytest.mark.asyncio
+async def test_hv_refresh_handles_range_limit_error_without_raising():
+    from app.market_data.market_schemas import HistoricalRangeLimitError
+
+    failing = FakeBarSource(fail=True, fail_exc=HistoricalRangeLimitError("Requested range exceeds 365 days limit"))
+    svc = HistoricalVolatilityService(bar_source=failing)
+
+    est = await svc.refresh("HPG")
+    assert est is None
+    assert svc.get_estimate("HPG") is None
+
+
+@pytest.mark.asyncio
+async def test_hv_refresh_handles_auth_error_without_raising():
+    from app.market_data.market_schemas import HistoricalAuthError
+
+    failing = FakeBarSource(fail=True, fail_exc=HistoricalAuthError("FiinQuant token expired"))
+    svc = HistoricalVolatilityService(bar_source=failing)
+
+    est = await svc.refresh("HPG")
+    assert est is None
+    assert svc.get_estimate("HPG") is None
+

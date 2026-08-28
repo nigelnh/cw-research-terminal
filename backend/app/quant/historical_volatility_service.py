@@ -33,6 +33,12 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional, Protocol, Sequence, Set
 
 from app.core.config import settings
+from app.market_data.market_schemas import (
+    HistoricalRangeLimitError,
+    HistoricalAuthError,
+    HistoricalEntitlementError,
+    HistoricalRateLimitError,
+)
 from app.quant.historical_volatility import calculate_historical_volatility
 
 logger = logging.getLogger(__name__)
@@ -193,6 +199,24 @@ class HistoricalVolatilityService:
                     bars = await self._source.get_historical_bars(
                         symbol=sym, timeframe="1D", adjusted=True
                     )
+            except HistoricalRangeLimitError as exc:
+                logger.warning(
+                    "HV refresh for %s failed due to range limit: %s",
+                    sym, exc,
+                )
+                return self._cache.get(sym)
+            except (HistoricalAuthError, HistoricalEntitlementError) as exc:
+                logger.warning(
+                    "HV refresh for %s failed due to auth/entitlement error: %s: %s",
+                    sym, exc.__class__.__name__, exc,
+                )
+                return self._cache.get(sym)
+            except HistoricalRateLimitError as exc:
+                logger.warning(
+                    "HV refresh for %s rate-limited upstream: %s",
+                    sym, exc,
+                )
+                return self._cache.get(sym)
             except Exception as exc:  # noqa: BLE001 - upstream failures must not propagate
                 logger.warning(
                     "HV refresh for %s failed to fetch bars: %s: %s",
@@ -217,7 +241,7 @@ class HistoricalVolatilityService:
             )
             if hv is None or hv <= 0:
                 logger.warning(
-                    "HV refresh for %s: insufficient/invalid history "
+                    "HV refresh for %s: insufficient history "
                     "(%d valid closes; need >= %d returns); cached estimate unchanged.",
                     sym, len(closes), self._min_sessions,
                 )
