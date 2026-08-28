@@ -184,24 +184,46 @@
     - **Live CW Market Context Banner**: Displays live `Last (— if no trades)` · `Bid` · `Ask` · `Spread (Spread %)` · `Underlying Price` above chart.
     - **Technical Overlays**: P1 indicators: Reference price horizontal level for stocks, EMA 20, EMA 50, EMA 200, and intraday VWAP.
 
+* **Market Data Runtime Hardening & Upstream Lifecycle Conformance**:
+  * **Problem A — FiinQuant Historical Request Error Classification & Range Enforcement**:
+    - **Root Cause & Gateway Contract**: Upstream gateway `https://apigw.fiingroup.vn/FXMA/TradingData/GetTradingDataBySingleEntity` strictly enforces a 365-day maximum lookback (`TimeFrameLimitFailed: You can only access data up to 365 days from the present time.`), returning HTTP 403.
+    - **Safe Lookback & Strict Non-Truncation Contract**: Default 1D lookback configured to a safe ~360 days (approx. 247 VN trading sessions). Explicit caller ranges exceeding 365 days strictly raise typed `HistoricalRangeLimitError` and are NEVER silently truncated.
+    - **Typed Failure Hierarchy**: Added `HistoricalDataError`, `HistoricalRangeLimitError`, `HistoricalAuthError`, `HistoricalEntitlementError`, `HistoricalRateLimitError`, `HistoricalTransportError`, and `HistoricalUpstreamError`.
+    - **Circuit Breaker Isolation**: `TimeFrameLimitFailed` / `HistoricalRangeLimitError` is classified as `RANGE_LIMIT` and NEVER trips the provider-wide circuit breaker. Repeated non-transient auth failures open the circuit breaker with a 60-second cooldown.
+    - **HistoricalVolatilityService & REST Routing**: Aligned `HistoricalVolatilityService` to handle typed exceptions gracefully without claiming "insufficient history" during upstream failures. Wired REST route `/api/market/history/{symbol}` to return HTTP 400 for range limits and HTTP 503 for auth errors.
+  * **Problem B — SignalR Reconnect Competing Paths & Single Ownership**:
+    - **Target Invariant**: Exactly one layer (`FiinQuantProvider`) owns reconnect lifecycle.
+    - **Guarded SDK Workaround**: Proactively set `stream.hub_connection.transport.reconnection_handler = None` and neutralized `stream._handle_disconnect` with attribute existence checks and warning logs if SDK shape changes.
+    - **Fresh State & Session Reuse**: Upon socket drop, transport close hook schedules a single-flighted, bounded-backoff reconnect task. The task retires old streams, reuses the existing authenticated `FiinSession` if valid (`is_login == True`), creates fresh stream objects with fresh SignalR negotiation, and re-authenticates only when the session itself is dead or expired.
+    - **Shutdown & Single-Flight Invariants**: Reconnect task is single-flighted, handles rapid notifications idempotently, and cancels immediately upon `disconnect()`.
+  * **Problem C — WebSocket `/ws/market` Connection Lifecycle Hardening**:
+    - **Root Cause Verified**: Frontend uses a singleton instance `backendWebSocketClient`, establishing exactly 1 concurrent WebSocket connection per browser tab. Connection bursts were empirically traced to Vite HMR and preview window reloads.
+    - **Safe Send & Dead Socket Pruning**: Added `_safe_send(ws, payload)` with automatic disconnection on send exceptions to prevent task error leakage and prune dead clients promptly.
+    - **Telemetry Logging**: Added structured logging with client address and active connection count upon connect and disconnect.
+
 ## Current State
 * **Primary UI Universe**: Exactly 5 symbols `["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]`.
 * **Realtime Subscription Count**: Exactly 5 unique symbols (`["CHPG2541", "CVHM2615", "HPG", "NVL", "VHM"]`).
 * **Runtime Data Mode**: `REALTIME_ONLY` (connected to FastAPI backend `/ws/market` and FiinQuant).
 * **Two-Tier State Cache**: L1 `MarketState` (in-memory) + L2 `RedisMarketStateStore` (warm cache on `127.0.0.1:6379`).
-* **Trading-Grade History Chart**: TradingView Canvas engine, separate Range/Interval, local aggregation, CurrentBarBuilder, dual-pane CW comparison, and normalized performance.
-* **Historical Data Pipeline**: `/api/market/history/{symbol}` + 3-dataset client caching in `cw_research:historical:v1:*`.
-* **Market Session**: Timezone-aware VN schedule (`Asia/Ho_Chi_Minh`) with display eligibility gating during lunch break.
-* **AI Research Assistant**: Context-aware, warm persona with Phase-1 bounded read-only tool layer, multi-conversation history store (`cw_research:copilot_history:v2`), plain-text formatting, and full quantitative analytics integration.
-* **Canonical WebSocket Route**: `ws://localhost:8501/ws/market`.
-* **Watchlist Schema Version**: `2`.
-* **Backend Pytest**: **67/67 passing (100% pass)**.
-* **Frontend Vitest**: **159/159 passing across 21 suites (100% pass)**.
+### Completed Changes
+* **Initial State Hydration & Session Freshness**: Implemented centralized [`SubscriptionManager.hydrate_missing_market_state()`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/backend/app/market_data/market_subscription_manager.py) with Asia/Ho_Chi_Minh timezone session checks, monotonic stale-write protection (`existing_ts >= incoming_ts` rejection), previous-day session trade sanitization, and immediate snapshot delivery.
+* **Partial Instrument UX**: Added subtle `partial` indicator and tooltip in [`personal_dashboard.tsx`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/frontend/src/features/watchlist/personal_dashboard.tsx) and informational callout in [`instrument_drawer.tsx`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/frontend/src/features/warrant_info/instrument_drawer.tsx) distinguishing unverified discovery terms from backend/network failures.
+* **Default Demo Universe**: Updated primary default watchlist in [`watchlist.ts`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/frontend/src/domain/models/watchlist.ts) to verified active Covered Warrants (`CVHM2601`, `CHPG2602`) while keeping unverified discovery symbols fully searchable.
+* **FiinQuant PercentPriceChange Parser Fix**: Added `PercentPriceChange` key extraction in [`market_state.py`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/backend/app/market_data/market_state.py) and added regression test `test_market_state_real_fiinquant_payload_shape` in [`test_market_gateway.py`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/backend/tests/test_market_gateway.py).
+* **Controlled Concurrency Verification**: Proven that `HubException: You are only allowed to access up to 5 connections` was exclusively caused by parallel diagnostic processes. Under a clean single-instance configuration (2 SignalR streams), zero quota errors occur.
+
+### Current State
+* **Pytest**: **609 passed, 20 skipped, 1 warning (100% pass across 26 suites)**
+* **Vitest**: **161 passed across 22 test files (100% pass)**
+* **Pyright**: **0 errors, 0 warnings, 0 informations**
+* **Status**: PASS
 * **Platform Architecture Audit**: **36/36 passing (100% pass)**.
-* **Pyright Type Checking**: **0 errors, 0 warnings, 0 informations**.
 * **Production Build**: **0 TypeScript/bundle errors**.
 * **Test Fixture Isolation**: Verified zero production imports of test fixtures or mock doubles.
 
 ## Next Steps
-1. Phase 2: Connect Copilot historical data queries to canonical `HistoricalDataService` when requested.
-2. Maintain strict quantitative math models and vendor integration boundaries.
+1. Prepare PostgreSQL historical bar backfill for multi-year EOD data (chunked in provider-compliant windows $\le 365$ days).
+2. Wire `PostgresBarSource` into production historical reader when backfill is complete.
+3. Maintain strict quantitative math models and vendor integration boundaries.
+

@@ -53,6 +53,43 @@ def test_market_state_trade_normalization():
     assert wire_row["Total_Vol"] == 1056600
 
 
+def test_market_state_real_fiinquant_payload_shape():
+    """Validates parser normalization against the exact runtime FiinQuant Trading_Data_Stream schema."""
+    state = MarketState()
+    real_sdk_payload = {
+        "Ticker": "HPG",
+        "MatchPrice": 22350.0,
+        "ClosePrice": 22350.0,
+        "ReferencePrice": 22250.0,
+        "CeilingPrice": 23800.0,
+        "FloorPrice": 20700.0,
+        "OpenPrice": 22300.0,
+        "HighestPrice": 22400.0,
+        "LowestPrice": 22200.0,
+        "PriceChange": 100.0,
+        "PercentPriceChange": 0.004494,
+        "TotalMatchVolume": 1520000,
+        "MatchVolume": 50000,
+        "TradingDate": "2026-08-28T11:25:00+07:00",
+    }
+
+    quote, diff = state.apply_trade_event(real_sdk_payload)
+    assert quote.symbol == "HPG"
+    assert quote.last_price == 22350.0
+    assert quote.reference_price == 22250.0
+    assert quote.price_change == 100.0
+    assert quote.price_change_percent == 0.004494
+    assert quote.total_volume == 1520000
+    assert quote.traded_quantity == 50000
+
+    wire_patch = quote.to_wire_patch(diff)
+    assert wire_patch["Symbol"] == "HPG"
+    assert wire_patch["Traded"] == 22.35
+    assert wire_patch["Ref"] == 22.25
+    assert wire_patch["ChangePercent"] == 0.004494
+    assert wire_patch["Total_Vol"] == 1520000
+
+
 def test_market_state_bidask_normalization_and_merge():
     state = MarketState()
     raw_ba = {
@@ -180,3 +217,43 @@ def test_websocket_gateway_protocol():
 
         # Wait small tick or verify receive
         ws.send_text(json.dumps({"type": "unsubscribe", "symbols": ["CHPG2602"]}))
+
+
+def test_market_rest_history_range_limit_error_returns_400():
+    from unittest.mock import AsyncMock, patch
+    from app.market_data.market_subscription_manager import subscription_manager
+    from app.market_data.market_schemas import HistoricalRangeLimitError
+
+    with patch.object(subscription_manager.provider, "get_historical_bars", new_callable=AsyncMock) as mock_hist:
+        mock_hist.side_effect = HistoricalRangeLimitError("Requested lookback exceeds 365 days limit")
+        response = client.get("/api/market/history/HPG?timeframe=1D&from_date=2024-01-01&to_date=2026-08-27")
+        assert response.status_code == 400
+        assert "exceeds 365 days limit" in response.json()["detail"]
+
+
+def test_market_rest_history_auth_error_returns_503():
+    from unittest.mock import AsyncMock, patch
+    from app.market_data.market_subscription_manager import subscription_manager
+    from app.market_data.market_schemas import HistoricalAuthError
+
+    with patch.object(subscription_manager.provider, "get_historical_bars", new_callable=AsyncMock) as mock_hist:
+        mock_hist.side_effect = HistoricalAuthError("FiinQuant token expired")
+        response = client.get("/api/market/history/HPG?timeframe=1D")
+        assert response.status_code == 503
+        assert "authentication error" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_websocket_manager_safe_send_prunes_dead_sockets():
+    from app.market_data.market_websocket import manager
+    from unittest.mock import AsyncMock, MagicMock
+
+    dead_ws = MagicMock()
+    dead_ws.send_text = AsyncMock(side_effect=RuntimeError("connection closed"))
+    manager._active_connections.add(dead_ws)
+    assert dead_ws in manager._active_connections
+
+    await manager._safe_send(dead_ws, json.dumps({"type": "test"}))
+
+    assert dead_ws not in manager._active_connections
+

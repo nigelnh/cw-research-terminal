@@ -530,6 +530,23 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
             {/* CW-Specific Sections */}
             {isCW && (
               <>
+                {(!instrument.strikePrice && !cw?.strikePrice || !instrument.exerciseRatio && !cw?.exerciseRatio || !instrument.maturityDate && !cw?.maturityDate) && (
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "4px",
+                      marginBottom: "12px",
+                      fontSize: "11px",
+                      color: "var(--muted-foreground)",
+                      lineHeight: "1.4",
+                    }}
+                  >
+                    <strong style={{ color: "var(--foreground)" }}>Partial Specification:</strong> Strike, Ratio, or Maturity Date are unverified in registry for this warrant. Quantitative pricing and Implied Volatility calculations are unavailable.
+                  </div>
+                )}
+
                 <Section title="Contract">
                   <Row label="Strike" value={formatNumber(instrument.strikePrice || cw?.strikePrice)} />
                   <Row label="Ratio" value={formatRatio(instrument.exerciseRatio || cw?.exerciseRatio)} />

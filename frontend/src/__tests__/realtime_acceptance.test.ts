@@ -13,11 +13,11 @@ import * as fs from "fs";
 import * as path from "path";
 
 describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
-  // 1. Primary display universe contains exactly HPG, NVL, VHM, CVHM2615, CHPG2541
-  it("1. Primary display universe contains exactly [HPG, NVL, VHM, CVHM2615, CHPG2541]", () => {
-    expect(PRIMARY_UI_UNIVERSE).toEqual(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]);
+  // 1. Primary display universe contains exactly HPG, NVL, VHM, CVHM2601, CHPG2602
+  it("1. Primary display universe contains exactly [HPG, NVL, VHM, CVHM2601, CHPG2602]", () => {
+    expect(PRIMARY_UI_UNIVERSE).toEqual(["HPG", "NVL", "VHM", "CVHM2601", "CHPG2602"]);
     const symbols = DEFAULT_PRIMARY_WATCHLIST_ITEMS.map((item) => item.symbol);
-    expect(symbols).toEqual(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]);
+    expect(symbols).toEqual(["HPG", "NVL", "VHM", "CVHM2601", "CHPG2602"]);
   });
 
   // 2. Primary universe count = 5
@@ -28,17 +28,17 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
     expect(defaultWatchlist.items.length).toBe(5);
   });
 
-  // 3. CVHM2615 resolves underlying VHM
-  it("3. CVHM2615 resolves underlying VHM in the default watchlist model", () => {
-    const cvhm = DEFAULT_PRIMARY_WATCHLIST_ITEMS.find((i) => i.symbol === "CVHM2615");
+  // 3. CVHM2601 resolves underlying VHM
+  it("3. CVHM2601 resolves underlying VHM in the default watchlist model", () => {
+    const cvhm = DEFAULT_PRIMARY_WATCHLIST_ITEMS.find((i) => i.symbol === "CVHM2601");
     expect(cvhm).toBeDefined();
     expect(cvhm?.instrumentType).toBe("CW");
     expect(cvhm?.underlyingSymbol).toBe("VHM");
   });
 
-  // 4. CHPG2541 resolves underlying HPG
-  it("4. CHPG2541 resolves underlying HPG in the default watchlist model", () => {
-    const chpg = DEFAULT_PRIMARY_WATCHLIST_ITEMS.find((i) => i.symbol === "CHPG2541");
+  // 4. CHPG2602 resolves underlying HPG
+  it("4. CHPG2602 resolves underlying HPG in the default watchlist model", () => {
+    const chpg = DEFAULT_PRIMARY_WATCHLIST_ITEMS.find((i) => i.symbol === "CHPG2602");
     expect(chpg).toBeDefined();
     expect(chpg?.instrumentType).toBe("CW");
     expect(chpg?.underlyingSymbol).toBe("HPG");
@@ -50,8 +50,8 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
     const plan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
     
     // Check dependency map
-    expect(plan.dependencyMap.get("VHM")?.has("CVHM2615")).toBe(true);
-    expect(plan.dependencyMap.get("HPG")?.has("CHPG2541")).toBe(true);
+    expect(plan.dependencyMap.get("VHM")?.has("CVHM2601")).toBe(true);
+    expect(plan.dependencyMap.get("HPG")?.has("CHPG2602")).toBe(true);
 
     // HPG and VHM appear only once in required symbols
     const hpgCount = plan.requiredSymbols.filter((s) => s === "HPG").length;
@@ -64,7 +64,7 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
   it("6. Deduplicated acceptance subscription count is exactly 5", () => {
     const defaultWatchlist = createDefaultWatchlist();
     const plan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
-    expect(plan.requiredSymbols).toEqual(["CHPG2541", "CVHM2615", "HPG", "NVL", "VHM"]);
+    expect(plan.requiredSymbols).toEqual(["CHPG2602", "CVHM2601", "HPG", "NVL", "VHM"]);
     expect(plan.symbolCount).toBe(5);
     expect(plan.isCapacityExceeded).toBe(false);
   });
@@ -107,7 +107,7 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
 
     // Subscription plan remains unchanged at 5
     const activePlan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
-    expect(activePlan.requiredSymbols).toEqual(["CHPG2541", "CVHM2615", "HPG", "NVL", "VHM"]);
+    expect(activePlan.requiredSymbols).toEqual(["CHPG2602", "CVHM2601", "HPG", "NVL", "VHM"]);
     expect(activePlan.symbolCount).toBe(5);
   });
 

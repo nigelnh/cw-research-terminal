@@ -2,7 +2,17 @@ import logging
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
-from app.market_data.market_schemas import CanonicalQuote, HistoricalBar, MarketHealthResponse
+from app.market_data.market_schemas import (
+    CanonicalQuote,
+    HistoricalBar,
+    MarketHealthResponse,
+    HistoricalRangeLimitError,
+    HistoricalAuthError,
+    HistoricalEntitlementError,
+    HistoricalRateLimitError,
+    HistoricalUpstreamError,
+    HistoricalTransportError,
+)
 from app.market_data.market_state import market_state
 from app.market_data.market_subscription_manager import subscription_manager
 
@@ -59,14 +69,28 @@ async def get_historical_data(
 ):
     """Retrieves historical price bars from the active market provider."""
     sym = symbol.strip().upper()
-    bars = await subscription_manager.provider.get_historical_bars(
-        symbol=sym,
-        timeframe=timeframe,
-        from_date=from_date,
-        to_date=to_date,
-        adjusted=adjusted,
-    )
-    return bars
+    try:
+        bars = await subscription_manager.provider.get_historical_bars(
+            symbol=sym,
+            timeframe=timeframe,
+            from_date=from_date,
+            to_date=to_date,
+            adjusted=adjusted,
+        )
+        return bars
+    except HistoricalRangeLimitError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HistoricalAuthError as e:
+        raise HTTPException(status_code=503, detail=f"Market data provider authentication error: {e}")
+    except HistoricalEntitlementError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except HistoricalRateLimitError as e:
+        raise HTTPException(status_code=429, detail="Upstream provider rate limited")
+    except (HistoricalUpstreamError, HistoricalTransportError) as e:
+        raise HTTPException(status_code=503, detail=f"Upstream market data provider unavailable: {e}")
+    except Exception as e:
+        logger.error("Error fetching historical data for %s: %s", sym, e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch historical data: {e}")
 
 
 @market_router.get("/subscriptions")

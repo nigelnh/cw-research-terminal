@@ -39,7 +39,7 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     resetWatchlistMemoryForTests(fresh);
   });
 
-  it("1, 2, 3, 4. Dashboard contains Stocks (3) [HPG, NVL, VHM] and Covered Warrants (2) [CVHM2615, CHPG2541]", () => {
+  it("1, 2, 3, 4. Dashboard contains Stocks (3) [HPG, NVL, VHM] and Covered Warrants (2) [CVHM2601, CHPG2602]", () => {
     const html = renderToStaticMarkup(<PersonalDashboard />);
 
     // Section 1: Stocks (3)
@@ -50,8 +50,8 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
 
     // Section 2: Covered Warrants (2)
     expect(html).toContain("Covered Warrants (2)");
-    expect(html).toContain("CVHM2615");
-    expect(html).toContain("CHPG2541");
+    expect(html).toContain("CVHM2601");
+    expect(html).toContain("CHPG2602");
 
     // Must NOT say Covered Warrants (5)
     expect(html).not.toContain("Covered Warrants (5)");

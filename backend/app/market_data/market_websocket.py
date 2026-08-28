@@ -24,6 +24,11 @@ class MarketConnectionManager:
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
         self._active_connections.add(websocket)
+        client_str = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
+        logger.info(
+            "WebSocket /ws/market client connected (%s). Active count: %d",
+            client_str, len(self._active_connections),
+        )
 
         # Emit hardened initial gateway, session, and upstream status frame
         health = subscription_manager.provider.get_health()
@@ -46,6 +51,13 @@ class MarketConnectionManager:
             "message": f"Connected to CW Research Gateway ({up_status}, Session: {sess_status})",
         }
         await websocket.send_text(json.dumps(status_msg))
+
+    async def _safe_send(self, ws: WebSocket, payload_str: str) -> None:
+        """Asynchronously sends a payload string to a websocket client and prunes on failure."""
+        try:
+            await ws.send_text(payload_str)
+        except Exception:
+            self.disconnect(ws)
 
     def broadcast_status(self) -> None:
         """Broadcasts updated upstream status frame to all connected WebSocket clients."""
@@ -76,19 +88,25 @@ class MarketConnectionManager:
             try:
                 import asyncio
                 loop = asyncio.get_running_loop()
-                loop.create_task(ws.send_text(payload_str))
+                loop.create_task(self._safe_send(ws, payload_str))
             except Exception:
-                pass
+                self.disconnect(ws)
 
     def disconnect(self, websocket: WebSocket) -> None:
         if websocket in self._active_connections:
             self._active_connections.remove(websocket)
+            client_str = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
+            logger.info(
+                "WebSocket /ws/market client disconnected (%s). Active count: %d",
+                client_str, len(self._active_connections),
+            )
 
     async def send_personal_message(self, message: Dict[str, Any], websocket: WebSocket) -> None:
         try:
             await websocket.send_text(json.dumps(message))
         except Exception as e:
             logger.warning(f"Error sending message to websocket client: {e}")
+            self.disconnect(websocket)
 
     def broadcast_patch_threadsafe(self, patch_msg: Dict[str, Any]) -> None:
         """Invoked when SubscriptionManager receives a live patch from provider."""
@@ -96,18 +114,13 @@ class MarketConnectionManager:
             return
 
         payload_str = json.dumps(patch_msg)
-        dead_sockets = []
-
         for ws in list(self._active_connections):
             try:
                 import asyncio
                 loop = asyncio.get_running_loop()
-                loop.create_task(ws.send_text(payload_str))
+                loop.create_task(self._safe_send(ws, payload_str))
             except Exception:
-                dead_sockets.append(ws)
-
-        for ws in dead_sockets:
-            self.disconnect(ws)
+                self.disconnect(ws)
 
     def broadcast_analytics_patch(self, symbol: str, analytics_obj: Any) -> None:
         """Broadcasts normalized analytics patch for a Covered Warrant to all connected WebSocket clients."""
@@ -121,18 +134,13 @@ class MarketConnectionManager:
             "analytics": analytics_dict,
         }
         payload_str = json.dumps(analytics_msg)
-        dead_sockets = []
-
         for ws in list(self._active_connections):
             try:
                 import asyncio
                 loop = asyncio.get_running_loop()
-                loop.create_task(ws.send_text(payload_str))
+                loop.create_task(self._safe_send(ws, payload_str))
             except Exception:
-                dead_sockets.append(ws)
-
-        for ws in dead_sockets:
-            self.disconnect(ws)
+                self.disconnect(ws)
 
 
 manager = MarketConnectionManager()
@@ -181,15 +189,8 @@ async def websocket_market_endpoint(websocket: WebSocket):
                             # Fire-and-forget, single-flighted, never blocks this handler.
                             historical_volatility_service.ensure(spec.underlying_symbol)
 
-                # Hydrate any missing symbols from secondary warm cache (Redis)
-                missing_syms = [s for s in clean_syms if not market_state.has_quote(s)]
-                if missing_syms and subscription_manager.store.is_available():
-                    try:
-                        restored = await subscription_manager.store.load_many(missing_syms)
-                        if restored:
-                            market_state.restore_quotes(restored)
-                    except Exception as rest_err:
-                        logger.warning(f"Error restoring warm quotes for {missing_syms}: {rest_err}")
+                # Centralized hydration of missing symbols from warm cache with session freshness checks
+                await subscription_manager.hydrate_missing_market_state(clean_syms)
 
                 # Deliver immediate snapshot for cached symbols
                 cached_rows = market_state.get_snapshots(clean_syms)

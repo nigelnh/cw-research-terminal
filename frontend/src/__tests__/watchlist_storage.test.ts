@@ -91,12 +91,12 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
 
     // Assert exact 5 primary universe symbols
     expect(migrated.items.length).toBe(5);
-    expect(migrated.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]);
+    expect(migrated.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CVHM2601", "CHPG2602"]);
     expect(migrated.version).toBe(2);
 
     // Assert deduplicated realtime subscription planner output
     const plan = SubscriptionPlanner.computePlan(migrated.items, [], 33);
-    expect(plan.requiredSymbols).toEqual(["CHPG2541", "CVHM2615", "HPG", "NVL", "VHM"]);
+    expect(plan.requiredSymbols).toEqual(["CHPG2602", "CVHM2601", "HPG", "NVL", "VHM"]);
     expect(plan.symbolCount).toBe(5);
 
     // Assert old V1 key was cleaned up
@@ -112,7 +112,7 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
     // Second reload (e.g. page refresh)
     const secondLoad = defaultStorage.loadWatchlist();
     expect(secondLoad.items.length).toBe(5);
-    expect(secondLoad.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]);
+    expect(secondLoad.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CVHM2601", "CHPG2602"]);
   });
 
   it("4. Post-migration user edit persists across subsequent reloads", () => {
@@ -143,7 +143,7 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
     const loaded = storage.loadWatchlist();
     expect(loaded).toBeDefined();
     expect(loaded.items.length).toBe(5);
-    expect(loaded.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]);
+    expect(loaded.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CVHM2601", "CHPG2602"]);
     expect(loaded.version).toBe(CURRENT_WATCHLIST_SCHEMA_VERSION);
   });
 
@@ -152,7 +152,7 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
 
     const loaded = storage.loadWatchlist();
     expect(loaded.items.length).toBe(5);
-    expect(loaded.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]);
+    expect(loaded.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CVHM2601", "CHPG2602"]);
   });
 
   it("7. Sanitizes corrupted watchlist item records in V2 payload", () => {

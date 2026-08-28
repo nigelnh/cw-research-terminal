@@ -1,8 +1,10 @@
 import asyncio
 import logging
+from datetime import datetime
 from typing import Set, List, Dict, Any, Callable, Optional, Tuple
 
 from app.core.config import settings
+from app.market_data.market_session import market_session, VN_TZ
 from app.market_data.market_state import MarketState, market_state
 from app.market_data.market_schemas import CanonicalQuote
 from app.market_data.market_state_store import MarketStateStore, NullMarketStateStore
@@ -149,6 +151,70 @@ class SubscriptionManager:
             self._schedule_debounced_restart()
 
         return True, "Subscriptions set successfully"
+
+    async def hydrate_missing_market_state(self, symbols: List[str]) -> List[str]:
+        """
+        Centralized warm-cache hydration. Loads cached quotes from MarketStateStore
+        for any symbols missing from in-memory MarketState, validates trading-session
+        freshness (Asia/Ho_Chi_Minh UTC+7), sanitizes previous-day session values, and merges
+        accepted quotes into MarketState.
+
+        Invariants:
+        1. Stale-write prevention: restore_quote rejects if existing in-memory quote is newer.
+        2. Session freshness: If cache timestamp belongs to a previous calendar day in VN time,
+           session-specific fields (last_price, total_volume, bid1, ask1) are sanitized (set to None)
+           so yesterday's trade/volume is never presented as today's live session state.
+        3. Never promotes bid/ask midpoint to last_price.
+
+        Returns the list of symbol names successfully restored.
+        """
+        clean_syms = [str(s).upper().strip() for s in symbols if str(s).strip()]
+        if not clean_syms or not self.store.is_available():
+            return []
+
+        missing_syms = [s for s in clean_syms if not self.state.has_quote(s)]
+        if not missing_syms:
+            return []
+
+        restored_symbols: List[str] = []
+        try:
+            loaded = await self.store.load_many(missing_syms)
+            if not loaded:
+                return []
+
+            today_vn = market_session.get_vn_now().date()
+
+            for sym, quote in loaded.items():
+                ts_ms = quote.received_timestamp or quote.source_timestamp
+                if ts_ms:
+                    quote_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=VN_TZ)
+                    is_same_session = (quote_dt.date() == today_vn)
+                else:
+                    is_same_session = False
+
+                if not is_same_session:
+                    # Previous-session quote: sanitize intraday fields so they are not presented as today's session state
+                    sanitized_quote = quote.model_copy(
+                        update={
+                            "last_price": None,
+                            "price_change": None,
+                            "price_change_percent": None,
+                            "total_volume": None,
+                            "bid1_price": None,
+                            "bid1_volume": None,
+                            "ask1_price": None,
+                            "ask1_volume": None,
+                        }
+                    )
+                else:
+                    sanitized_quote = quote
+
+                if self.state.restore_quote(sanitized_quote):
+                    restored_symbols.append(sym)
+        except Exception as e:
+            logger.warning(f"Error hydrating missing market state for {missing_syms}: {e}")
+
+        return restored_symbols
 
     def unsubscribe(self, symbols: List[str]) -> None:
         """Removes symbols from desired subscription set."""

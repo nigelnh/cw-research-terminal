@@ -39,8 +39,8 @@ export const PRIMARY_UI_UNIVERSE = [
   "HPG",
   "NVL",
   "VHM",
-  "CVHM2615",
-  "CHPG2541",
+  "CVHM2601",
+  "CHPG2602",
 ] as const;
 
 export const DEFAULT_PRIMARY_WATCHLIST_ITEMS: WatchlistItem[] = [
@@ -60,16 +60,23 @@ export const DEFAULT_PRIMARY_WATCHLIST_ITEMS: WatchlistItem[] = [
     addedAt: 0,
   },
   {
-    symbol: "CVHM2615",
+    symbol: "CVHM2601",
     instrumentType: "CW",
     underlyingSymbol: "VHM",
-    issuer: "MBS",
+    issuer: "VND",
+    strikePrice: 45000,
+    exerciseRatio: 4,
+    maturityDate: "2026-11-20",
     addedAt: 0,
   },
   {
-    symbol: "CHPG2541",
+    symbol: "CHPG2602",
     instrumentType: "CW",
     underlyingSymbol: "HPG",
+    issuer: "TCBS",
+    strikePrice: 25885,
+    exerciseRatio: 3.5704,
+    maturityDate: "2026-09-21",
     addedAt: 0,
   },
 ];

@@ -263,6 +263,7 @@ export function PersonalDashboard({
                   const ivBid = cw?.ivBid;
 
                   const isSelected = selectedInstrument?.symbol === item.symbol;
+                  const isPartial = !strikePrice || !exerciseRatio || (!lastTradingDate && !maturityDate);
 
                   return (
                     <tr
@@ -275,8 +276,30 @@ export function PersonalDashboard({
                         borderBottom: "1px solid var(--border)",
                       }}
                     >
-                      <td className="tnum text-primary" style={{ padding: "0 12px", fontSize: "13px" }}>
-                        {item.symbol}
+                      <td className="tnum text-primary" style={{ padding: "0 12px", fontSize: "13px", whiteSpace: "nowrap" }}>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                          <span>{item.symbol}</span>
+                          {isPartial && (
+                            <span
+                              title="Unverified / Partial specification in registry. Strike, Ratio, and Maturity Date are missing, so Implied Volatility and Greeks are unavailable."
+                              aria-label="Unverified / Partial contract terms"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: "10px",
+                                color: "var(--muted-foreground)",
+                                backgroundColor: "var(--secondary)",
+                                padding: "1px 4px",
+                                borderRadius: "2px",
+                                cursor: "help",
+                                fontWeight: 400,
+                              }}
+                            >
+                              partial
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ padding: "0 12px", fontSize: "12px", color: "var(--muted-foreground)" }}>
                         {issuer || "—"}
