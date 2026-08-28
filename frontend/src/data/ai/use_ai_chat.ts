@@ -321,11 +321,14 @@ export function useAiChat(apiEndpoint: string = "/api/ai/chat") {
             const trimmedLine = line.trim();
             if (!trimmedLine.startsWith("data: ")) continue;
 
-            const jsonStr = trimmedLine.slice(6);
+            const jsonStr = trimmedLine.slice(6).trim();
+            if (!jsonStr || jsonStr === "[DONE]") continue;
+
             try {
               const data = JSON.parse(jsonStr);
               if (data.error) {
-                throw new Error(data.error);
+                setError(data.error);
+                continue;
               }
               if (data.type === "activity" && data.label) {
                 setActivity(data.label);
@@ -348,10 +351,9 @@ export function useAiChat(apiEndpoint: string = "/api/ai/chat") {
                   return prev;
                 });
               }
-            } catch (err: any) {
-              if (err.message && err.message !== "Unexpected end of JSON input") {
-                throw err;
-              }
+            } catch (err) {
+              // Non-fatal: individual chunk decode anomaly should not kill the full stream
+              console.warn("Failed to parse AI SSE chunk:", jsonStr, err);
             }
           }
         }

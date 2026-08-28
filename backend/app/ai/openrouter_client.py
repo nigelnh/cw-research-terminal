@@ -70,10 +70,27 @@ class OpenRouterClient(AiProvider):
         base_url: Optional[str] = None,
         timeout: Optional[float] = None,
     ):
-        self.api_key = api_key if api_key is not None else settings.OPENROUTER_API_KEY
-        self.model = model if model is not None else settings.OPENROUTER_MODEL
-        self.base_url = (base_url or settings.OPENROUTER_BASE_URL).rstrip("/")
-        self.timeout = timeout if timeout is not None else settings.AI_TIMEOUT_SECONDS
+        self._api_key = api_key
+        self._model = model
+        self._base_url = base_url
+        self._timeout = timeout
+
+    @property
+    def api_key(self) -> str:
+        return self._api_key if self._api_key is not None else settings.OPENROUTER_API_KEY
+
+    @property
+    def model(self) -> str:
+        return self._model if self._model is not None else settings.OPENROUTER_MODEL
+
+    @property
+    def base_url(self) -> str:
+        url = self._base_url or settings.OPENROUTER_BASE_URL
+        return url.rstrip("/")
+
+    @property
+    def timeout(self) -> float:
+        return self._timeout if self._timeout is not None else settings.AI_TIMEOUT_SECONDS
 
     def _get_headers(self) -> Dict[str, str]:
         if not self.api_key:

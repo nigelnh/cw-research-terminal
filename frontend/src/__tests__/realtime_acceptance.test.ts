@@ -13,11 +13,11 @@ import * as fs from "fs";
 import * as path from "path";
 
 describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
-  // 1. Primary display universe contains exactly HPG, NVL, VHM, CVHM2601, CHPG2602
-  it("1. Primary display universe contains exactly [HPG, NVL, VHM, CVHM2601, CHPG2602]", () => {
-    expect(PRIMARY_UI_UNIVERSE).toEqual(["HPG", "NVL", "VHM", "CVHM2601", "CHPG2602"]);
+  // 1. Primary display universe contains exactly HPG, NVL, VHM, CTCB2601, CVPB2615
+  it("1. Primary display universe contains exactly [HPG, NVL, VHM, CTCB2601, CVPB2615]", () => {
+    expect(PRIMARY_UI_UNIVERSE).toEqual(["HPG", "NVL", "VHM", "CTCB2601", "CVPB2615"]);
     const symbols = DEFAULT_PRIMARY_WATCHLIST_ITEMS.map((item) => item.symbol);
-    expect(symbols).toEqual(["HPG", "NVL", "VHM", "CVHM2601", "CHPG2602"]);
+    expect(symbols).toEqual(["HPG", "NVL", "VHM", "CTCB2601", "CVPB2615"]);
   });
 
   // 2. Primary universe count = 5
@@ -28,44 +28,42 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
     expect(defaultWatchlist.items.length).toBe(5);
   });
 
-  // 3. CVHM2601 resolves underlying VHM
-  it("3. CVHM2601 resolves underlying VHM in the default watchlist model", () => {
-    const cvhm = DEFAULT_PRIMARY_WATCHLIST_ITEMS.find((i) => i.symbol === "CVHM2601");
-    expect(cvhm).toBeDefined();
-    expect(cvhm?.instrumentType).toBe("CW");
-    expect(cvhm?.underlyingSymbol).toBe("VHM");
+  // 3. CTCB2601 resolves underlying TCB
+  it("3. CTCB2601 resolves underlying TCB in the default watchlist model", () => {
+    const ctcb = DEFAULT_PRIMARY_WATCHLIST_ITEMS.find((i) => i.symbol === "CTCB2601");
+    expect(ctcb).toBeDefined();
+    expect(ctcb?.instrumentType).toBe("CW");
+    expect(ctcb?.underlyingSymbol).toBe("TCB");
   });
 
-  // 4. CHPG2602 resolves underlying HPG
-  it("4. CHPG2602 resolves underlying HPG in the default watchlist model", () => {
-    const chpg = DEFAULT_PRIMARY_WATCHLIST_ITEMS.find((i) => i.symbol === "CHPG2602");
-    expect(chpg).toBeDefined();
-    expect(chpg?.instrumentType).toBe("CW");
-    expect(chpg?.underlyingSymbol).toBe("HPG");
+  // 4. CVPB2615 resolves underlying VPB
+  it("4. CVPB2615 resolves underlying VPB in the default watchlist model", () => {
+    const cvpb = DEFAULT_PRIMARY_WATCHLIST_ITEMS.find((i) => i.symbol === "CVPB2615");
+    expect(cvpb).toBeDefined();
+    expect(cvpb?.instrumentType).toBe("CW");
+    expect(cvpb?.underlyingSymbol).toBe("VPB");
   });
 
-  // 5. CW dependency resolution does not create duplicate HPG/VHM subscriptions
-  it("5. CW dependency resolution deduplicates HPG and VHM without extra slots", () => {
+  // 5. CW dependency resolution maps underlying dependencies
+  it("5. CW dependency resolution maps underlying dependencies", () => {
     const defaultWatchlist = createDefaultWatchlist();
     const plan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
     
     // Check dependency map
-    expect(plan.dependencyMap.get("VHM")?.has("CVHM2601")).toBe(true);
-    expect(plan.dependencyMap.get("HPG")?.has("CHPG2602")).toBe(true);
+    expect(plan.dependencyMap.get("TCB")?.has("CTCB2601")).toBe(true);
+    expect(plan.dependencyMap.get("VPB")?.has("CVPB2615")).toBe(true);
 
-    // HPG and VHM appear only once in required symbols
-    const hpgCount = plan.requiredSymbols.filter((s) => s === "HPG").length;
-    const vhmCount = plan.requiredSymbols.filter((s) => s === "VHM").length;
-    expect(hpgCount).toBe(1);
-    expect(vhmCount).toBe(1);
+    // Symbols appear only once in required symbols
+    expect(plan.requiredSymbols.filter((s) => s === "TCB").length).toBe(1);
+    expect(plan.requiredSymbols.filter((s) => s === "VPB").length).toBe(1);
   });
 
-  // 6. Deduplicated acceptance subscription count = 5
-  it("6. Deduplicated acceptance subscription count is exactly 5", () => {
+  // 6. Deduplicated acceptance subscription count = 7
+  it("6. Deduplicated acceptance subscription count is exactly 7 (5 watchlist items + 2 distinct CW underlyings)", () => {
     const defaultWatchlist = createDefaultWatchlist();
     const plan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
-    expect(plan.requiredSymbols).toEqual(["CHPG2602", "CVHM2601", "HPG", "NVL", "VHM"]);
-    expect(plan.symbolCount).toBe(5);
+    expect(plan.requiredSymbols).toEqual(["CTCB2601", "CVPB2615", "HPG", "NVL", "TCB", "VHM", "VPB"]);
+    expect(plan.symbolCount).toBe(7);
     expect(plan.isCapacityExceeded).toBe(false);
   });
 
@@ -94,7 +92,7 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
   it("9. Browsing a Research-only instrument does not automatically add it to realtime subscriptions", () => {
     const defaultWatchlist = createDefaultWatchlist();
     const initialPlan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
-    expect(initialPlan.symbolCount).toBe(5);
+    expect(initialPlan.symbolCount).toBe(7);
 
     // Browsing/selecting CFPT2401 in Research catalog without adding to watchlist
     const researchSelection = {
@@ -105,10 +103,10 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
     };
     expect(researchSelection.symbol).toBe("CFPT2401");
 
-    // Subscription plan remains unchanged at 5
+    // Subscription plan remains unchanged at 7
     const activePlan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
-    expect(activePlan.requiredSymbols).toEqual(["CHPG2602", "CVHM2601", "HPG", "NVL", "VHM"]);
-    expect(activePlan.symbolCount).toBe(5);
+    expect(activePlan.requiredSymbols).toEqual(["CTCB2601", "CVPB2615", "HPG", "NVL", "TCB", "VHM", "VPB"]);
+    expect(activePlan.symbolCount).toBe(7);
   });
 
   // 10. Research-only synthetic instruments do not supply fabricated realtime quote/IV/Greek values
