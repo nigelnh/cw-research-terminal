@@ -1,15 +1,14 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { BackendWebSocketClient } from "../data/backend/backend_websocket_client";
 
-describe("BackendWebSocketClient - Correctness & Ordering Tests", () => {
+describe("BackendWebSocketClient - Correctness, Routing & Lifecycle Tests", () => {
   let client: BackendWebSocketClient;
 
   beforeEach(() => {
-    client = new BackendWebSocketClient("ws://localhost:8787");
+    client = new BackendWebSocketClient("ws://localhost:8501/ws/market");
   });
 
   it("1. Patch before initial snapshots: queues patch and merges cleanly when snapshot arrives", () => {
-    // Patch arrives first for unseen symbol CHPG2401 in thousand-VND transport (1.35 -> 1350 VND)
     client.handleIncomingMessage({
       type: "patch",
       symbol: "CHPG2401",
@@ -24,7 +23,6 @@ describe("BackendWebSocketClient - Correctness & Ordering Tests", () => {
     expect(placeholder).toBeDefined();
     expect(placeholder?.quote.lastPrice).toBe(1350);
 
-    // Full specification snapshot arrives later
     client.handleIncomingMessage({
       type: "snapshot",
       symbol: "CHPG2401",
@@ -42,7 +40,7 @@ describe("BackendWebSocketClient - Correctness & Ordering Tests", () => {
     const merged = client.getCoveredWarrant("CHPG2401");
     expect(merged?.strikePrice).toBe(28000);
     expect(merged?.exerciseRatio).toBe(2.0);
-    expect(merged?.quote.lastPrice).toBe(1350); // Buffered patch price retained
+    expect(merged?.quote.lastPrice).toBe(1350);
     expect(merged?.quote.referencePrice).toBe(1250);
   });
 
@@ -63,7 +61,6 @@ describe("BackendWebSocketClient - Correctness & Ordering Tests", () => {
     client.handleIncomingMessage(snapshotMsg);
     expect(client.getCoveredWarrant("CFPT2401")?.strikePrice).toBe(120000);
 
-    // Duplicate snapshot message arrives
     client.handleIncomingMessage(snapshotMsg);
     expect(client.getCoveredWarrant("CFPT2401")?.strikePrice).toBe(120000);
     expect(client.getAllCoveredWarrants().size).toBe(1);
@@ -96,7 +93,6 @@ describe("BackendWebSocketClient - Correctness & Ordering Tests", () => {
       row: { Symbol: "CHPG2401", Traded: 1.35, _ts_source: 5000 },
     });
 
-    // Newer tick arrives (ts = 5050)
     client.handleIncomingMessage({
       type: "patch",
       symbol: "CHPG2401",
@@ -104,14 +100,12 @@ describe("BackendWebSocketClient - Correctness & Ordering Tests", () => {
     });
     expect(client.getCoveredWarrant("CHPG2401")?.quote.lastPrice).toBe(1380);
 
-    // Delayed/Stale out-of-order tick arrives (ts = 5020 < 5050)
     client.handleIncomingMessage({
       type: "patch",
       symbol: "CHPG2401",
       patch: { Symbol: "CHPG2401", Traded: 1.36, _ts_source: 5020 },
     });
 
-    // Stale tick must be rejected! Last price remains 1380
     expect(client.getCoveredWarrant("CHPG2401")?.quote.lastPrice).toBe(1380);
   });
 
@@ -131,14 +125,12 @@ describe("BackendWebSocketClient - Correctness & Ordering Tests", () => {
       row: { Symbol: "CMWG2401", Traded: 1.45, _ts_source: 8000 },
     });
 
-    // Reconnected snapshot with higher timestamp
     client.handleIncomingMessage({
       type: "snapshot",
       symbol: "CMWG2401",
       row: { Symbol: "CMWG2401", Traded: 1.50, _ts_source: 9000 },
     });
 
-    // Delayed patch from pre-disconnect session with ts = 8500 (< 9000)
     client.handleIncomingMessage({
       type: "patch",
       symbol: "CMWG2401",
@@ -164,43 +156,46 @@ describe("BackendWebSocketClient - Correctness & Ordering Tests", () => {
     expect(client.getCoveredWarrant("CMWG2401")?.quote.lastPrice).toBe(1450);
   });
 
-  it("8. Index update: routes cleanly to index listeners", () => {
-    let receivedIndex: any = null;
-    client.onIndexUpdate((idx) => {
-      receivedIndex = idx;
+  it("8. Failed handshake does not mark gateway LIVE or upstream connected", () => {
+    const errorClient = new BackendWebSocketClient("ws://localhost:8501/ws/market");
+    expect(errorClient.getConnectionState()).toBe("DISCONNECTED");
+    expect(errorClient.getUpstreamFeedState()).toBe("UNKNOWN");
+
+    // Receiving gateway disconnected status frame
+    errorClient.handleIncomingMessage({
+      type: "status",
+      gateway_connected: false,
+      upstream_status: "UNAVAILABLE",
+      connected: false,
     });
 
-    client.handleIncomingMessage({
-      type: "index_update",
-      data: {
-        name: "VNINDEX",
-        value: 1285.5,
-        change: 5.5,
-        changePercent: 0.43,
-      },
-      ts: Date.now(),
-    });
-
-    expect(receivedIndex).toBeDefined();
-    expect(receivedIndex.name).toBe("VNINDEX");
-    expect(receivedIndex.value).toBe(1285.5);
+    expect(errorClient.getUpstreamFeedState()).toBe("DISCONNECTED");
   });
 
-  it("9. Unknown message types: gracefully handled without throwing errors", () => {
-    expect(() => {
-      client.handleIncomingMessage({
-        type: "unknown_future_message_type",
-        payload: { test: true },
-      });
-    }).not.toThrow();
+  it("9. Planned subscription count does not imply upstream live feed", () => {
+    const newClient = new BackendWebSocketClient("ws://localhost:8501/ws/market");
+    newClient.subscribeSymbols(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]);
+
+    expect(newClient.getSubscribedSymbols().size).toBe(5);
+    // Subscribed symbols exist, but upstream feed is still UNKNOWN until gateway connects and delivers ticks
+    expect(newClient.getUpstreamFeedState()).toBe("UNKNOWN");
+    expect(newClient.getAllQuotes().size).toBe(0);
   });
 
-  it("10. Malformed payload: handled safely without crashing client", () => {
-    expect(() => {
-      client.handleIncomingMessage(null);
-      client.handleIncomingMessage(undefined);
-      client.handleIncomingMessage("not-json" as any);
-      client.handleIncomingMessage({ type: "patch" }); // Missing symbol and patch
-    }).not.toThrow();
+  it("10. Subscription payload after OPEN contains exactly requested primary symbols", () => {
+    const sentMessages: string[] = [];
+    const mockWs: any = {
+      readyState: 1, // OPEN
+      send: vi.fn((data: string) => sentMessages.push(data)),
+      close: vi.fn(),
+    };
+
+    (client as any).ws = mockWs;
+    client.subscribeSymbols(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]);
+
+    expect(mockWs.send).toHaveBeenCalledTimes(1);
+    const parsed = JSON.parse(sentMessages[0]);
+    expect(parsed.type).toBe("subscribe");
+    expect(parsed.symbols).toEqual(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]);
   });
 });

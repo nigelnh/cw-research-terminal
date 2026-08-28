@@ -5,15 +5,15 @@ import type { HistoricalBar, AdjustedComparisonPoint, UnderlyingClosePoint, Inde
  */
 export function mapRawCWDataToHistoricalBar(item: any): HistoricalBar {
   return {
-    symbol: String(item.symbol || "").toUpperCase(),
-    date: item.trading_date || item.tradingdate || "",
-    open: typeof item.open === "number" ? item.open : null,
-    high: typeof item.high === "number" ? item.high : null,
-    low: typeof item.low === "number" ? item.low : null,
-    close: typeof item.close === "number" ? item.close : null,
-    volume: typeof item.volume === "number" ? item.volume : null,
-    referencePrice: typeof item.ref_price === "number" ? item.ref_price : null,
-    value: typeof item.total_match_val === "number" ? item.total_match_val : null,
+    symbol: String(item.symbol || item.ticker || "").toUpperCase(),
+    date: item.date || item.trading_date || item.tradingdate || item.timestamp || "",
+    open: typeof item.open === "number" ? item.open : (typeof item.Open === "number" ? item.Open : null),
+    high: typeof item.high === "number" ? item.high : (typeof item.High === "number" ? item.High : null),
+    low: typeof item.low === "number" ? item.low : (typeof item.Low === "number" ? item.Low : null),
+    close: typeof item.close === "number" ? item.close : (typeof item.Close === "number" ? item.Close : null),
+    volume: typeof item.volume === "number" ? item.volume : (typeof item.Volume === "number" ? item.Volume : null),
+    referencePrice: typeof item.ref_price === "number" ? item.ref_price : (typeof item.referencePrice === "number" ? item.referencePrice : null),
+    value: typeof item.total_match_val === "number" ? item.total_match_val : (typeof item.value === "number" ? item.value : null),
   };
 }
 

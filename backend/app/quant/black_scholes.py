@@ -7,7 +7,7 @@ tailored for Covered Warrants with explicit exercise-ratio scaling.
 import math
 import logging
 from typing import Optional, Tuple
-from app.quant.schemas import WarrantGreeks, GreeksVolatilitySource
+from app.quant.quant_schemas import WarrantGreeks, GreeksVolatilitySource
 
 logger = logging.getLogger(__name__)
 

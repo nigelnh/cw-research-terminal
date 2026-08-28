@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AiAssistantBubble } from "../components/common/ai_assistant_bubble";
+import { AiAssistantBubble } from "../features/ai_assistant/ai_assistant_bubble";
 import type { ResearchContextEnvelope } from "../data/ai/use_ai_chat";
 
 class MemoryLocalStorage {
@@ -75,8 +75,8 @@ describe("AiAssistantBubble Presentation Shell, Context Awareness & Security", (
         ivBid: 0.312,
       },
       watchlist: ["CFPT2401", "CHPG2401"],
-      realtimeStatus: "Demo",
-      dataMode: "mock",
+      realtimeStatus: "Live",
+      dataMode: "live",
     };
 
     const html = renderToStaticMarkup(<AiAssistantBubble context={mockContext} />);

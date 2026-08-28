@@ -47,10 +47,14 @@ export function useWatchlist() {
     );
   }, [watchlist.items, capabilities.maxRealtimeSymbols]);
 
-  // Synchronize desired live symbols to active market data provider
+  // Synchronize desired live symbols to active market data provider with replacement semantics
   useEffect(() => {
     if (plan.requiredSymbols.length > 0) {
-      provider.subscribeSymbols(plan.requiredSymbols);
+      if (typeof provider.syncSubscriptions === "function") {
+        provider.syncSubscriptions(plan.requiredSymbols);
+      } else {
+        provider.subscribeSymbols(plan.requiredSymbols);
+      }
     }
   }, [provider, plan.requiredSymbols]);
 

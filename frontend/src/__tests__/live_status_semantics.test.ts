@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { BackendWebSocketClient } from "../data/backend/backend_websocket_client";
-import { MockMarketDataProvider } from "../data/mock/mock_market_data_provider";
+import { BackendMarketDataProvider } from "../data/backend/backend_market_data_provider";
 
 describe("Live Status Semantics & Two-State Tracking", () => {
   it("1. Tracks gateway and upstream feed states independently", () => {
@@ -71,13 +71,35 @@ describe("Live Status Semantics & Two-State Tracking", () => {
     expect(client.getUpstreamFeedState()).toBe("UNKNOWN");
   });
 
-  it("6. MockMarketDataProvider preserves mock mode as Demo Data", () => {
-    const mock = new MockMarketDataProvider();
-    expect(mock.getConnectionState()).toBe("DISCONNECTED");
-    expect(mock.getUpstreamFeedState()).toBe("UNKNOWN");
+  it("6. BackendMarketDataProvider propagates live gateway states directly to consumers", () => {
+    const wsClient = new BackendWebSocketClient("ws://localhost:8787");
+    const provider = new BackendMarketDataProvider(wsClient);
+    expect(provider.getConnectionState()).toBe("DISCONNECTED");
+    expect(provider.getUpstreamFeedState()).toBe("UNKNOWN");
 
-    mock.connect();
-    // After connect, mock provider provides immediate local simulated feeds
-    expect(mock.getUpstreamFeedState()).toBe("UNKNOWN"); // initial before timeout
+    wsClient.handleIncomingMessage({
+      type: "status",
+      connected: true,
+    });
+    expect(provider.getUpstreamFeedState()).toBe("CONNECTED");
+  });
+
+  it("7. Handles LUNCH_BREAK session without dropping to false disconnected", () => {
+    const client = new BackendWebSocketClient("ws://localhost:8787");
+
+    client.handleIncomingMessage({
+      type: "status",
+      gateway_connected: true,
+      authenticated: true,
+      upstream_status: "READY",
+      connected: false,
+      market_session: "LUNCH_BREAK",
+      market_session_active: false,
+      quote_display_eligible: false,
+    });
+
+    expect(client.getMarketSession()).toBe("LUNCH_BREAK");
+    expect(client.isMarketSessionActive()).toBe(false);
+    expect(client.getUpstreamFeedState()).toBe("CONNECTED");
   });
 });

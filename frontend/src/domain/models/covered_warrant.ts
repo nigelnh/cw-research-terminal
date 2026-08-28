@@ -12,8 +12,8 @@ export interface CoveredWarrant {
   underlyingPrice: number | null;
 
   // Contract Terms
-  strikePrice: number;
-  exerciseRatio: number; // e.g. 2.0 (for 2:1 ratio)
+  strikePrice: number | null;
+  exerciseRatio: number | null; // e.g. 2.0 (for 2:1 ratio)
 
   // Lifespan & Schedule
   issueDate?: string | null;

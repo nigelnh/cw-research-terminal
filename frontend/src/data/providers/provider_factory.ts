@@ -1,17 +1,9 @@
-import { config } from "@/config";
 import type {
   MarketDataProvider,
   InstrumentProvider,
   HistoricalDataProvider,
   QuantProvider,
 } from "./index";
-
-import {
-  mockMarketDataProvider,
-  mockInstrumentProvider,
-  mockHistoricalDataProvider,
-  mockQuantProvider,
-} from "../mock";
 
 import {
   backendMarketDataProvider,
@@ -28,27 +20,15 @@ export interface ResearchProviders {
 }
 
 /**
- * Creates provider suite based on configured VITE_DATA_MODE.
- * Prevents scattering `if (mock)` throughout UI components.
+ * Creates provider suite connected to live FastAPI backend and upstream FiinQuant feed.
+ * Strictly operates against real market data with zero mock fallback.
  */
-export function createProviders(mode?: string): ResearchProviders {
-  const selectedMode = mode || config.dataMode;
-
-  if (selectedMode === "live") {
-    return {
-      marketData: backendMarketDataProvider,
-      instruments: backendInstrumentProvider,
-      historicalData: backendHistoricalDataProvider,
-      quant: backendQuantProvider,
-    };
-  }
-
-  // Default: Mock providers (Zero external infrastructure required)
+export function createProviders(_mode?: string): ResearchProviders {
   return {
-    marketData: mockMarketDataProvider,
-    instruments: mockInstrumentProvider,
-    historicalData: mockHistoricalDataProvider,
-    quant: mockQuantProvider,
+    marketData: backendMarketDataProvider,
+    instruments: backendInstrumentProvider,
+    historicalData: backendHistoricalDataProvider,
+    quant: backendQuantProvider,
   };
 }
 

@@ -63,6 +63,10 @@ export class BackendMarketDataProvider implements MarketDataProvider {
     this.wsClient.unsubscribeSymbols(symbols);
   }
 
+  syncSubscriptions(symbols: string[]): void {
+    this.wsClient.syncSubscriptions(symbols);
+  }
+
   onQuoteUpdate(listener: (quote: MarketQuote) => void): () => void {
     return this.wsClient.onQuoteUpdate(listener);
   }
@@ -73,6 +77,18 @@ export class BackendMarketDataProvider implements MarketDataProvider {
 
   onIndexUpdate(listener: (indexData: { name: string; value: number; change: number; changePercent: number }) => void): () => void {
     return this.wsClient.onIndexUpdate(listener);
+  }
+
+  getMarketSession(): string {
+    return this.wsClient.getMarketSession();
+  }
+
+  isMarketSessionActive(): boolean {
+    return this.wsClient.isMarketSessionActive();
+  }
+
+  onMarketSessionChange(listener: (session: { status: string; active: boolean }) => void): () => void {
+    return this.wsClient.onMarketSessionChange(listener);
   }
 
   connect(): void {

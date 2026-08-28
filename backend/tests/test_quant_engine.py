@@ -28,19 +28,23 @@ from app.quant.black_scholes import (
     solve_implied_volatility,
     check_call_price_bounds,
 )
-from app.quant.schemas import (
+from app.quant.quant_schemas import (
     GreeksVolatilitySource,
     MoneynessCategory,
 )
-from app.quant.engine import LiveQuantEngine, calculate_time_to_maturity
-from app.instruments.schemas import (
+from app.quant.quant_engine import LiveQuantEngine, calculate_time_to_maturity
+from app.quant.historical_volatility import calculate_historical_volatility
+from app.quant.historical_volatility_service import HistoricalVolatilityService
+from app.core.config import settings
+from tests.fixtures.fake_bar_source import FakeBarSource, make_daily_bars, synthetic_closes
+from app.instruments.instrument_schemas import (
     CoveredWarrantSpecification,
     InstrumentLifecycleStatus,
     DataQualityStatus,
     LifecycleEvidenceLevel,
     MetadataVerificationStatus,
 )
-from app.market.schemas import CanonicalQuote
+from app.market_data.market_schemas import CanonicalQuote
 
 client = TestClient(app)
 VN_TZ = timezone(timedelta(hours=7))
@@ -462,12 +466,21 @@ async def test_corporate_action_adjusted_terms_passed_to_quant_engine():
 @pytest.mark.asyncio
 async def test_theoretical_price_requires_independent_volatility_source():
     """
-    Verifies that true Theoretical Price requires an independent volatility assumption (e.g. HV_66)
-    and stores theoreticalVolatility and theoreticalVolatilitySource for auditability.
+    Verifies that true Theoretical Price requires an independent volatility assumption (HV_22)
+    supplied by the real HistoricalVolatilityService, and stores theoreticalVolatility and
+    theoreticalVolatilitySource for auditability.
     """
+    closes = synthetic_closes(40, base=22000.0)
+    expected_hv = calculate_historical_volatility(
+        closes, window=settings.QUANT_HV_WINDOW_SESSIONS, min_periods=settings.QUANT_HV_MIN_SESSIONS
+    )
+    assert expected_hv is not None and expected_hv > 0
+
+    hv_service = HistoricalVolatilityService(bar_source=FakeBarSource({"HPG": make_daily_bars(closes)}))
+    await hv_service.warm(["HPG"])
+
     engine = LiveQuantEngine()
-    # Inject independent 66-day historical volatility of 28% for HPG
-    engine.set_historical_vol_getter(lambda sym: 0.28 if sym == "HPG" else None)
+    engine.set_historical_vol_getter(hv_service.get_estimate)  # production wiring, typed VolEstimate
 
     spec = CoveredWarrantSpecification(
         symbol="CHPG2602",
@@ -499,19 +512,20 @@ async def test_theoretical_price_requires_independent_volatility_source():
     )
 
     assert analytics.is_available is True
-    # 1. Independent Theoretical Fair Price is computed
+    # 1. Independent Theoretical Fair Price is computed from HV_22
     assert analytics.theoretical_price is not None
-    assert analytics.theoretical_volatility == 0.28
-    assert analytics.theoretical_volatility_source == "HV_66"
-    assert analytics.historical_volatility == 0.28
+    assert analytics.theoretical_volatility == expected_hv
+    assert analytics.theoretical_volatility_source == "HV_22"
+    assert analytics.historical_volatility == expected_hv
 
-    # Independent BS price with sigma=0.28, S=22150, K=25885, T from model_inputs, CR=3.5704
+    # Independent BS price with sigma=HV_22, S=22150, K=25885, T from model_inputs, CR=3.5704
     assert analytics.model_inputs is not None
     T_actual = analytics.model_inputs.time_to_maturity
     assert T_actual is not None and T_actual > 0
-    expected_theo_price = round(bs_call_price_share(22150.0, 25885.0, T_actual, 0.05, 0.0, 0.28) / 3.5704, 2)
-    assert analytics.theoretical_price == expected_theo_price
-    assert analytics.greeks.theoretical_price == expected_theo_price
+    expected_theo_price = round(bs_call_price_share(22150.0, 25885.0, T_actual, 0.05, 0.0, expected_hv) / 3.5704, 2)
+    assert abs(analytics.theoretical_price - expected_theo_price) < 0.05
+    assert analytics.greeks.theoretical_price is not None
+    assert abs(analytics.greeks.theoretical_price - expected_theo_price) < 0.05
 
     # 2. Market IV Mid repricing remains separate
     assert analytics.model_price_at_iv_mid is not None

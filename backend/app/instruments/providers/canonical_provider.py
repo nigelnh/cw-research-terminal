@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 
-from app.instruments.schemas import (
+from app.instruments.instrument_schemas import (
     CoveredWarrantSpecification,
     InstrumentLifecycleStatus,
     DataQualityStatus,
@@ -125,7 +125,7 @@ class CanonicalInstrumentProvider(InstrumentRegistryProvider):
             raw_prov = raw.get("provenance")
             if isinstance(raw_prov, dict):
                 try:
-                    from app.instruments.schemas import WarrantProvenance, ProvenanceReference
+                    from app.instruments.instrument_schemas import WarrantProvenance, ProvenanceReference
                     init_ref = None
                     eff_ref = None
                     if isinstance(raw_prov.get("initial_terms_source"), dict):
@@ -144,7 +144,7 @@ class CanonicalInstrumentProvider(InstrumentRegistryProvider):
             # Invariant: VERIFIED_CURRENT strictly requires concrete auditable source evidence
             # (either source_document_id or source_url in effective_terms_source or initial_terms_source).
             # A source label alone without documentary evidence is INSUFFICIENT.
-            from app.instruments.schemas import MetadataVerificationStatus
+            from app.instruments.instrument_schemas import MetadataVerificationStatus
             verification_raw = raw.get("metadata_verification")
             
             has_concrete_source = False

@@ -124,7 +124,7 @@ describe("Instrument Registry Frontend Integration & Quant Readiness", () => {
     expect(partialCw).toBeDefined();
     expect(partialCw?.symbol).toBe("CPDR2601");
     expect(partialCw?.underlyingSymbol).toBe("PDR");
-    expect(partialCw?.strikePrice).toBe(0); // Mapped safely to 0/null in UI domain
+    expect(partialCw?.strikePrice).toBeNull(); // Mapped safely to null in UI domain
     expect(partialCw?.maturityDate).toBe("");
   });
 

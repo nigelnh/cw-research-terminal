@@ -1,7 +1,12 @@
-import { config } from "@/config";
+import { config, normalizeWsUrl } from "@/config";
 import type { GatewayConnectionState, UpstreamFeedState, ConnectionState } from "@/data/providers";
 import type { CoveredWarrant, MarketQuote } from "@/domain/models";
-import { mapRawSnapshotToCoveredWarrant, applyRawPatchToCoveredWarrant } from "./mappers";
+import {
+  mapRawSnapshotToCoveredWarrant,
+  applyRawPatchToCoveredWarrant,
+  mapRawSnapshotToQuote,
+  applyRawPatchToQuote,
+} from "./mappers";
 
 type GatewayStateHandler = (state: GatewayConnectionState) => void;
 type UpstreamFeedStateHandler = (state: UpstreamFeedState) => void;
@@ -10,11 +15,14 @@ type UpstreamFeedStateHandler = (state: UpstreamFeedState) => void;
  * Hardened, shared WebSocket client for the Research Platform Market Data Gateway.
  * 
  * Tracks two independent states:
- * 1. `gatewayConnectionState`: Browser WebSocket connectivity to backend gateway (ws://localhost:8787).
+ * 1. `gatewayConnectionState`: Browser WebSocket connectivity to backend gateway (ws://localhost:8501/ws/market).
  * 2. `upstreamFeedState`: Backend gateway upstream connectivity to active market data feed.
  * 
  * Never treats a successful WebSocket open state as "Live" without verified upstream feed.
  */
+const WS_CONNECTING = 0;
+const WS_OPEN = 1;
+
 export class BackendWebSocketClient {
   private wsUrl: string;
   private ws: WebSocket | null = null;
@@ -36,12 +44,16 @@ export class BackendWebSocketClient {
   // Subscriptions & listeners
   private gatewayStateListeners = new Set<GatewayStateHandler>();
   private upstreamFeedListeners = new Set<UpstreamFeedStateHandler>();
+  private sessionListeners = new Set<(session: { status: string; active: boolean }) => void>();
   private quoteListeners = new Set<(quote: MarketQuote) => void>();
   private cwListeners = new Set<(cw: CoveredWarrant) => void>();
   private indexListeners = new Set<(data: any) => void>();
 
+  private marketSession: string = "UNKNOWN";
+  private marketSessionActive: boolean = false;
+
   constructor(wsUrl?: string) {
-    this.wsUrl = wsUrl || config.wsUrl || "ws://localhost:8787";
+    this.wsUrl = normalizeWsUrl(wsUrl || config.wsUrl || "ws://localhost:8501/ws/market");
   }
 
   public getConnectionState(): ConnectionState {
@@ -54,6 +66,20 @@ export class BackendWebSocketClient {
 
   public getUpstreamFeedState(): UpstreamFeedState {
     return this.upstreamFeedState;
+  }
+
+  public getMarketSession(): string {
+    return this.marketSession;
+  }
+
+  public isMarketSessionActive(): boolean {
+    return this.marketSessionActive;
+  }
+
+  public onMarketSessionChange(listener: (session: { status: string; active: boolean }) => void): () => void {
+    this.sessionListeners.add(listener);
+    listener({ status: this.marketSession, active: this.marketSessionActive });
+    return () => this.sessionListeners.delete(listener);
   }
 
   public getCoveredWarrant(symbol: string): CoveredWarrant | undefined {
@@ -76,6 +102,19 @@ export class BackendWebSocketClient {
     return new Set(this.subscribedSymbols);
   }
 
+  public syncSubscriptions(symbols: string[]): void {
+    const clean = Array.from(new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)));
+    this.subscribedSymbols = new Set(clean);
+
+    if (this.ws && this.ws.readyState === WS_OPEN) {
+      try {
+        this.ws.send(JSON.stringify({ type: "subscribe", symbols: clean, replace: true }));
+      } catch (err) {
+        console.warn("[BackendWebSocketClient] Failed to send syncSubscriptions:", err);
+      }
+    }
+  }
+
   public subscribeSymbols(symbols: string[]): void {
     const toSend: string[] = [];
     symbols.forEach((s) => {
@@ -86,9 +125,9 @@ export class BackendWebSocketClient {
       }
     });
 
-    if (toSend.length > 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (toSend.length > 0 && this.ws && this.ws.readyState === WS_OPEN) {
       try {
-        this.ws.send(JSON.stringify({ type: "subscribe", symbols: toSend }));
+        this.ws.send(JSON.stringify({ type: "subscribe", symbols: toSend, replace: false }));
       } catch (err) {
         console.warn("[BackendWebSocketClient] Failed to send subscribe message:", err);
       }
@@ -105,7 +144,7 @@ export class BackendWebSocketClient {
       }
     });
 
-    if (toSend.length > 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (toSend.length > 0 && this.ws && this.ws.readyState === WS_OPEN) {
       try {
         this.ws.send(JSON.stringify({ type: "unsubscribe", symbols: toSend }));
       } catch (err) {
@@ -156,7 +195,7 @@ export class BackendWebSocketClient {
   }
 
   public connect(): void {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+    if (this.ws && (this.ws.readyState === WS_OPEN || this.ws.readyState === WS_CONNECTING)) {
       return;
     }
 
@@ -174,10 +213,16 @@ export class BackendWebSocketClient {
           this.setUpstreamFeedState("UNKNOWN");
         }
 
-        // Send active desired subscriptions on connect/reconnect
-        if (this.subscribedSymbols.size > 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
+        // Send active desired subscriptions on connect/reconnect with replacement semantics
+        if (this.subscribedSymbols.size > 0 && this.ws && this.ws.readyState === WS_OPEN) {
           try {
-            this.ws.send(JSON.stringify({ type: "subscribe", symbols: Array.from(this.subscribedSymbols) }));
+            this.ws.send(
+              JSON.stringify({
+                type: "subscribe",
+                symbols: Array.from(this.subscribedSymbols),
+                replace: true,
+              })
+            );
           } catch (err) {
             console.warn("[BackendWebSocketClient] Failed to send initial subscriptions:", err);
           }
@@ -273,8 +318,14 @@ export class BackendWebSocketClient {
 
     switch (msg.type) {
       case "status": {
+        if (msg.market_session) {
+          this.marketSession = String(msg.market_session);
+          this.marketSessionActive = Boolean(msg.market_session_active);
+          this.sessionListeners.forEach((fn) => fn({ status: this.marketSession, active: this.marketSessionActive }));
+        }
+
         // Explicit upstream market feed status from backend gateway
-        if (msg.upstream_status === "LIVE" || msg.connected === true) {
+        if (msg.upstream_status === "LIVE" || msg.connected === true || (msg.gateway_connected && msg.market_session === "LUNCH_BREAK")) {
           this.setUpstreamFeedState("CONNECTED");
         } else if (
           msg.upstream_status === "CONNECTING" ||
@@ -284,9 +335,10 @@ export class BackendWebSocketClient {
           this.setUpstreamFeedState("CONNECTING");
         } else if (
           msg.upstream_status === "UNAVAILABLE" ||
-          msg.upstream_status === "ERROR" ||
-          msg.connected === false
+          msg.upstream_status === "ERROR"
         ) {
+          this.setUpstreamFeedState("DISCONNECTED");
+        } else if (msg.connected === false && !msg.gateway_connected) {
           this.setUpstreamFeedState("DISCONNECTED");
         }
         break;
@@ -321,69 +373,44 @@ export class BackendWebSocketClient {
         this.setUpstreamFeedState("CONNECTED");
 
         const incomingSourceTs = msg.patch._ts_source || msg.ts_origin || (msg.patch.ExchangeTime ? Number(msg.patch.ExchangeTime) : null);
-        const existing = this.warrantsMap.get(sym);
+        const existingCw = this.warrantsMap.get(sym);
+        const existingQuote = this.quotesMap.get(sym);
 
         // Stale tick rejection check
-        if (this.isEventStale(existing, incomingSourceTs, msg.ts)) {
+        if (this.isEventStale(existingCw, incomingSourceTs, msg.ts)) {
           return;
         }
 
-        if (existing) {
-          const updatedCw = applyRawPatchToCoveredWarrant(existing, msg.patch);
-          this.warrantsMap.set(sym, updatedCw);
-          this.quotesMap.set(sym, updatedCw.quote);
-          this.cwListeners.forEach((fn) => fn(updatedCw));
-          this.quoteListeners.forEach((fn) => fn(updatedCw.quote));
-        } else {
-          // Unseen symbol: buffer patch
-          if (!this.pendingPatches.has(sym)) {
-            this.pendingPatches.set(sym, []);
-          }
-          this.pendingPatches.get(sym)!.push(msg.patch);
+        const updatedQuote = applyRawPatchToQuote(existingQuote, sym, msg.patch, incomingSourceTs);
+        this.quotesMap.set(sym, updatedQuote);
+        this.quoteListeners.forEach((fn) => fn(updatedQuote));
 
-          const placeholder = applyRawPatchToCoveredWarrant(
-            {
-              symbol: sym,
-              issuer: null,
-              underlyingSymbol: "",
-              underlyingPrice: null,
-              strikePrice: 0,
-              exerciseRatio: 1.0,
-              lastTradingDate: null,
-              maturityDate: "",
-              quote: {
-                symbol: sym,
-                lastPrice: null,
-                referencePrice: null,
-                ceilingPrice: null,
-                floorPrice: null,
-                openPrice: null,
-                highPrice: null,
-                lowPrice: null,
-                averagePrice: null,
-                bidPrice: null,
-                bidQuantity: null,
-                askPrice: null,
-                askQuantity: null,
-                tradedQuantity: null,
-                totalVolume: null,
-                tradingValue: null,
-                priceChange: null,
-                priceChangePercent: null,
-                exchangeTimestamp: null,
-                sourceTimestamp: incomingSourceTs,
-                receivedTimestamp: Date.now(),
-              },
-              ivAsk: null,
-              ivTrade: null,
-              ivBid: null,
-            },
-            msg.patch
-          );
-          this.warrantsMap.set(sym, placeholder);
-          this.quotesMap.set(sym, placeholder.quote);
-          this.cwListeners.forEach((fn) => fn(placeholder));
-          this.quoteListeners.forEach((fn) => fn(placeholder.quote));
+        // Only populate/update warrantsMap if symbol is actually a Covered Warrant
+        const isCwSymbol = sym.startsWith("C") && sym.length >= 6;
+        if (existingCw || isCwSymbol) {
+          if (!existingCw) {
+            if (!this.pendingPatches.has(sym)) {
+              this.pendingPatches.set(sym, []);
+            }
+            this.pendingPatches.get(sym)!.push(msg.patch);
+          }
+          const baseCw: CoveredWarrant = existingCw || {
+            symbol: sym,
+            issuer: null,
+            underlyingSymbol: "",
+            underlyingPrice: null,
+            strikePrice: null,
+            exerciseRatio: null,
+            lastTradingDate: null,
+            maturityDate: "",
+            quote: updatedQuote,
+            ivAsk: null,
+            ivTrade: null,
+            ivBid: null,
+          };
+          const updatedCw = applyRawPatchToCoveredWarrant(baseCw, msg.patch);
+          this.warrantsMap.set(sym, updatedCw);
+          this.cwListeners.forEach((fn) => fn(updatedCw));
         }
         break;
       }
@@ -440,21 +467,30 @@ export class BackendWebSocketClient {
       return; // Drop stale snapshot
     }
 
-    let cw = mapRawSnapshotToCoveredWarrant(row);
+    const isCwSymbol = sym.startsWith("C") && sym.length >= 6;
+    const isCwType = row.instrument_type === "CW" || row.InstrumentType === "CW" || !!row.Under_Symbol || !!row.Underlying;
 
-    // Apply any buffered patches that arrived before this snapshot
-    if (this.pendingPatches.has(sym)) {
-      const patches = this.pendingPatches.get(sym)!;
-      patches.forEach((p) => {
-        cw = applyRawPatchToCoveredWarrant(cw, p);
-      });
-      this.pendingPatches.delete(sym);
+    if (isCwSymbol || isCwType) {
+      let cw = mapRawSnapshotToCoveredWarrant(row);
+
+      // Apply any buffered patches that arrived before this snapshot
+      if (this.pendingPatches.has(sym)) {
+        const patches = this.pendingPatches.get(sym)!;
+        patches.forEach((p) => {
+          cw = applyRawPatchToCoveredWarrant(cw, p);
+        });
+        this.pendingPatches.delete(sym);
+      }
+
+      this.warrantsMap.set(sym, cw);
+      this.quotesMap.set(sym, cw.quote);
+      this.cwListeners.forEach((fn) => fn(cw));
+      this.quoteListeners.forEach((fn) => fn(cw.quote));
+    } else {
+      const quote = mapRawSnapshotToQuote(row);
+      this.quotesMap.set(sym, quote);
+      this.quoteListeners.forEach((fn) => fn(quote));
     }
-
-    this.warrantsMap.set(sym, cw);
-    this.quotesMap.set(sym, cw.quote);
-    this.cwListeners.forEach((fn) => fn(cw));
-    this.quoteListeners.forEach((fn) => fn(cw.quote));
   }
 }
 

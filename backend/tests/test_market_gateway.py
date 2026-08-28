@@ -5,12 +5,24 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.market.state import MarketState
-from app.market.subscription_manager import SubscriptionManager
-from app.market.providers.mock_provider import MockMarketDataProvider
-from app.market.schemas import CanonicalQuote
+from app.market_data.market_state import MarketState
+from app.market_data.market_subscription_manager import SubscriptionManager
+from app.market_data.providers.fiinquant_provider import FiinQuantProvider
+from tests.fixtures.mock_market_provider import MockMarketDataProvider
+from app.market_data.market_schemas import CanonicalQuote, HistoricalBar
 
 client = TestClient(app)
+
+
+def test_subscription_manager_defaults_to_live_fiinquant():
+    mgr = SubscriptionManager()
+    assert isinstance(mgr.provider, FiinQuantProvider)
+
+
+def test_production_providers_package_contains_no_mock():
+    import app.market_data.providers as prov_pkg
+    assert not hasattr(prov_pkg, "MockMarketDataProvider")
+    assert "MockMarketDataProvider" not in prov_pkg.__all__
 
 
 def test_market_state_trade_normalization():
@@ -136,16 +148,24 @@ def test_market_rest_health_zero_credentials():
 
 
 def test_market_rest_history():
-    response = client.get("/api/market/history/HPG?timeframe=1D&adjusted=true")
-    assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data, list)
-    if data:
+    from unittest.mock import AsyncMock, patch
+    from app.market_data.market_subscription_manager import subscription_manager
+
+    fake_bars = [
+        HistoricalBar(date="2026-08-25", open=22000.0, high=22500.0, low=21900.0, close=22150.0, volume=1050000.0, adjusted=True)
+    ]
+    with patch.object(subscription_manager.provider, "get_historical_bars", new_callable=AsyncMock) as mock_hist:
+        mock_hist.return_value = fake_bars
+        response = client.get("/api/market/history/HPG?timeframe=1D&adjusted=true")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) == 1
         bar = data[0]
-        assert "date" in bar
-        assert "open" in bar
-        assert "close" in bar
-        assert "volume" in bar
+        assert bar["date"] == "2026-08-25"
+        assert bar["open"] == 22000.0
+        assert bar["close"] == 22150.0
+        assert bar["volume"] == 1050000.0
 
 
 def test_websocket_gateway_protocol():

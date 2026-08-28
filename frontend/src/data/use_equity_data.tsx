@@ -6,7 +6,6 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback, Re
 import type { EquityRow } from "@/tables/equity/types";
 import { config } from "@/config";
 import type { IndexRow } from "@/tables/index/types";
-import { mockIndexData } from "@/constants/index_data";
 
 const WS_URL = config.wsUrl;
 
@@ -34,7 +33,7 @@ const EquityDataContext = createContext<EquityDataContextValue | undefined>(unde
 
 export function EquityDataProvider({ children }: { children: ReactNode }) {
   const [rows, setRows] = useState<EquityRow[]>([]);
-  const [indices, setIndices] = useState<IndexRow[]>(mockIndexData);
+  const [indices, setIndices] = useState<IndexRow[]>([]);
   const [connected, setConnected] = useState(false);
   const [statusMessage, setStatusMessage] = useState("Connecting...");
   const [tradingDates, setTradingDates] = useState<string[]>([]);

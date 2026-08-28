@@ -4,7 +4,7 @@ import {
   MockInstrumentProvider,
   MockHistoricalDataProvider,
   MockQuantProvider,
-} from "../data/mock";
+} from "./test_fixtures";
 
 describe("CW Research Platform - Mock Providers Test Suite", () => {
   describe("mock_market_data_provider", () => {
