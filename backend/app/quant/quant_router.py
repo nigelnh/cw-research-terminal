@@ -42,7 +42,14 @@ class CalculatePricingRequest(BaseModel):
         default=1.0, alias="exerciseRatio", description="Exercise ratio (e.g. 2.0 = 2:1)"
     )
     dividend_yield: float = Field(
-        default=0.0, alias="dividendYield", description="Dividend yield assumption q"
+        default=0.0,
+        alias="dividendYield",
+        description=(
+            "What-if annualized decimal dividend yield q (0.02 = 2%) for THIS stateless "
+            "calculation only. The canonical CW analytics engine (GET /api/quant/{symbol}) "
+            "always uses q = 0 because HOSE covered warrants are dividend-protected -- see "
+            "QUANT_CONTRACT.md section 7."
+        ),
     )
     market_price: Optional[float] = Field(
         default=None, alias="marketPrice", description="Optional CW market price to solve IV"

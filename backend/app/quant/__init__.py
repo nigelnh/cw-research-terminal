@@ -12,6 +12,7 @@ from .black_scholes import (
     solve_implied_volatility,
     check_call_price_bounds,
 )
+from .dividend_convention import CW_DIVIDEND_YIELD_CONVENTION, DividendYieldConvention
 from .historical_volatility import calculate_historical_volatility, calculate_multi_window_hv
 # NOTE: the `historical_volatility_service` singleton is intentionally NOT re-exported here -
 # its name would collide with (and shadow) the submodule of the same name. Import it directly:
@@ -33,6 +34,8 @@ __all__ = [
     "check_call_price_bounds",
     "calculate_historical_volatility",
     "calculate_multi_window_hv",
+    "CW_DIVIDEND_YIELD_CONVENTION",
+    "DividendYieldConvention",
     "HistoricalVolatilityService",
     "VolEstimate",
     "live_quant_engine",
