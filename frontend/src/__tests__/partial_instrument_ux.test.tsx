@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderMarkup } from "./test_fixtures/render_markup";
 import { PersonalDashboard } from "../features/watchlist/personal_dashboard";
 import { defaultWatchlistStorage } from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
@@ -56,7 +56,7 @@ describe("Partial Instrument UX & Complete Contract Differentiation", () => {
     defaultWatchlistStorage.saveWatchlist(customWatchlist);
     resetWatchlistMemoryForTests(customWatchlist);
 
-    const html = renderToStaticMarkup(<PersonalDashboard />);
+    const html = renderMarkup(<PersonalDashboard />);
 
     // Symbol is rendered
     expect(html).toContain("CVPB2615");
@@ -88,7 +88,7 @@ describe("Partial Instrument UX & Complete Contract Differentiation", () => {
     defaultWatchlistStorage.saveWatchlist(customWatchlist);
     resetWatchlistMemoryForTests(customWatchlist);
 
-    const html = renderToStaticMarkup(<PersonalDashboard />);
+    const html = renderMarkup(<PersonalDashboard />);
 
     // Symbol and strike/ratio are rendered
     expect(html).toContain("CTCB2601");

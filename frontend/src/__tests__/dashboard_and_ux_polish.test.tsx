@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderMarkup } from "./test_fixtures/render_markup";
 import { PersonalDashboard } from "../features/watchlist/personal_dashboard";
 import { InstrumentDrawer } from "../features/warrant_info/instrument_drawer";
 import { TopNav } from "../components/common/top_nav";
@@ -42,7 +42,7 @@ describe("Targeted Dashboard & Copilot UX Polish Pass Verifications", () => {
   });
 
   it("1 & 2 & 3. Stock and CW rows render in separate Dashboard sections with strict column scoping", () => {
-    const html = renderToStaticMarkup(<PersonalDashboard />);
+    const html = renderMarkup(<PersonalDashboard />);
 
     // Separate section headers
     expect(html).toContain("Stocks (3)");
@@ -102,7 +102,7 @@ describe("Targeted Dashboard & Copilot UX Polish Pass Verifications", () => {
       },
     };
 
-    const cwHtml = renderToStaticMarkup(
+    const cwHtml = renderMarkup(
       <InstrumentDrawer instrument={mockCW as any} onClose={vi.fn()} />
     );
 
@@ -117,7 +117,7 @@ describe("Targeted Dashboard & Copilot UX Polish Pass Verifications", () => {
       instrumentType: "STOCK" as const,
     };
 
-    const stockHtml = renderToStaticMarkup(
+    const stockHtml = renderMarkup(
       <InstrumentDrawer instrument={mockStock} onClose={vi.fn()} />
     );
 
@@ -189,7 +189,7 @@ describe("Targeted Dashboard & Copilot UX Polish Pass Verifications", () => {
   });
 
   it("12. Focus state classes and styles exist for accessible non-native outline, and composer uses neutral border without focus highlight", () => {
-    const html = renderToStaticMarkup(<AiAssistantBubble initialOpen={true} />);
+    const html = renderMarkup(<AiAssistantBubble initialOpen={true} />);
     expect(html).toContain("focus-ring");
     // Composer container is centered and uses constant neutral border without box-shadow
     expect(html).toContain("align-items:center");
@@ -198,13 +198,13 @@ describe("Targeted Dashboard & Copilot UX Polish Pass Verifications", () => {
   });
 
   it("13. Redundant Dashboard footer sentence is completely removed", () => {
-    const html = renderToStaticMarkup(<PersonalDashboard />);
+    const html = renderMarkup(<PersonalDashboard />);
     expect(html).not.toContain("instruments in personal dashboard");
     expect(html).not.toContain("search Research catalog to explore all instruments");
   });
 
   it("14. Subscription capacity label accurately uses 'slots' instead of misleading 'live'", () => {
-    const html = renderToStaticMarkup(<TopNav activeTab="dashboard" onTabChange={vi.fn()} />);
+    const html = renderMarkup(<TopNav activeTab="dashboard" onTabChange={vi.fn()} />);
     expect(html).toContain("7</span> / 33 slots");
     expect(html).not.toContain("live");
   });

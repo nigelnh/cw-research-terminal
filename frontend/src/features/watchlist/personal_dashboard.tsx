@@ -1,15 +1,16 @@
-import { useState } from "react";
+import { useMemo } from "react";
 import { X } from "lucide-react";
 import type { WatchlistItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
+import { deriveSelectedInstrument } from "@/data/selected_instrument";
 import { Change } from "@/components/common/change";
 import { InstrumentDrawer } from "@/features/warrant_info/instrument_drawer";
 
 interface PersonalDashboardProps {
   onNavigateToUniverse?: () => void;
-  selectedInstrument?: any | null;
-  onSelectInstrument?: (inst: any | null) => void;
+  selectedSymbol?: string | null;
+  onSelectSymbol?: (symbol: string | null) => void;
 }
 
 const H = ({ children, right }: { children: React.ReactNode; right?: boolean }) => (
@@ -30,15 +31,28 @@ const H = ({ children, right }: { children: React.ReactNode; right?: boolean }) 
 
 export function PersonalDashboard({
   onNavigateToUniverse,
-  selectedInstrument: controlledSelected,
-  onSelectInstrument: controlledOnSelect,
+  selectedSymbol = null,
+  onSelectSymbol,
 }: PersonalDashboardProps) {
   const { items, removeFromWatchlist, plan } = useWatchlist();
   const { quotes, warrants } = useResearchMarket();
-  const [internalSelected, setInternalSelected] = useState<any | null>(null);
 
-  const selectedInstrument = controlledSelected !== undefined ? controlledSelected : internalSelected;
-  const setSelectedInstrument = controlledOnSelect || setInternalSelected;
+  const setSelectedSymbol = onSelectSymbol ?? (() => {});
+
+  // Drawer instrument is DERIVED from the watchlist item + realtime store, not stored.
+  const selectedWatchlistItem = useMemo(
+    () => items.find((i) => i.symbol.toUpperCase() === (selectedSymbol ?? "").toUpperCase()) ?? null,
+    [items, selectedSymbol]
+  );
+  const selectedInstrument = useMemo(
+    () =>
+      deriveSelectedInstrument(selectedSymbol, {
+        watchlistItem: selectedWatchlistItem,
+        quote: selectedSymbol ? quotes.get(selectedSymbol.toUpperCase()) : undefined,
+        cw: selectedSymbol ? warrants.get(selectedSymbol.toUpperCase()) : undefined,
+      }),
+    [selectedSymbol, selectedWatchlistItem, quotes, warrants]
+  );
 
   // Helper formatters with strict — fallback (never 0 for missing data)
   const formatPrice = (val: number | null | undefined): string => {
@@ -130,12 +144,12 @@ export function PersonalDashboard({
                   const askPrice = q?.askPrice;
                   const priceChangePct = q?.priceChangePercent;
                   const totalVolume = q?.totalVolume;
-                  const isSelected = selectedInstrument?.symbol === item.symbol;
+                  const isSelected = selectedSymbol === item.symbol;
 
                   return (
                     <tr
                       key={item.symbol}
-                      onClick={() => setSelectedInstrument({ ...item, instrumentType: "STOCK", quote: q })}
+                      onClick={() => setSelectedSymbol(item.symbol)}
                       className={`table-row ${isSelected ? "table-row-selected" : ""}`}
                       style={{
                         height: "38px",
@@ -177,9 +191,7 @@ export function PersonalDashboard({
                           onClick={(e) => {
                             e.stopPropagation();
                             removeFromWatchlist(item.symbol);
-                            if (selectedInstrument?.symbol === item.symbol) {
-                              setSelectedInstrument(null);
-                            }
+                            if (selectedSymbol === item.symbol) setSelectedSymbol(null);
                           }}
                           className="focus-ring"
                           style={{
@@ -262,13 +274,13 @@ export function PersonalDashboard({
                   const ivTrade = cw?.ivTrade;
                   const ivBid = cw?.ivBid;
 
-                  const isSelected = selectedInstrument?.symbol === item.symbol;
+                  const isSelected = selectedSymbol === item.symbol;
                   const isPartial = !strikePrice || !exerciseRatio || (!lastTradingDate && !maturityDate);
 
                   return (
                     <tr
                       key={item.symbol}
-                      onClick={() => setSelectedInstrument({ ...item, instrumentType: "CW", quote: q, cw })}
+                      onClick={() => setSelectedSymbol(item.symbol)}
                       className={`table-row ${isSelected ? "table-row-selected" : ""}`}
                       style={{
                         height: "38px",
@@ -356,9 +368,7 @@ export function PersonalDashboard({
                           onClick={(e) => {
                             e.stopPropagation();
                             removeFromWatchlist(item.symbol);
-                            if (selectedInstrument?.symbol === item.symbol) {
-                              setSelectedInstrument(null);
-                            }
+                            if (selectedSymbol === item.symbol) setSelectedSymbol(null);
                           }}
                           className="focus-ring"
                           style={{
@@ -408,7 +418,7 @@ export function PersonalDashboard({
       {/* Right Drawer */}
       <InstrumentDrawer
         instrument={selectedInstrument}
-        onClose={() => setSelectedInstrument(null)}
+        onClose={() => setSelectedSymbol(null)}
       />
     </div>
   );

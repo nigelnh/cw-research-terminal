@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderMarkup } from "./test_fixtures/render_markup";
 import { InstrumentDrawer } from "../features/warrant_info/instrument_drawer";
 import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
@@ -23,7 +23,7 @@ describe("InstrumentDrawer Rendering, Interaction & Accessibility Correctness", 
   };
 
   it("1. Renders semantic dialog with accessible ARIA attributes and Hoarfrost styling", () => {
-    const html = renderToStaticMarkup(
+    const html = renderMarkup(
       <InstrumentDrawer instrument={mockInstrument} onClose={vi.fn()} />
     );
 
@@ -36,7 +36,7 @@ describe("InstrumentDrawer Rendering, Interaction & Accessibility Correctness", 
   });
 
   it("2. Renders 3 internal drawer tabs: Overview, History, and Quant", () => {
-    const html = renderToStaticMarkup(
+    const html = renderMarkup(
       <InstrumentDrawer instrument={mockInstrument} onClose={vi.fn()} />
     );
 
@@ -46,7 +46,7 @@ describe("InstrumentDrawer Rendering, Interaction & Accessibility Correctness", 
   });
 
   it("3. Renders Overview sections: Market, Contract, Volatility, and Microstructure Liquidity", () => {
-    const html = renderToStaticMarkup(
+    const html = renderMarkup(
       <InstrumentDrawer instrument={mockInstrument} onClose={vi.fn()} />
     );
 
@@ -58,7 +58,7 @@ describe("InstrumentDrawer Rendering, Interaction & Accessibility Correctness", 
   });
 
   it("4. Returns null and renders nothing when instrument is null", () => {
-    const html = renderToStaticMarkup(
+    const html = renderMarkup(
       <InstrumentDrawer instrument={null} onClose={vi.fn()} />
     );
     expect(html).toBe("");
@@ -110,7 +110,7 @@ describe("InstrumentDrawer Rendering, Interaction & Accessibility Correctness", 
       },
     };
 
-    const html = renderToStaticMarkup(
+    const html = renderMarkup(
       <InstrumentDrawer instrument={mockStock as any} onClose={vi.fn()} />
     );
 
