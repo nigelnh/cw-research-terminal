@@ -52,4 +52,14 @@ export const queryKeys = {
     analytics: (symbol: string) =>
       ["cw-research", "quant", "analytics", symbol.trim().toUpperCase()] as const,
   },
+
+  /**
+   * Per-user server state. EVERY key is scoped by the verified auth subject so nothing
+   * survives a user switch: `queryClient.clear()` on identity change wipes it, and even
+   * without that a different subject is simply a different cache entry.
+   */
+  me: {
+    root: (subject: string) => ["cw-research", "me", subject] as const,
+    watchlist: (subject: string) => ["cw-research", "me", subject, "watchlist"] as const,
+  },
 } as const;

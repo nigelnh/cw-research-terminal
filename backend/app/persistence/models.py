@@ -25,6 +25,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
     Numeric,
     String,
     UniqueConstraint,
@@ -43,6 +44,7 @@ _TIMEFRAME_CHECK = "timeframe IN ('1m','5m','15m','30m','1h','1d')"
 _PRICE_BASIS_CHECK = "price_basis IN ('ADJUSTED','RAW')"
 _INSTRUMENT_TYPE_CHECK = "instrument_type IN ('CW','STOCK','INDEX')"
 _RUN_STATUS_CHECK = "status IN ('RUNNING','SUCCEEDED','FAILED','PARTIAL')"
+_WATCHLIST_ITEM_TYPE_CHECK = "instrument_type IN ('CW','STOCK','INDEX')"
 
 
 class Instrument(Base):
@@ -78,8 +80,8 @@ class Instrument(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    underlying: Mapped["Instrument | None"] = relationship(remote_side=[id])
-    bars: Mapped[list["MarketBar"]] = relationship(back_populates="instrument", cascade="all, delete-orphan")
+    underlying: Mapped[Instrument | None] = relationship(remote_side=[id])
+    bars: Mapped[list[MarketBar]] = relationship(back_populates="instrument", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("symbol", name="uq_instruments_symbol"),
@@ -120,7 +122,7 @@ class MarketBar(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    instrument: Mapped["Instrument"] = relationship(back_populates="bars")
+    instrument: Mapped[Instrument] = relationship(back_populates="bars")
 
     __table_args__ = (
         # THE idempotency anchor + the index that serves latest-bar and range queries.
@@ -207,4 +209,81 @@ class IngestionState(Base):
         ),
         CheckConstraint(_TIMEFRAME_CHECK, name="ck_ingestion_state_timeframe"),
         CheckConstraint(_PRICE_BASIS_CHECK, name="ck_ingestion_state_price_basis"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# User-owned data (Step 9). Ownership key = the verified Supabase JWT ``sub``. #
+# This schema is deliberately standalone: it holds the auth subject as an      #
+# opaque string and has NO foreign key into Supabase's internal auth tables    #
+# (PostgreSQL here is not the Supabase database).                              #
+# --------------------------------------------------------------------------- #
+class UserWatchlist(Base):
+    """One row per user - their single primary watchlist. (Not a multi-list abstraction:
+    ``name`` is cosmetic and the ``owner_subject`` unique constraint enforces exactly one.)"""
+
+    __tablename__ = "user_watchlists"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    # Verified JWT ``sub``. Opaque, immutable per Supabase user. Never sourced from a request body.
+    owner_subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(
+        String(120), nullable=False, server_default=text("'Primary Watchlist'")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    items: Mapped[list[UserWatchlistItem]] = relationship(
+        back_populates="watchlist",
+        cascade="all, delete-orphan",
+        order_by="UserWatchlistItem.position",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        # Exactly one primary watchlist per owner. Also serves as the owner lookup index.
+        UniqueConstraint("owner_subject", name="uq_user_watchlists_owner"),
+    )
+
+
+class UserWatchlistItem(Base):
+    __tablename__ = "user_watchlist_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    watchlist_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("user_watchlists.id", ondelete="CASCADE"), nullable=False
+    )
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    instrument_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Dense 0-based rank. Deterministic ordering is (position ASC, id ASC).
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    underlying_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    issuer: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    strike_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    exercise_ratio: Mapped[float | None] = mapped_column(Numeric(20, 6), nullable=True)
+    maturity_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    last_trading_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    watchlist: Mapped[UserWatchlist] = relationship(back_populates="items")
+
+    __table_args__ = (
+        UniqueConstraint("watchlist_id", "symbol", name="uq_user_watchlist_items_symbol"),
+        UniqueConstraint("watchlist_id", "position", name="uq_user_watchlist_items_position"),
+        CheckConstraint(_WATCHLIST_ITEM_TYPE_CHECK, name="ck_user_watchlist_items_type"),
+        CheckConstraint("position >= 0", name="ck_user_watchlist_items_position"),
+        Index("ix_user_watchlist_items_watchlist", "watchlist_id"),
     )

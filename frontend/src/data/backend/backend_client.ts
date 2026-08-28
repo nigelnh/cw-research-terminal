@@ -1,10 +1,79 @@
 import { config } from "@/config";
 
+/** Resolves the current access token (or null when anonymous). Set by the AuthProvider. */
+export type AccessTokenProvider = () => string | null | Promise<string | null>;
+
+let accessTokenProvider: AccessTokenProvider | null = null;
+
+/**
+ * Register how protected `/api/me/*` requests obtain their bearer token. Public market /
+ * quant / history requests never call this and never send an Authorization header.
+ */
+export function setAccessTokenProvider(fn: AccessTokenProvider | null): void {
+  accessTokenProvider = fn;
+}
+
+/** Thrown when a protected call has no token, or the backend answered 401/403. */
+export class AuthRequiredError extends Error {
+  status: number;
+  constructor(status = 401, message = "authentication required") {
+    super(`HTTP ${status} ${message}`);
+    this.name = "AuthRequiredError";
+    this.status = status;
+  }
+}
+
 export class BackendClient {
   private baseUrl: string;
 
   constructor(baseUrl?: string) {
     this.baseUrl = (baseUrl || config.apiUrl || "http://localhost:8000").replace(/\/$/, "");
+  }
+
+  /** Authenticated request for the `/api/me/*` namespace. */
+  private async authed<T>(
+    method: "GET" | "PUT" | "POST" | "DELETE",
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal
+  ): Promise<T> {
+    const token = accessTokenProvider ? await accessTokenProvider() : null;
+    if (!token) {
+      throw new AuthRequiredError(401, "no session");
+    }
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal,
+    });
+    if (res.status === 401 || res.status === 403) {
+      throw new AuthRequiredError(res.status);
+    }
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const errJson = await res.json();
+        detail = errJson.detail ? JSON.stringify(errJson.detail) : JSON.stringify(errJson);
+      } catch {
+        detail = await res.text();
+      }
+      throw new Error(`HTTP ${res.status} on ${path}: ${detail}`);
+    }
+    return res.json();
+  }
+
+  // --- Authenticated: the caller's primary watchlist (/api/me) ---
+  async getMyWatchlist(signal?: AbortSignal): Promise<any> {
+    return this.authed<any>("GET", "/api/me/watchlist", undefined, signal);
+  }
+
+  async putMyWatchlist(items: unknown[], signal?: AbortSignal): Promise<any> {
+    return this.authed<any>("PUT", "/api/me/watchlist", { items }, signal);
   }
 
   private async get<T>(

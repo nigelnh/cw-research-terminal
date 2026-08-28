@@ -20,6 +20,11 @@ msgpack==1.0.2
 # Cache & State Persistence
 redis>=5.0.0
 
+# Authentication (Step 9) - LOCAL verification of Supabase-minted access tokens only.
+# The backend never issues sessions or stores passwords. PyJWT[crypto] pulls in
+# `cryptography` for RS256/ES256 (JWKS) verification; HS256 works without it.
+PyJWT[crypto]>=2.8,<3.0
+
 # Durable Historical Market-Data Persistence (PostgreSQL)
 # SQLAlchemy 2.0 async ORM + Alembic migrations. asyncpg is the runtime async driver;
 # psycopg2-binary is the synchronous driver Alembic uses to run migrations.

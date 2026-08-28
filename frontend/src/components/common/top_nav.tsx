@@ -1,5 +1,6 @@
 import { useResearchMarket } from "@/data/use_research_market";
 import { useWatchlist } from "@/data/watchlist";
+import { AccountMenu } from "@/features/auth/account_menu";
 
 interface TopNavProps {
   activeTab: "dashboard" | "research";
@@ -248,6 +249,8 @@ export function TopNav({ activeTab, onTabChange }: TopNavProps) {
           </div>
 
           {getStatusLabel()}
+
+          <AccountMenu />
         </div>
       </div>
     </header>
