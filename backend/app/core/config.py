@@ -89,6 +89,50 @@ class Settings(BaseSettings):
     DATABASE_ECHO_SQL: bool = Field(default=False, description="Log every emitted SQL statement (debug only)")
     DATABASE_BULK_CHUNK_SIZE: int = Field(default=5000, description="Rows per INSERT ... ON CONFLICT statement during bulk bar upserts")
 
+    # ------------------------------------------------------------------ #
+    # Historical ingestion (Step 6) - resumable, quota-safe FiinQuant backfill  #
+    # ------------------------------------------------------------------ #
+    # Conservative by design: predictable + resumable + quota-safe, NOT fastest.
+    # Empirically verified (2026-08): this FiinQuant account has a ~1-year historical
+    # LOOKBACK entitlement. A ~355-day request span with small lookback returns 200;
+    # any window whose oldest date is >~365 days old returns HTTP 403. Request *span*
+    # up to ~355 days is fine.
+    INGEST_MAX_LOOKBACK_DAYS: int = Field(
+        default=360,
+        description="Oldest date a historical request may reach back to (account entitlement ~1 year; keep < 365)",
+    )
+    INGEST_MAX_CHUNK_SPAN_DAYS: int = Field(
+        default=350,
+        description="Maximum span of a single provider request window in calendar days (safely inside the observed ~355)",
+    )
+    INGEST_MAX_CONCURRENT_REQUESTS: int = Field(
+        default=1,
+        description="Bounded worker pool size for concurrent historical provider requests "
+        "(1 = fully serial; FiinQuant rate-limits aggressive parallel historical fetches)",
+    )
+    INGEST_MIN_REQUEST_INTERVAL_SECONDS: float = Field(
+        default=2.0,
+        description="Minimum delay between successive provider requests (global throttle)",
+    )
+    INGEST_MAX_RETRIES: int = Field(default=5, description="Max retry attempts for a retryable provider error")
+    INGEST_RETRY_BASE_SECONDS: float = Field(default=2.0, description="Base delay for exponential backoff")
+    INGEST_RETRY_MAX_SECONDS: float = Field(default=60.0, description="Ceiling for a single backoff sleep")
+    INGEST_MAX_SYMBOLS_PER_INVOCATION: int = Field(
+        default=60,
+        description="Refuse a single CLI invocation targeting more symbols than this (quota guardrail)",
+    )
+    INGEST_INCREMENTAL_OVERLAP_DAYS_1D: int = Field(
+        default=5, description="Calendar-day re-fetch overlap for daily incremental sync (vendor EOD revision window)"
+    )
+    INGEST_INCREMENTAL_OVERLAP_DAYS_INTRADAY: int = Field(
+        default=2, description="Calendar-day re-fetch overlap for intraday incremental sync"
+    )
+    INGEST_ADVISORY_LOCK_NAMESPACE: int = Field(
+        default=0x43574947,  # 'CWIG'
+        description="First key of the PostgreSQL two-int advisory lock used to serialise ingestion of one logical stream",
+    )
+    INGEST_SOURCE_LABEL: str = Field(default="fiinquant", description="`source` value written to market_bars / ingestion_* rows")
+
     def sync_database_url(self) -> str:
         """The synchronous (psycopg2) form of DATABASE_URL, used by Alembic migrations."""
         url = self.DATABASE_URL

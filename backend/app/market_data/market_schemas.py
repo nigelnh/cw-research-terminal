@@ -253,6 +253,42 @@ class HistoricalUpstreamError(HistoricalDataError):
     pass
 
 
+# Canonical reasons a historical circuit can be open. AUTH_FAILURE / ENTITLEMENT do not
+# self-heal; RATE_LIMIT / UPSTREAM clear after their cooldown.
+CIRCUIT_REASON_AUTH = "AUTH_FAILURE"
+CIRCUIT_REASON_RATE_LIMIT = "RATE_LIMIT"
+CIRCUIT_REASON_ENTITLEMENT = "ENTITLEMENT"
+CIRCUIT_REASON_UPSTREAM = "UPSTREAM"
+CIRCUIT_REASON_UNKNOWN = "UNKNOWN"
+
+_SELF_HEALING_CIRCUIT_REASONS = frozenset({CIRCUIT_REASON_RATE_LIMIT, CIRCUIT_REASON_UPSTREAM})
+
+
+class HistoricalCircuitOpenError(HistoricalDataError):
+    """Raised when the provider's historical circuit breaker is currently OPEN and is
+    rejecting the request *without contacting upstream*.
+
+    Distinct from the underlying failure classes so callers never have to inspect message
+    strings or hidden provider state to decide retryability:
+
+      * ``reason`` - the canonical class of failure that opened the circuit
+        (``AUTH_FAILURE`` / ``ENTITLEMENT`` / ``RATE_LIMIT`` / ``UPSTREAM`` / ``UNKNOWN``).
+      * ``retry_after_seconds`` - best-effort remaining cooldown before the circuit
+        half-opens.
+      * ``is_retryable`` - True only when the circuit will clear on its own
+        (rate-limit / transient upstream); an auth or entitlement circuit will not.
+    """
+
+    def __init__(self, message: str, *, reason: str, retry_after_seconds: float = 0.0):
+        super().__init__(message)
+        self.reason = reason or CIRCUIT_REASON_UNKNOWN
+        self.retry_after_seconds = max(0.0, float(retry_after_seconds))
+
+    @property
+    def is_retryable(self) -> bool:
+        return self.reason in _SELF_HEALING_CIRCUIT_REASONS
+
+
 class MarketHealthResponse(BaseModel):
     status: str = "ok"
     provider: str
