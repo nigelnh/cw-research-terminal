@@ -13,6 +13,7 @@ from app.instruments.instrument_registry import instrument_registry
 from app.quant.quant_router import quant_router
 from app.quant.quant_engine import live_quant_engine
 from app.quant.historical_volatility_service import historical_volatility_service
+from app.persistence import database as persistence_db
 from app.market_data.market_state import market_state
 from app.market_data.market_websocket import manager
 
@@ -72,6 +73,23 @@ async def lifespan(app: FastAPI):
         await instrument_registry.initialize()
     except Exception as e:
         logger.warning(f"Instrument registry initialization warning: {e}")
+
+    # Durable historical persistence (PostgreSQL). OFF unless DATABASE_ENABLED. Storage
+    # foundation only - the realtime path and the public historical API do NOT depend on
+    # it yet. A failed connection is non-fatal unless DATABASE_REQUIRE_ON_STARTUP is set.
+    if settings.DATABASE_ENABLED:
+        try:
+            await persistence_db.init_engine()
+            await persistence_db.ping()
+            logger.info("PostgreSQL persistence layer: connected.")
+        except Exception as e:
+            if settings.DATABASE_REQUIRE_ON_STARTUP:
+                logger.error(f"PostgreSQL persistence required but unavailable: {e}")
+                raise
+            logger.warning(
+                f"PostgreSQL persistence unavailable (non-fatal, DATABASE_REQUIRE_ON_STARTUP=false): "
+                f"{e.__class__.__name__}: {e}"
+            )
 
     # Wire Quant Engine
     live_quant_engine.startup()
@@ -136,6 +154,10 @@ async def lifespan(app: FastAPI):
         await historical_volatility_service.stop_periodic_refresh()
     except Exception as e:
         logger.warning(f"Historical volatility refresh shutdown warning: {e}")
+    try:
+        await persistence_db.dispose_engine()
+    except Exception as e:
+        logger.warning(f"PostgreSQL persistence shutdown warning: {e}")
 
 
 app = FastAPI(
@@ -189,6 +211,7 @@ async def root_health():
         "redis_connected": store_health.get("redis_connected", False),
         "market_cache_available": store_health.get("market_cache_available", False),
         "quant_scheduler": live_quant_engine.stats(),
+        "database": await persistence_db.health(),
     }
 
 
