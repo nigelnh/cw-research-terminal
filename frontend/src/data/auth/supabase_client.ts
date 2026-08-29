@@ -24,6 +24,16 @@ export function isAuthConfigured(): boolean {
   return readConfig() !== null;
 }
 
+/**
+ * Whether to offer the Google OAuth button. Off by default: the Supabase project must
+ * have the Google provider configured first, otherwise the button dead-ends. Email
+ * magic link needs no provider setup and is always available when auth is configured.
+ */
+export function isGoogleAuthEnabled(): boolean {
+  const env = import.meta.env as Record<string, string | undefined>;
+  return (env.VITE_AUTH_GOOGLE_ENABLED ?? "").trim().toLowerCase() === "true";
+}
+
 /** The shared Supabase client, or `null` when auth is not configured on this build. */
 export function getSupabase(): SupabaseClient | null {
   if (cached !== undefined) return cached;

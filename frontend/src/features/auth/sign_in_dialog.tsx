@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@/data/auth";
+import { useAuth, isGoogleAuthEnabled } from "@/data/auth";
 
 /**
- * Compact sign-in popover. Google OAuth + email magic link. No password field - the
- * provider owns credentials. Not a route, not a wall: the dashboard stays mounted behind it.
+ * Compact sign-in popover. Email magic link always; Google OAuth only when the provider
+ * is configured (VITE_AUTH_GOOGLE_ENABLED). No password field - the provider owns
+ * credentials. Not a route, not a wall: the dashboard stays mounted behind it.
  */
 export function SignInDialog({ onClose }: { onClose: () => void }) {
   const { signInWithGoogle, signInWithEmail } = useAuth();
+  const googleEnabled = isGoogleAuthEnabled();
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -64,28 +66,32 @@ export function SignInDialog({ onClose }: { onClose: () => void }) {
           data stay open either way.
         </p>
 
-        <button
-          type="button"
-          onClick={() => void signInWithGoogle()}
-          className="focus-ring"
-          style={{
-            padding: "9px 12px",
-            borderRadius: "6px",
-            border: "1px solid var(--border-strong)",
-            background: "var(--card)",
-            color: "var(--foreground)",
-            fontSize: "13px",
-            cursor: "pointer",
-          }}
-        >
-          Continue with Google
-        </button>
+        {googleEnabled && (
+          <>
+            <button
+              type="button"
+              onClick={() => void signInWithGoogle()}
+              className="focus-ring"
+              style={{
+                padding: "9px 12px",
+                borderRadius: "6px",
+                border: "1px solid var(--border-strong)",
+                background: "var(--card)",
+                color: "var(--foreground)",
+                fontSize: "13px",
+                cursor: "pointer",
+              }}
+            >
+              Continue with Google
+            </button>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ flex: 1, height: "1px", background: "var(--border)" }} />
-          <span style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>OR</span>
-          <span style={{ flex: 1, height: "1px", background: "var(--border)" }} />
-        </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ flex: 1, height: "1px", background: "var(--border)" }} />
+              <span style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>OR</span>
+              <span style={{ flex: 1, height: "1px", background: "var(--border)" }} />
+            </div>
+          </>
+        )}
 
         <form onSubmit={submitEmail} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           <input
