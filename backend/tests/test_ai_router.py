@@ -61,8 +61,9 @@ def test_missing_api_key_returns_sanitized_503():
     app.dependency_overrides.clear()
 
     assert response.status_code == 503
+    assert response.headers.get("X-AI-Error-Code") == "AI_DISABLED"
     data = response.json()
-    assert "not configured with an API key" in data["detail"]
+    assert "turned off" in data["detail"]
     assert "test-dummy" not in json.dumps(data)
 
 
@@ -147,8 +148,9 @@ async def test_upstream_401_403_sanitized_502(mock_openrouter_client):
         )
 
         assert response.status_code == 502
+        assert response.headers.get("X-AI-Error-Code") == "UPSTREAM_AUTH_ERROR"
         data = response.json()
-        assert "AI inference provider authentication failed" in data["detail"]
+        assert "provider authentication" in data["detail"]
         # Crucial security assertion: Never leak raw provider message or key
         assert "Invalid API key" not in data["detail"]
         assert "test-dummy" not in json.dumps(data)
@@ -177,13 +179,17 @@ async def test_upstream_429_rate_limit_handled(mock_openrouter_client):
         )
 
         assert response.status_code == 429
+        assert response.headers.get("X-AI-Error-Code") == "UPSTREAM_RATE_LIMIT"
         data = response.json()
-        assert "Rate limit reached" in data["detail"]
+        assert "rate-limiting" in data["detail"]
+        assert "Rate limit exceeded" not in json.dumps(data)
 
     app.dependency_overrides.clear()
 
 
-def test_request_validation_bounds():
+def test_request_validation_bounds(mock_openrouter_client):
+    app.dependency_overrides[get_client] = lambda: mock_openrouter_client
+    # Both are rejected by the request schema (pydantic) before the handler runs.
     # 1. Empty messages list
     res_empty = client.post("/api/ai/chat", json={"messages": [], "stream": False})
     assert res_empty.status_code == 422
@@ -194,6 +200,16 @@ def test_request_validation_bounds():
         json={"messages": [{"role": "user", "content": "A" * 9000}], "stream": False},
     )
     assert res_oversized.status_code == 422
+
+    # 3. Message over AI_MAX_MESSAGE_LENGTH but under the schema's hard cap - caught by
+    #    validate_chat_input, which the router normalises to INVALID_REQUEST (400) + header.
+    res_mid = client.post(
+        "/api/ai/chat",
+        json={"messages": [{"role": "user", "content": "A" * 5000}], "stream": False},
+    )
+    assert res_mid.status_code == 400
+    assert res_mid.headers.get("X-AI-Error-Code") == "INVALID_REQUEST"
+    app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
@@ -227,6 +243,59 @@ async def test_streaming_chat_generator(mock_openrouter_client):
         last_chunk = json.loads(lines[-1].replace("data: ", ""))
         assert last_chunk["done"] is True
 
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_streaming_error_frame_carries_machine_code(mock_openrouter_client):
+    """A provider failure before the first token yields a classified SSE error frame -
+    machine code present, raw provider text absent."""
+    from app.ai.openrouter_client import AiModelUnavailableError
+
+    async def failing_stream(messages, system_prompt):
+        raise AiModelUnavailableError("model xyz returned 404 upstream")
+        yield  # pragma: no cover - generator marker
+
+    with patch.object(mock_openrouter_client, "stream_chat", side_effect=failing_stream):
+        app.dependency_overrides[get_client] = lambda: mock_openrouter_client
+        response = client.post(
+            "/api/ai/chat",
+            json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
+        )
+        assert response.status_code == 200
+        frames = [
+            json.loads(l.replace("data: ", ""))
+            for l in response.text.strip().split("\n\n")
+            if l.startswith("data: ")
+        ]
+        err = next(f for f in frames if f.get("error"))
+        assert err["code"] == "MODEL_UNAVAILABLE"
+        assert err["done"] is True
+        assert "404" not in response.text and "xyz" not in response.text
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_daily_budget_exhausted_maps_to_budget_code(mock_openrouter_client):
+    from app.ai.ai_limits import ai_daily_budget
+
+    app.dependency_overrides[get_client] = lambda: mock_openrouter_client
+    original = ai_daily_budget.check_and_increment
+
+    def boom():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=429, detail="The daily AI request budget for this server has been reached.")
+
+    ai_daily_budget.check_and_increment = boom  # type: ignore[assignment]
+    try:
+        response = client.post(
+            "/api/ai/chat",
+            json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
+        )
+        assert response.status_code == 429
+        assert response.headers.get("X-AI-Error-Code") == "AI_BUDGET_EXCEEDED"
+    finally:
+        ai_daily_budget.check_and_increment = original  # type: ignore[assignment]
         app.dependency_overrides.clear()
 
 

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { config } from "@/config";
 import {
   type StoredChatMessage,
   type CopilotHistoryStore,
@@ -10,6 +11,56 @@ import {
   COPILOT_STORAGE_KEY_V2,
   LEGACY_STORAGE_KEY_V1,
 } from "./copilot_history_store";
+
+/**
+ * The AI chat endpoint on the configured backend. In production this is the absolute
+ * Railway URL (from VITE_MARKET_DATA_REST_URL, same origin the market REST + WS use); in
+ * local dev it is http://localhost:8501. A bare "/api/ai/chat" would resolve against the
+ * Vercel static origin, which has no such route (POST -> 405) - that was the production bug.
+ */
+export const DEFAULT_AI_CHAT_ENDPOINT = `${(config.apiUrl || "").replace(/\/$/, "")}/api/ai/chat`;
+
+/**
+ * Internal AI failure codes emitted by the backend (`X-AI-Error-Code` header on a non-2xx
+ * response, or a `code` field on an SSE `{error}` frame). Kept in the console for support;
+ * the user only ever sees the short prose the backend already sanitised.
+ */
+export type AiErrorCode =
+  | "AI_DISABLED"
+  | "AI_BUDGET_EXCEEDED"
+  | "RATE_LIMITED"
+  | "MODEL_UNAVAILABLE"
+  | "UPSTREAM_AUTH_ERROR"
+  | "UPSTREAM_TIMEOUT"
+  | "UPSTREAM_RATE_LIMIT"
+  | "UPSTREAM_ERROR"
+  | "INVALID_REQUEST"
+  | "STREAM_INTERRUPTED"
+  | "NETWORK_ERROR"
+  | "INTERNAL_ERROR";
+
+const AI_ERROR_FALLBACK_MESSAGE: Record<AiErrorCode, string> = {
+  AI_DISABLED: "The AI research assistant is turned off on this server.",
+  AI_BUDGET_EXCEEDED: "The AI assistant has reached its daily usage limit. Try again tomorrow.",
+  RATE_LIMITED: "The AI assistant is busy right now. Please retry in a moment.",
+  MODEL_UNAVAILABLE: "The AI model is temporarily unavailable. Please try again shortly.",
+  UPSTREAM_AUTH_ERROR: "The AI service is unavailable (provider authentication).",
+  UPSTREAM_TIMEOUT: "The AI response timed out. Please try again.",
+  UPSTREAM_RATE_LIMIT: "The AI provider is rate-limiting requests. Please retry in a moment.",
+  UPSTREAM_ERROR: "The AI service returned an error. Please try again.",
+  INVALID_REQUEST: "That request could not be processed.",
+  STREAM_INTERRUPTED: "The AI response was interrupted. Please try again.",
+  NETWORK_ERROR: "Could not reach the AI service. Please try again.",
+  INTERNAL_ERROR: "An unexpected error occurred while generating the AI response.",
+};
+
+function messageForAiError(code: string | null | undefined, serverMessage?: string): string {
+  if (serverMessage && serverMessage.trim()) return serverMessage.trim();
+  if (code && code in AI_ERROR_FALLBACK_MESSAGE) {
+    return AI_ERROR_FALLBACK_MESSAGE[code as AiErrorCode];
+  }
+  return "Failed to generate AI response.";
+}
 
 export interface ChatMessage {
   id?: string;
@@ -82,7 +133,7 @@ export function normalizePlainResponse(text: string): string {
     .trim();
 }
 
-export function useAiChat(apiEndpoint: string = "/api/ai/chat") {
+export function useAiChat(apiEndpoint: string = DEFAULT_AI_CHAT_ENDPOINT) {
   const [store, setStore] = useState<CopilotHistoryStore>(() => loadCopilotHistory());
   const [hasHydrated, setHasHydrated] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -294,16 +345,20 @@ export function useAiChat(apiEndpoint: string = "/api/ai/chat") {
         });
 
         if (!response.ok) {
-          if (response.status === 429) {
-            throw new Error("Rate limit reached. Please wait a moment and try again.");
-          } else if (response.status === 503) {
-            const errData = await response.json().catch(() => ({}));
-            throw new Error(errData.detail || "AI assistant is temporarily unavailable.");
-          } else if (response.status === 502) {
-            throw new Error("AI provider authentication failed.");
-          } else {
-            throw new Error("Failed to generate AI response.");
-          }
+          // Prefer the backend's own classification; fall back to the HTTP status for
+          // errors raised by upstream middleware (e.g. the shared rate limiter's 429).
+          const code =
+            response.headers.get("X-AI-Error-Code") ||
+            (response.status === 429
+              ? "RATE_LIMITED"
+              : response.status === 503
+                ? "AI_DISABLED"
+                : response.status === 502
+                  ? "UPSTREAM_ERROR"
+                  : null);
+          const errData = await response.json().catch(() => ({} as { detail?: string }));
+          console.warn(`AI request failed [${code ?? "HTTP_" + response.status}] (HTTP ${response.status})`);
+          throw new Error(messageForAiError(code, errData?.detail));
         }
 
         const reader = response.body?.getReader();
@@ -333,7 +388,10 @@ export function useAiChat(apiEndpoint: string = "/api/ai/chat") {
             try {
               const data = JSON.parse(jsonStr);
               if (data.error) {
-                setError(data.error);
+                if (data.code) {
+                  console.warn(`AI stream failed [${data.code}]`);
+                }
+                setError(messageForAiError(data.code, data.error));
                 continue;
               }
               if (data.type === "activity" && data.label) {
@@ -394,7 +452,15 @@ export function useAiChat(apiEndpoint: string = "/api/ai/chat") {
         if (err.name === "AbortError") {
           return;
         }
-        const errorMsg = err.message || "An unexpected error occurred.";
+        // A thrown TypeError here is the browser failing to reach the backend at all
+        // (DNS, CORS preflight, offline) - distinct from a classified backend error.
+        const isTransport = err instanceof TypeError;
+        if (isTransport) {
+          console.warn("AI request failed [NETWORK_ERROR]", err?.message);
+        }
+        const errorMsg = isTransport
+          ? AI_ERROR_FALLBACK_MESSAGE.NETWORK_ERROR
+          : err.message || "An unexpected error occurred.";
         setError(errorMsg);
 
         // Remove empty assistant placeholder if failed before receiving content

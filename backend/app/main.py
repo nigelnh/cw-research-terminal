@@ -245,6 +245,7 @@ app.add_middleware(
     allow_credentials=bool(_cors_origins),  # credentials only with an explicit origin list
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
+    expose_headers=["X-AI-Error-Code"],
     max_age=600,
 )
 app.add_middleware(SecurityHeadersMiddleware)
