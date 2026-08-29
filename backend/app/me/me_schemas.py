@@ -43,6 +43,8 @@ class WatchlistItemView(BaseModel):
     exercise_ratio: float | None = Field(default=None, serialization_alias="exerciseRatio")
     maturity_date: str | None = Field(default=None, serialization_alias="maturityDate")
     last_trading_date: str | None = Field(default=None, serialization_alias="lastTradingDate")
+    data_quality: str | None = Field(default=None, serialization_alias="dataQuality")
+    metadata_verification: str | None = Field(default=None, serialization_alias="metadataVerification")
     notes: str | None = None
 
 

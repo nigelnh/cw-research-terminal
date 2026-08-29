@@ -34,6 +34,8 @@ interface InstrumentDrawerProps {
     exerciseRatio?: number | null;
     maturityDate?: string | null;
     lastTradingDate?: string | null;
+    dataQuality?: "COMPLETE" | "PARTIAL" | null;
+    metadataVerification?: "VERIFIED_CURRENT" | "CONFLICTING" | "STALE" | "UNVERIFIED" | null;
     quote?: MarketQuote;
     cw?: CoveredWarrant;
   } | null;
@@ -533,7 +535,7 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
             {/* CW-Specific Sections */}
             {isCW && (
               <>
-                {(!instrument.strikePrice && !cw?.strikePrice || !instrument.exerciseRatio && !cw?.exerciseRatio || !instrument.maturityDate && !cw?.maturityDate) && (
+                {instrument.dataQuality === "PARTIAL" && (
                   <div
                     style={{
                       padding: "8px 12px",
@@ -546,7 +548,23 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
                       lineHeight: "1.4",
                     }}
                   >
-                    <strong style={{ color: "var(--foreground)" }}>Partial Specification:</strong> Strike, Ratio, or Maturity Date are unverified in registry for this warrant. Quantitative pricing and Implied Volatility calculations are unavailable.
+                    <strong style={{ color: "var(--foreground)" }}>Partial specification:</strong> strike, ratio, or maturity is missing in the registry. Implied volatility and Greeks are unavailable.
+                  </div>
+                )}
+                {instrument.metadataVerification === "CONFLICTING" && (
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid var(--destructive)",
+                      borderRadius: "4px",
+                      marginBottom: "12px",
+                      fontSize: "11px",
+                      color: "var(--muted-foreground)",
+                      lineHeight: "1.4",
+                    }}
+                  >
+                    <strong style={{ color: "var(--destructive)" }}>Conflicting contract terms:</strong> the as-issued terms below are known, but an effective (corporate-action-adjusted) value disagrees across public sources. Quant analytics are held back until the effective terms are reconciled from an authoritative notice.
                   </div>
                 )}
 

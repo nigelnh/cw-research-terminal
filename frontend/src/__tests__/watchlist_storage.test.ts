@@ -3,6 +3,7 @@ import {
   WatchlistStorage,
   WATCHLIST_STORAGE_KEY_V1,
   WATCHLIST_STORAGE_KEY_V2,
+  WATCHLIST_STORAGE_KEY_V3,
   CURRENT_WATCHLIST_SCHEMA_VERSION,
   type ResearchWatchlist,
 } from "../domain/models/watchlist";
@@ -65,42 +66,53 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
     expect(loaded.version).toBe(CURRENT_WATCHLIST_SCHEMA_VERSION);
   });
 
-  it("2. One-Time Migration: Migrates legacy V1 persisted watchlist to exact 5 primary symbols", () => {
-    // Seed with the exact old persisted primary symbols under V1 storage
-    const oldV1Payload = {
+  it("2. Migration to v3 keeps the user's own symbols + order and STRIPS frozen contract terms", () => {
+    // A pre-correction v2 payload: the user's real list, with frozen (now-stale) CW terms.
+    const oldV2 = {
       id: "default_personal_watchlist",
       name: "My Personal Research Dashboard",
       items: [
-        { symbol: "CFPT2602", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 1 },
-        { symbol: "CHPG2602", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 2 },
-        { symbol: "CFPT2604", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 3 },
-        { symbol: "CHPG2611", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 4 },
-        { symbol: "CHPG2609", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 5 },
-        { symbol: "CHPG2604", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 6 },
+        { symbol: "HPG", instrumentType: "STOCK", addedAt: 1 },
+        {
+          symbol: "CTCB2601", instrumentType: "CW", underlyingSymbol: "TCB",
+          issuer: "KIS", strikePrice: 25000, exerciseRatio: 2, maturityDate: "2026-12-10", addedAt: 2,
+        },
+        { symbol: "CFPT2604", instrumentType: "CW", underlyingSymbol: "FPT", issuer: "SSI", strikePrice: 99999, addedAt: 3 },
+        { symbol: "hpg", instrumentType: "STOCK", addedAt: 4 }, // dup (case) -> deduped
       ],
       createdAt: 1000,
       updatedAt: 2000,
-      version: 1,
+      version: 2,
     };
+    mockStorage.setItem(WATCHLIST_STORAGE_KEY_V2, JSON.stringify(oldV2));
 
-    mockStorage.setItem(WATCHLIST_STORAGE_KEY_V1, JSON.stringify(oldV1Payload));
+    const s = new WatchlistStorage(WATCHLIST_STORAGE_KEY_V3);
+    const migrated = s.loadWatchlist();
 
-    // Load with new V2 storage instance
-    const defaultStorage = new WatchlistStorage(WATCHLIST_STORAGE_KEY_V2);
-    const migrated = defaultStorage.loadWatchlist();
+    // user's symbols + order preserved (dedup on the case-variant HPG)
+    expect(migrated.items.map((i) => i.symbol)).toEqual(["HPG", "CTCB2601", "CFPT2604"]);
+    expect(migrated.version).toBe(CURRENT_WATCHLIST_SCHEMA_VERSION); // 3
+    expect(migrated.items[1].addedAt).toBe(2); // preference (addedAt) kept
 
-    // Assert exact 5 primary universe symbols
-    expect(migrated.items.length).toBe(5);
-    expect(migrated.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CTCB2601", "CVPB2615"]);
-    expect(migrated.version).toBe(2);
+    // frozen contract terms are GONE - they must be resolved live from the registry
+    for (const it of migrated.items as any[]) {
+      expect(it.issuer).toBeUndefined();
+      expect(it.strikePrice).toBeUndefined();
+      expect(it.exerciseRatio).toBeUndefined();
+      expect(it.maturityDate).toBeUndefined();
+    }
+    // identity hint (underlying) survives - a CW's underlying never changes
+    expect((migrated.items[1] as any).underlyingSymbol).toBe("TCB");
 
-    // Assert deduplicated realtime subscription planner output
-    const plan = SubscriptionPlanner.computePlan(migrated.items, [], 33);
-    expect(plan.requiredSymbols).toEqual(["CTCB2601", "CVPB2615", "HPG", "NVL", "TCB", "VHM", "VPB"]);
-    expect(plan.symbolCount).toBe(7);
-
-    // Assert old V1 key was cleaned up
+    // old keys cleaned up; v3 written
     expect(mockStorage.getItem(WATCHLIST_STORAGE_KEY_V1)).toBeNull();
+    expect(mockStorage.getItem(WATCHLIST_STORAGE_KEY_V2)).toBeNull();
+    expect(mockStorage.getItem(WATCHLIST_STORAGE_KEY_V3)).not.toBeNull();
+
+    // subscription planner still works off the migrated list
+    const plan = SubscriptionPlanner.computePlan(migrated.items, [], 33);
+    expect(plan.requiredSymbols).toContain("CTCB2601");
+    expect(plan.requiredSymbols).toContain("TCB");
   });
 
   it("3. Reload after migration remains exactly 5 symbols without resetting", () => {

@@ -109,3 +109,22 @@ async def test_real_demo_symbols_end_state(tmp_path):
     assert cvpb.status == InstrumentLifecycleStatus.ACTIVE and cvpb.effective_strike == 28500.0
     assert ctcb.metadata_verification == MetadataVerificationStatus.CONFLICTING
     assert ctcb.provenance is not None and ctcb.provenance.effective_terms_source is not None
+
+
+async def test_conflicting_metadata_keeps_the_quant_gate_closed():
+    """CONFLICTING must NOT unlock analytics even though data_quality is COMPLETE."""
+    from app.instruments.instrument_registry import instrument_registry
+    from app.quant.quant_engine import LiveQuantEngine
+    from app.market_data.market_schemas import CanonicalQuote
+
+    await instrument_registry.initialize()
+    eng = LiveQuantEngine()
+    und = CanonicalQuote(symbol="TCB", last_price=33400.0)
+    cw = CanonicalQuote(symbol="CTCB2601", bid1_price=60.0, ask1_price=70.0)
+    a = await eng.compute_warrant_analytics(
+        "CTCB2601", spec=await instrument_registry.get_instrument("CTCB2601"), cw_state=cw, und_state=und
+    )
+    assert a.is_available is False
+    assert "METADATA_NOT_VERIFIED_CURRENT" in a.unavailable_reason
+    assert "CONFLICTING" in a.unavailable_reason
+    assert a.iv_bid is None and a.greeks.delta is None

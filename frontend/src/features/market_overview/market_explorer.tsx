@@ -7,6 +7,7 @@ import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket, useQuote, useCoveredWarrant } from "@/data/use_research_market";
 import { useSearchParam, useNullableSearchParam } from "@/data/url/use_url_state";
 import { deriveSelectedInstrument } from "@/data/selected_instrument";
+import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import { computeSpread } from "@/domain/quant_display";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
 
@@ -19,20 +20,28 @@ export function MarketExplorer() {
   const [selectedSymbol, setSelectedSymbol] = useNullableSearchParam("symbol");
 
   const { items } = useWatchlist();
+  const { getSpec } = useInstrumentSpecs();
   const { quotes, connectionState, upstreamFeedState, marketSession, marketSessionActive, dataMode } =
     useResearchMarket();
 
-  // Derived (never stored): the selected instrument's contract metadata comes from the
-  // watchlist; its live quote/analytics come from the realtime store.
+  // Derived (never stored): contract metadata is the canonical backend registry spec; the
+  // watchlist item contributes identity only; live quote/analytics come from the realtime store.
   const selectedQuote = useQuote(selectedSymbol);
   const selectedCw = useCoveredWarrant(selectedSymbol);
   const watchlistItem = useMemo(
     () => items.find((i) => i.symbol.toUpperCase() === (selectedSymbol ?? "").toUpperCase()) ?? null,
     [items, selectedSymbol]
   );
+  const selectedSpec = getSpec(selectedSymbol);
   const selected = useMemo(
-    () => deriveSelectedInstrument(selectedSymbol, { watchlistItem, quote: selectedQuote, cw: selectedCw }),
-    [selectedSymbol, watchlistItem, selectedQuote, selectedCw]
+    () =>
+      deriveSelectedInstrument(selectedSymbol, {
+        instrumentSpec: selectedSpec,
+        watchlistItem,
+        quote: selectedQuote,
+        cw: selectedCw,
+      }),
+    [selectedSymbol, selectedSpec, watchlistItem, selectedQuote, selectedCw]
   );
 
   const contextEnvelope = useMemo<ResearchContextEnvelope>(() => {

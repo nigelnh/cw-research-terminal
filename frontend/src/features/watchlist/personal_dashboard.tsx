@@ -4,6 +4,7 @@ import type { WatchlistItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
 import { deriveSelectedInstrument } from "@/data/selected_instrument";
+import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import { Change } from "@/components/common/change";
 import { InstrumentDrawer } from "@/features/warrant_info/instrument_drawer";
 
@@ -36,10 +37,12 @@ export function PersonalDashboard({
 }: PersonalDashboardProps) {
   const { items, removeFromWatchlist, plan } = useWatchlist();
   const { quotes, warrants } = useResearchMarket();
+  const { getSpec } = useInstrumentSpecs();
 
   const setSelectedSymbol = onSelectSymbol ?? (() => {});
 
-  // Drawer instrument is DERIVED from the watchlist item + realtime store, not stored.
+  // Contract metadata = canonical backend registry spec; watchlist item = identity only;
+  // live quote/analytics = realtime store.
   const selectedWatchlistItem = useMemo(
     () => items.find((i) => i.symbol.toUpperCase() === (selectedSymbol ?? "").toUpperCase()) ?? null,
     [items, selectedSymbol]
@@ -47,11 +50,12 @@ export function PersonalDashboard({
   const selectedInstrument = useMemo(
     () =>
       deriveSelectedInstrument(selectedSymbol, {
+        instrumentSpec: getSpec(selectedSymbol),
         watchlistItem: selectedWatchlistItem,
         quote: selectedSymbol ? quotes.get(selectedSymbol.toUpperCase()) : undefined,
         cw: selectedSymbol ? warrants.get(selectedSymbol.toUpperCase()) : undefined,
       }),
-    [selectedSymbol, selectedWatchlistItem, quotes, warrants]
+    [selectedSymbol, selectedWatchlistItem, quotes, warrants, getSpec]
   );
 
   // Helper formatters with strict — fallback (never 0 for missing data)
@@ -261,21 +265,28 @@ export function PersonalDashboard({
                   const priceChangePct = q?.priceChangePercent ?? cw?.quote?.priceChangePercent;
                   const totalVolume = q?.totalVolume ?? cw?.quote?.totalVolume;
 
-                  const underlyingSymbol = item.underlyingSymbol || cw?.underlyingSymbol || null;
+                  // Canonical contract metadata from the backend registry - NOT the
+                  // (possibly stale) persisted watchlist item.
+                  const spec = getSpec(item.symbol);
+                  const underlyingSymbol =
+                    spec?.underlyingSymbol || item.underlyingSymbol || cw?.underlyingSymbol || null;
                   const underlyingPrice =
                     cw?.underlyingPrice ?? (underlyingSymbol ? quotes.get(underlyingSymbol)?.lastPrice : null);
-                  const issuer = item.issuer || cw?.issuer || null;
-                  const strikePrice = item.strikePrice ?? (cw?.strikePrice ? cw.strikePrice : null);
-                  const exerciseRatio = item.exerciseRatio ?? (cw?.exerciseRatio ? cw.exerciseRatio : null);
-                  const lastTradingDate = item.lastTradingDate || cw?.lastTradingDate || null;
-                  const maturityDate = item.maturityDate || cw?.maturityDate || null;
+                  const issuer = spec?.issuer ?? null;
+                  const strikePrice = spec?.strikePrice ?? null;
+                  const exerciseRatio = spec?.exerciseRatio ?? null;
+                  const lastTradingDate = spec?.lastTradingDate ?? null;
+                  const maturityDate = spec?.maturityDate ?? null;
 
                   const ivAsk = cw?.ivAsk;
                   const ivTrade = cw?.ivTrade;
                   const ivBid = cw?.ivBid;
 
                   const isSelected = selectedSymbol === item.symbol;
-                  const isPartial = !strikePrice || !exerciseRatio || (!lastTradingDate && !maturityDate);
+                  // "partial" reflects the registry's data_quality; "conflicting" is a distinct
+                  // state (terms known but disputed). Until the spec loads, show neither.
+                  const isPartial = spec ? spec.dataQuality === "PARTIAL" : false;
+                  const isConflicting = spec?.metadataVerification === "CONFLICTING";
 
                   return (
                     <tr
@@ -293,8 +304,8 @@ export function PersonalDashboard({
                           <span>{item.symbol}</span>
                           {isPartial && (
                             <span
-                              title="Unverified / Partial specification in registry. Strike, Ratio, and Maturity Date are missing, so Implied Volatility and Greeks are unavailable."
-                              aria-label="Unverified / Partial contract terms"
+                              title="Partial specification in registry. Strike, Ratio, or Maturity Date is missing, so Implied Volatility and Greeks are unavailable."
+                              aria-label="Partial contract terms"
                               style={{
                                 display: "inline-flex",
                                 alignItems: "center",
@@ -309,6 +320,25 @@ export function PersonalDashboard({
                               }}
                             >
                               partial
+                            </span>
+                          )}
+                          {isConflicting && (
+                            <span
+                              title="Contract terms are known but disagree across public sources (e.g. an unresolved corporate-action adjustment). Quant analytics are held back until the effective terms are reconciled."
+                              aria-label="Conflicting contract terms"
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                fontSize: "10px",
+                                color: "var(--destructive)",
+                                backgroundColor: "var(--secondary)",
+                                padding: "1px 4px",
+                                borderRadius: "2px",
+                                cursor: "help",
+                                fontWeight: 400,
+                              }}
+                            >
+                              conflicting
                             </span>
                           )}
                         </div>

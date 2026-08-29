@@ -43,22 +43,19 @@ function buildItem(item: {
   symbol: string;
   instrumentType: "CW" | "STOCK" | "INDEX";
   underlyingSymbol?: string | null;
+  notes?: string;
+  // Callers may still pass contract fields (e.g. from a research-universe row); they are
+  // intentionally ignored - contract terms are resolved live from the backend registry.
   issuer?: string | null;
   strikePrice?: number | null;
   exerciseRatio?: number | null;
   maturityDate?: string | null;
   lastTradingDate?: string | null;
-  notes?: string;
 }): WatchlistItem {
   return {
     symbol: item.symbol.toUpperCase(),
     instrumentType: item.instrumentType,
     underlyingSymbol: item.underlyingSymbol ? item.underlyingSymbol.toUpperCase() : null,
-    issuer: item.issuer || null,
-    strikePrice: item.strikePrice ?? null,
-    exerciseRatio: item.exerciseRatio ?? null,
-    maturityDate: item.maturityDate || null,
-    lastTradingDate: item.lastTradingDate || null,
     addedAt: Date.now(),
     notes: item.notes,
   };

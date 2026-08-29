@@ -46,6 +46,7 @@ class ResolvedInstrument:
     maturity_date: date | None = None
     last_trading_date: date | None = None
     data_quality: str | None = None  # COMPLETE | PARTIAL | None (observability only)
+    metadata_verification: str | None = None  # VERIFIED_CURRENT | CONFLICTING | STALE | UNVERIFIED | None
 
 
 def _parse_iso_date(value: str | None) -> date | None:
@@ -86,6 +87,9 @@ class InstrumentResolver:
                 maturity_date=_parse_iso_date(cw.maturity_date),
                 last_trading_date=_parse_iso_date(cw.last_trading_date),
                 data_quality=cw.data_quality.value if cw.data_quality else None,
+                metadata_verification=(
+                    cw.metadata_verification.value if cw.metadata_verification else None
+                ),
             )
 
         # 2. Persisted instruments table (seeded stocks / indices).
