@@ -178,6 +178,11 @@ class ToolExecutor:
         wants_history = any(k in q_lower for k in HISTORY_KEYWORDS)
         wants_order_book = any(k in q_lower for k in ORDER_BOOK_KEYWORDS)
         is_dashboard_query = any(k in q_lower for k in DASHBOARD_KEYWORDS)
+        # Outside an active session there is no live quote to fetch - pull the last
+        # completed session's end-of-day series so the model cites real closing values
+        # instead of the "no quote available" dead end (Step 13C).
+        market_closed = context is not None and context.marketSessionActive is False
+        pull_eod = wants_history or market_closed
 
         # Case 1: one or more recognised symbols in the query / on screen
         if resolved:
@@ -190,8 +195,8 @@ class ToolExecutor:
                 elif wants_order_book:
                     await self.call_tool("get_order_book", {"symbol": sym})
 
-                if wants_history:
-                    await self.call_tool("get_history", {"symbol": sym})
+                if pull_eod:
+                    await self.call_tool("get_history", {"symbol": sym, "lookback_days": 30})
 
         # Case 2: dashboard comparison query (e.g. "which stock is doing best?")
         elif is_dashboard_query:
