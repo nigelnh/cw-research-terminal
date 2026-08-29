@@ -2,8 +2,19 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.core.config import settings
+from app.core.production_guard import collect_production_problems, enforce_production_config
+from app.security import (
+    MaxBodySizeMiddleware,
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
+    ai_call_gate,
+    history_gapfill_gate,
+    security_counters,
+)
+from app.security.rate_limiter import rate_limiter
 from app.ai.ai_router import ai_router
 from app.market_data.market_router import market_router
 from app.market_data.market_websocket import ws_router
@@ -70,7 +81,17 @@ logger = logging.getLogger("cw-research-backend")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: initialize instrument registry, quant engine, and market data provider
-    logger.info("Initializing CW Research Platform Backend...")
+    logger.info("Initializing CW Research Terminal Backend...")
+
+    # ---- Public-API hardening (Step 10) + production fail-safe (Step 11 prep) ----
+    # rate_limiter.configure() itself raises RateLimiterStartupError for an unsafe
+    # production limiter config; the guard below is the single coherent check for
+    # everything else. Both are no-ops when ENVIRONMENT != production.
+    await rate_limiter.configure()
+    ai_call_gate.set_limit(settings.AI_MAX_CONCURRENT)
+    history_gapfill_gate.set_limit(settings.HISTORY_MAX_CONCURRENT_GAPFILLS)
+    enforce_production_config(settings, rate_limiter_mode=rate_limiter.mode)
+
     try:
         await instrument_registry.initialize()
     except Exception as e:
@@ -170,7 +191,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown: stop ingestion first (no new ticks), then drain the analytics scheduler,
     # then background refreshers.
-    logger.info("Shutting down CW Research Platform Backend...")
+    logger.info("Shutting down CW Research Terminal Backend...")
     try:
         await subscription_manager.shutdown()
     except Exception as e:
@@ -190,25 +211,33 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="CW Research Platform API",
+    title="CW Research Terminal API",
     version="1.0.0",
     description="Quantitative Covered Warrant Research Terminal Gateway and AI Copilot Service",
     lifespan=lifespan,
 )
 
-# CORS middleware for local development and proxying
+# ------------------------------------------------------------------ #
+# Middleware stack (Step 10). add_middleware prepends, so execution order is the
+# REVERSE of the calls below:
+#   TrustedHost -> SecurityHeaders -> CORS -> RateLimit -> MaxBodySize -> routes
+# CORS wraps RateLimit so a 429 still carries Access-Control-Allow-Origin and the
+# browser can read it. None of these touch the websocket scope.
+# ------------------------------------------------------------------ #
+_cors_origins = settings.cors_allowed_origins()
+
+app.add_middleware(MaxBodySizeMiddleware)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=bool(_cors_origins),  # credentials only with an explicit origin list
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
+    max_age=600,
 )
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts())
 
 # Mount Routers
 app.include_router(ai_router)
@@ -217,6 +246,15 @@ app.include_router(instruments_router)
 app.include_router(quant_router)
 app.include_router(me_router)
 app.include_router(ws_router)
+
+
+def _ai_daily_budget_snapshot() -> dict:
+    try:
+        from app.ai.ai_limits import ai_daily_budget
+
+        return ai_daily_budget.snapshot()
+    except Exception:  # noqa: BLE001
+        return {"enabled": False}
 
 
 @app.get("/health", tags=["System"])
@@ -252,6 +290,31 @@ async def root_health():
                 if settings.SUPABASE_JWT_SECRET.strip()
                 else "disabled"
             ),
+        },
+        "security": {
+            "rate_limit": rate_limiter.health(),
+            "production_config_problems": len(
+                collect_production_problems(settings, rate_limiter_mode=rate_limiter.mode)
+            ),
+            "ai_public_enabled": bool(settings.AI_ENABLED and settings.AI_PUBLIC_ENABLED),
+            "public_realtime_enabled": bool(settings.PUBLIC_REALTIME_ENABLED),
+            "cors_origins_configured": bool(settings.CORS_ALLOWED_ORIGINS.strip()),
+            "allowed_hosts_enforced": bool(settings.ALLOWED_HOSTS.strip()),
+            "hsts_enabled": bool(settings.SECURITY_HSTS_ENABLED),
+            "gates": {
+                "ai_calls": {"limit": ai_call_gate.limit, "in_flight": ai_call_gate.in_flight},
+                "history_gapfill": {
+                    "limit": history_gapfill_gate.limit,
+                    "in_flight": history_gapfill_gate.in_flight,
+                },
+            },
+            "ai_daily_budget": _ai_daily_budget_snapshot(),
+            "ws": {
+                "active": manager.active_count,
+                "max_total": settings.WS_MAX_CONNECTIONS_TOTAL,
+                "max_per_client": settings.WS_MAX_CONNECTIONS_PER_IP,
+            },
+            "counters": security_counters.snapshot(),
         },
     }
 

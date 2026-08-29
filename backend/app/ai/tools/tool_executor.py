@@ -13,7 +13,7 @@ from app.ai.tools.tool_registry import execute_tool, TOOL_HANDLERS
 
 logger = logging.getLogger(__name__)
 
-# Primary symbols recognized in the platform
+# Primary symbols recognized in the terminal
 PRIMARY_SYMBOLS = {"HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"}
 CW_PATTERN = re.compile(r"\b(C[A-Z0-9]{7})\b", re.IGNORECASE)
 STOCK_PATTERN = re.compile(r"\b(HPG|NVL|VHM|FPT|VIC|MSN|MWG|SSI|VND|TCB|MBB|STB|VPB)\b", re.IGNORECASE)

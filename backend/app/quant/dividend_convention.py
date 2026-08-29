@@ -31,10 +31,12 @@ Consequences for the model:
    from the *volatility* estimate; it does not touch the *drift* (q).
 
 Evidence (ranked strongest first):
-  * The recovered KB Securities desk formula `F-05` (`legacy/historical_formulas/theo_prc_t.js`)
-    and every legacy Greek formula use **dividend-free** Black-Scholes: no q, no e^{-qT}.
-  * `docs/domain/warrant_domain_contract.md` §3 - dividends handled by term adjustment.
-  * VN regulatory framework (issuer obligation to adjust CW terms for corporate actions).
+  * VN regulatory framework: the issuer is obliged to adjust CW contract terms (strike,
+    conversion ratio) for corporate actions on the ex-date, which removes dividend drag
+    for the holder - so a continuous BSM dividend yield q > 0 would double-count.
+  * The standard closed-form covered-warrant theoretical price is dividend-free
+    Black-Scholes: `theo_prc = C_BS(S, K_effective, T, r, sigma) / conversion_ratio`,
+    with no q and no e^{-qT} term.
   * `backend/app/instruments/data/active_warrants.json` - populated `effective_*` terms
     (e.g. CHPG2602 adjusted after an HPG dividend).
 
@@ -86,8 +88,8 @@ CW_DIVIDEND_YIELD_CONVENTION = DividendYieldConvention(
         "applied through the adjusted strike/ratio and systematically underprice the warrant."
     ),
     source=(
-        "docs/domain/warrant_domain_contract.md section 3 (corporate action term adjustments); "
-        "legacy KB desk formula F-05 (legacy/historical_formulas/theo_prc_t.js) - dividend-free "
-        "Black-Scholes; docs/QUANT_CONTRACT.md section 7."
+        "VN covered-warrant regulatory framework: issuer corporate-action term adjustments "
+        "(strike / conversion ratio on ex-date); standard dividend-free Black-Scholes "
+        "closed form for the theoretical price."
     ),
 )

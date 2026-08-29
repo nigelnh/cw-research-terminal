@@ -5,7 +5,7 @@ import { BackendInstrumentProvider } from "../data/backend/backend_instrument_pr
 import { BackendHistoricalDataProvider } from "../data/backend/backend_historical_data_provider";
 import { BackendQuantProvider } from "../data/backend/backend_quant_provider";
 
-describe("CW Research Platform - ProviderFactory Composition (Live Only)", () => {
+describe("CW Research Terminal - ProviderFactory Composition (Live Only)", () => {
   it("1. Creates live backend providers suite unconditionally", () => {
     const suite = createProviders();
     expect(suite.marketData).toBeInstanceOf(BackendMarketDataProvider);

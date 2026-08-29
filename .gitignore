@@ -1,46 +1,96 @@
-# Environment
+# ==============================================================================
+# Environment / secrets
+# ==============================================================================
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+secrets.json
+service-account*.json
 
+# ==============================================================================
 # Dependencies
+# ==============================================================================
 node_modules/
 
-# Build
+# ==============================================================================
+# Build output
+# ==============================================================================
 dist/
 build/
 __pycache__/
 *.pyc
+*.pyo
 venv/
 .venv/
+*.egg-info/
+.eggs/
 
-# Archive
-server/archive/
+# ==============================================================================
+# Runtime / generated data (Step 10 hygiene)
+# ==============================================================================
+# Redis persistence files (dump.rdb has churned in this repo before)
+dump.rdb
+*.rdb
+appendonly.aof
+# Local database / runtime state
+*.sqlite
+*.sqlite3
+*.db
+backend/.pytest_cache/
+.pytest_cache/
+.ruff_cache/
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+# Local disposable-Postgres scratch dirs created by the persistence test fixture
+cw_pg_test_*/
 
+# ==============================================================================
 # Logs
+# ==============================================================================
 *.log
 
-# OS / IDE
+# ==============================================================================
+# OS / IDE / conflict copies
+# ==============================================================================
 .DS_Store
 .vscode/
 .idea/
-
-# cursor
 .cursor/
+# iCloud/Finder conflict-copy pattern. NARROW on purpose: only "<name> 2.<ext>" /
+# "<name> 3.<ext>" siblings, never a legitimate file. Re-check `git status` after edits.
+* 2.py
+* 3.py
+* 2.ts
+* 3.ts
+* 2.tsx
+* 3.tsx
 
+# ==============================================================================
 # ngrok
+# ==============================================================================
 bin/
 
-# performance scripts
+# ==============================================================================
+# Decommissioned prefixes. These held an older Node/Postgres prototype, prod-API
+# scratch scripts (real broker credentials in history - see the secret-audit report),
+# and recovered internal-terminal formula-verification scripts. All superseded by
+# backend/ + frontend/. Rooted (/...) so they never shadow real source.
+# ==============================================================================
+/legacy/
+/server/
+/scratch/
+audit/claude/
+
+# ==============================================================================
+# Misc
+# ==============================================================================
 performance_test_cw.js
-
 docs/
-
-# tests
 /tests/
-
-# .agents
 .agents/
-
-# node_modules
-node_modules/
+server/archive/

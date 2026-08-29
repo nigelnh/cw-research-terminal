@@ -118,12 +118,17 @@ class OpenRouterClient(AiProvider):
             formatted_messages.append({"role": "system", "content": system_prompt})
         formatted_messages.extend(messages)
 
-        return {
+        payload: Dict[str, Any] = {
             "model": self.model,
             "messages": formatted_messages,
             "temperature": settings.AI_TEMPERATURE,
             "stream": stream,
         }
+        # Bound the paid output. OpenRouter passes max_tokens through to the model.
+        max_out = int(getattr(settings, "AI_MAX_OUTPUT_TOKENS", 0) or 0)
+        if max_out > 0:
+            payload["max_tokens"] = max_out
+        return payload
 
     async def generate_chat(
         self,

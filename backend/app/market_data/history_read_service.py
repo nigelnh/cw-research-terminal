@@ -76,6 +76,7 @@ class HistoryReadService:
             "gap_fills_out_of_horizon": 0,
             "gap_fills_suppressed_cooldown": 0,
             "gap_fill_lock_timeouts": 0,
+            "gap_fills_rejected_saturated": 0,
         }
         self._last_fill: dict | None = None
 
@@ -164,12 +165,34 @@ class HistoryReadService:
             self._counters["db_partial_reads"] += 1
             return _to_wire(rows, price_basis)
 
+        # HTTP-layer global cap on how many DISTINCT streams may trigger a provider
+        # gap-fill at once. This is SEPARATE from ingestion's own request throttling /
+        # per-stream advisory lock - it just stops a burst of many-symbol cache misses
+        # from each occupying a worker on an upstream call. Saturated -> serve the DB
+        # partial now (graceful), never queue.
+        from app.security.concurrency import GateTimeout, history_gapfill_gate
+
         self._counters["gap_fills_attempted"] += 1
-        outcome = await self._ingestion.fill_range(
-            sym, timeframe=tf, price_basis=price_basis,
-            from_date=assessment.fill_from or req_from, to_date=assessment.fill_to or req_to,
-        )
-        self._record_fill(stream_key, outcome)
+        try:
+            # Wait for a slot up to the same budget a concurrent miss already spends waiting
+            # on the per-stream advisory lock; a genuine flood beyond that serves the DB
+            # partial rather than piling upstream calls.
+            async with history_gapfill_gate.acquire(
+                timeout=float(settings.HISTORY_GAPFILL_LOCK_WAIT_SECONDS)
+            ):
+                outcome = await self._ingestion.fill_range(
+                    sym, timeframe=tf, price_basis=price_basis,
+                    from_date=assessment.fill_from or req_from, to_date=assessment.fill_to or req_to,
+                )
+            self._record_fill(stream_key, outcome)
+        except GateTimeout:
+            self._counters["gap_fills_rejected_saturated"] += 1
+            self._counters["db_partial_reads"] += 1
+            logger.info(
+                "history: %s gap-fill deferred (global concurrency cap %d reached); serving DB partial",
+                stream_key, settings.HISTORY_MAX_CONCURRENT_GAPFILLS,
+            )
+            return _to_wire(rows, price_basis)
 
         rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
         return _to_wire(rows, price_basis)

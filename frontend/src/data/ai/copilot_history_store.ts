@@ -1,5 +1,5 @@
 /**
- * CW Research Platform — Versioned Copilot Conversation History Store
+ * CW Research Terminal — Versioned Copilot Conversation History Store
  * Schema Version: 2
  * Key: cw_research:copilot_history:v2
  */

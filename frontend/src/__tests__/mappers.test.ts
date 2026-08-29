@@ -11,7 +11,7 @@ import {
   normalizeTransportIVToDecimal,
 } from "../data/backend/mappers";
 
-describe("CW Research Platform - Normalization Mappers & Unit Conversions", () => {
+describe("CW Research Terminal - Normalization Mappers & Unit Conversions", () => {
   it("converts thousand-VND transport prices unconditionally to canonical raw VND without magnitude heuristic", () => {
     // Standard stock and CW quotes in thousand-VND
     expect(normalizeTransportPriceToRawVnd(29.5)).toBe(29500);

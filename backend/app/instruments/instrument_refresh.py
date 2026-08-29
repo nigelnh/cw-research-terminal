@@ -275,7 +275,7 @@ def refresh_instruments(
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     print("=" * 70)
-    print("  CW RESEARCH PLATFORM - INSTRUMENT SNAPSHOT REFRESH CLI")
+    print("  CW RESEARCH TERMINAL - INSTRUMENT SNAPSHOT REFRESH CLI")
     print("=" * 70)
     ok, rep = refresh_instruments()
     print(f"\nResult: {'SUCCESS' if ok else 'FAILED'}")

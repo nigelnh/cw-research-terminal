@@ -32,6 +32,7 @@ from app.quant.quant_schemas import (
     GreeksVolatilitySource,
     MoneynessCategory,
 )
+import app.quant.quant_engine as _qe
 from app.quant.quant_engine import LiveQuantEngine, calculate_time_to_maturity
 from app.quant.historical_volatility import calculate_historical_volatility
 from app.quant.historical_volatility_service import HistoricalVolatilityService
@@ -48,6 +49,15 @@ from app.market_data.market_schemas import CanonicalQuote
 
 client = TestClient(app)
 VN_TZ = timezone(timedelta(hours=7))
+
+
+@pytest.fixture(autouse=True)
+def _freeze_engine_clock(monkeypatch):
+    """Pin the engine's Vietnam wall-clock so time-to-maturity is deterministic and does
+    not drift across a date boundary. Test-only; no production code / formula is touched.
+    No test in this file depends on 'today' being a particular value (expired-warrant
+    cases pass T=0.0 or maturity_date=None directly)."""
+    monkeypatch.setattr(_qe, "get_vietnam_now", lambda: datetime(2026, 8, 29, 10, 0, 0, tzinfo=VN_TZ))
 
 
 def test_exact_single_vector_verification():
@@ -518,19 +528,64 @@ async def test_theoretical_price_requires_independent_volatility_source():
     assert analytics.theoretical_volatility_source == "HV_22"
     assert analytics.historical_volatility == expected_hv
 
-    # Independent BS price with sigma=HV_22, S=22150, K=25885, T from model_inputs, CR=3.5704
+    # Reprice from the CANONICAL full-precision T the engine used (clock is frozen), not
+    # the 5dp display echo in model_inputs. Both paths apply round(_/CR, 2), so with the
+    # same T this is exact.
     assert analytics.model_inputs is not None
-    T_actual = analytics.model_inputs.time_to_maturity
-    assert T_actual is not None and T_actual > 0
-    expected_theo_price = round(bs_call_price_share(22150.0, 25885.0, T_actual, 0.05, 0.0, expected_hv) / 3.5704, 2)
-    assert abs(analytics.theoretical_price - expected_theo_price) < 0.05
-    assert analytics.greeks.theoretical_price is not None
-    assert abs(analytics.greeks.theoretical_price - expected_theo_price) < 0.05
+    T_full, _dte = calculate_time_to_maturity(spec.maturity_date)
+    assert T_full > 0
+    expected_theo_price = round(bs_call_price_share(22150.0, 25885.0, T_full, 0.05, 0.0, expected_hv) / 3.5704, 2)
+    assert analytics.theoretical_price == expected_theo_price
+    assert analytics.greeks.theoretical_price == expected_theo_price
+    # the display echo is the rounded T, verified separately
+    assert analytics.model_inputs.time_to_maturity == round(T_full, 5)
 
     # 2. Market IV Mid repricing remains separate
     assert analytics.model_price_at_iv_mid is not None
     assert abs(analytics.model_price_at_iv_mid - 45.0) < 1.0
     assert analytics.theoretical_price != analytics.model_price_at_iv_mid
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frozen_now", [
+    datetime(2026, 6, 1, 10, 0, tzinfo=VN_TZ),    # far from maturity
+    datetime(2026, 8, 29, 10, 0, tzinfo=VN_TZ),    # the date class of bug first surfaced
+    datetime(2026, 9, 10, 10, 0, tzinfo=VN_TZ),    # ~11 days out
+    datetime(2026, 9, 19, 15, 30, tzinfo=VN_TZ),   # ~2 days out, most T-sensitive
+])
+async def test_theo_price_provenance_is_date_boundary_stable(monkeypatch, frozen_now):
+    """Regression: repricing the independent theoretical price from the CANONICAL full T
+    (not the 5dp model_inputs echo) reproduces it exactly, at any 'today'."""
+    monkeypatch.setattr(_qe, "get_vietnam_now", lambda: frozen_now)
+
+    closes = synthetic_closes(40, base=22000.0)
+    expected_hv = calculate_historical_volatility(
+        closes, window=settings.QUANT_HV_WINDOW_SESSIONS, min_periods=settings.QUANT_HV_MIN_SESSIONS
+    )
+    svc = HistoricalVolatilityService(bar_source=FakeBarSource({"HPG": make_daily_bars(closes)}))
+    await svc.warm(["HPG"])
+    engine = LiveQuantEngine()
+    engine.set_historical_vol_getter(svc.get_estimate)
+
+    spec = CoveredWarrantSpecification(
+        symbol="CHPG2602", issuer="TCBS", underlying_symbol="HPG",
+        strike_price=25885.0, exercise_ratio=3.5704,
+        maturity_date="2026-09-21", last_trading_date="2026-09-17",
+        status=InstrumentLifecycleStatus.ACTIVE, data_quality=DataQualityStatus.COMPLETE,
+        evidence_level=LifecycleEvidenceLevel.CURRENT_EXCHANGE_LIST,
+        metadata_verification=MetadataVerificationStatus.VERIFIED_CURRENT,
+    )
+    und = CanonicalQuote(symbol="HPG", instrument_type="STOCK", last_price=22150.0)
+    cw = CanonicalQuote(symbol="CHPG2602", instrument_type="CW", bid1_price=40.0, ask1_price=50.0, last_price=None)
+
+    a = await engine.compute_warrant_analytics("CHPG2602", spec=spec, cw_state=cw, und_state=und)
+    assert a.is_available is True
+
+    T_full, _dte = calculate_time_to_maturity(spec.maturity_date)
+    expected = round(bs_call_price_share(22150.0, 25885.0, T_full, 0.05, 0.0, expected_hv) / 3.5704, 2)
+    assert a.theoretical_price == expected
+    assert a.greeks.theoretical_price == expected
+    assert a.model_inputs.time_to_maturity == round(T_full, 5)
 
 
 @pytest.mark.asyncio

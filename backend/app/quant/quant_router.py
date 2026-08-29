@@ -4,9 +4,10 @@ Exposes endpoints for warrant valuation, implied volatility, Greeks, and histori
 """
 
 import logging
+import math
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.config import settings
 from app.instruments.instrument_registry import instrument_registry
@@ -29,21 +30,26 @@ quant_router = APIRouter(prefix="/api/quant", tags=["quant"])
 
 
 class CalculatePricingRequest(BaseModel):
-    underlying_price: float = Field(..., alias="underlyingPrice", description="Underlying spot price S (VND)")
-    strike_price: float = Field(..., alias="strikePrice", description="Strike price K (VND)")
-    time_to_maturity: float = Field(..., alias="timeToMaturity", description="Time to maturity T in years")
-    risk_free_rate: float = Field(
-        default=0.05, alias="riskFreeRate", description="Annual risk-free interest rate r"
-    )
-    volatility: float = Field(
-        default=0.30, alias="volatility", description="Volatility sigma (decimal, e.g. 0.30)"
-    )
-    exercise_ratio: float = Field(
-        default=1.0, alias="exerciseRatio", description="Exercise ratio (e.g. 2.0 = 2:1)"
-    )
+    """Adversarial-input hardened (Step 10): every numeric field rejects NaN/Infinity and
+    is bounded. Legitimate supported parameter semantics are unchanged - the bounds are
+    far outside any real covered-warrant input."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    underlying_price: float = Field(..., alias="underlyingPrice", gt=0, allow_inf_nan=False,
+                                    description="Underlying spot price S (VND)")
+    strike_price: float = Field(..., alias="strikePrice", gt=0, allow_inf_nan=False,
+                                description="Strike price K (VND)")
+    time_to_maturity: float = Field(..., alias="timeToMaturity", ge=0, allow_inf_nan=False,
+                                    description="Time to maturity T in years")
+    risk_free_rate: float = Field(default=0.05, alias="riskFreeRate", ge=-1.0, le=1.0, allow_inf_nan=False,
+                                  description="Annual risk-free interest rate r")
+    volatility: float = Field(default=0.30, alias="volatility", gt=0, allow_inf_nan=False,
+                              description="Volatility sigma (decimal, e.g. 0.30)")
+    exercise_ratio: float = Field(default=1.0, alias="exerciseRatio", gt=0, allow_inf_nan=False,
+                                  description="Exercise ratio (e.g. 2.0 = 2:1)")
     dividend_yield: float = Field(
-        default=0.0,
-        alias="dividendYield",
+        default=0.0, alias="dividendYield", ge=-1.0, le=1.0, allow_inf_nan=False,
         description=(
             "What-if annualized decimal dividend yield q (0.02 = 2%) for THIS stateless "
             "calculation only. The canonical CW analytics engine (GET /api/quant/{symbol}) "
@@ -52,8 +58,29 @@ class CalculatePricingRequest(BaseModel):
         ),
     )
     market_price: Optional[float] = Field(
-        default=None, alias="marketPrice", description="Optional CW market price to solve IV"
+        default=None, alias="marketPrice", ge=0, allow_inf_nan=False,
+        description="Optional CW market price to solve IV",
     )
+
+    @model_validator(mode="after")
+    def _within_supported_bounds(self) -> "CalculatePricingRequest":
+        m = settings
+        if self.underlying_price > m.QUANT_CALC_MAX_PRICE or self.strike_price > m.QUANT_CALC_MAX_PRICE:
+            raise ValueError("underlyingPrice / strikePrice out of supported range")
+        if self.market_price is not None and self.market_price > m.QUANT_CALC_MAX_PRICE:
+            raise ValueError("marketPrice out of supported range")
+        if self.time_to_maturity > m.QUANT_CALC_MAX_T_YEARS:
+            raise ValueError("timeToMaturity out of supported range")
+        if self.volatility > m.QUANT_CALC_MAX_SIGMA:
+            raise ValueError("volatility out of supported range")
+        if self.exercise_ratio > m.QUANT_CALC_MAX_RATIO:
+            raise ValueError("exerciseRatio out of supported range")
+        for name in ("underlying_price", "strike_price", "time_to_maturity", "risk_free_rate",
+                     "volatility", "exercise_ratio", "dividend_yield"):
+            v = getattr(self, name)
+            if not math.isfinite(v):
+                raise ValueError(f"{name} must be a finite number")
+        return self
 
 
 class CalculatePricingResponse(BaseModel):
@@ -72,6 +99,8 @@ async def get_warrant_analytics(symbol: str):
     Returns quantitative analytics and Greeks for a Covered Warrant symbol.
     """
     sym_upper = symbol.strip().upper()
+    if not (1 <= len(sym_upper) <= 32) or not sym_upper.replace(".", "").isalnum():
+        raise HTTPException(status_code=400, detail=f"invalid symbol: {symbol!r}")
     analytics = await live_quant_engine.compute_warrant_analytics(sym_upper)
     return analytics
 

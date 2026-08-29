@@ -13,7 +13,7 @@ from app.market_data.market_subscription_manager import subscription_manager
 
 logger = logging.getLogger(__name__)
 
-# Primary canonical universe monitored by the platform
+# Primary canonical universe monitored by the terminal
 DEFAULT_PRIMARY_UNIVERSE = ["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]
 
 
