@@ -1,8 +1,41 @@
 # Step 11 Deployment — Checkpoint
 
-_Last updated: 2026-08-28 23:5x EDT (session resume — Part A + B done). No secrets in this file._
+_Last updated: 2026-08-29 00:10 EDT (session resume — Part A + B + hardening pass done). No secrets._
 
-## STATUS: ~DEPLOYED. Backend + DB + frontend live. One open item (FiinQuant reconnect loop).
+## STATUS: Step 11 COMPLETE except (1) manual magic-link browser test, (2) Monday live HOSE verification.
+
+### Hardening pass (this session, after initial deploy)
+- **FiinQuant off-session reconnect** — `63009aa`. Was flapping ~every 10 s outside HOSE hours.
+  Added `MarketSession.seconds_until_next_trading_session()` + `FiinQuantProvider.
+  _compute_reconnect_delay()`: in-session = unchanged fast bounded backoff; off-session =
+  poll every 300 s, never past the next session open. No 2nd reconnect owner, signalrcore
+  auto-reconnect still off, single-provider/two-stream + clean shutdown preserved. Calendar
+  seams injectable; calendar error → falls back to fast path. Holidays not modelled (safe:
+  degrades to today's fast-reconnect on ~10 days/yr). Deterministic tests added
+  (`test_market_session.py`, `test_fiinquant_reconnect_pacing.py`). Full suite 896 pass / 20 skip.
+  **Verified live:** log now shows `Scheduling provider reconnect in 300.0s
+  (session_active=False)` — loop is paced, not tight.
+- **HSTS** — `SECURITY_HSTS_ENABLED=true` set + deployed. Verified: HTTPS response carries
+  `strict-transport-security: max-age=31536000; includeSubDomains`; `/health` `hsts_enabled:
+  true`; `production_config_problems: 0` still. Backend HTTP→HTTPS 301, frontend HTTP→HTTPS 308.
+  No required plain-HTTP public endpoint (frontend uses `https://` + `wss://` only).
+
+### Production data / infra sanity (verified this session)
+- Postgres: 2655 bars, 12 symbols 1D. Curated HPG/TCB/VHM/VPB=248, NVL=240 (from 2025-09-15);
+  CWs CTCB2601=152 RAW, CVPB2615=38 RAW; HV extras FPT/MBB/MWG/VNM=248, **STB=241 last
+  2026-08-19 (stale, HV underlying only, not in demo set)**. Latest `session_date` = 2026-08-28
+  (Fri). instruments=552. ingestion_runs: 15 total, 11 SUCCEEDED, **4 stale RUNNING** (startup
+  HV gap-fills that hit the 20 s warm-up cap — cosmetic, data landed except STB partial).
+- Redis: `PING True`, rate-limiter keys present (`cw_research:ratelimit:v1:...`).
+- DB-first 1D history: 12 covered reads → `provider_direct_reads: 0`; one legitimate in-horizon
+  gap-fill (NVL pre-window) filled once, then all pure DB hits. Spec-compliant.
+- Backend: `numReplicas: 1`; container has exactly one `uvicorn ... --workers 1` process.
+- Region: backend `ams`; Postgres/Redis created in the same env with no region override →
+  same default; private `.railway.internal` networking between them verified working.
+- No `ingest-cron` service. No cron schedules. No spending cap (per constraint).
+- Railway usage this billing period: ~$0.006 (just started). Free Trial plan, no card.
+
+## STATUS (pre-hardening notes retained below for history)
 
 ### Live URLs
 - Frontend: **https://cw-research-terminal.vercel.app** (200, Supabase config + new backend URL baked in)
@@ -204,4 +237,97 @@ if Hobby (~$10–15/mo) is worth it. Trial credit ≈ $5, ~12–16 days; then se
 ## Do NOT
 Upgrade Railway to Hobby · add a payment method · set a spending cap · commit any secret /
 env value · fetch a Supabase service-role key · enable MCP `database`/`functions`/`storage`/
-`branching` · set Railway region via API · run an uncontrolled full-universe backfill.
+`branching` · set Railway region via API · run an uncontrolled full-universe backfill ·
+add `ingest-cron` yet · begin Step 12 yet · redesign the FiinQuant provider.
+
+---
+
+## REMAINING BLOCKER 1 — Monday HOSE live verification (PENDING MARKET HOURS)
+
+Next HOSE continuous session: **Mon 2026-08-31, 09:00 ICT (02:00 UTC)**, morning 09:00–11:30,
+afternoon 13:00–15:00 ICT. Run this during an active session (not lunch 11:30–13:00).
+
+`B=https://backend-production-626f.up.railway.app`
+
+1. **Provider reaches LIVE**
+   `curl -s $B/api/market/health` → `upstream_status: "LIVE"`, `authenticated: true`.
+2. **Both streams stay connected**
+   same call → `trade_stream_connected: true` AND `bid_ask_stream_connected: true`.
+   Re-check 3× over ~2 min — both stay `true`.
+3. **No 10-second reconnect loop during trading**
+   `railway logs -s backend | grep -E "reconnect|SignalR stream"` → during an active session
+   there should be **no** repeating `disconnected → reconnect` lines (an occasional single
+   reconnect is fine; a ~10 s cadence is not). Log lines now include `session_active=` — it
+   must read `True` during the session.
+4. **Realtime quotes advance**
+   open `wss://.../ws/market`, subscribe `["HPG","TCB","VNINDEX"]`, watch ~60 s → quote/price
+   messages arrive and `last`/`price` values change between messages.
+5. **Bid/ask updates advance**
+   same socket → bid/ask fields update (non-null, changing) for a liquid symbol.
+6. **Analytics patches advance**
+   subscribe a CW (`CTCB2601`) → `analytics`/patch frames arrive; `iv_*` / greeks populate
+   once its metadata is verified (see note — greeks are gated on `MetadataVerificationStatus`).
+7. **Exactly one FiinQuantProvider**
+   `railway ssh -s backend "grep -c 'FiinQuant authentication successful' /proc/1/fd/1"` is not
+   reliable; instead `curl $B/health | grep -oE '"connection_generation":[0-9]+'` — one number,
+   and it does not climb on its own. `connect_count` should be low and stable.
+8. **Exactly two upstream SignalR connections**
+   `curl $B/health` → `security...` block has provider health; check `signalr_ping_threads`
+   == 2 (trade + bidask) and `active_stream_count` == 2. Never 0, never > 2 at rest.
+9. **No connection-count growth after 30–60 min**
+   re-run step 8 after 30 and 60 min → `signalr_ping_threads` still 2, `orphan_ping_threads_
+   reaped` may rise slightly (expected on reconnects) but `disconnect_count` / `stream_restart_
+   count` must not be climbing fast (a handful over an hour is fine; hundreds is the old bug).
+10. Do NOT change any formula/threshold just because live IV/HV/greek values differ from
+    weekend/fixture values — live market numbers are expected to differ.
+
+If step 3 or 8–9 fail during active trading → that is the real defect; capture
+`railway logs -s backend` for the window and the `/health` provider block before touching code.
+
+---
+
+## REMAINING BLOCKER 2 — Supabase magic-link browser smoke test (MANUAL — user runs)
+
+Google OAuth stays disabled (`VITE_AUTH_GOOGLE_ENABLED` unset → button hidden). Email
+magic-link only. Site: `https://cw-research-terminal.vercel.app`.
+
+1. **Anonymous baseline** — open the site in a fresh/incognito window. Dashboard, market data,
+   history, quant all load with **no** account. A "Sign in" control is visible. Add a couple
+   symbols to the local watchlist; note them.
+2. **Request magic link** — click Sign in → enter your email → "Email me a sign-in link".
+   Expect the in-dialog confirmation ("check your email"). No password field.
+3. **Complete sign-in** — open the email, click the link. It returns to
+   `https://cw-research-terminal.vercel.app/…`; the `?code=…` (and any `state`) is scrubbed
+   from the URL after the callback, research query params (`?tab`/`?symbol`/…) preserved.
+4. **Authenticated identity established** — the header shows the signed-in state (email /
+   avatar / sign-out). `GET /api/me/watchlist` now returns 200 (was 401 anonymous) — visible
+   as the watchlist syncing.
+5. **First-login watchlist import** — per the app's existing first-login policy the local
+   (anonymous) watchlist items from step 1 should be merged into the now server-persisted
+   watchlist. Confirm the step-1 symbols are present server-side.
+6. **Add / change watchlist** — add one more symbol, remove one. UI updates.
+7. **Refresh persists** — hard-refresh the browser. Still signed in; the watchlist from step 6
+   (server-persisted) is intact — not the old local set.
+8. **Sign out** — click sign out. The authenticated session/cache is cleared: `/api/me/*`
+   would 401 again; header returns to the "Sign in" state.
+9. **Anon state restored safely** — after sign-out the app is back to the anonymous local
+   experience (local watchlist store), no stale authenticated data shown, no console errors,
+   dashboard still fully usable.
+
+Pass = every step behaves as written, especially 5 (import), 7 (server persistence beats
+local), 8 (clean cache clear), 9 (safe anon restore).
+
+---
+
+## Step-11 completion status
+
+**COMPLETE NOW:** Vercel frontend · Railway backend · PostgreSQL · Redis · migrations +
+bootstrap · historical reads (postgres-first, 0 provider calls) · quant engine · AI (free
+model, budgeted) · rate limiting + security headers + HSTS + client-IP trust · Supabase
+integration & config (JWKS asymmetric verify live, env wired both sides, redirect URLs set).
+
+**MANUAL (user):** email magic-link end-to-end browser test (steps above).
+
+**PENDING MARKET HOURS:** sustained FiinQuant realtime verification during a live HOSE
+session (checklist above). Off-session reconnect is now paced (fix verified in logs);
+in-session stability is the thing only Monday can confirm.
