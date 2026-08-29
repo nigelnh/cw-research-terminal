@@ -38,11 +38,15 @@ async def test_lifecycle_truth_active_vs_expired_vs_unknown():
     expired_items = [x for x in items if x.status == InstrumentLifecycleStatus.EXPIRED]
     unknown_items = [x for x in items if x.status == InstrumentLifecycleStatus.UNKNOWN]
 
-    # 1. Verified active instruments have evidence
+    # 1. Active instruments require an auditable origin (explicit evidence_level or a
+    #    provenance block). Hand-seeded term sets with neither are UNKNOWN, not ACTIVE
+    #    (Step 13C). The shipped dataset has exactly three: CHPG2602 + CVPB2615 verified,
+    #    CTCB2601 conflicting.
     active_symbols = [x.symbol for x in active_items]
-    assert "CHPG2602" in active_symbols
-    assert "CFPT2602" in active_symbols
-    assert "CMWG2602" in active_symbols
+    assert set(active_symbols) == {"CHPG2602", "CVPB2615", "CTCB2601"}
+    # A former hand-seeded "active" with no provenance is now UNKNOWN.
+    assert "CFPT2602" in [x.symbol for x in unknown_items]
+    assert "CMWG2602" in [x.symbol for x in unknown_items]
     valid_active_evidence = (
         LifecycleEvidenceLevel.MANUAL_SNAPSHOT,
         LifecycleEvidenceLevel.CURRENT_PROVIDER_LIST,
@@ -210,7 +214,10 @@ def test_rest_api_coverage_and_reconciliation_endpoints():
     assert "unknown_lifecycle_symbols" in metrics
     assert "metadata_complete_symbols" in metrics
     assert "metadata_partial_symbols" in metrics
-    assert metrics["verified_active_symbols"] == 15
+    # Only warrants with an auditable origin are ACTIVE (Step 13C): CHPG2602, CVPB2615,
+    # CTCB2601. Metadata-verification counts are unchanged (expired verified CWs keep their
+    # grade).
+    assert metrics["verified_active_symbols"] == 3
     assert metrics["verified_expired_symbols"] == 3
     assert metrics["unknown_lifecycle_symbols"] > 0
     assert metrics["verified_current_metadata_symbols"] == 5
@@ -219,7 +226,7 @@ def test_rest_api_coverage_and_reconciliation_endpoints():
     # 2. Reconcile endpoint
     rec_resp = client.post(
         "/api/instruments/reconcile",
-        json=["CHPG2602", "CFPT2602", "SYNTHETIC_TEST_CW_999"],
+        json=["CHPG2602", "CVPB2615", "SYNTHETIC_TEST_CW_999"],
     )
     assert rec_resp.status_code == 200
     rec = rec_resp.json()

@@ -33,7 +33,7 @@ def upgrade() -> None:
         sa.Column("session_date", sa.Date(), nullable=False),
         sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("source", sa.String(length=24), nullable=False),
-        sa.Column("quality", sa.String(length=16), nullable=False),
+        sa.Column("quality", sa.String(length=24), nullable=False),
         sa.Column("instrument_type", sa.String(length=8), nullable=False),
         sa.Column("reference_price", sa.Numeric(20, 4), nullable=True),
         sa.Column("last_price", sa.Numeric(20, 4), nullable=True),

@@ -29,6 +29,7 @@ async def list_instruments(
     status: Optional[str] = Query(default=None, description="Lifecycle status filter: ACTIVE | EXPIRED | ALL"),
     quality: Optional[str] = Query(default=None, description="Data quality filter: COMPLETE | PARTIAL | ALL"),
     active_only: bool = Query(default=True, description="When true, returns only currently active warrants"),
+    verified_only: bool = Query(default=False, description="When true, returns only VERIFIED_CURRENT warrants"),
 ):
     """
     Lists Covered Warrants in the registry with multi-attribute filtering.
@@ -63,6 +64,7 @@ async def list_instruments(
         status=lifecycle_status,
         data_quality=data_quality_filter,
         active_only=effective_active_only,
+        verified_only=verified_only,
     )
 
     all_active = await instrument_registry.search(active_only=True)
@@ -74,6 +76,52 @@ async def list_instruments(
         coverage=coverage,
         items=items,
     )
+
+
+@instruments_router.get("/default-universe")
+async def get_default_universe():
+    """The curated default research/demo universe (Step 13C).
+
+    Anonymous users and new sessions seed their dashboard from this list instead of a
+    hardcoded frontend constant. Every CW here is VERIFIED_CURRENT; the list also carries
+    the underlyings and the index so the demo can show real underlying relationships and
+    quant analytics. Each item is re-resolved against the live registry so a symbol whose
+    verification later regresses is dropped rather than shown stale.
+    """
+    import json
+    from pathlib import Path
+
+    from app.instruments.instrument_schemas import MetadataVerificationStatus
+
+    raw = json.loads((Path(__file__).parent / "data" / "default_research_universe.json").read_text())
+    if not instrument_registry._is_initialized:
+        await instrument_registry.initialize()
+
+    resolved: list[dict] = []
+    for item in raw.get("items", []):
+        sym = str(item.get("symbol", "")).strip().upper()
+        if not sym:
+            continue
+        entry = {"symbol": sym, "instrument_type": item.get("instrument_type", "STOCK")}
+        if entry["instrument_type"] == "CW":
+            spec = await instrument_registry.get_instrument(sym)
+            if spec is None or spec.metadata_verification != MetadataVerificationStatus.VERIFIED_CURRENT:
+                continue  # drop a CW that no longer verifies
+            entry.update(
+                underlying_symbol=spec.underlying_symbol,
+                issuer=spec.issuer,
+                strike_price=spec.effective_strike,
+                exercise_ratio=spec.effective_ratio,
+                maturity_date=spec.maturity_date,
+                last_trading_date=spec.last_trading_date,
+                metadata_verification=spec.metadata_verification.value,
+                data_quality=spec.data_quality.value if spec.data_quality else None,
+            )
+        else:
+            entry["underlying_symbol"] = item.get("underlying_symbol")
+        resolved.append(entry)
+
+    return {"known_through": raw.get("known_through"), "items": resolved}
 
 
 @instruments_router.get("/metrics/coverage", response_model=CoverageMetrics)

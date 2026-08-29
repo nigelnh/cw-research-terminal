@@ -18,11 +18,15 @@ from app.market_data.market_schemas import (
 from app.market_data.market_state import market_state
 from app.market_data.market_subscription_manager import subscription_manager
 from app.market_data.history_read_service import HistoryRequestError, history_read_service
+from app.market_data.market_snapshot_resolver import market_snapshot_resolver
+from app.market_data import trading_calendar as cal
 
 logger = logging.getLogger(__name__)
 from app.market_data.market_session import market_session
 
 market_router = APIRouter(prefix="/api/market", tags=["Market Data"])
+
+_MAX_DASHBOARD_SYMBOLS = 60
 
 
 @market_router.get("/health", response_model=MarketHealthResponse)
@@ -111,9 +115,69 @@ async def get_historical_data(
 
 @market_router.get("/subscriptions")
 async def get_subscriptions():
-    """Returns desired and active subscription lists."""
+    """Returns desired and active realtime subscription lists + remaining capacity."""
+    active = subscription_manager.get_active_symbols()
     return {
         "desired": subscription_manager.get_desired_symbols(),
-        "active": subscription_manager.get_active_symbols(),
+        "active": active,
         "capacity": subscription_manager.max_symbols,
+        "capacity_remaining": max(0, subscription_manager.max_symbols - len(active)),
+    }
+
+
+@market_router.get("/dashboard")
+async def get_dashboard_rows(
+    symbols: str = Query(..., description="Comma-separated symbols"),
+    debug: bool = Query(default=False, description="Include the per-field fallback decision trace"),
+):
+    """Fully-resolved dashboard rows with an explicit temporal fallback.
+
+    During an active session a symbol's row is LIVE. Outside trading hours (weekend,
+    holiday, lunch, pre-open, post-close) it falls back to the last completed session's
+    persisted snapshot, then to end-of-day daily bars, with each field group carrying a
+    ``provenance`` block (state / source / asOf / sessionDate). Realtime-only fields with
+    no legitimate fallback are ``null`` with ``state = UNAVAILABLE`` - never fabricated.
+    """
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:_MAX_DASHBOARD_SYMBOLS]
+    if not syms:
+        raise HTTPException(status_code=400, detail="At least one symbol is required.")
+
+    now = cal._as_vn(None)
+    rows = await market_snapshot_resolver.resolve_rows(syms, now=now, diag=debug)
+    tracked = set(subscription_manager.get_active_symbols())
+    wire_rows = []
+    for r in rows:
+        w = r.to_wire()
+        w["tracked_realtime"] = r.symbol in tracked
+        wire_rows.append(w)
+
+    return {
+        "rows": wire_rows,
+        "as_of": now.isoformat(),
+        "market_session": cal.session_status(now).value,
+        "market_session_active": cal.is_trading_active(now),
+        "latest_completed_session": cal.latest_completed_trading_session(now).isoformat(),
+        "calendar_confidence": cal.calendar_confidence(now.date()),
+    }
+
+
+@market_router.get("/_diag/{symbol}")
+async def get_symbol_diagnostics(symbol: str):
+    """Sanitized fallback-decision trace for one symbol: which source won each field group,
+    which session it came from, whether a gap-fill fired. No provider payloads or secrets."""
+    sym = symbol.strip().upper()
+    now = cal._as_vn(None)
+    rows = await market_snapshot_resolver.resolve_rows([sym], now=now, diag=True)
+    r = rows[0]
+    return {
+        "symbol": sym,
+        "as_of": now.isoformat(),
+        "latest_completed_session": cal.latest_completed_trading_session(now).isoformat(),
+        "market_session": cal.session_status(now).value,
+        "decision": r.diag,
+        "provenance": {
+            "quote": r.quote_prov.to_wire(),
+            "book": r.book_prov.to_wire(),
+            **({"analytics": r.analytics_prov.to_wire()} if r.analytics_prov else {}),
+        },
     }

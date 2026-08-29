@@ -41,6 +41,7 @@ _CANDIDATE_BIN_DIRS = [
 
 _ALL_TABLES = (
     "market_bars",
+    "instrument_snapshots",
     "ingestion_state",
     "ingestion_runs",
     "instruments",

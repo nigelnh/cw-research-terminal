@@ -99,6 +99,10 @@ class SnapshotRepository:
 
         same = await self.get_for_session(sym, row.session_date)
         if same is not None:
+            # A FINAL row is the canonical close for that session - later non-FINAL
+            # checkpoints (e.g. a stray post-close tick) must not overwrite it.
+            if same.quality == "FINAL" and row.quality != "FINAL":
+                return
             newer = row.captured_at > same.captured_at
             better = _QUALITY_RANK.get(row.quality, 0) > _QUALITY_RANK.get(same.quality, 0)
             if not newer and not better:
