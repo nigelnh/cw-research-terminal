@@ -81,7 +81,7 @@ async def init_engine() -> async_sessionmaker[AsyncSession]:
         return _sessionmaker
     if not settings.DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set but the persistence layer was asked to initialize")
-    return configure(create_engine_from_url(settings.DATABASE_URL))
+    return configure(create_engine_from_url(settings.async_database_url()))
 
 
 async def dispose_engine() -> None:
