@@ -13,8 +13,14 @@ from app.market_data.market_subscription_manager import subscription_manager
 
 logger = logging.getLogger(__name__)
 
-# Primary canonical universe monitored by the terminal
-DEFAULT_PRIMARY_UNIVERSE = ["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]
+
+def _live_universe() -> List[str]:
+    """Symbols the terminal is currently tracking in MarketState (whatever is subscribed
+    for this deployment) - no hardcoded ticker list."""
+    try:
+        return sorted(market_state.get_all_quotes().keys())
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def get_market_status() -> Dict[str, Any]:
@@ -65,6 +71,7 @@ def get_quote(symbol: str) -> Dict[str, Any]:
     quote = market_state.get_quote(sym_clean)
     sess_status = market_session.get_session_status().value
     quote_eligible = market_session.is_display_eligible(quote.received_timestamp if quote else None)
+    inst_type = quote.instrument_type if quote else None
 
     if not quote:
         return {
@@ -87,8 +94,6 @@ def get_quote(symbol: str) -> Dict[str, Any]:
             if quote.bid1_price > 0:
                 spread_pct = diff / quote.bid1_price
 
-    # Determine instrument type
-    inst_type = "CW" if (sym_clean.startswith("C") and len(sym_clean) >= 6) else ("INDEX" if sym_clean.startswith("VN") else "STOCK")
     data_source = "REDIS_WARM_CACHE" if getattr(quote, "is_restored_from_cache", False) else "FIINQUANT_REALTIME"
     cache_state = "REDIS_RESTORED" if getattr(quote, "is_restored_from_cache", False) else "LIVE"
 
@@ -171,13 +176,13 @@ def get_dashboard_snapshot(watched_symbols: Optional[List[str]] = None) -> Dict[
     Returns the canonical market snapshot of all currently monitored primary instruments.
     Reads directly from in-memory MarketState without making new vendor subscription calls.
     """
-    symbols_to_check = watched_symbols if (watched_symbols and len(watched_symbols) > 0) else DEFAULT_PRIMARY_UNIVERSE
+    symbols_to_check = watched_symbols if (watched_symbols and len(watched_symbols) > 0) else _live_universe()
 
     items = []
     for s in symbols_to_check:
         sym_clean = s.strip().upper()
         q = market_state.get_quote(sym_clean)
-        inst_type = "CW" if (sym_clean.startswith("C") and len(sym_clean) >= 6) else ("INDEX" if sym_clean.startswith("VN") else "STOCK")
+        inst_type = q.instrument_type if q else None
 
         spread: Optional[float] = None
         spread_pct: Optional[float] = None

@@ -126,6 +126,42 @@ class HistoryReadService:
         return tf in settings.history_postgres_timeframes()
 
     # ------------------------------------------------------------------ #
+    async def get_history_readonly(
+        self,
+        symbol: str,
+        *,
+        timeframe: str,
+        from_date: str | None,
+        to_date: str | None,
+        adjusted: bool,
+    ) -> tuple[list[HistoricalBar], str]:
+        """Strictly PostgreSQL-backed daily history: NO provider call, NO gap-fill, ever.
+
+        Returns ``(bars, source)`` where ``source`` is one of ``"POSTGRES"`` (rows served
+        from the persisted store, possibly a partial window) or ``"UNAVAILABLE"`` (the DB
+        is not wired, the timeframe is not persisted, or the symbol is not seeded). This is
+        the read path the AI research tool uses - it must never widen the server's upstream
+        request surface on behalf of the model.
+        """
+        sym = symbol.strip().upper()
+        tf = normalize_timeframe(timeframe)
+        req_from, req_to = self._resolve_window(from_date, to_date, tf)
+
+        if self._mode() != "postgres_first" or not self._pg_timeframe(tf):
+            return [], "UNAVAILABLE"
+        if self._sm is None:
+            return [], "UNAVAILABLE"
+
+        async with self._sm() as session:
+            inst = await InstrumentRepository(session).get_by_symbol(sym)
+        if inst is None:
+            return [], "UNAVAILABLE"
+
+        price_basis = "RAW" if inst.instrument_type == "CW" else ("ADJUSTED" if adjusted else "RAW")
+        rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
+        return _to_wire(rows, price_basis), "POSTGRES"
+
+    # ------------------------------------------------------------------ #
     async def get_history(
         self,
         symbol: str,
