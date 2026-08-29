@@ -62,8 +62,15 @@ class _SigningKeyClient(Protocol):
 
 def _default_jwks_client_factory(url: str, cache_seconds: int) -> _SigningKeyClient:
     # PyJWKClient keeps the fetched JWK set in memory for ``lifespan`` seconds and only
-    # refetches on a cache miss / expiry, so steady-state verification is offline.
-    return jwt.PyJWKClient(url, cache_keys=True, cache_jwk_set=True, lifespan=cache_seconds)
+    # refetches on a cache miss / expiry, so steady-state verification is offline. The
+    # ``timeout`` bounds that rare refetch so a slow/hung JWKS host can never wedge a worker.
+    return jwt.PyJWKClient(
+        url,
+        cache_keys=True,
+        cache_jwk_set=True,
+        lifespan=cache_seconds,
+        timeout=max(1.0, float(settings.JWKS_FETCH_TIMEOUT_SECONDS)),
+    )
 
 
 class JwtVerifier:

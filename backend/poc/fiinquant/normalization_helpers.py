@@ -1,7 +1,7 @@
 """
 FiinQuant Normalization Helpers
 Pure schema mapping and unit conversion utilities for FiinQuant RealTimeData and BidAskData payloads.
-Explicitly converts raw payloads to canonical cw-research-platform representations.
+Explicitly converts raw payloads to canonical cw-research-terminal representations.
 """
 
 from typing import Dict, Any, Optional

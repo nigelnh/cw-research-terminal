@@ -5,7 +5,7 @@ import {
   MockHistoricalDataProvider,
 } from "./test_fixtures";
 
-describe("CW Research Platform - Mock Providers Test Suite", () => {
+describe("CW Research Terminal - Mock Providers Test Suite", () => {
   describe("mock_market_data_provider", () => {
     let provider: MockMarketDataProvider;
 

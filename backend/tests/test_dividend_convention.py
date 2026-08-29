@@ -24,7 +24,8 @@ from app.main import app
 from app.core.config import settings
 from app.quant.black_scholes import bs_call_price_share, calculate_analytical_greeks, solve_implied_volatility
 from app.quant.dividend_convention import CW_DIVIDEND_YIELD_CONVENTION, DividendYieldConvention
-from app.quant.quant_engine import LiveQuantEngine
+from app.quant.quant_engine import LiveQuantEngine, calculate_time_to_maturity
+from app.quant.quant_schemas import GreeksVolatilitySource
 from app.instruments.instrument_schemas import (
     CoveredWarrantSpecification,
     InstrumentLifecycleStatus,
@@ -37,6 +38,18 @@ from tests.fixtures.fake_bar_source import FakeBarSource, make_daily_bars, synth
 from app.quant.historical_volatility_service import HistoricalVolatilityService
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _freeze_engine_clock(monkeypatch):
+    """Pin the engine's Vietnam wall-clock so time-to-maturity (and therefore every
+    repriced figure below) is deterministic and does not drift across a date boundary.
+    Test-only: no production code or quant formula is touched."""
+    from datetime import datetime
+
+    import app.quant.quant_engine as qe
+
+    monkeypatch.setattr(qe, "get_vietnam_now", lambda: datetime(2026, 8, 29, 10, 0, 0, tzinfo=qe.VN_TZ))
 
 
 # --------------------------------------------------------------------------- #
@@ -62,8 +75,10 @@ def test_convention_is_immutable_and_carries_provenance():
     with pytest.raises(FrozenInstanceError):
         CW_DIVIDEND_YIELD_CONVENTION.value = 0.03  # type: ignore[misc]
     assert "dividend-protected" in CW_DIVIDEND_YIELD_CONVENTION.rationale
-    assert "warrant_domain_contract" in CW_DIVIDEND_YIELD_CONVENTION.source
-    assert "theo_prc_t.js" in CW_DIVIDEND_YIELD_CONVENTION.source
+    src = CW_DIVIDEND_YIELD_CONVENTION.source
+    # provenance cites only public rules (VN regulatory framework + standard BSM)
+    assert "regulatory framework" in src and "Black-Scholes" in src
+    assert "legacy/" not in src and "F-05" not in src
 
 
 def test_config_no_longer_exposes_a_dividend_yield_knob():
@@ -115,15 +130,17 @@ async def test_engine_uses_same_q_for_price_iv_and_greeks():
     mi = a.model_inputs
     assert mi is not None and mi.underlying_price is not None and mi.strike_price is not None
     assert mi.time_to_maturity is not None and mi.exercise_ratio is not None
-    S, K, T, k = mi.underlying_price, mi.strike_price, mi.time_to_maturity, mi.exercise_ratio
+    S, K, k = mi.underlying_price, mi.strike_price, mi.exercise_ratio
     r = mi.risk_free_rate
     q0 = 0.0
+    # canonical full-precision T (clock is frozen by the autouse fixture); the 5dp value
+    # in model_inputs is a display echo, verified separately.
+    T, _dte = calculate_time_to_maturity(_spec().maturity_date)
+    assert mi.time_to_maturity == round(T, 5)
 
-    # theoretical price reprices at q = 0 with the HV it reports
+    # theoretical price reprices exactly at q = 0 with the HV it reports
     assert a.theoretical_volatility is not None
-    assert a.theoretical_price == pytest.approx(
-        round(bs_call_price_share(S, K, T, r, q0, a.theoretical_volatility) / k, 2), abs=0.01
-    )
+    assert a.theoretical_price == round(bs_call_price_share(S, K, T, r, q0, a.theoretical_volatility) / k, 2)
     # model_price_at_iv_mid reprices at q = 0 with iv_mid
     assert a.iv_mid is not None and a.model_price_at_iv_mid is not None
     assert a.model_price_at_iv_mid == pytest.approx(
@@ -133,12 +150,15 @@ async def test_engine_uses_same_q_for_price_iv_and_greeks():
     for iv, px in ((a.iv_bid, 1200.0), (a.iv_ask, 1260.0), (a.iv_trade, 1230.0)):
         assert iv is not None
         assert bs_call_price_share(S, K, T, r, q0, iv) / k == pytest.approx(px, abs=1.0)
-    # Greeks match a direct q = 0 call at the volatility the analytics reports
-    assert a.greeks.volatility_used is not None
-    direct = calculate_analytical_greeks(S, K, T, r, q0, a.greeks.volatility_used, exercise_ratio=k)
-    assert a.greeks.delta == pytest.approx(direct.delta, abs=1e-5)
-    assert a.greeks.theta == pytest.approx(direct.theta, abs=0.02)
-    assert a.greeks.vega == pytest.approx(direct.vega, abs=0.02)
+    # Greeks match a direct q = 0 call at the volatility the engine ACTUALLY used (full
+    # a.iv_trade), reproduced exactly. `greeks.volatility_used` is the 4dp display echo.
+    assert a.greeks.volatility_source == GreeksVolatilitySource.IV_TRADE
+    assert a.iv_trade is not None
+    assert a.greeks.volatility_used == round(a.iv_trade, 4)
+    direct = calculate_analytical_greeks(S, K, T, r, q0, a.iv_trade, exercise_ratio=k)
+    assert a.greeks.delta == direct.delta
+    assert a.greeks.theta == direct.theta
+    assert a.greeks.vega == direct.vega
 
 
 @pytest.mark.asyncio

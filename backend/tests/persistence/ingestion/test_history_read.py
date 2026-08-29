@@ -251,6 +251,48 @@ async def test_20_concurrent_cache_misses_produce_one_fill_lifecycle(history_ser
     assert list(results[0])[-1].date == _CUTOFF.isoformat()
 
 
+async def test_global_gapfill_concurrency_cap_serves_db_partial(history_service, fake_provider, monkeypatch):
+    """Step 10: an HTTP-layer cap on how many DISTINCT streams may trigger a provider fill
+    at once. With the cap at 1 and a slow provider, a second distinct-symbol miss serves
+    the DB partial instead of starting a second upstream call."""
+    import asyncio
+
+    from app.core.config import settings as app_settings
+    from app.security.concurrency import history_gapfill_gate
+
+    monkeypatch.setattr(app_settings, "HISTORY_MAX_CONCURRENT_GAPFILLS", 1)
+    monkeypatch.setattr(app_settings, "HISTORY_GAPFILL_LOCK_WAIT_SECONDS", 0.1)
+    history_gapfill_gate.set_limit(1)
+
+    lo = _CUTOFF - timedelta(days=40)
+    mid = _CUTOFF - timedelta(days=20)
+    ids = {}
+    for sym in ("HPG", "VHM"):
+        ids[sym] = await _seed_instrument(sym)
+        await _insert_bars(ids[sym], _weekdays(lo, mid))
+        await _set_cursor(ids[sym], lo, mid)
+        fake_provider.seed_daily(sym, lo - timedelta(days=5), _CUTOFF)
+
+    _orig = fake_provider.get_historical_bars
+
+    async def _slow(*a, **k):
+        await asyncio.sleep(0.3)
+        return await _orig(*a, **k)
+
+    monkeypatch.setattr(fake_provider, "get_historical_bars", _slow)
+
+    results = await asyncio.gather(*(
+        history_service.get_history(sym, timeframe="1D", from_date=lo.isoformat(),
+                                    to_date=_CUTOFF.isoformat(), adjusted=True)
+        for sym in ("HPG", "VHM")
+    ))
+    # one fill got the slot; the other was deferred -> its result is the (shorter) DB partial
+    lengths = sorted(len(r) for r in results)
+    assert lengths[0] < lengths[1]
+    assert history_service._counters["gap_fills_rejected_saturated"] >= 1
+    history_gapfill_gate.set_limit(app_settings.HISTORY_MAX_CONCURRENT_GAPFILLS)
+
+
 async def test_different_symbols_fill_independently(history_service, fake_provider):
     lo = _CUTOFF - timedelta(days=40)
     mid = _CUTOFF - timedelta(days=20)

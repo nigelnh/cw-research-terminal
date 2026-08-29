@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FiinQuant Real-Time Market Data Probe & Credentialled Runtime Validation Harness
-Project: cw-research-platform (Vendor Reconnaissance - POC Area)
+Project: cw-research-terminal (Vendor Reconnaissance - POC Area)
 
 Validates FiinQuantX official SDK in clean virtual environment (.venv) with ZERO vendor patching.
 Evaluates:

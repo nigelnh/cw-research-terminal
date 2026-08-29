@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FiinQuant Historical Data & Metadata Probe
-Project: cw-research-platform (Vendor Reconnaissance - Credentialled Test)
+Project: cw-research-terminal (Vendor Reconnaissance - Credentialled Test)
 
 Evaluates FiinQuant Official Python SDK (FiinQuantX) for:
 1. Historical EOD and Intraday Data (Fetch_Trading_Data) for Stock and CW

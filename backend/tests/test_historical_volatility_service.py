@@ -302,17 +302,18 @@ async def test_engine_theoretical_price_populated_with_real_service():
     assert analytics.greeks.theoretical_price is not None
 
     assert analytics.model_inputs is not None
-    T = analytics.model_inputs.time_to_maturity
-    assert T is not None
+    # reprice from canonical full-precision T (clock frozen), not the 5dp display echo
+    T_full, _dte = calculate_time_to_maturity(spec.maturity_date)
     expected = round(
         bs_call_price_share(
-            22150.0, 25885.0, T, settings.QUANT_RISK_FREE_RATE,
+            22150.0, 25885.0, T_full, settings.QUANT_RISK_FREE_RATE,
             CW_DIVIDEND_YIELD_CONVENTION.value, EXPECTED_HV
         )
         / 3.5704,
         2,
     )
-    assert abs(analytics.theoretical_price - expected) < 0.05
+    assert analytics.theoretical_price == expected
+    assert analytics.model_inputs.time_to_maturity == round(T_full, 5)
     # Invariant preserved: independent theo price != circular IV-mid repricing
     assert analytics.model_price_at_iv_mid is not None
     assert analytics.theoretical_price != analytics.model_price_at_iv_mid
@@ -369,11 +370,15 @@ async def test_engine_theoretical_price_none_without_service():
     assert analytics.theoretical_volatility_source == "UNAVAILABLE"
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def frozen_vn_now(monkeypatch):
     """Freeze the engine's Vietnam wall-clock. ``calculate_time_to_maturity`` resolves
     ``get_vietnam_now`` from the engine module at call time, so this pins T for both the
-    engine and any reconstruction the test performs. Returns a setter for the instant."""
+    engine and any reconstruction the test performs. Returns a setter for the instant.
+
+    Autouse: every engine-analytics test in this file that reprices from the model inputs
+    is deterministic across a date boundary. (The HV-staleness tests use a *different*
+    clock - ``historical_volatility_service._vn_today`` - which is left real.)"""
 
     holder = {"now": datetime(2026, 8, 29, 10, 0, 0, tzinfo=VN_TZ)}
     monkeypatch.setattr(quant_engine_module, "get_vietnam_now", lambda: holder["now"])

@@ -2,7 +2,7 @@ import json
 from typing import Optional, List, Dict, Any
 from app.ai.ai_schemas import ResearchContextEnvelope
 
-BASE_SYSTEM_INSTRUCTIONS = """You are the research companion embedded in CW Research Platform, a professional Covered Warrant (CW) and equity quantitative workspace for the Vietnam market (HOSE).
+BASE_SYSTEM_INSTRUCTIONS = """You are the research companion embedded in CW Research Terminal, a professional Covered Warrant (CW) and equity quantitative workspace for the Vietnam market (HOSE).
 
 ### Persona & Style:
 - **Tone**: Warm, cheerful, approachable, competent, concise, calm, and naturally conversational—like a smart quantitative research partner sitting next to the user.

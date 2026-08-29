@@ -19,7 +19,7 @@ GATEWAY_REST_URL = "http://127.0.0.1:8501"
 
 async def run_live_acceptance_checks():
     logger.info("================================================================================")
-    logger.info("  CW RESEARCH PLATFORM - LIVE GATEWAY & STATUS SEMANTICS ACCEPTANCE")
+    logger.info("  CW RESEARCH TERMINAL - LIVE GATEWAY & STATUS SEMANTICS ACCEPTANCE")
     logger.info("================================================================================")
 
     async with httpx.AsyncClient(base_url=GATEWAY_REST_URL, timeout=10.0) as http_client:

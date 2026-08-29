@@ -1,18 +1,18 @@
-# Project Progress: cw-research-platform
+# Project Progress: cw-research-terminal
 
 ## Completed Changes
 * **Full Repository Structure Cleanup, Historical Domain Reconstruction & Architecture Reorganization**:
   * **Deep Git Archaeology & Historical Formula Lineage**:
     - Recovered and cataloged all 33 historical formulas ($F-01$ to $F-33$) with exact `SOURCE_COMMIT`, `SOURCE_FILE`, and `ACTUAL_SOURCE_EVIDENCE`.
     - Identified formulas deleted across history: $F-31$ (Stock Beta in `c0fff65:server/python_api/beta_calculator.py`), $F-32$ (Bid-Ask Spread % in `c0fff65:frontend/src/tables/cw/CWTable.ts`), $F-33$ (Issuer Market Share in `c0fff65:frontend/src/app/MarketShareTables.tsx`).
-    - Cataloged 54 historical Info-tab (Position Master) spreadsheet columns and 15 Stock-tab columns.
+    - Cataloged 54 historical Info-tab (legacy desk spreadsheet) spreadsheet columns and 15 Stock-tab columns.
   * **Backend Descriptive Snake_Case Renaming**:
     - Standardized generic backend filenames to self-describing snake_case: `market_data/market_state.py`, `market_data/market_subscription_manager.py`, `market_data/market_websocket.py`, `instruments/instrument_registry.py`, `quant/quant_engine.py`, `quant/historical_volatility.py`, `ai/ai_system_prompt.py`, `ai/ai_router.py`.
   * **Frontend Feature-Driven Modularization**:
     - Reorganized components into canonical feature directories: `frontend/src/features/market_overview/`, `frontend/src/features/warrant_info/`, `frontend/src/features/stock_research/`, `frontend/src/features/watchlist/`, `frontend/src/features/ai_assistant/`.
     - Retained shared UI primitives under `frontend/src/components/common/`.
   * **Legacy Reference Archival Namespace**:
-    - Consolidated historical reference material into `legacy/historical_formulas/` (30 CLI scripts) and `legacy/legacy_node_server/` (Node.js/Postgres backend).
+    - Removed superseded/pre-project material (an older Node.js/Postgres prototype and standalone formula-verification CLI scripts); the current backend is the FastAPI + PostgreSQL implementation under `backend/`.
   * **Two-Stage Theoretical Fair Value Architecture**:
     - Formally documented the pipeline separating `QuantEngine` (independent volatility orchestration using $\sigma_{\text{HV22}}$) from `black_scholes.py` (pure BSM call pricing math primitive), preserving the invariant $\text{model\_price\_at\_iv\_mid} \neq \text{theoretical\_price}$.
   * **Transport-Unit Compatibility Boundary Documentation**:
@@ -207,12 +207,12 @@
 * **Runtime Data Mode**: `REALTIME_ONLY` (connected to FastAPI backend `/ws/market` and FiinQuant).
 * **Two-Tier State Cache**: L1 `MarketState` (in-memory) + L2 `RedisMarketStateStore` (warm cache on `127.0.0.1:6379`).
 ### Completed Changes
-* **Initial State Hydration & Session Freshness**: Implemented centralized [`SubscriptionManager.hydrate_missing_market_state()`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/backend/app/market_data/market_subscription_manager.py) with Asia/Ho_Chi_Minh timezone session checks, monotonic stale-write protection (`existing_ts >= incoming_ts` rejection), previous-day session trade sanitization, and immediate snapshot delivery.
-* **Partial Instrument UX**: Added subtle `partial` indicator and tooltip in [`personal_dashboard.tsx`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/frontend/src/features/watchlist/personal_dashboard.tsx) and informational callout in [`instrument_drawer.tsx`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/frontend/src/features/warrant_info/instrument_drawer.tsx) distinguishing unverified discovery terms from backend/network failures.
-* **Default Demo Universe**: Updated primary default watchlist in [`watchlist.ts`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/frontend/src/domain/models/watchlist.ts) to active Covered Warrants:
+* **Initial State Hydration & Session Freshness**: Implemented centralized [`SubscriptionManager.hydrate_missing_market_state()`](backend/app/market_data/market_subscription_manager.py) with Asia/Ho_Chi_Minh timezone session checks, monotonic stale-write protection (`existing_ts >= incoming_ts` rejection), previous-day session trade sanitization, and immediate snapshot delivery.
+* **Partial Instrument UX**: Added subtle `partial` indicator and tooltip in [`personal_dashboard.tsx`](frontend/src/features/watchlist/personal_dashboard.tsx) and informational callout in [`instrument_drawer.tsx`](frontend/src/features/warrant_info/instrument_drawer.tsx) distinguishing unverified discovery terms from backend/network failures.
+* **Default Demo Universe**: Updated primary default watchlist in [`watchlist.ts`](frontend/src/domain/models/watchlist.ts) to active Covered Warrants:
   - **`CTCB2601`**: `Issuer: KIS` | `Underlying: TCB` | `Strike: 25,000` | `Ratio: 2:1` | `Maturity: 2026-12-10` (`ACTIVE`, `COMPLETE`).
   - **`CVPB2615`**: `Issuer: ACBS` | `Underlying: VPB` (`ACTIVE`, `PARTIAL` discovery instrument demonstrating subtle partial badge).
-* **FiinQuant PercentPriceChange Parser Fix**: Added `PercentPriceChange` key extraction in [`market_state.py`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/backend/app/market_data/market_state.py) and added regression test `test_market_state_real_fiinquant_payload_shape` in [`test_market_gateway.py`](file:///Users/nhannguyen/Desktop/Folders/hq_gui/backend/tests/test_market_gateway.py).
+* **FiinQuant PercentPriceChange Parser Fix**: Added `PercentPriceChange` key extraction in [`market_state.py`](backend/app/market_data/market_state.py) and added regression test `test_market_state_real_fiinquant_payload_shape` in [`test_market_gateway.py`](backend/tests/test_market_gateway.py).
 * **Controlled Concurrency Verification**: Proven that `HubException: You are only allowed to access up to 5 connections` was exclusively caused by parallel diagnostic processes. Under a clean single-instance configuration (2 SignalR streams), zero quota errors occur.
 
 ### Current State

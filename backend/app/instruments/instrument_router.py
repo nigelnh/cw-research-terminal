@@ -92,6 +92,11 @@ async def reconcile_symbols(
     Reconciles an external list of discovered symbols against the current registry.
     Identifies missing symbols and computes coverage ratio.
     """
+    from app.core.config import settings
+
+    cap = settings.INSTRUMENTS_RECONCILE_MAX_SYMBOLS
+    if len(discovered_symbols) > cap:
+        raise HTTPException(status_code=400, detail=f"Too many symbols ({len(discovered_symbols)}); max {cap}.")
     if not instrument_registry._is_initialized:
         await instrument_registry.initialize()
     return instrument_registry.reconcile_with_discovered(discovered_symbols)

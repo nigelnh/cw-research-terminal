@@ -1,5 +1,5 @@
 /**
- * Test Suite for CW Research Platform:
+ * Test Suite for CW Research Terminal:
  * 1. Snapshot Mapper (Vol1/Vol2/Vol3 -> ivAsk/ivTrade/ivBid)
  * 2. Patch Mapper (Incremental Diff updates)
  * 3. Instrument & Historical Mappers
@@ -32,7 +32,7 @@ function assert(condition: boolean, testName: string) {
   }
 }
 
-console.log("=== RUNNING CW RESEARCH PLATFORM TEST SUITE ===\n");
+console.log("=== RUNNING CW RESEARCH TERMINAL TEST SUITE ===\n");
 
 // 1. Test Snapshot Mapping
 console.log("1. Testing Snapshot Mapper (Raw -> Canonical Model):");

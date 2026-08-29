@@ -1,14 +1,26 @@
+import asyncio
 import json
 import logging
+import time
+from collections import defaultdict, deque
 from typing import Set, Dict, Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.core.config import settings
 from app.market_data.market_session import market_session
 from app.market_data.market_state import market_state
 from app.market_data.market_subscription_manager import subscription_manager
+from app.security.client_ip import resolve_client_ip
+from app.security.observability import security_counters
 
 logger = logging.getLogger(__name__)
 ws_router = APIRouter()
+
+# WS close codes
+_CLOSE_POLICY = 1008        # policy violation (caps, rate)
+_CLOSE_TOO_BIG = 1009       # message too large
+_CLOSE_GOING_AWAY = 1001    # idle timeout
+_CLOSE_TRY_LATER = 1013     # feature disabled / try again later
 
 
 class MarketConnectionManager:
@@ -18,13 +30,40 @@ class MarketConnectionManager:
     """
     def __init__(self):
         self._active_connections: Set[WebSocket] = set()
+        self._conn_by_ip: Dict[str, int] = defaultdict(int)
         subscription_manager.register_patch_listener(self.broadcast_patch_threadsafe)
         subscription_manager.register_status_listener(self.broadcast_status)
 
-    async def connect(self, websocket: WebSocket) -> None:
+    @property
+    def active_count(self) -> int:
+        return len(self._active_connections)
+
+    async def connect(self, websocket: WebSocket) -> bool:
+        """Apply the connection caps, then accept. Returns False (handshake refused) when a
+        limit is hit or public realtime is disabled - the caller must not enter its loop."""
+        if not settings.PUBLIC_REALTIME_ENABLED:
+            security_counters.incr("ws.rejected_disabled_total")
+            await websocket.close(code=_CLOSE_TRY_LATER)
+            return False
+
+        ip = resolve_client_ip(websocket)
+        if len(self._active_connections) >= settings.WS_MAX_CONNECTIONS_TOTAL:
+            security_counters.incr("ws.rejected_global_cap_total")
+            logger.warning("WebSocket /ws/market rejected: global cap %d reached", settings.WS_MAX_CONNECTIONS_TOTAL)
+            await websocket.close(code=_CLOSE_TRY_LATER)
+            return False
+        if self._conn_by_ip[ip] >= settings.WS_MAX_CONNECTIONS_PER_IP:
+            security_counters.incr("ws.rejected_per_client_cap_total")
+            logger.warning("WebSocket /ws/market rejected: per-client cap %d reached", settings.WS_MAX_CONNECTIONS_PER_IP)
+            await websocket.close(code=_CLOSE_POLICY)
+            return False
+
         await websocket.accept()
         self._active_connections.add(websocket)
-        client_str = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
+        self._conn_by_ip[ip] += 1
+        websocket.scope["_cw_client_ip"] = ip
+        security_counters.set_gauge("ws.active_connections", len(self._active_connections))
+        client_str = f"{ip}:{websocket.client.port}" if websocket.client else "unknown"
         logger.info(
             "WebSocket /ws/market client connected (%s). Active count: %d",
             client_str, len(self._active_connections),
@@ -51,6 +90,7 @@ class MarketConnectionManager:
             "message": f"Connected to CW Research Gateway ({up_status}, Session: {sess_status})",
         }
         await websocket.send_text(json.dumps(status_msg))
+        return True
 
     async def _safe_send(self, ws: WebSocket, payload_str: str) -> None:
         """Asynchronously sends a payload string to a websocket client and prunes on failure."""
@@ -95,10 +135,15 @@ class MarketConnectionManager:
     def disconnect(self, websocket: WebSocket) -> None:
         if websocket in self._active_connections:
             self._active_connections.remove(websocket)
-            client_str = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
+            ip = websocket.scope.get("_cw_client_ip") if hasattr(websocket, "scope") else None
+            if ip is not None and self._conn_by_ip.get(ip, 0) > 0:
+                self._conn_by_ip[ip] -= 1
+                if self._conn_by_ip[ip] == 0:
+                    self._conn_by_ip.pop(ip, None)
+            security_counters.set_gauge("ws.active_connections", len(self._active_connections))
             logger.info(
                 "WebSocket /ws/market client disconnected (%s). Active count: %d",
-                client_str, len(self._active_connections),
+                ip or "unknown", len(self._active_connections),
             )
 
     async def send_personal_message(self, message: Dict[str, Any], websocket: WebSocket) -> None:
@@ -146,23 +191,74 @@ class MarketConnectionManager:
 manager = MarketConnectionManager()
 
 
+def _too_big(raw_text: str) -> bool:
+    return len(raw_text.encode("utf-8", "ignore")) > settings.WS_MAX_MESSAGE_BYTES
+
+
+class _MessageRate:
+    """Per-connection sliding-window message-rate guard."""
+
+    __slots__ = ("_times", "_burst", "_window")
+
+    def __init__(self) -> None:
+        self._times: deque[float] = deque()
+        self._burst = int(settings.WS_MESSAGE_BURST)
+        self._window = float(settings.WS_MESSAGE_WINDOW_SECONDS)
+
+    def allow(self) -> bool:
+        now = time.monotonic()
+        cutoff = now - self._window
+        while self._times and self._times[0] < cutoff:
+            self._times.popleft()
+        if len(self._times) >= self._burst:
+            return False
+        self._times.append(now)
+        return True
+
+
 @ws_router.websocket("/ws/market")
 async def websocket_market_endpoint(websocket: WebSocket):
     from app.instruments.instrument_registry import instrument_registry
     from app.quant.quant_engine import live_quant_engine
     from app.quant.historical_volatility_service import historical_volatility_service
 
-    await manager.connect(websocket)
+    if not await manager.connect(websocket):
+        return
+
+    rate = _MessageRate()
+    malformed = 0
     try:
         while True:
-            raw_text = await websocket.receive_text()
+            try:
+                raw_text = await asyncio.wait_for(
+                    websocket.receive_text(), timeout=settings.WS_IDLE_TIMEOUT_SECONDS
+                )
+            except (TimeoutError, asyncio.TimeoutError):
+                security_counters.incr("ws.closed_idle_total")
+                await websocket.close(code=_CLOSE_GOING_AWAY)
+                break
+
             if not raw_text:
                 continue
+            if _too_big(raw_text):
+                security_counters.incr("ws.rejected_oversized_msg_total")
+                await websocket.close(code=_CLOSE_TOO_BIG)
+                break
+            if not rate.allow():
+                security_counters.incr("ws.rejected_msg_rate_total")
+                await websocket.close(code=_CLOSE_POLICY)
+                break
 
             try:
                 msg = json.loads(raw_text)
             except json.JSONDecodeError:
-                logger.warning(f"Malformed WebSocket message: {raw_text}")
+                malformed += 1
+                security_counters.incr("ws.malformed_msg_total")
+                if malformed > 10:
+                    await websocket.close(code=_CLOSE_POLICY)
+                    break
+                continue
+            if not isinstance(msg, dict):
                 continue
 
             msg_type = msg.get("type")
@@ -170,9 +266,22 @@ async def websocket_market_endpoint(websocket: WebSocket):
 
             if not isinstance(symbols, list):
                 continue
+            if len(symbols) > settings.WS_MAX_SYMBOLS_PER_CLIENT:
+                security_counters.incr("ws.rejected_symbol_count_total")
+                await manager.send_personal_message(
+                    {
+                        "type": "error",
+                        "error": "too_many_symbols",
+                        "detail": f"At most {settings.WS_MAX_SYMBOLS_PER_CLIENT} symbols per subscribe frame.",
+                    },
+                    websocket,
+                )
+                continue
 
             if msg_type == "subscribe":
-                clean_syms = [str(s).upper() for s in symbols if str(s).strip()]
+                clean_syms = [str(s).upper() for s in symbols if str(s).strip()][
+                    : settings.WS_MAX_SYMBOLS_PER_CLIENT
+                ]
                 replace = bool(msg.get("replace", True))
                 if replace:
                     success, reason = subscription_manager.set_exact_subscriptions(clean_syms)

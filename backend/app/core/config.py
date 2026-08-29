@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = Field(default="", description="OpenRouter API Key (Server-Side Only)")
     OPENROUTER_MODEL: str = Field(default="stealth/ox-alpha", description="Target OpenRouter model")
     OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter Base URL")
-    OPENROUTER_SITE_URL: str = Field(default="https://github.com/nigelnh/cw-research-platform", description="App Site URL header")
-    OPENROUTER_APP_NAME: str = Field(default="CW Research Platform", description="App Name header")
+    OPENROUTER_SITE_URL: str = Field(default="https://github.com/nigelnh/cw-research-terminal", description="App Site URL header")
+    OPENROUTER_APP_NAME: str = Field(default="CW Research Terminal", description="App Name header")
 
     # Request Bounds & Limits
     AI_MAX_MESSAGES: int = Field(default=20, description="Max conversation turns accepted")
@@ -249,6 +249,167 @@ class Settings(BaseSettings):
         if self.ENVIRONMENT.strip().lower() == "production":
             return ""
         return self.AUTH_TEST_HS256_SECRET.strip()
+
+    # ================================================================== #
+    # Step 10 - Public API abuse / cost / deployment-safety hardening      #
+    # ================================================================== #
+    # None of this changes the public product surface: the dashboard, research,
+    # market/quant/history reads and the websocket stay anonymous. These knobs bound
+    # *rate*, *size*, *concurrency* and *cost*, and make deployment defaults safe.
+
+    # ---- master switches -------------------------------------------------
+    PUBLIC_RATE_LIMIT_ENABLED: bool = Field(
+        default=True, description="Master switch for HTTP rate limiting (disable only for debugging)"
+    )
+    AI_PUBLIC_ENABLED: bool = Field(
+        default=True, description="Allow anonymous access to /api/ai/*. When false the endpoint 503s cleanly."
+    )
+    PUBLIC_REALTIME_ENABLED: bool = Field(
+        default=True, description="Allow public /ws/market connections. When false the upgrade is refused."
+    )
+    SECURITY_HEADERS_ENABLED: bool = Field(default=True, description="Attach API security headers to responses")
+    SECURITY_HSTS_ENABLED: bool = Field(
+        default=False,
+        description="Send Strict-Transport-Security. ONLY enable when the deployment is HTTPS end-to-end.",
+    )
+
+    # ---- rate-limit backend -------------------------------------------------
+    # auto   : Redis when REDIS_ENABLED and a URL resolves, else in-process memory
+    # memory : always in-process (single worker); fine for local/CI and small demos
+    # redis  : always Redis; startup validates a URL is configured
+    RATE_LIMIT_BACKEND: str = Field(default="auto", description="auto | memory | redis")
+    RATE_LIMIT_REDIS_URL: str = Field(
+        default="", description="Override Redis URL for the limiter. Empty -> reuse REDIS_URL."
+    )
+    RATE_LIMIT_FAIL_OPEN: bool = Field(
+        default=False,
+        description="If the Redis limiter errors: false -> fall back to a conservative in-process limiter "
+        "(never unlimited); true -> allow the request. AI is always fail-closed regardless.",
+    )
+    ALLOW_SINGLE_PROCESS_RATE_LIMIT: bool = Field(
+        default=False,
+        description="DEMO/SINGLE-WORKER ONLY. Permit a per-process memory rate limiter when "
+        "ENVIRONMENT=production. Limits are NOT shared across workers - safe ONLY for a "
+        "single-worker deployment. Without this, production requires a working Redis limiter "
+        "and fails startup otherwise.",
+    )
+
+    # ---- trusted proxy / client-IP ---------------------------------------
+    RATE_LIMIT_TRUST_PROXY: bool = Field(
+        default=False,
+        description="Honor X-Forwarded-For ONLY when the direct peer is in TRUSTED_PROXY_CIDRS. "
+        "Keep false for direct local dev; set true behind a known reverse proxy.",
+    )
+    TRUSTED_PROXY_CIDRS: str = Field(
+        default="",
+        description="Comma-separated CIDRs of trusted reverse proxies (e.g. '10.0.0.0/8,127.0.0.1/32'). "
+        "XFF from any other direct peer is ignored.",
+    )
+
+    # ---- per-tier HTTP policies (requests / window seconds), keyed per client ----
+    RL_HEALTH_PER_MIN: int = Field(default=120, description="Tier A: /health, /api/*/health, small metadata")
+    RL_MARKET_PER_MIN: int = Field(default=120, description="Tier B: ordinary market-data + instrument reads")
+    RL_QUANT_PER_MIN: int = Field(default=40, description="Tier C: /api/quant/* (CPU-bounded, body-bounded)")
+    RL_HISTORY_PER_MIN: int = Field(default=20, description="Tier D: /api/market/history/* (DB + possible provider fill)")
+    RL_AI_PER_MIN: int = Field(default=6, description="Tier E burst: /api/ai/* per minute (spends real money)")
+    RL_AI_PER_HOUR: int = Field(default=40, description="Tier E sustained: /api/ai/* per hour")
+    RL_ME_PER_MIN: int = Field(default=30, description="Tier F: authenticated /api/me/* (keyed by verified sub)")
+    RL_DEFAULT_PER_MIN: int = Field(default=60, description="Catch-all for any public route without a specific tier")
+
+    # ---- request body size (bytes) -------------------------------------
+    API_MAX_BODY_BYTES: int = Field(
+        default=64 * 1024, description="Max JSON body for quant / watchlist / reconcile (64 KiB)"
+    )
+    AI_MAX_BODY_BYTES: int = Field(
+        default=256 * 1024, description="Max body for /api/ai/* (conversation history + context) (256 KiB)"
+    )
+
+    # ---- AI cost controls -------------------------------------------------
+    AI_MAX_INPUT_CHARS: int = Field(
+        default=12000, description="Max total characters across all messages in one /api/ai/chat request"
+    )
+    AI_MAX_CONCURRENT: int = Field(default=3, description="Max in-flight upstream AI calls across the whole process")
+    AI_MAX_OUTPUT_TOKENS: int = Field(default=1024, description="max_tokens sent to the AI provider (bounds output cost)")
+    AI_ACQUIRE_TIMEOUT_SECONDS: float = Field(
+        default=5.0, description="Max wait for an AI concurrency slot before returning 503"
+    )
+    AI_DAILY_REQUEST_BUDGET: int = Field(
+        default=0,
+        description="If > 0, a process-local per-UTC-day cap on total AI requests (single-worker only). 0 disables.",
+    )
+
+    # ---- history HTTP-layer protection (separate from ingestion throttling) ----
+    HISTORY_MAX_CONCURRENT_GAPFILLS: int = Field(
+        default=2, description="Max distinct history streams triggering a provider gap-fill at once (HTTP layer)"
+    )
+
+    # ---- instrument reconcile input bound -------------------------------
+    INSTRUMENTS_RECONCILE_MAX_SYMBOLS: int = Field(
+        default=5000, description="Max symbols accepted by POST /api/instruments/reconcile"
+    )
+
+    # ---- quant /calculate adversarial-input bounds --------------------
+    QUANT_CALC_MAX_PRICE: float = Field(default=1e12, description="Upper bound for S / K / marketPrice (raw VND)")
+    QUANT_CALC_MAX_T_YEARS: float = Field(default=100.0, description="Upper bound for timeToMaturity")
+    QUANT_CALC_MAX_SIGMA: float = Field(default=50.0, description="Upper bound for volatility sigma (5000%)")
+    QUANT_CALC_MAX_RATIO: float = Field(default=1e6, description="Upper bound for exerciseRatio")
+
+    # ---- websocket protection ------------------------------------------
+    WS_MAX_CONNECTIONS_TOTAL: int = Field(default=200, description="Global ceiling on concurrent /ws/market clients")
+    WS_MAX_CONNECTIONS_PER_IP: int = Field(default=8, description="Max concurrent /ws/market connections from one client key")
+    WS_MAX_SYMBOLS_PER_CLIENT: int = Field(
+        default=40,
+        description="Structural cap on symbols in one subscribe frame. The provider still enforces "
+        "FIINQUANT_MAX_REALTIME_SYMBOLS as the true realtime capacity.",
+    )
+    WS_MAX_MESSAGE_BYTES: int = Field(default=16 * 1024, description="Max size of one inbound websocket text frame")
+    WS_MESSAGE_BURST: int = Field(default=30, description="Max inbound messages per WS_MESSAGE_WINDOW_SECONDS per connection")
+    WS_MESSAGE_WINDOW_SECONDS: float = Field(default=10.0, description="Sliding window for WS_MESSAGE_BURST")
+    WS_IDLE_TIMEOUT_SECONDS: float = Field(
+        default=300.0, description="Close a /ws/market connection that sends nothing for this long"
+    )
+
+    # ---- CORS / host policy -------------------------------------------
+    CORS_ALLOWED_ORIGINS: str = Field(
+        default="",
+        description="Comma-separated exact frontend origins. Empty in development -> localhost dev origins. "
+        "REQUIRED (non-empty) in production. '*' is never combined with credentials.",
+    )
+    ALLOWED_HOSTS: str = Field(
+        default="",
+        description="Comma-separated allowed Host headers. Empty -> not enforced (dev). Set explicitly in production.",
+    )
+
+    # ---- outbound timeouts (seconds) ---------------------------------
+    JWKS_FETCH_TIMEOUT_SECONDS: float = Field(default=5.0, description="Timeout for the Supabase JWKS fetch")
+
+    # ------------------------------------------------------------------ derived helpers
+
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT.strip().lower() == "production"
+
+    def rate_limit_redis_url(self) -> str:
+        return (self.RATE_LIMIT_REDIS_URL or self.REDIS_URL or "").strip()
+
+    def trusted_proxy_cidrs(self) -> list[str]:
+        return [c.strip() for c in self.TRUSTED_PROXY_CIDRS.split(",") if c.strip()]
+
+    def cors_allowed_origins(self) -> list[str]:
+        explicit = [o.strip() for o in self.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
+        if explicit:
+            return explicit
+        if self.is_production():
+            return []  # must be configured; startup will warn
+        return [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+
+    def allowed_hosts(self) -> list[str]:
+        hosts = [h.strip() for h in self.ALLOWED_HOSTS.split(",") if h.strip()]
+        return hosts or ["*"]
 
     def history_postgres_timeframes(self) -> set[str]:
         return {t.strip().lower() for t in self.HISTORY_POSTGRES_TIMEFRAMES.split(",") if t.strip()}
