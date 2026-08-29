@@ -184,7 +184,7 @@ def _target_label(base_url: str, timeout: float) -> str:
         return base_url
 
 
-def run_target(base_url: str, timeout: float) -> list[Result]:
+def run_target(base_url: str, timeout: float, delay: float) -> list[Result]:
     out: list[Result] = []
     label = _target_label(base_url, timeout)
     url = base_url.rstrip("/") + "/api/ai/chat"
@@ -205,7 +205,7 @@ def run_target(base_url: str, timeout: float) -> list[Result]:
             out.append(res)
         except Exception as e:  # noqa: BLE001
             out.append(Result(label, p["id"], p["prompt"], False, time.monotonic() - t0, error=str(e)))
-        time.sleep(1.0)  # be gentle on the shared limiter
+        time.sleep(delay)  # stay under the /api/ai/* per-minute rate-limit tier
     return out
 
 
@@ -249,6 +249,8 @@ def main() -> int:
     ap.add_argument("--targets", default=os.environ.get("AI_EVAL_BASE_URL", "http://localhost:8501"),
                     help="Comma-separated base URLs (1-3), each a server configured with the model to test.")
     ap.add_argument("--timeout", type=float, default=90.0)
+    ap.add_argument("--delay", type=float, default=12.0,
+                    help="Seconds between prompts (keep >= 60/RL_AI_PER_MIN; default 12).")
     args = ap.parse_args()
 
     targets = [t.strip() for t in args.targets.split(",") if t.strip()]
@@ -259,7 +261,7 @@ def main() -> int:
     all_results: list[Result] = []
     for base in targets:
         print(f"running {base} ...", file=sys.stderr)
-        all_results += run_target(base, args.timeout)
+        all_results += run_target(base, args.timeout, args.delay)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
