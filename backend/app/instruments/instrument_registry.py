@@ -81,6 +81,7 @@ class InstrumentRegistry:
         data_quality: Optional[DataQualityStatus] = None,
         evidence_level: Optional[LifecycleEvidenceLevel] = None,
         active_only: bool = True,
+        verified_only: bool = False,
     ) -> List[CoveredWarrantSpecification]:
         """
         Queries instruments with multi-attribute filtering.
@@ -106,6 +107,14 @@ class InstrumentRegistry:
         # 3. Evidence level filter
         if evidence_level:
             results = [spec for spec in results if spec.evidence_level == evidence_level]
+
+        if verified_only:
+            from app.instruments.instrument_schemas import MetadataVerificationStatus
+
+            results = [
+                spec for spec in results
+                if spec.metadata_verification == MetadataVerificationStatus.VERIFIED_CURRENT
+            ]
 
         # 4. Underlying filter
         if underlying:

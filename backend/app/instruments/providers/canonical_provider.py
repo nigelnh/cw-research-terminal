@@ -77,8 +77,17 @@ class CanonicalInstrumentProvider(InstrumentRegistryProvider):
             except ValueError:
                 pass
 
-        # 3. If manual canonical snapshot with valid future maturity date & verified terms -> ACTIVE
-        if maturity_date and maturity_date >= today and raw.get("strike_price") is not None:
+        # 3. A term set alone does NOT make a warrant "active". Promotion to ACTIVE by
+        #    strike + future maturity requires an auditable origin (explicit evidence_level
+        #    - handled in step 2 - or a provenance block). Terms with neither are treated
+        #    as unverified discovery data, never as a live/tradable instrument. This is the
+        #    guard against hand-seeded strikes leaking into the active universe (Step 13C).
+        if (
+            maturity_date
+            and maturity_date >= today
+            and raw.get("strike_price") is not None
+            and isinstance(raw.get("provenance"), dict)
+        ):
             return InstrumentLifecycleStatus.ACTIVE, LifecycleEvidenceLevel.MANUAL_SNAPSHOT
 
         # 4. Search-only discovery without active trading evidence -> UNKNOWN

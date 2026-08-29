@@ -154,7 +154,7 @@ class InstrumentSnapshot(Base):
     # Last observed instant folded into this row.
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     source: Mapped[str] = mapped_column(String(24), nullable=False)   # REALTIME_CHECKPOINT | SESSION_CLOSE | HISTORICAL_SEED
-    quality: Mapped[str] = mapped_column(String(16), nullable=False)  # FINAL | INTRADAY_CHECKPOINT | SEED
+    quality: Mapped[str] = mapped_column(String(24), nullable=False)  # FINAL | INTRADAY_CHECKPOINT | SEED
     instrument_type: Mapped[str] = mapped_column(String(8), nullable=False)
 
     reference_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)

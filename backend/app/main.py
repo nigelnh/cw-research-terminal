@@ -147,6 +147,7 @@ async def lifespan(app: FastAPI):
     # ---- Historical read path (Step 7) ----
     # The direct provider is always available for provider-direct mode / non-daily / unseeded.
     history_read_service.set_provider(subscription_manager.provider)
+    _snapshot_checkpointer = None
     if _persistence_ready:
         history_read_service.configure(
             engine=persistence_db.get_engine(),
@@ -154,6 +155,18 @@ async def lifespan(app: FastAPI):
             provider=subscription_manager.provider,
         )
         logger.info("Historical reads: PostgreSQL-first (mode=%s).", settings.HISTORY_SOURCE_MODE)
+
+        # ---- After-hours fallback resolver + last-valid snapshot checkpointer (Step 13C) ----
+        from app.market_data.market_snapshot_resolver import market_snapshot_resolver
+        from app.market_data.snapshot_checkpointer import SnapshotCheckpointer
+
+        market_snapshot_resolver.configure(persistence_db.get_sessionmaker())
+        _snapshot_checkpointer = SnapshotCheckpointer(
+            persistence_db.get_sessionmaker(),
+            subscription_manager.get_active_symbols,
+        )
+        _snapshot_checkpointer.start()
+        app.state.snapshot_checkpointer = _snapshot_checkpointer
     else:
         logger.info("Historical reads: provider-direct (persistence not enabled/reachable).")
 
@@ -215,6 +228,11 @@ async def lifespan(app: FastAPI):
         await historical_volatility_service.stop_periodic_refresh()
     except Exception as e:
         logger.warning(f"Historical volatility refresh shutdown warning: {e}")
+    try:
+        if _snapshot_checkpointer is not None:
+            await _snapshot_checkpointer.stop()
+    except Exception as e:
+        logger.warning(f"Snapshot checkpointer shutdown warning: {e}")
     try:
         await persistence_db.dispose_engine()
     except Exception as e:
@@ -285,6 +303,14 @@ async def root_health():
     sess_status = market_session.get_session_status().value
     sess_active = market_session.is_trading_active()
 
+    def _cal_confidence() -> str:
+        from app.market_data import trading_calendar as _c
+        return _c.calendar_confidence(_c._as_vn(None).date())
+
+    def _checkpointer_health() -> dict:
+        cp = getattr(app.state, "snapshot_checkpointer", None)
+        return cp.health() if cp is not None else {"enabled": False}
+
     return {
         "status": "ok",
         "service": "cw-research-backend",
@@ -301,6 +327,8 @@ async def root_health():
         "quant_scheduler": live_quant_engine.stats(),
         "database": await persistence_db.health(),
         "history_reads": history_read_service.health(),
+        "calendar_confidence": _cal_confidence(),
+        "snapshot_checkpointer": _checkpointer_health(),
         "auth": {
             "configured": settings.auth_configured(),
             "mode": (

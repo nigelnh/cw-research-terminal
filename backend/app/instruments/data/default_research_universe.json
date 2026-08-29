@@ -1,0 +1,11 @@
+{
+  "description": "Default research/demo universe served to anonymous users and new sessions. Curated: only VERIFIED_CURRENT covered warrants plus their underlyings and the index. CTCB2601 (CONFLICTING) is deliberately excluded from the default set - it stays reachable via search as fail-closed evidence.",
+  "known_through": "2027",
+  "items": [
+    { "symbol": "CHPG2602", "instrument_type": "CW", "underlying_symbol": "HPG" },
+    { "symbol": "CVPB2615", "instrument_type": "CW", "underlying_symbol": "VPB" },
+    { "symbol": "HPG", "instrument_type": "STOCK" },
+    { "symbol": "VPB", "instrument_type": "STOCK" },
+    { "symbol": "VNINDEX", "instrument_type": "INDEX" }
+  ]
+}
