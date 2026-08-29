@@ -130,6 +130,20 @@ def test_connection_cleanup_releases_counters(monkeypatch):
         with client.websocket_connect("/ws/market") as ws:
             _drain_status(ws)
     assert manager.active_count == 0
+
+
+def test_server_side_break_close_still_releases_the_slot(monkeypatch):
+    """A server-initiated close via `break` (oversized / rate-limit / malformed-flood)
+    must release the connection slot and per-IP counter, not just a client disconnect."""
+    monkeypatch.setattr(settings, "WS_MAX_MESSAGE_BYTES", 256)
+    for _ in range(4):
+        with client.websocket_connect("/ws/market") as ws:
+            _drain_status(ws)
+            ws.send_text(json.dumps({"type": "subscribe", "symbols": ["X" * 4000]}))
+            with contextlib.suppress(Exception):
+                ws.receive_text()  # server closes with _CLOSE_TOO_BIG
+    assert manager.active_count == 0
+    assert sum(manager._conn_by_ip.values()) == 0
     assert sum(manager._conn_by_ip.values()) == 0
 
 

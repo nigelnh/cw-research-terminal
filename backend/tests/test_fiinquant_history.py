@@ -11,7 +11,7 @@ Invariant:
 No real FiinQuant network calls are made: exercised via mock session seam.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import pytest
 
@@ -109,9 +109,14 @@ async def test_explicit_over_limit_range_raises_range_limit_error_without_silent
 async def test_upstream_timeframe_limit_failure_classified_as_range_limit():
     p, sess = _make_history_provider("timeframe_limit")
 
-    # Request within nominal 365 days that upstream rejects with TimeFrameLimitFailed
+    # A request comfortably inside the local 365-day window (dates relative to *today* so
+    # the test never rots), so it is the upstream mock's TimeFrameLimitFailed that gets
+    # classified here - not local pre-validation.
+    today = datetime.now().date()
+    frm = (today - timedelta(days=200)).strftime("%Y-%m-%d")
+    to = (today - timedelta(days=10)).strftime("%Y-%m-%d")
     with pytest.raises(HistoricalRangeLimitError) as exc_info:
-        await p.get_historical_bars("HPG", timeframe="1D", from_date="2025-08-28", to_date="2026-08-27")
+        await p.get_historical_bars("HPG", timeframe="1D", from_date=frm, to_date=to)
 
     assert "TimeFrameLimitFailed" in str(exc_info.value)
 
@@ -128,8 +133,11 @@ async def test_range_limit_does_not_open_circuit_breaker_and_subsequent_short_re
     assert health["historical_circuit_open"] is False
     assert health["historical_status"] == "HEALTHY"
 
-    # 2. Subsequent valid short request succeeds immediately
-    bars = await p.get_historical_bars("HPG", timeframe="1D", from_date="2026-08-01", to_date="2026-08-27")
+    # 2. Subsequent valid short request succeeds immediately (dates relative to today)
+    today = datetime.now().date()
+    frm = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    to = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+    bars = await p.get_historical_bars("HPG", timeframe="1D", from_date=frm, to_date=to)
     assert len(bars) == 2
     assert bars[0].close == 22200.0
     assert len(sess.call_log) == 1  # only the valid request reached upstream

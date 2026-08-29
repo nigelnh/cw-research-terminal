@@ -107,6 +107,17 @@ async def lifespan(app: FastAPI):
             await persistence_db.ping()
             _persistence_ready = True
             logger.info("PostgreSQL persistence layer: connected.")
+            # Sweep ingestion_runs left RUNNING by a prior process exit / cancelled run
+            # (e.g. a deploy, or the HV warm-up timeout cancelling an in-flight gap-fill).
+            try:
+                from app.persistence.repositories.ingestion_repository import IngestionRepository
+
+                async with persistence_db.get_sessionmaker()() as _s, _s.begin():
+                    _orphaned = await IngestionRepository(_s).fail_orphaned_runs()
+                if _orphaned:
+                    logger.warning("Marked %d orphaned RUNNING ingestion_run(s) as FAILED.", _orphaned)
+            except Exception as _e:  # noqa: BLE001 - bookkeeping cleanup must never block startup
+                logger.warning("Orphaned ingestion_run sweep skipped: %s", _e)
         except Exception as e:
             if settings.DATABASE_REQUIRE_ON_STARTUP:
                 logger.error(f"PostgreSQL persistence required but unavailable: {e}")
