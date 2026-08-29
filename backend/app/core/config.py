@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     AI_MAX_MESSAGE_LENGTH: int = Field(default=4000, description="Max characters per single message")
     AI_TIMEOUT_SECONDS: float = Field(default=60.0, description="HTTP timeout for AI inference")
     AI_TEMPERATURE: float = Field(default=0.2, description="Sampling temperature for quantitative research")
+    AI_HISTORY_MAX_LOOKBACK_DAYS: int = Field(default=120, description="Max calendar span the AI get_history tool may request")
+    AI_HISTORY_MAX_POINTS: int = Field(default=60, description="Max OHLCV rows the AI get_history tool returns (older rows downsampled)")
 
     # Market Data Provider Configuration (FiinQuant)
     MARKET_DATA_PROVIDER: str = Field(default="fiinquant", description="Active provider: 'fiinquant'")

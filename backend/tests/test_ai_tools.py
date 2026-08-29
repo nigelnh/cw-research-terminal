@@ -21,7 +21,7 @@ from app.ai.tools.market_tools import (
 )
 from app.ai.tools.instrument_tools import get_instrument
 from app.ai.tools.quant_tools import get_quant
-from app.ai.tools.tool_executor import ToolExecutor, extract_symbols_from_query
+from app.ai.tools.tool_executor import ToolExecutor
 from app.ai.ai_schemas import ResearchContextEnvelope, SelectedInstrumentContext, ChatRequest
 from app.ai.openrouter_client import OpenRouterClient
 from app.ai.ai_router import get_client

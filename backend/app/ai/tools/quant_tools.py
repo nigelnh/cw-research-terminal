@@ -48,7 +48,9 @@ async def get_quant(symbol: str) -> Dict[str, Any]:
         }
 
     sym_clean = symbol.strip().upper()
-    is_cw = sym_clean.startswith("C") and len(sym_clean) >= 6
+    # HOSE covered-warrant symbol convention: 'C' + 7 alphanumerics. This is a structural
+    # shape check (matches market_state._determine_instrument_type), not a ticker allow-list.
+    is_cw = len(sym_clean) == 8 and sym_clean.startswith("C") and sym_clean[1:].isalnum()
 
     if not is_cw:
         return {
