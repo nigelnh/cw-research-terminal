@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import update
+
+from app.persistence.models import IngestionRun
 
 from app.persistence.repositories.ingestion_repository import IngestionRepository
 from app.persistence.repositories.instrument_repository import InstrumentRepository, InstrumentUpsert
@@ -46,6 +49,35 @@ async def test_complete_run_rejects_running_status(db):
     with pytest.raises(ValueError):
         async with db.begin():
             await repo.complete_run(run.id, status="RUNNING")
+
+
+async def test_fail_orphaned_runs_only_touches_old_running_rows(db):
+    repo = IngestionRepository(db)
+    async with db.begin():
+        stale = await repo.start_run(source="fiinquant", timeframe="1d", price_basis="RAW", requested_symbols=["HPG"])
+        fresh = await repo.start_run(source="fiinquant", timeframe="1d", price_basis="RAW", requested_symbols=["NVL"])
+        done = await repo.start_run(source="fiinquant", timeframe="1d", price_basis="RAW", requested_symbols=["VHM"])
+    async with db.begin():
+        await repo.complete_run(done.id, status="SUCCEEDED")
+        # Backdate the stale run's start well past the sweep cutoff.
+        await db.execute(
+            update(IngestionRun).where(IngestionRun.id == stale.id)
+            .values(started_at=datetime.now(timezone.utc) - timedelta(hours=3))
+        )
+
+    async with db.begin():
+        n = await repo.fail_orphaned_runs(older_than_minutes=30)
+    assert n == 1
+
+    async with db.begin():
+        assert (await repo.get_run(stale.id)).status == "FAILED"
+        assert (await repo.get_run(stale.id)).completed_at is not None
+        assert (await repo.get_run(fresh.id)).status == "RUNNING"   # too recent - untouched
+        assert (await repo.get_run(done.id)).status == "SUCCEEDED"  # already terminal - untouched
+
+    # Idempotent: a second sweep finds nothing.
+    async with db.begin():
+        assert await repo.fail_orphaned_runs(older_than_minutes=30) == 0
 
 
 async def test_ingestion_state_upsert_and_unique_key(db):

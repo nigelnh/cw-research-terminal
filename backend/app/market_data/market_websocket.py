@@ -332,7 +332,11 @@ async def websocket_market_endpoint(websocket: WebSocket):
                     live_quant_engine.unregister_watched_cw(sym)
 
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        pass
     except Exception as e:
         logger.error(f"WebSocket client error: {e}")
+    finally:
+        # Every exit path - client disconnect, error, OR a server-side `break`
+        # (idle timeout, oversized/rate-limited/malformed-flood close) - must release
+        # the connection slot and per-IP counter. disconnect() is idempotent.
         manager.disconnect(websocket)

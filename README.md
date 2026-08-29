@@ -4,8 +4,21 @@
 underlying equities, combining realtime market monitoring, quantitative analytics,
 historical research, and AI-assisted analysis.**
 
+**▶ Live demo: https://cw-research-terminal.vercel.app** — no account needed; the dashboard,
+research, market data, quant analytics, and history are all fully public.
+
 It is a personal project. Market data is provided by **FiinQuant**. It is not affiliated
 with, sponsored by, or operated on behalf of any brokerage.
+
+### What is a covered warrant?
+
+A **covered warrant (CW)** is an exchange-listed option-like security issued by a securities
+firm. A HOSE call CW gives the holder the right to buy a fixed *underlying* stock (e.g. HPG)
+at a fixed *exercise price* by a fixed *maturity*, converted at a fixed *ratio* (e.g. 5:1 —
+five warrants per share). Its price is driven by the underlying's price, time to maturity,
+and volatility — so it is priced and risk-managed with a Black-Scholes-Merton model. This
+terminal pairs each CW with its underlying and computes the standard analytics (theoretical
+price, implied volatility, Greeks, moneyness, spread, days-to-expiry).
 
 ## What it does
 
@@ -57,6 +70,53 @@ AUTH (optional)
   analytics engine pins the BSM dividend yield `q = 0` — see
   `backend/app/quant/dividend_convention.py`.
 
+### Design decisions
+
+| Decision | Why |
+|---|---|
+| `MarketDataProvider` abstraction | Vendor-neutral seam; the subscription planner, market-state pipeline and quant engine never import FiinQuant. |
+| One backend replica / one Uvicorn worker | The provider owns persistent SignalR connections and shared in-memory state; a second worker would duplicate upstream connections against a limited account and split the process-local WS / rate-limit counters. |
+| PostgreSQL-first history | A complete DB hit makes **zero** provider calls; only a legitimate in-horizon gap triggers **one** controlled, advisory-locked, single-flighted fill, which is then persisted. |
+| Redis warm state | L2 recovery of the latest canonical market snapshot across restarts/sessions, plus the distributed rate limiter (separate key prefixes). |
+| `q = 0` dividend convention | CWs are dividend-protected via strike/ratio adjustment; a BSM `q > 0` would double-count and underprice. |
+| Adjusted stock history vs **RAW** CW history | Underlying HV is computed from corporate-action-adjusted closes (removes ex-date jumps from the volatility estimate); CW bars are stored RAW because CW terms are re-based on the ex-date, so there is nothing to adjust. |
+
+## Testing
+
+Backend **~900** pytest cases (quant verification, provider SignalR lifecycle, ingestion /
+history, auth, rate-limit / security, repo-hygiene) + frontend **~190** vitest cases,
+`tsc --noEmit`, and `pyright` — all green. No test makes a real FiinQuant network call.
+
+```bash
+cd backend && .venv/bin/python -m pytest -q
+cd frontend && npm test && npx tsc --noEmit && npm run build
+```
+
+The persistence tests spin up a disposable local PostgreSQL cluster and skip cleanly when
+`initdb` / `pg_ctl` are not on `PATH`.
+
+## Production hosting
+
+| Piece | Where |
+|---|---|
+| Frontend (static Vite build) | Vercel — https://cw-research-terminal.vercel.app |
+| Backend (FastAPI, 1 replica / 1 Uvicorn worker) | Railway |
+| PostgreSQL + Redis | Railway (private networking) |
+
+## Known limitations
+
+- **Single backend replica by design.** The FiinQuant SignalR streams and in-memory market
+  state are process-owned; horizontal scaling would require extracting the provider into its
+  own single-instance service with a fan-out bus (see *Design decisions*).
+- **Realtime is live only during HOSE hours** (Mon–Fri, 09:00–15:00 ICT). Outside the
+  session FiinQuant closes the streams; the provider reconnects on a slow session-aware
+  cadence and quotes render as `—` rather than stale values.
+- **Historical horizon ≈ 365 days** (FiinQuant limit); longer lookbacks need range chunking.
+- **AI assistant runs on a free model** and is deliberately cost-capped (daily budget,
+  concurrency gate, per-hour rate limit). It summarizes the on-screen market/quant/history
+  context; it has no news/event feed.
+- No scheduled incremental ingestion yet — history is backfilled explicitly via the CLI.
+
 ## Roadmap (not yet implemented)
 
 - **Event-aware research.** Given a market/corporate event: identify the relevant
@@ -105,16 +165,6 @@ All configuration is environment-driven — see **`.env.example`** for the full 
 list. The only credentials the runtime needs are the FiinQuant account (market data), and
 optionally a PostgreSQL URL, a Redis URL, a Supabase project (auth), and an OpenRouter key
 (AI). Never commit a real `.env`.
-
-## Tests
-
-```bash
-cd backend && .venv/bin/python -m pytest -q
-cd frontend && npm test && npx tsc --noEmit && npm run build
-```
-
-The persistence tests spin up a disposable local PostgreSQL cluster and skip cleanly when
-`initdb`/`pg_ctl` are not on `PATH`. No test makes a real FiinQuant network call.
 
 ## Provenance
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -130,6 +130,27 @@ class IngestionRepository:
                 updated_at=datetime.now(timezone.utc),
             )
         )
+
+    async def fail_orphaned_runs(self, *, older_than_minutes: int = 30) -> int:
+        """Mark ``RUNNING`` runs that started more than ``older_than_minutes`` ago as
+        ``FAILED``. A run is only ever ``RUNNING`` while a live in-process task owns it, so
+        an old ``RUNNING`` row means the process died / was cancelled mid-run (e.g. a
+        deploy, or the HV warm-up timeout cancelling an in-flight gap-fill). The persisted
+        ``market_bars`` are unaffected - they are committed per chunk, independent of the
+        run row. Returns the number of rows corrected.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max(1, int(older_than_minutes)))
+        res = await self._session.execute(
+            update(IngestionRun)
+            .where(IngestionRun.status == "RUNNING", IngestionRun.started_at < cutoff)
+            .values(
+                status="FAILED",
+                completed_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                error_summary="orphaned: process exited or run was cancelled while RUNNING",
+            )
+        )
+        return int(getattr(res, "rowcount", 0) or 0)
 
     async def get_run(self, run_id: int) -> IngestionRunRow | None:
         m = await self._session.get(IngestionRun, run_id)

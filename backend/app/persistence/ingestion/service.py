@@ -391,14 +391,24 @@ class IngestionService:
                 logger.debug("gap-fill %s: could not open ingestion_run", sym, exc_info=True)
 
             stream = StreamOutcome(sym, instrument_id, instrument_type, tf, pb, "SUCCEEDED")
-            await self._run_chunks(
-                outcome=stream, symbol=sym, tf=tf, adjusted=(pb == "ADJUSTED"), price_basis=pb,
-                instrument_id=instrument_id, plan=plan, run_id=run_id, include_forming=False,
-            )
-            if run_id is not None:
-                await self._finalize_run(
-                    run_id, IngestionResult(run_id, "api_gap_fill", tf, pb, False, [stream])
+            chunks_completed = False
+            try:
+                await self._run_chunks(
+                    outcome=stream, symbol=sym, tf=tf, adjusted=(pb == "ADJUSTED"), price_basis=pb,
+                    instrument_id=instrument_id, plan=plan, run_id=run_id, include_forming=False,
                 )
+                chunks_completed = True
+            finally:
+                if run_id is not None:
+                    # Finalize on every exit path - including an error or a cancellation
+                    # (the HV warm-up wraps its fills in asyncio.wait_for) - so the
+                    # ingestion_run is never left stuck at RUNNING. A cancellation still
+                    # raises past this await; the startup orphan-sweep is the backstop.
+                    if not chunks_completed and stream.status not in ("PARTIAL", "FAILED"):
+                        stream.status = "FAILED"
+                    await self._finalize_run(
+                        run_id, IngestionResult(run_id, "api_gap_fill", tf, pb, False, [stream])
+                    )
 
             outcome.rows_inserted = stream.inserted
             outcome.rows_updated = stream.updated
