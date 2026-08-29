@@ -24,6 +24,7 @@ from app.quant.quant_schemas import (
     QuantModelInputs,
     GreeksVolatilitySource,
     MoneynessCategory,
+    ContractLifecycleState,
 )
 from app.quant.black_scholes import (
     solve_implied_volatility,
@@ -43,6 +44,46 @@ VN_TZ = timezone(timedelta(hours=7))
 def get_vietnam_now() -> datetime:
     """Current timestamp in Vietnam timezone (UTC+7)."""
     return datetime.now(VN_TZ)
+
+
+def derive_contract_state(
+    last_trading_date: Optional[str],
+    maturity_date: Optional[str],
+    now: Optional[datetime] = None,
+) -> Tuple[ContractLifecycleState, bool]:
+    """Truthful trading-lifecycle state + whether the warrant is still tradable.
+
+    Uses `last_trading_date` (the date the CW stops trading, ~2 sessions before maturity)
+    as the tradability boundary, and `maturity_date` for final expiry. Independent of
+    whether analytics could be computed.
+    """
+    today = (now or get_vietnam_now()).date()
+    ltd = mat = None
+    try:
+        if last_trading_date:
+            ltd = datetime.strptime(last_trading_date, "%Y-%m-%d").date()
+    except ValueError:
+        ltd = None
+    try:
+        if maturity_date:
+            mat = datetime.strptime(maturity_date, "%Y-%m-%d").date()
+    except ValueError:
+        mat = None
+
+    if mat is None and ltd is None:
+        return ContractLifecycleState.UNKNOWN, False
+    if mat is not None and today > mat:
+        return ContractLifecycleState.EXPIRED, False
+    if ltd is not None:
+        if today > ltd:
+            return ContractLifecycleState.PENDING_MATURITY, False  # matured trading, awaiting settlement
+        if today == ltd:
+            return ContractLifecycleState.LAST_TRADING_DAY, True
+        if (ltd - today).days <= max(0, int(settings.QUANT_NEAR_EXPIRY_DAYS)):
+            return ContractLifecycleState.NEAR_EXPIRY, True
+        return ContractLifecycleState.ACTIVE, True
+    # only maturity known
+    return ContractLifecycleState.ACTIVE, True
 
 
 def calculate_time_to_maturity(maturity_date_str: str, current_time: Optional[datetime] = None) -> Tuple[float, int]:
@@ -188,6 +229,33 @@ class LiveQuantEngine:
         cw_state: Optional[CanonicalQuote] = None,
         und_state: Optional[CanonicalQuote] = None,
     ) -> WarrantAnalytics:
+        """Full CW analytics, then stamp the truthful contract-lifecycle state onto the
+        result (even when analytics are unavailable). If the warrant is no longer tradable
+        (past its last trading date) the greeks/IV are cleared and `is_available` is forced
+        False - intrinsic value may still be mathematically defined, but the UI must not
+        present live tradable analytics for a non-tradable contract."""
+        analytics = await self._compute_warrant_analytics_inner(cw_symbol, spec, cw_state, und_state)
+        resolved = spec or await instrument_registry.get_instrument(cw_symbol.strip().upper())
+        if resolved is not None:
+            cstate, tradable = derive_contract_state(resolved.last_trading_date, resolved.maturity_date)
+        else:
+            cstate, tradable = ContractLifecycleState.UNKNOWN, False
+        analytics.contract_state = cstate
+        analytics.is_tradable = tradable
+        if not tradable and analytics.is_available:
+            analytics.is_available = False
+            analytics.unavailable_reason = f"NOT_TRADABLE ({cstate.value})"
+            analytics.iv_bid = analytics.iv_trade = analytics.iv_ask = analytics.iv_mid = None
+            analytics.greeks = WarrantGreeks()
+        return analytics
+
+    async def _compute_warrant_analytics_inner(
+        self,
+        cw_symbol: str,
+        spec: Optional[CoveredWarrantSpecification] = None,
+        cw_state: Optional[CanonicalQuote] = None,
+        und_state: Optional[CanonicalQuote] = None,
+    ) -> WarrantAnalytics:
         """
         Computes full quantitative analytics for a Covered Warrant.
         Enforces strict Data-Quality guards: ACTIVE + COMPLETE + K>0 + CR>0 + T>0.
@@ -314,11 +382,15 @@ class LiveQuantEngine:
         # used for the theoretical price, every IV inversion, and every Greek below.
         q = CW_DIVIDEND_YIELD_CONVENTION.value
 
-        # 5. Moneyness (S / K)
+        # 5. Moneyness (S / K). `moneyness` is the raw numeric ratio; `moneyness_cat` is the
+        #    categorical UI label, ATM iff |S/K - 1| <= QUANT_MONEYNESS_ATM_BAND (default 3%).
+        #    For a call CW: S > K is in-the-money. The band is a display convention only and
+        #    never feeds the BSM computation below.
         moneyness = round(S / K, 5)
-        if moneyness > 1.03:
+        atm_band = max(0.0, float(settings.QUANT_MONEYNESS_ATM_BAND))
+        if moneyness > 1.0 + atm_band:
             moneyness_cat = MoneynessCategory.ITM
-        elif moneyness < 0.97:
+        elif moneyness < 1.0 - atm_band:
             moneyness_cat = MoneynessCategory.OTM
         else:
             moneyness_cat = MoneynessCategory.ATM

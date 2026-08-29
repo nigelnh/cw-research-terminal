@@ -7,6 +7,7 @@ import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket, useQuote, useCoveredWarrant } from "@/data/use_research_market";
 import { useSearchParam, useNullableSearchParam } from "@/data/url/use_url_state";
 import { deriveSelectedInstrument } from "@/data/selected_instrument";
+import { computeSpread } from "@/domain/quant_display";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
 
 type Tab = "dashboard" | "research";
@@ -47,10 +48,10 @@ export function MarketExplorer() {
       const underlyingPrice =
         cw?.underlyingPrice ??
         (selected.underlyingSymbol ? quotes.get(selected.underlyingSymbol)?.lastPrice ?? null : null);
-      const moneynessRatio =
-        underlyingPrice && selected.strikePrice ? (underlyingPrice / selected.strikePrice) * 100 : null;
-      const spread = bidPrice != null && askPrice != null ? askPrice - bidPrice : null;
-      const spreadPercent = spread != null && lastPrice ? (spread / lastPrice) * 100 : null;
+      // Spread: the ONE canonical convention (ask - bid) / mid. Moneyness: canonical from the
+      // backend quant engine - the client never derives S/K, so if the quant gate rejected
+      // this contract's metadata the AI sees `moneyness: null` exactly as the UI shows "—".
+      const { abs: spread, pct: spreadPercent } = computeSpread(bidPrice, askPrice);
 
       selectedContext = {
         symbol: selected.symbol,
@@ -66,14 +67,16 @@ export function MarketExplorer() {
         askPrice: askPrice ?? null,
         lastPrice: lastPrice ?? null,
         priceChangePercent: chgPct ?? null,
-        spread: spread ?? null,
-        spreadPercent: spreadPercent ?? null,
+        spread: spread,
+        spreadPercent: spreadPercent,
         volume: volume ?? null,
         ivBid: cw?.ivBid ?? null,
         ivTrade: cw?.ivTrade ?? null,
         ivAsk: cw?.ivAsk ?? null,
-        moneyness: moneynessRatio ?? null,
-        moneynessLabel: moneynessRatio ? (moneynessRatio >= 100 ? "ITM" : "OTM") : null,
+        moneyness: typeof cw?.moneynessRatio === "number" ? cw.moneynessRatio : null,
+        moneynessLabel: cw?.moneynessCategory ?? null,
+        contractState: cw?.contractState ?? null,
+        quantAvailable: typeof cw?.ivBid === "number" || typeof cw?.delta === "number",
       };
     }
 

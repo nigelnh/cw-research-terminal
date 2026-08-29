@@ -38,8 +38,17 @@ export interface CoveredWarrant {
   theta?: number | null;
   vega?: number | null;
   rho?: number | null;
+  /** Canonical moneyness S/K from the backend quant engine. Never recomputed on the client. */
   moneynessRatio?: number | null;
+  /** Canonical ITM | ATM | OTM label from the backend quant engine (uses its configured ATM band). */
+  moneynessCategory?: "ITM" | "ATM" | "OTM" | null;
   historicalVolatility?: number | null;
+  /** Backend contract-lifecycle state: ACTIVE | NEAR_EXPIRY | LAST_TRADING_DAY | PENDING_MATURITY | EXPIRED | UNKNOWN. */
+  contractState?: string | null;
+  /** True only while the warrant can still be traded. When false the greeks/IV above are not "live". */
+  isTradable?: boolean | null;
+  /** Backend diagnostic when analytics are unavailable (e.g. METADATA_NOT_VERIFIED_CURRENT). */
+  quantUnavailableReason?: string | null;
 
   // Supply / Listing info
   listedVolume?: number | null;
@@ -49,7 +58,7 @@ export interface CoveredWarrant {
 export interface CoveredWarrantSnapshot extends CoveredWarrant {
   daysToMaturity: number | null;
   timeToMaturity: number | null;
-  moneyness: number | null; // (S - K) / K or S / K
-  spread: number | null;    // Ask - Bid
-  spreadPercent: number | null; // (Ask - Bid) / Bid
+  moneyness: number | null;     // canonical S/K from the backend
+  spread: number | null;        // ask - bid (see domain/quant_display.ts)
+  spreadPercent: number | null; // 100 * (ask - bid) / mid  (see domain/quant_display.ts)
 }

@@ -210,9 +210,11 @@ def test_rest_api_coverage_and_reconciliation_endpoints():
     assert "unknown_lifecycle_symbols" in metrics
     assert "metadata_complete_symbols" in metrics
     assert "metadata_partial_symbols" in metrics
-    assert metrics["verified_active_symbols"] == 14
+    assert metrics["verified_active_symbols"] == 15
     assert metrics["verified_expired_symbols"] == 3
     assert metrics["unknown_lifecycle_symbols"] > 0
+    assert metrics["verified_current_metadata_symbols"] == 5
+    assert metrics["conflicting_metadata_symbols"] == 1
 
     # 2. Reconcile endpoint
     rec_resp = client.post(

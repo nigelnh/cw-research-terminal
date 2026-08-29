@@ -65,6 +65,28 @@ describe("Quant API contract - frontend consumes backend units correctly", () =>
     expect(cw.historicalVolatility).toBe(0.2264);    // stays decimal, NOT 22.64
   });
 
+  it("propagates canonical moneyness_category / contract_state / is_tradable from the backend", () => {
+    client.handleIncomingMessage({
+      type: "analytics_patch",
+      symbol: "CHPG2541",
+      analytics: {
+        symbol: "CHPG2541",
+        moneyness: 0.985,
+        moneyness_category: "ATM",
+        contract_state: "NEAR_EXPIRY",
+        is_tradable: true,
+        is_available: true,
+        greeks: {},
+      },
+    });
+    const cw = client.getCoveredWarrant("CHPG2541")!;
+    expect(cw.moneynessRatio).toBe(0.985);
+    expect(cw.moneynessCategory).toBe("ATM");    // backend label, client never derives it
+    expect(cw.contractState).toBe("NEAR_EXPIRY");
+    expect(cw.isTradable).toBe(true);
+    expect(cw.quantUnavailableReason).toBeNull();
+  });
+
   it("keeps analytics_patch IVs as decimals (NOT re-divided by 100)", () => {
     client.handleIncomingMessage({
       type: "analytics_patch",

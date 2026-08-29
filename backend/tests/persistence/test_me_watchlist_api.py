@@ -149,9 +149,9 @@ async def test_put_then_get_round_trips_with_order_and_canonical_metadata(api):
     # canonical registry facts win over the forged client values
     assert items[1]["instrumentType"] == "CW"
     assert items[1]["underlyingSymbol"] == "TCB"
-    assert items[1]["issuer"] == "KIS"
-    assert items[1]["strikePrice"] == 25000.0
-    assert items[1]["exerciseRatio"] == 2.0
+    assert items[1]["issuer"] == "ACBS"
+    assert items[1]["strikePrice"] == 37000.0
+    assert items[1]["exerciseRatio"] == 4.0
     assert r2.json()["updatedAt"] is not None
 
 
@@ -220,11 +220,11 @@ async def test_forged_strike_issuer_ratio_cannot_be_persisted(api):
     item = (await api.get("/api/me/watchlist", headers=_auth(SUBJECT_A))).json()["items"][0]
     assert item["instrumentType"] == "CW"
     assert item["underlyingSymbol"] == "TCB"
-    assert item["issuer"] == "KIS"
-    assert item["strikePrice"] == 25000.0
-    assert item["exerciseRatio"] == 2.0
-    assert item["maturityDate"] == "2026-12-10"
-    assert item["lastTradingDate"] == "2026-12-08"
+    assert item["issuer"] == "ACBS"
+    assert item["strikePrice"] == 37000.0
+    assert item["exerciseRatio"] == 4.0
+    assert item["maturityDate"] == "2026-10-26"
+    assert item["lastTradingDate"] == "2026-10-22"
 
 
 async def test_unknown_symbol_is_rejected(api):
@@ -240,14 +240,14 @@ async def test_unknown_symbol_is_rejected(api):
 
 
 async def test_partial_but_known_registry_cw_is_accepted(api):
-    # CVPB2615 exists in the registry but has no strike/ratio/maturity (data_quality PARTIAL).
+    # CVPB2501: in the registry (public search discovery) but no strike/ratio/maturity yet
+    # (data_quality PARTIAL).
     r = await api.put(
-        "/api/me/watchlist", json={"items": [{"symbol": "CVPB2615"}]}, headers=_auth(SUBJECT_A)
+        "/api/me/watchlist", json={"items": [{"symbol": "CVPB2501"}]}, headers=_auth(SUBJECT_A)
     )
     assert r.status_code == 200
     item = (await api.get("/api/me/watchlist", headers=_auth(SUBJECT_A))).json()["items"][0]
     assert item["instrumentType"] == "CW"
-    assert item["issuer"] == "ACBS"
     assert item["underlyingSymbol"] == "VPB"
     assert item["strikePrice"] is None
     assert item["exerciseRatio"] is None

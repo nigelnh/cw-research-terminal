@@ -84,6 +84,30 @@ class CanonicalInstrumentProvider(InstrumentRegistryProvider):
         # 4. Search-only discovery without active trading evidence -> UNKNOWN
         return InstrumentLifecycleStatus.UNKNOWN, LifecycleEvidenceLevel.SEARCH_ONLY
 
+    def _provenance_is_stale(self, as_of_iso: Optional[str], current_date: Optional[str] = None) -> bool:
+        """True when a VERIFIED_CURRENT record's provenance timestamp is older than
+        ``INSTRUMENT_METADATA_MAX_AGE_DAYS`` VN calendar days. Unparseable / missing
+        timestamps are treated as stale (fail-closed)."""
+        from app.core.config import settings
+
+        if not as_of_iso:
+            return True
+        try:
+            as_of = datetime.fromisoformat(str(as_of_iso).strip())
+        except ValueError:
+            try:
+                as_of = datetime.strptime(str(as_of_iso).strip()[:10], "%Y-%m-%d").replace(tzinfo=VN_TZ)
+            except ValueError:
+                return True
+        if as_of.tzinfo is None:
+            as_of = as_of.replace(tzinfo=VN_TZ)
+        today_str = current_date or get_vietnam_today()
+        try:
+            today = datetime.strptime(today_str, "%Y-%m-%d").replace(tzinfo=VN_TZ)
+        except ValueError:
+            today = datetime.now(VN_TZ)
+        return (today.date() - as_of.date()).days > max(1, int(settings.INSTRUMENT_METADATA_MAX_AGE_DAYS))
+
     def _determine_data_quality(
         self,
         strike_price: Optional[float],
@@ -158,7 +182,18 @@ class CanonicalInstrumentProvider(InstrumentRegistryProvider):
                     has_concrete_source = True
 
             if verification_raw == "VERIFIED_CURRENT" and has_concrete_source:
-                verification_status = MetadataVerificationStatus.VERIFIED_CURRENT
+                # VERIFIED_CURRENT is only honoured while the provenance is fresh. Past the
+                # configured max age it auto-downgrades to STALE and the quant gate rejects
+                # it until the metadata is re-reconciled from source.
+                as_of = None
+                if prov_obj:
+                    ref = prov_obj.effective_terms_source or prov_obj.initial_terms_source
+                    as_of = ref.retrieved_at if ref else None
+                as_of = as_of or raw.get("metadata_retrieved_at")
+                if self._provenance_is_stale(as_of, current_date):
+                    verification_status = MetadataVerificationStatus.STALE
+                else:
+                    verification_status = MetadataVerificationStatus.VERIFIED_CURRENT
             elif verification_raw == "CONFLICTING":
                 verification_status = MetadataVerificationStatus.CONFLICTING
             elif verification_raw == "STALE":

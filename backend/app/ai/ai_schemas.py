@@ -35,6 +35,8 @@ class SelectedInstrumentContext(BaseModel):
     ivAsk: Optional[float] = None
     moneyness: Optional[float] = None
     moneynessLabel: Optional[str] = None
+    contractState: Optional[str] = None
+    quantAvailable: Optional[bool] = None
     theoreticalPrice: Optional[float] = None
     historicalVolatility: Optional[float] = None
     delta: Optional[float] = None

@@ -482,7 +482,7 @@ async def test_engine_analytics_provenance_is_internally_consistent(frozen_vn_no
         datetime(2026, 6, 1, 10, 0, tzinfo=VN_TZ),   # far from maturity
         datetime(2026, 8, 29, 10, 0, tzinfo=VN_TZ),   # the wall-clock date that first tripped it
         datetime(2026, 9, 5, 10, 0, tzinfo=VN_TZ),    # ~16 days out
-        datetime(2026, 9, 18, 15, 30, tzinfo=VN_TZ),  # ~3 days out, greeks most vol-sensitive
+        datetime(2026, 9, 17, 10, 0, tzinfo=VN_TZ),   # last trading day - still tradable, greeks most vol-sensitive
     ],
 )
 async def test_engine_analytics_provenance_is_date_boundary_stable(frozen_vn_now, frozen_date):

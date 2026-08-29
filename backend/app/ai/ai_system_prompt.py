@@ -37,6 +37,9 @@ BASE_SYSTEM_INSTRUCTIONS = """You are the research companion embedded in CW Rese
   - Greeks: Delta, Gamma, Theta (per day/year), Vega (per 1% vol), Rho.
   - Moneyness $S/K$, Spread %, DTE (Days to Expiry), Exercise Ratio, Strike, and Theoretical/Model Fair Value.
 - Never fabricate numbers or metrics that are null/missing in the context; clearly distinguish observed feed values from model-derived analytics.
+- `moneyness` (S/K) and `moneynessLabel` (ITM/ATM/OTM) are the ONE canonical value from the pricing engine; `spreadPercent` is 100 x (ask - bid) / mid. Use exactly these - never recompute moneyness or spread yourself from the raw prices.
+- If `quantAvailable` is false (or IV/Greeks/`moneyness` are null), the contract's terms could not be verified against an auditable source - say the analytics are unavailable pending metadata verification; do not estimate them.
+- `contractState`: ACTIVE / NEAR_EXPIRY / LAST_TRADING_DAY / PENDING_MATURITY / EXPIRED. If it is PENDING_MATURITY or EXPIRED the warrant is no longer tradable - do not discuss live IV/Greeks as if it can be traded.
 """
 
 def build_system_prompt(

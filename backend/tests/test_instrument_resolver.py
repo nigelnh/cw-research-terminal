@@ -19,23 +19,24 @@ def resolver() -> InstrumentResolver:
 
 
 async def test_covered_warrant_resolves_to_canonical_terms(resolver):
-    r = await resolver.resolve("ctcb2601")
+    # CVPB2615 has publicly-reconciled, VERIFIED_CURRENT contract terms.
+    r = await resolver.resolve("cvpb2615")
     assert r is not None
-    assert r.symbol == "CTCB2601"
+    assert r.symbol == "CVPB2615"
     assert r.instrument_type == "CW"
-    assert r.underlying_symbol == "TCB"
-    assert r.issuer == "KIS"
-    assert r.strike_price == 25000.0
+    assert r.underlying_symbol == "VPB"
+    assert r.issuer == "ACBS"
+    assert r.strike_price == 28500.0
     assert r.exercise_ratio == 2.0
-    assert r.maturity_date.isoformat() == "2026-12-10"
-    assert r.last_trading_date.isoformat() == "2026-12-08"
+    assert r.maturity_date.isoformat() == "2027-02-17"
+    assert r.last_trading_date.isoformat() == "2027-02-15"
 
 
 async def test_partial_registry_cw_is_still_resolved(resolver):
-    r = await resolver.resolve("CVPB2615")
+    # CVPB2501: discovered via public search, no contract terms yet (data_quality PARTIAL).
+    r = await resolver.resolve("CVPB2501")
     assert r is not None
     assert r.instrument_type == "CW"
-    assert r.issuer == "ACBS"
     assert r.underlying_symbol == "VPB"
     assert r.strike_price is None
     assert r.exercise_ratio is None

@@ -551,7 +551,7 @@ async def test_theoretical_price_requires_independent_volatility_source():
     datetime(2026, 6, 1, 10, 0, tzinfo=VN_TZ),    # far from maturity
     datetime(2026, 8, 29, 10, 0, tzinfo=VN_TZ),    # the date class of bug first surfaced
     datetime(2026, 9, 10, 10, 0, tzinfo=VN_TZ),    # ~11 days out
-    datetime(2026, 9, 19, 15, 30, tzinfo=VN_TZ),   # ~2 days out, most T-sensitive
+    datetime(2026, 9, 17, 10, 0, tzinfo=VN_TZ),    # last trading day - still tradable, most T-sensitive
 ])
 async def test_theo_price_provenance_is_date_boundary_stable(monkeypatch, frozen_now):
     """Regression: repricing the independent theoretical price from the CANONICAL full T

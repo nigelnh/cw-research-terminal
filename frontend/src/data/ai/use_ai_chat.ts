@@ -39,8 +39,14 @@ export interface SelectedInstrumentContext {
   ivBid?: number | null;
   ivTrade?: number | null;
   ivAsk?: number | null;
+  /** Canonical S/K from the backend quant engine (null if the quant gate rejected the contract). */
   moneyness?: number | null;
+  /** Canonical ITM | ATM | OTM label from the backend (null when moneyness is null). */
   moneynessLabel?: string | null;
+  /** Backend contract-lifecycle state: ACTIVE | NEAR_EXPIRY | LAST_TRADING_DAY | PENDING_MATURITY | EXPIRED. */
+  contractState?: string | null;
+  /** True when the backend quant engine returned live IV/greeks for this instrument. */
+  quantAvailable?: boolean;
   delta?: number | null;
   gamma?: number | null;
   theta?: number | null;

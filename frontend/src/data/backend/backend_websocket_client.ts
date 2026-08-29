@@ -463,6 +463,16 @@ export class BackendWebSocketClient {
             vega: typeof g.vega === "number" ? g.vega : existing.vega,
             rho: typeof g.rho === "number" ? g.rho : existing.rho,
             moneynessRatio: typeof an.moneyness === "number" ? an.moneyness : existing.moneynessRatio,
+            moneynessCategory:
+              an.moneyness_category ?? an.moneynessCategory ?? existing.moneynessCategory ?? null,
+            contractState: an.contract_state ?? an.contractState ?? existing.contractState ?? null,
+            isTradable:
+              typeof an.is_tradable === "boolean"
+                ? an.is_tradable
+                : typeof an.isTradable === "boolean"
+                ? an.isTradable
+                : existing.isTradable ?? null,
+            quantUnavailableReason: an.is_available === false ? (an.unavailable_reason ?? null) : null,
             historicalVolatility: typeof an.historical_volatility === "number" ? an.historical_volatility : (typeof an.historicalVolatility === "number" ? an.historicalVolatility : existing.historicalVolatility),
           };
           this.warrantsMap.set(sym, updatedCw);
