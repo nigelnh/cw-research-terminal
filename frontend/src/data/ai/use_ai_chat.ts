@@ -110,6 +110,14 @@ export interface ResearchContextEnvelope {
   watchlist?: string[];
   realtimeStatus?: string;
   dataMode?: string;
+  marketSession?: string;
+  marketSessionActive?: boolean;
+  quoteDisplayEligible?: boolean;
+  /** Step 13C temporal context. */
+  dataState?: string;               // LIVE | LAST_SESSION | MIXED | UNAVAILABLE
+  quoteAsOf?: string | null;        // ISO instant / session date the selected quote is from
+  latestCompletedSession?: string | null;
+  calendarConfidence?: string | null;
 }
 
 export { COPILOT_STORAGE_KEY_V2, LEGACY_STORAGE_KEY_V1 };

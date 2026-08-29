@@ -205,7 +205,7 @@ describe("Targeted Dashboard & Copilot UX Polish Pass Verifications", () => {
 
   it("14. Subscription capacity label accurately uses 'slots' instead of misleading 'live'", () => {
     const html = renderMarkup(<TopNav activeTab="dashboard" onTabChange={vi.fn()} />);
-    expect(html).toContain("7</span> / 33 slots");
+    expect(html).toContain("5</span> / 33 slots");
     expect(html).not.toContain("live");
   });
 });

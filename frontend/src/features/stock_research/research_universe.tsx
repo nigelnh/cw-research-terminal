@@ -53,8 +53,13 @@ export function ResearchUniverse({
   const setSelectedSymbol = onSelectSymbol ?? (() => {});
   const { isInWatchlist, addToWatchlist, removeFromWatchlist, canAdd } = useWatchlist();
 
-  // Static universe metadata: server state owned by TanStack Query (cached, deduped).
-  const { instruments, isLoading: loading, isError } = useActiveWarrants();
+  // Default view = genuinely active warrants (small, all real terms). Typing a search
+  // expands to the whole discovered registry so any listed warrant is findable, without
+  // dumping 500+ mostly-empty rows on first load.
+  const browseAll = searchTerm.trim().length > 0 || selectedIssuer !== "all" || selectedUnderlying !== "all";
+  const { instruments, isLoading: loading, isError } = useActiveWarrants({
+    status: browseAll ? "ALL" : "ACTIVE",
+  });
   const { getSpec } = useInstrumentSpecs();
 
   // Drawer instrument DERIVED from the universe record + realtime store (not stored).
@@ -112,12 +117,15 @@ export function ResearchUniverse({
     return val.toLocaleString("en-US");
   };
 
+  // DTE anchored to the VN calendar date, not the viewer's local clock.
+  const vnTodayIso = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Ho_Chi_Minh" });
   const calculateDTE = (lastTradingDate?: string | null, maturityDate?: string | null) => {
     const target = lastTradingDate || maturityDate;
     if (!target) return "—";
-    const targetTime = new Date(target).getTime();
-    if (isNaN(targetTime)) return "—";
-    const diff = Math.ceil((targetTime - Date.now()) / (1000 * 60 * 60 * 24));
+    const t = Date.parse(`${String(target).slice(0, 10)}T00:00:00+07:00`);
+    const now = Date.parse(`${vnTodayIso}T00:00:00+07:00`);
+    if (isNaN(t) || isNaN(now)) return "—";
+    const diff = Math.round((t - now) / 86_400_000);
     return diff >= 0 ? `${diff}d` : "Expired";
   };
 
@@ -252,7 +260,9 @@ export function ResearchUniverse({
         )}
 
         <span className="tnum" style={{ marginLeft: "auto", color: "var(--subtle-foreground)" }}>
-          {filteredInstruments.length} results
+          {browseAll
+            ? `${filteredInstruments.length} results`
+            : `${filteredInstruments.length} active · search to browse all listed warrants`}
         </span>
       </div>
 
@@ -338,7 +348,7 @@ export function ResearchUniverse({
                             if (onNavigateToDashboard) onNavigateToDashboard();
                           }}
                           className="focus-ring"
-                          title="Active in Live Dashboard. Click to view dashboard."
+                          title="On your dashboard. Click to view."
                           style={{
                             background: "transparent",
                             border: "none",
@@ -351,10 +361,12 @@ export function ResearchUniverse({
                           }}
                         >
                           <span style={{ width: "4px", height: "4px", borderRadius: "50%", backgroundColor: "var(--primary)" }} />
-                          Live
+                          Tracked
                         </button>
                       ) : (
-                        <span style={{ color: "var(--subtle-foreground)" }}>Static</span>
+                        <span style={{ color: "var(--subtle-foreground)" }}>
+                          {(cw as any).status === "ACTIVE" || !("status" in (cw as any)) ? "Reference" : "—"}
+                        </span>
                       )}
                     </td>
                     <td style={{ paddingRight: "8px", textAlign: "right" }}>

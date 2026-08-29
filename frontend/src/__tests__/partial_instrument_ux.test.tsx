@@ -66,7 +66,7 @@ describe("Dashboard contract metadata comes from the canonical registry, not the
     expect(html).not.toContain("conflicting");
   });
 
-  it("registry CONFLICTING -> 'conflicting' badge, as-issued terms still shown", () => {
+  it("registry CONFLICTING -> muted 'unverified' badge (full detail deferred to the drawer), as-issued terms still shown", () => {
     const wl = watchlistWith("CTCB2601", "TCB");
     defaultWatchlistStorage.saveWatchlist(wl);
     resetWatchlistMemoryForTests(wl);
@@ -80,7 +80,8 @@ describe("Dashboard contract metadata comes from the canonical registry, not the
     ]);
 
     expect(html).toContain("CTCB2601");
-    expect(html).toContain("conflicting");
+    expect(html).toContain("unverified");             // main table: minimal, muted
+    expect(html).toContain("Conflicting contract terms"); // full reason still in the aria-label / tooltip
     expect(html).toContain("37,000");
     expect(html).toContain("4:1");
   });

@@ -8,6 +8,7 @@ import { useResearchMarket, useQuote, useCoveredWarrant } from "@/data/use_resea
 import { useSearchParam, useNullableSearchParam } from "@/data/url/use_url_state";
 import { deriveSelectedInstrument } from "@/data/selected_instrument";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
+import { useDashboardData } from "@/data/query/use_dashboard_data";
 import { computeSpread } from "@/domain/quant_display";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
 
@@ -23,6 +24,8 @@ export function MarketExplorer() {
   const { getSpec } = useInstrumentSpecs();
   const { quotes, connectionState, upstreamFeedState, marketSession, marketSessionActive, dataMode } =
     useResearchMarket();
+  const dashSymbols = useMemo(() => items.map((i) => i.symbol), [items]);
+  const { getRow: getDashRow, meta: dashMeta } = useDashboardData(dashSymbols);
 
   // Derived (never stored): contract metadata is the canonical backend registry spec; the
   // watchlist item contributes identity only; live quote/analytics come from the realtime store.
@@ -106,6 +109,8 @@ export function MarketExplorer() {
         ? "Connecting feed"
         : "Feed unavailable";
 
+    const selRow = selected?.symbol ? getDashRow(selected.symbol) : undefined;
+
     return {
       activePage: activeTab,
       selectedInstrument: selectedContext,
@@ -115,6 +120,12 @@ export function MarketExplorer() {
       marketSession,
       marketSessionActive,
       quoteDisplayEligible: marketSessionActive,
+      // Step 13C temporal context: lets the assistant say "as of Friday's close" rather
+      // than implying every number is live.
+      dataState: selRow?.displayState ?? (marketSessionActive ? "LIVE" : "LAST_SESSION"),
+      quoteAsOf: selRow?.provenance?.quote?.asOf ?? selRow?.provenance?.quote?.sessionDate ?? null,
+      latestCompletedSession: dashMeta.latestCompletedSession,
+      calendarConfidence: dashMeta.calendarConfidence,
     };
   }, [
     activeTab,
@@ -126,6 +137,8 @@ export function MarketExplorer() {
     upstreamFeedState,
     marketSession,
     marketSessionActive,
+    getDashRow,
+    dashMeta,
   ]);
 
   const goToTab = (tab: Tab) => setTabParam(tab, "push");

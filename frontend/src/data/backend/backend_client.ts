@@ -135,17 +135,22 @@ export class BackendClient {
     return res.json();
   }
 
-  // Active Instruments from Instrument Registry
+  // Instruments from the registry. Pass status:"ALL" to browse the whole discovered
+  // universe (research tab); default is active-only (dashboard).
   async getActiveInstruments(
     issuer?: string,
     underlying?: string,
     search?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    status?: string
   ): Promise<any[]> {
     try {
+      const params: Record<string, string | undefined> = { issuer, underlying, search };
+      if (status) params.status = status;
+      else params.active_only = "true";
       const res = await this.get<{ total: number; active_count: number; items: any[] }>(
         "/api/instruments",
-        { issuer, underlying, search, active_only: "true" },
+        params,
         signal
       );
       return res.items || [];
@@ -153,6 +158,34 @@ export class BackendClient {
       console.warn("[BackendClient] Failed to fetch /api/instruments:", err);
       throw err;
     }
+  }
+
+  /** Curated default research/demo universe (verified CWs + underlyings + index). */
+  async getDefaultUniverse(signal?: AbortSignal): Promise<{ known_through?: string; items: any[] }> {
+    return this.get<{ known_through?: string; items: any[] }>(
+      "/api/instruments/default-universe",
+      undefined,
+      signal
+    );
+  }
+
+  /** Fully-resolved dashboard rows with the after-hours temporal fallback (Step 13C). */
+  async getDashboardRows(
+    symbols: string[],
+    signal?: AbortSignal
+  ): Promise<{
+    rows: any[];
+    as_of: string;
+    market_session: string;
+    market_session_active: boolean;
+    latest_completed_session: string;
+    calendar_confidence: string;
+  }> {
+    return this.get<any>(
+      "/api/market/dashboard",
+      { symbols: symbols.map((s) => s.toUpperCase()).join(",") },
+      signal
+    );
   }
 
   async getInstrumentSpecification(symbol: string, signal?: AbortSignal): Promise<any> {

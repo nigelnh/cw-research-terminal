@@ -36,52 +36,35 @@ export interface ResearchWatchlist {
 export const WATCHLIST_STORAGE_KEY_V1 = "cw-research-watchlist:v1";
 export const WATCHLIST_STORAGE_KEY_V2 = "cw-research-watchlist:v2";
 export const WATCHLIST_STORAGE_KEY_V3 = "cw-research-watchlist:v3";
-// v3: watchlist items store IDENTITY + PREFERENCE only. Frozen contract terms
-// (issuer/strike/ratio/maturity/lastTradingDate) are stripped - they are resolved live
-// from the canonical backend registry. Existing v1/v2 payloads migrate in place, keeping
-// symbols, order, instrumentType, underlyingSymbol, addedAt and notes.
-export const CURRENT_WATCHLIST_SCHEMA_VERSION = 3;
+export const WATCHLIST_STORAGE_KEY_V4 = "cw-research-watchlist:v4";
+// v3: items store IDENTITY + PREFERENCE only (contract terms resolved live from the
+//     registry).
+// v4: default demo universe changed to the curated VERIFIED_CURRENT set - CTCB2601
+//     (CONFLICTING) and NVL (no history) are no longer seeded. A user who never touched
+//     the old default is re-seeded; a customized watchlist migrates unchanged.
+export const CURRENT_WATCHLIST_SCHEMA_VERSION = 4;
 
 /**
- * PRIMARY UI UNIVERSE
- * The exact 5 canonical symbols intended for the primary user-facing dashboard experience.
+ * PRIMARY UI UNIVERSE - mirrors the backend GET /api/instruments/default-universe.
+ * Curated: verified covered warrants + their underlyings + the index.
  */
 export const PRIMARY_UI_UNIVERSE = [
-  "HPG",
-  "NVL",
-  "VHM",
-  "CTCB2601",
+  "CHPG2602",
   "CVPB2615",
+  "HPG",
+  "VPB",
+  "VNINDEX",
 ] as const;
 
+/** The old (pre-v4) default set - used to detect an untouched watchlist during migration. */
+export const LEGACY_DEFAULT_SYMBOLS = ["HPG", "NVL", "VHM", "CTCB2601", "CVPB2615"];
+
 export const DEFAULT_PRIMARY_WATCHLIST_ITEMS: WatchlistItem[] = [
-  {
-    symbol: "HPG",
-    instrumentType: "STOCK",
-    addedAt: 0,
-  },
-  {
-    symbol: "NVL",
-    instrumentType: "STOCK",
-    addedAt: 0,
-  },
-  {
-    symbol: "VHM",
-    instrumentType: "STOCK",
-    addedAt: 0,
-  },
-  {
-    symbol: "CTCB2601",
-    instrumentType: "CW",
-    underlyingSymbol: "TCB",
-    addedAt: 0,
-  },
-  {
-    symbol: "CVPB2615",
-    instrumentType: "CW",
-    underlyingSymbol: "VPB",
-    addedAt: 0,
-  },
+  { symbol: "CHPG2602", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
+  { symbol: "CVPB2615", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
+  { symbol: "HPG", instrumentType: "STOCK", addedAt: 0 },
+  { symbol: "VPB", instrumentType: "STOCK", addedAt: 0 },
+  { symbol: "VNINDEX", instrumentType: "INDEX", addedAt: 0 },
 ];
 
 /**
@@ -104,7 +87,7 @@ export function createDefaultWatchlist(): ResearchWatchlist {
 export class WatchlistStorage {
   private storageKey: string;
 
-  constructor(storageKey: string = WATCHLIST_STORAGE_KEY_V3) {
+  constructor(storageKey: string = WATCHLIST_STORAGE_KEY_V4) {
     this.storageKey = storageKey;
   }
 
@@ -156,10 +139,12 @@ export class WatchlistStorage {
         }
       }
 
-      // 2. Migrate an older payload (v1/v2, or a v3 key still holding v2 data). Keep the
-      //    user's symbols, ORDER, type, underlying hint, addedAt and notes; drop frozen
-      //    contract terms.
+      // 2. Migrate an older payload (v1/v2/v3). Keep the user's symbols, ORDER, type,
+      //    underlying hint, addedAt and notes; drop frozen contract terms. EXCEPTION: a
+      //    watchlist that still holds exactly the pre-v4 default set, untouched, is
+      //    re-seeded with the new curated default (removes CTCB2601 CONFLICTING + NVL).
       const rawOlder =
+        window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V3) ||
         window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V2) ||
         window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V1) ||
         rawV3;
@@ -167,17 +152,26 @@ export class WatchlistStorage {
         try {
           const old = JSON.parse(rawOlder);
           if (old && typeof old === "object" && Array.isArray(old.items) && old.items.length > 0) {
-            const migrated: ResearchWatchlist = {
-              id: old.id || "default_personal_watchlist",
-              name: old.name || "My Personal Research Dashboard",
-              items: this.sanitizeItems(old.items),
-              createdAt: typeof old.createdAt === "number" ? old.createdAt : Date.now(),
-              updatedAt: Date.now(),
-              version: CURRENT_WATCHLIST_SCHEMA_VERSION,
-            };
+            const oldSyms = old.items.map((i: any) => String(i?.symbol || "").toUpperCase());
+            const untouchedLegacyDefault =
+              oldSyms.length === LEGACY_DEFAULT_SYMBOLS.length &&
+              LEGACY_DEFAULT_SYMBOLS.every((s) => oldSyms.includes(s)) &&
+              old.items.every((i: any) => (i?.addedAt ?? 0) === 0 && !i?.notes);
+
+            const migrated: ResearchWatchlist = untouchedLegacyDefault
+              ? createDefaultWatchlist()
+              : {
+                  id: old.id || "default_personal_watchlist",
+                  name: old.name || "My Personal Research Dashboard",
+                  items: this.sanitizeItems(old.items),
+                  createdAt: typeof old.createdAt === "number" ? old.createdAt : Date.now(),
+                  updatedAt: Date.now(),
+                  version: CURRENT_WATCHLIST_SCHEMA_VERSION,
+                };
             this.saveWatchlist(migrated);
-            window.localStorage.removeItem(WATCHLIST_STORAGE_KEY_V1);
-            window.localStorage.removeItem(WATCHLIST_STORAGE_KEY_V2);
+            for (const k of [WATCHLIST_STORAGE_KEY_V1, WATCHLIST_STORAGE_KEY_V2, WATCHLIST_STORAGE_KEY_V3]) {
+              if (k !== this.storageKey) window.localStorage.removeItem(k);
+            }
             return migrated;
           }
         } catch {
