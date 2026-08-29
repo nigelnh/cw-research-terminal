@@ -218,6 +218,10 @@ def _make_provider(monkeypatch, *, session_factory=None):
         return _FakeSession()
 
     monkeypatch.setattr(p, "_create_session", _factory)
+    # Lifecycle tests assert the in-session fast-reconnect path; pin it so they are
+    # deterministic regardless of wall-clock. Off-session pacing is covered separately
+    # in test_fiinquant_reconnect_pacing.py.
+    p._market_is_active = lambda: True
     return p, counter
 
 

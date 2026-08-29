@@ -76,6 +76,35 @@ class MarketSession:
         status = self.get_session_status(dt)
         return status in (MarketSessionStatus.MORNING_SESSION, MarketSessionStatus.AFTERNOON_SESSION)
 
+    def seconds_until_next_trading_session(self, dt: Optional[datetime] = None) -> float:
+        """Seconds from ``dt`` (or now, VN time) until the next continuous trading session
+        begins - the 09:00 morning open or the 13:00 afternoon open, Monday-Friday.
+
+        Returns ``0.0`` when a session is active right now. Public holidays are **not**
+        modelled: on a VN holiday this returns the delta to the next clock-scheduled open,
+        which is a safe (at worst slightly early) value for pacing reconnects.
+        """
+        current = dt if dt is not None else self.get_vn_now()
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=VN_TZ)
+        else:
+            current = current.astimezone(VN_TZ)
+
+        if self.is_trading_active(current):
+            return 0.0
+
+        # today .. +4 days covers a Friday-evening -> Monday-morning gap
+        for add_days in range(0, 5):
+            day = (current + timedelta(days=add_days)).date()
+            if day.weekday() >= 5:  # Sat / Sun
+                continue
+            for start in (self.MORNING_START, self.AFTERNOON_START):
+                candidate = datetime.combine(day, start, tzinfo=VN_TZ)
+                if candidate > current:
+                    return (candidate - current).total_seconds()
+
+        return 3600.0  # unreachable in practice; conservative fallback
+
     def is_display_eligible(
         self,
         received_timestamp_ms: Optional[int],

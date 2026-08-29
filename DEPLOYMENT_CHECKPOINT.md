@@ -1,28 +1,75 @@
 # Step 11 Deployment — Checkpoint
 
-_Last updated: 2026-08-28 (session resume). No secrets in this file._
+_Last updated: 2026-08-28 23:5x EDT (session resume — Part A + B done). No secrets in this file._
 
-## Progress this session
-- Supabase MCP connected (project `ezfcgcfzewtrpevgfzpr`, scoped `development,docs`). ✅
-- Retrieved via MCP: Project URL `https://ezfcgcfzewtrpevgfzpr.supabase.co`; publishable key
-  `sb_publishable_...` (client-safe). JWKS endpoint serves an **ES256** key → backend
-  asymmetric JWT verification will work (no `SUPABASE_JWT_SECRET` needed). ✅
-- Supabase auth settings (`GET /auth/v1/settings`): `email: true` (magic link zero-config),
-  **`google: false`** — Google OAuth provider is NOT configured; the UI "Sign in with Google"
-  button will fail until a Google provider is added in the Supabase dashboard. Email magic
-  link works once redirect URLs are set.
-- Vercel env (Production + Preview): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` set. ✅
-- Railway `backend` `SUPABASE_URL`: **NOT set** — `railway variables --set` is blocked by the
-  Claude Code auto-approve classifier. Needs the user to run it or approve.
-- Redirect-URL research (docs): separators are `.` and `/`; `*` matches a non-separator run.
-  App always redirects to `window.location.href` = origin + path `/` + optional query
-  (`?tab`,`?symbol`,`?range`,`?interval`,`?code`), never a deeper path. → narrowest pattern:
-  **`https://cw-research-terminal.vercel.app/*`** (fallback `/**` if any redirect is rejected).
-- Railway incident (deploy backlog) appears resolved (~Aug 17–20); control-plane API responsive.
-- Still pending: manual Supabase dashboard URL config (A.6), frontend prod redeploy (A.7),
-  all of Part B (recreate Postgres/Redis, deploy backend), Part C smoke tests.
+## STATUS: ~DEPLOYED. Backend + DB + frontend live. One open item (FiinQuant reconnect loop).
 
-_Original checkpoint below._
+### Live URLs
+- Frontend: **https://cw-research-terminal.vercel.app** (200, Supabase config + new backend URL baked in)
+- Backend:  **https://backend-production-626f.up.railway.app** (`/healthz` 200, `/health` all-green)
+  - ⚠️ domain CHANGED from `-f1b1` to `-626f` (old one was stuck in "Application not found" —
+    a Railway edge-routing bug from being created pre-deployment; deleted + recreated).
+
+### Done this session
+- **Supabase (Part A)** — MCP connected (`ezfcgcfzewtrpevgfzpr`, `development,docs`). JWKS = ES256
+  → backend `auth.mode: asymmetric_jwks` confirmed live, no secret. `GET /auth/v1/settings`:
+  `email:true`, `google:false`.
+  - Vercel (Prod+Preview): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (= `sb_publishable_...`).
+  - Railway `backend`: `SUPABASE_URL` set.
+  - Frontend code: Google button now gated behind `VITE_AUTH_GOOGLE_ENABLED` (unset → magic-link
+    only). Committed `d921b82`, pushed to `main`.
+  - **Redirect URLs (user confirmed saved in dashboard):** Site URL
+    `https://cw-research-terminal.vercel.app`; Redirect `https://cw-research-terminal.vercel.app/*`.
+- **Railway (Part B)** — `.claude/settings.local.json` got `Bash(railway:*)` allow rule.
+  - Deleted orphaned volumes. Created `Postgres` + `Redis` (default region `ams`, exact names).
+  - Re-pinned `DATABASE_URL=${{Postgres.DATABASE_URL}}` / `REDIS_URL=${{Redis.REDIS_URL}}` (the
+    refs were wiped when the old services were deleted; only re-set correctly AFTER the new
+    services existed).
+  - `ALLOWED_HOSTS=backend-production-626f.up.railway.app,healthcheck.railway.app` — the
+    `healthcheck.railway.app` entry is REQUIRED (Railway probes `/healthz` with that Host;
+    without it TrustedHost returns 400 and the deploy never goes healthy).
+  - Deployed via `railway up` then GitHub auto-deploy; final good deployment builds `backend/`
+    (Dockerfile), 1 replica / 1 uvicorn worker, listens on `$PORT` (8080). Domain target port
+    pinned to 8080.
+  - Migrations ran in entrypoint (alembic → head). `production_config_problems: 0`,
+    `database.connected: true`, `redis_connected: true`, `client_ip_trust_mode: railway`.
+  - DB bootstrap (via `railway ssh -s backend`, key registered + `ssh.railway.com` in known_hosts):
+    `seed-instruments` → 13 stocks / 5 indices / 533 warrants. Backfill:
+    HPG/VHM/TCB/VPB = 248 bars 1D adj; NVL = 240; CTCB2601 = 152 raw; CVPB2615 = 38 raw
+    (all 2025-09..2026-08-27). A few stale `RUNNING` run-rows from the startup HV gap-fill —
+    cosmetic, data landed.
+  - `ingest-cron` NOT added (per instruction).
+- **Part C smoke tests** — PASS: healthz; CORS (Vercel origin only); `/api/instruments`;
+  `/api/market/history/{sym}` postgres-first (0 provider_direct_reads); `/api/quant/{sym}`
+  (engine resolves underlying, applies verification gate — CW metadata still UNVERIFIED so
+  greeks N/A, data task not deploy bug); `/api/ai/health` ok + `/api/ai/chat` works (free model,
+  used_today small); rate-limit 429 + `retry-after` header (Redis limiter); body-size 413;
+  client-IP spoof (fake XFF/X-Real-IP does NOT create fresh buckets — `railway` trust mode);
+  WSS upgrade 101 via edge (needs HTTP/1.1); WS status frame + symbol-cap error ("At most 40").
+  me/watchlist unauth → 401.
+
+### OPEN ITEM — FiinQuant SignalR reconnect loop
+- Provider flaps ~every 10 s: `stream disconnected → reconnect 1.0s → successful → drops ~7s later`,
+  plus intermittent `[Errno 9] Bad file descriptor` from `signalrcore`. `upstream_status:
+  DISCONNECTED`, `trade_stream_connected: false`, 8 auto-subscriptions (CWs + underlyings + VNINDEX).
+- Likely trigger: running `python -m app.persistence.cli` inside the container repeatedly — each
+  invocation re-authenticates FiinQuant on the SAME account and can invalidate the long-running
+  server's session. Market is also CLOSED_WEEKEND.
+- **Next:** stop touching the CLI; let it settle. Re-check `GET /api/market/health` →
+  `upstream_status` should go `READY`/`LIVE`. Verify for real when **HOSE opens Mon 09:00 ICT
+  (02:00 UTC)**. If FiinQuant starts rejecting auth, temporarily `FIINQUANT_ENABLED=false`.
+  `PUBLIC_REALTIME_ENABLED=false` does NOT stop this (only gates client WS, not the provider's
+  own quant auto-subscriptions).
+
+### Still TODO
+- Confirm FiinQuant goes LIVE Monday; then flip `SECURITY_HSTS_ENABLED=true` (HTTPS is verified).
+- Manual: sign in on the live site (magic link) → import watchlist → refresh persists → sign out.
+- Optional: verified CW metadata so quant greeks compute. Google provider if wanted.
+- After 48–72 h: `railway metrics` per service → decide on Hobby (~$5 trial credit, ~12–16 days).
+- Commit `.claude/settings.local.json` + the market-data URL change is already in Vercel only
+  (no code change needed — URLs are env vars).
+
+_Original checkpoint below (URLs/host names now superseded by the -626f domain)._
 
 ---
 
