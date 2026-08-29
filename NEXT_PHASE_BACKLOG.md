@@ -12,6 +12,26 @@ Recommended phase order: **P0 → P1 finance → P1 AI → P1 UX setup → P1 UX
 
 ---
 
+## Step 13A status (2026-08-29) — finance/trading correctness pass
+
+DONE: **P0-3** (STB backfilled) · **P1-F1** (one spread convention: `(ask-bid)/mid`, shared
+helper) · **P1-F2** (moneyness single source = backend; `moneyness_category` propagated;
+ATM band now `QUANT_MONEYNESS_ATM_BAND`) · **P1-F3** (CVPB2615 → `VERIFIED_CURRENT` with
+auditable provenance, quant panel populates during market hours; CTCB2601 → `CONFLICTING`,
+gate stays closed honestly; staleness auto-downgrade added) · **P1-F6** (`ContractLifecycleState`
++ `is_tradable`; non-tradable clears IV/Greeks; DTE aligned to maturity).
+
+PARTIAL: **P1-F4** — `docs/domain/quant_display_conventions.md` documents the model and the
+`display_eligible` primitive already nulls stale wire fields; the first-class per-value
+freshness **badge** (LIVE/DELAYED/SESSION-CLOSED/STALE-<age>) is still UX-phase work (P1-U4).
+**P1-F5** — conventions table + shared `formatPct`/`formatVnd`/`formatGreek` helpers exist;
+wiring every component to them is UX-phase.
+
+P0-1 (Supabase token alg) — still MANUAL PENDING (no real user token; JWKS is ES256-only,
+so almost certainly fine). P0-2 (Monday HOSE live check) — unchanged.
+
+---
+
 ## P0 — correctness / broken behavior
 
 ### P0-1 — Confirm Supabase user tokens are asymmetric (ES256), not legacy HS256
