@@ -35,13 +35,14 @@ export const queryKeys = {
 
   instruments: {
     all: ["cw-research", "instruments"] as const,
-    activeWarrants: (f?: { issuer?: string | null; underlying?: string | null }) =>
+    activeWarrants: (f?: { issuer?: string | null; underlying?: string | null; status?: string }) =>
       [
         "cw-research",
         "instruments",
         "active-warrants",
         f?.issuer ?? null,
         f?.underlying ?? null,
+        f?.status ?? "ACTIVE",
       ] as const,
     spec: (symbol: string) =>
       ["cw-research", "instruments", "spec", symbol.trim().toUpperCase()] as const,
