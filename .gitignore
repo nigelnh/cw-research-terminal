@@ -90,7 +90,9 @@ audit/claude/
 # Misc
 # ==============================================================================
 performance_test_cw.js
-docs/
+# docs/ is tracked (public-facts-only domain + convention docs). Internal scratch notes
+# live under docs/internal/ which stays ignored.
+docs/internal/
 /tests/
 .agents/
 server/archive/

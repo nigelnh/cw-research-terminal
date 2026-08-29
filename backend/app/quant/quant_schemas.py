@@ -22,6 +22,17 @@ class MoneynessCategory(str, Enum):
     OTM = "OTM"
 
 
+class ContractLifecycleState(str, Enum):
+    """Truthful trading-lifecycle state for the UI. Derived from last_trading_date /
+    maturity_date, independent of whether analytics could be computed."""
+    ACTIVE = "ACTIVE"                    # tradable, not close to last trading date
+    NEAR_EXPIRY = "NEAR_EXPIRY"          # tradable, within QUANT_NEAR_EXPIRY_DAYS of last trading
+    LAST_TRADING_DAY = "LAST_TRADING_DAY"  # today is the last trading date
+    PENDING_MATURITY = "PENDING_MATURITY"  # past last trading date, not yet matured (NOT tradable)
+    EXPIRED = "EXPIRED"                  # past maturity date
+    UNKNOWN = "UNKNOWN"                  # dates unavailable
+
+
 class WarrantGreeks(BaseModel):
     theoretical_price: Optional[float] = Field(
         default=None,
@@ -83,6 +94,16 @@ class WarrantAnalytics(BaseModel):
     calculated_at: str = Field(..., description="ISO 8601 timestamp of calculation")
     is_available: bool = Field(default=False, description="True if valid inputs allowed analytics computation")
     unavailable_reason: Optional[str] = Field(default=None, description="Diagnostic reason if analytics cannot be computed")
+
+    # Contract trading-lifecycle state (truthful even when is_available is False)
+    contract_state: ContractLifecycleState = Field(
+        default=ContractLifecycleState.UNKNOWN,
+        description="ACTIVE | NEAR_EXPIRY | LAST_TRADING_DAY | PENDING_MATURITY | EXPIRED | UNKNOWN",
+    )
+    is_tradable: bool = Field(
+        default=False,
+        description="True only while the warrant can still be traded (ACTIVE / NEAR_EXPIRY / LAST_TRADING_DAY).",
+    )
 
     # Moneyness
     moneyness: Optional[float] = Field(default=None, description="Moneyness ratio S / K")

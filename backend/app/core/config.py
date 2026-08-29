@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     # Live analytics scheduler: max Covered Warrants whose analytics may be recomputed concurrently.
     # Per-symbol work is already single-flighted; this bounds the global fan-out.
     QUANT_MAX_CONCURRENT_COMPUTES: int = Field(default=8, description="Max concurrent live CW analytics recomputations")
+    # Moneyness (S/K) categorical band for the UI label ONLY. The raw numeric moneyness is
+    # always reported unrounded-by-category; this tolerance around parity (1.0) decides the
+    # ITM / ATM / OTM label. 0.03 = classify |S/K - 1| <= 3% as ATM. Does not touch BSM inputs.
+    QUANT_MONEYNESS_ATM_BAND: float = Field(default=0.03, description="Half-width of the ATM band around S/K = 1.0 for the categorical label")
+    # A CW contract record is only allowed to gate analytics as VERIFIED_CURRENT while its
+    # provenance is fresh. Past this age (VN calendar days since the provenance retrieved_at)
+    # a VERIFIED_CURRENT record is downgraded to STALE at load time and the quant gate rejects
+    # it until the metadata is re-reconciled. Set generously: contract terms change rarely.
+    INSTRUMENT_METADATA_MAX_AGE_DAYS: int = Field(default=120, description="Max age of CW metadata provenance before VERIFIED_CURRENT auto-downgrades to STALE")
+    QUANT_NEAR_EXPIRY_DAYS: int = Field(default=10, description="Calendar days before last-trading-date at which a CW's contract_state becomes NEAR_EXPIRY")
     # NOTE: dividend yield q is NOT configurable. HOSE covered warrants are dividend-protected
     # (strike/ratio adjusted on ex-date), so the CW analytics engine pins q = 0 by convention
     # -- see app.quant.dividend_convention.CW_DIVIDEND_YIELD_CONVENTION and QUANT_CONTRACT.md section 7.

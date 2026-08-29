@@ -17,6 +17,7 @@ import {
   RANGE_INTERVAL_COMPATIBILITY,
   DEFAULT_INTERVAL_FOR_RANGE,
 } from "@/domain/historical/types";
+import { computeSpread, contractStateLabel, daysUntil } from "@/domain/quant_display";
 
 const RANGES: readonly ChartRange[] = ["1D", "5D", "1M", "3M", "6M", "1Y", "MAX"];
 const INTERVALS: readonly ChartInterval[] = ["1m", "5m", "15m", "30m", "1h", "1D", "1W", "1M"];
@@ -54,27 +55,22 @@ const formatRatio = (val?: number | null): string => {
   return `${val}:1`;
 };
 
-const calculateDTE = (lastTradingDate?: string | null, maturityDate?: string | null): string => {
-  const target = lastTradingDate || maturityDate;
-  if (!target) return "—";
-  const targetTime = new Date(target).getTime();
-  if (isNaN(targetTime)) return "—";
-  const diffDays = Math.ceil((targetTime - Date.now()) / (1000 * 60 * 60 * 24));
-  return diffDays >= 0 ? `${diffDays}d` : "Expired";
+// DTE = calendar days to the MATURITY date, matching the backend `days_to_expiry`
+// (ACT, floored at 0). "Days to last trading" is conveyed separately by the contract state.
+const calculateDTE = (_lastTradingDate?: string | null, maturityDate?: string | null): string => {
+  const d = daysUntil(maturityDate);
+  return d === null ? "—" : `${d}d`;
 };
 
-const calculateSpread = (bid?: number | null, ask?: number | null): string => {
-  if (bid === undefined || bid === null || ask === undefined || ask === null) return "—";
-  const diff = ask - bid;
-  if (diff < 0) return "—";
-  return formatNumber(diff);
+// Spread + spread% use the ONE canonical convention (see domain/quant_display.ts):
+// spread = ask - bid ; spreadPct = 100 * spread / mid ; "—" unless bid>0, ask>0, ask>=bid.
+const spreadAbsStr = (bid?: number | null, ask?: number | null): string => {
+  const { abs } = computeSpread(bid, ask);
+  return abs === null ? "—" : formatNumber(abs);
 };
-
-const calculateSpreadPct = (bid?: number | null, ask?: number | null): string => {
-  if (bid === undefined || bid === null || ask === undefined || ask === null || bid <= 0) return "—";
-  const diff = ask - bid;
-  if (diff < 0) return "—";
-  return `${((diff / bid) * 100).toFixed(2)}%`;
+const spreadPctStr = (bid?: number | null, ask?: number | null): string => {
+  const { pct } = computeSpread(bid, ask);
+  return pct === null ? "—" : `${pct.toFixed(2)}%`;
 };
 
 function ChartPlaceholder({ children, tone }: { children: React.ReactNode; tone: "muted" | "error" }) {
@@ -236,15 +232,20 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
   const volume = q?.totalVolume ?? cw?.quote?.totalVolume;
   const underlyingPrice = cw?.underlyingPrice ?? null;
 
-  // Moneyness calculation
-  const moneynessRatio =
-    underlyingPrice && instrument.strikePrice
-      ? (underlyingPrice / instrument.strikePrice) * 100
+  // Moneyness is canonical from the backend quant engine (numeric S/K + ITM/ATM/OTM label).
+  // The client never recomputes it - if the quant gate rejected the contract metadata, it
+  // stays "—" here just as it does in the quant panel.
+  const moneynessLabel =
+    typeof cw?.moneynessRatio === "number" && cw?.moneynessCategory
+      ? `${cw.moneynessRatio.toFixed(3)} · ${cw.moneynessCategory}`
+      : "—";
+  const contractStateText = contractStateLabel(cw?.contractState);
+  const tradableCaveat =
+    cw?.isTradable === false
+      ? cw?.contractState === "PENDING_MATURITY"
+        ? "This warrant has stopped trading; figures below are last-known, not live."
+        : null
       : null;
-
-  const moneynessLabel = moneynessRatio
-    ? `${moneynessRatio.toFixed(1)}% ${moneynessRatio >= 100 ? "ITM" : "OTM"}`
-    : "—";
 
   const handleToggleWatchlist = () => {
     if (watched) {
@@ -524,7 +525,7 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
               <Row label="Ask" value={formatNumber(askPrice)} />
               <Row
                 label="Spread"
-                value={`${calculateSpread(bidPrice, askPrice)} · ${calculateSpreadPct(bidPrice, askPrice)}`}
+                value={`${spreadAbsStr(bidPrice, askPrice)} · ${spreadPctStr(bidPrice, askPrice)}`}
               />
               <Row label="Volume" value={formatNumber(volume)} />
             </Section>
@@ -552,10 +553,17 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
                 <Section title="Contract">
                   <Row label="Strike" value={formatNumber(instrument.strikePrice || cw?.strikePrice)} />
                   <Row label="Ratio" value={formatRatio(instrument.exerciseRatio || cw?.exerciseRatio)} />
+                  <Row label="Last trading" value={instrument.lastTradingDate || cw?.lastTradingDate || "—"} />
                   <Row label="Maturity" value={instrument.maturityDate || cw?.maturityDate || "—"} />
-                  <Row label="DTE" value={calculateDTE(instrument.lastTradingDate, instrument.maturityDate)} />
+                  <Row label="DTE (to maturity)" value={calculateDTE(instrument.lastTradingDate, instrument.maturityDate)} />
+                  <Row label="State" value={contractStateText} />
                   <Row label="Moneyness (S/K)" value={moneynessLabel} />
                 </Section>
+                {tradableCaveat && (
+                  <div style={{ padding: "0 24px 12px", fontSize: "11px", color: "var(--destructive)" }}>
+                    {tradableCaveat}
+                  </div>
+                )}
 
                 <Section title="Volatility">
                   <Row label="IV bid" value={formatPct(cw?.ivBid)} accent />
@@ -607,7 +615,7 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
                     <span style={{ color: "var(--foreground)" }}>{formatNumber(askPrice)}</span>
                   </span>
                   <span className="tnum" style={{ color: "var(--subtle-foreground)" }}>
-                    Spread {calculateSpread(bidPrice, askPrice)} ({calculateSpreadPct(bidPrice, askPrice)})
+                    Spread {spreadAbsStr(bidPrice, askPrice)} ({spreadPctStr(bidPrice, askPrice)})
                   </span>
                 </div>
                 {instrument.underlyingSymbol && (
@@ -841,7 +849,7 @@ export function InstrumentDrawer({ instrument, onClose }: InstrumentDrawerProps)
               <Row label="Moneyness (S/K)" value={moneynessLabel} />
               <Row label="Underlying Spot (S)" value={formatNumber(underlyingPrice)} />
               <Row label="Strike (K)" value={formatNumber(instrument.strikePrice || cw?.strikePrice)} />
-              <Row label="Historical Volatility (30D)" value={cw?.historicalVolatility !== undefined && cw?.historicalVolatility !== null ? formatPct(cw.historicalVolatility) : "—"} />
+              <Row label="Historical Volatility (HV₂₂)" value={cw?.historicalVolatility !== undefined && cw?.historicalVolatility !== null ? formatPct(cw.historicalVolatility) : "—"} />
               <Row label="Theoretical Fair Price" value={cw?.theoreticalPrice !== undefined && cw?.theoreticalPrice !== null ? `${formatNumber(cw.theoreticalPrice)} ₫` : "—"} />
               {cw?.modelPriceAtIvMid !== undefined && cw?.modelPriceAtIvMid !== null && (
                 <Row label="Model Price @ IV Mid" value={`${formatNumber(cw.modelPriceAtIvMid)} ₫`} />
