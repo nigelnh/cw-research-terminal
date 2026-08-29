@@ -267,22 +267,38 @@ afternoon 13:00–15:00 ICT. Run this during an active session (not lunch 11:30�
 6. **Analytics patches advance**
    subscribe a CW (`CTCB2601`) → `analytics`/patch frames arrive; `iv_*` / greeks populate
    once its metadata is verified (see note — greeks are gated on `MetadataVerificationStatus`).
-7. **Exactly one FiinQuantProvider**
-   `railway ssh -s backend "grep -c 'FiinQuant authentication successful' /proc/1/fd/1"` is not
-   reliable; instead `curl $B/health | grep -oE '"connection_generation":[0-9]+'` — one number,
-   and it does not climb on its own. `connect_count` should be low and stable.
-8. **Exactly two upstream SignalR connections**
-   `curl $B/health` → `security...` block has provider health; check `signalr_ping_threads`
-   == 2 (trade + bidask) and `active_stream_count` == 2. Never 0, never > 2 at rest.
-9. **No connection-count growth after 30–60 min**
-   re-run step 8 after 30 and 60 min → `signalr_ping_threads` still 2, `orphan_ping_threads_
-   reaped` may rise slightly (expected on reconnects) but `disconnect_count` / `stream_restart_
-   count` must not be climbing fast (a handful over an hour is fine; hundreds is the old bug).
+   NOTE: the detailed provider lifecycle counters (`signalr_ping_threads`,
+   `disconnect_count`, `connection_generation`, …) are **not** exposed over HTTP, and
+   `railway ssh` python sees a *fresh unconnected* provider (separate process) — useless.
+   Steps 7–9 are therefore **log-based**, against `railway logs -s backend`.
+7. **Exactly one FiinQuantProvider** — structural (one `SubscriptionManager()` singleton,
+   `numReplicas: 1`, `uvicorn --workers 1` — all already verified). Confirm: logs show a
+   single `FiinQuant authentication successful (connection generation N)` with **N small and
+   not climbing** during the session (re-auth only happens if the session token dies).
+8. **Exactly two upstream SignalR connections** — after a successful stream start the log
+   reads `FiinQuant streams active for K symbols (generation N)` and, on reconnects,
+   `SignalR stream reconnect successful for K symbols`. There is no per-connection count in
+   the logs, but the two-stream invariant is enforced in code (`_owned_streams` = trade +
+   bidask, retired before any replacement). Watch instead for the failure signatures:
+   repeated `orphan ping threads reaped` climbing fast, or `[Errno 9] Bad file descriptor`
+   storms → that's leakage.
+9. **No connection-count growth / loop after 30–60 min** — during an active session,
+   `grep -cE "Scheduling provider reconnect|reconnect successful" <(railway logs -s backend)`
+   should be **low** (single digits over an hour). A ~10 s cadence of
+   `disconnected → reconnect` during active trading = the real defect. Also check the final
+   `FiinQuant provider disconnected (… N orphan ping threads reaped over lifetime)` only
+   appears on shutdown, and lifetime orphan count is small.
 10. Do NOT change any formula/threshold just because live IV/HV/greek values differ from
     weekend/fixture values — live market numbers are expected to differ.
 
 If step 3 or 8–9 fail during active trading → that is the real defect; capture
-`railway logs -s backend` for the window and the `/health` provider block before touching code.
+`railway logs -s backend` for the window before touching code.
+
+Baseline captured this session (weekend, off-session, streams flapping on the 300 s pace):
+provider reaches `LIVE` with BOTH `trade_stream_connected` and `bid_ask_stream_connected`
+`true` during each brief window, then FiinQuant closes them; `market/health`
+`subscription_count: 8`. So the connect path and two-stream setup are known-good — Monday
+only needs to confirm they *stay* up during trading.
 
 ---
 
