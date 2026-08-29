@@ -58,7 +58,10 @@ def test_total_input_chars_capped(monkeypatch):
     monkeypatch.setattr(settings, "AI_MAX_MESSAGE_LENGTH", 5000)
     monkeypatch.setattr(settings, "AI_MAX_INPUT_CHARS", 1000)
     r = client.post("/api/ai/chat", json=_chat(content="x" * 400, n=5))  # 2000 total
-    assert r.status_code == 413
+    # The router normalises every input-validation rejection to INVALID_REQUEST (400);
+    # the machine code on the header preserves the specific reason for logs/clients.
+    assert r.status_code == 400
+    assert r.headers.get("X-AI-Error-Code") == "INVALID_REQUEST"
 
 
 def test_daily_budget_enforced(monkeypatch):

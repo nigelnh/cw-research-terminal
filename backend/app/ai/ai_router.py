@@ -1,26 +1,37 @@
 import json
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from app.ai.ai_errors import AiErrorCode, classify, http_status, user_message
 from app.ai.ai_limits import ai_daily_budget, validate_chat_input
 from app.ai.ai_schemas import ChatRequest, ChatResponse, HealthResponse
 from app.ai.ai_system_prompt import build_system_prompt
-from app.security.concurrency import GateTimeout, ai_call_gate
 from app.ai.openrouter_client import (
+    AiProviderError,
     OpenRouterClient,
     openrouter_client,
-    AiProviderError,
-    AiConfigurationError,
-    AiAuthenticationError,
-    AiRateLimitError,
-    AiModelUnavailableError,
-    AiTimeoutError,
 )
 from app.core.config import settings
+from app.security.concurrency import GateTimeout, ai_call_gate
 
 logger = logging.getLogger(__name__)
 ai_router = APIRouter(prefix="/api/ai", tags=["AI Research Copilot"])
+
+AI_ERROR_CODE_HEADER = "X-AI-Error-Code"
+
+
+def _raise_ai_http(code: AiErrorCode, log_detail: str) -> None:
+    """Raise a sanitized HTTPException carrying the machine code as a header. The body
+    `detail` is the short user-facing string; the real reason goes only to the server log."""
+    logger.warning("AI request rejected [%s]: %s", code.value, log_detail)
+    raise HTTPException(
+        status_code=http_status(code),
+        detail=user_message(code),
+        headers={AI_ERROR_CODE_HEADER: code.value},
+    )
+
 
 def get_client() -> OpenRouterClient:
     return openrouter_client
@@ -40,21 +51,21 @@ async def chat_endpoint(
     client: OpenRouterClient = Depends(get_client),
 ):
     if not settings.AI_ENABLED or not settings.AI_PUBLIC_ENABLED:
-        raise HTTPException(
-            status_code=503,
-            detail="AI research assistant is currently disabled on this server."
-        )
+        _raise_ai_http(AiErrorCode.AI_DISABLED, "AI_ENABLED/AI_PUBLIC_ENABLED is off")
 
     if not client.api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="AI research assistant is not configured with an API key."
-        )
+        _raise_ai_http(AiErrorCode.AI_DISABLED, "no OpenRouter API key configured on this server")
 
     # Input hardening + optional process-local daily budget (rate limit + concurrency
     # gate are enforced separately - middleware tier 'ai' and ai_call_gate).
-    validate_chat_input(req)
-    ai_daily_budget.check_and_increment()
+    try:
+        validate_chat_input(req)
+    except HTTPException as e:
+        _raise_ai_http(classify(e), f"input validation failed: {e.detail}")
+    try:
+        ai_daily_budget.check_and_increment()
+    except HTTPException as e:
+        _raise_ai_http(classify(e), "daily AI request budget reached")
 
     if req.context is not None:
         try:
@@ -95,6 +106,7 @@ async def chat_endpoint(
 
     if req.stream:
         async def event_generator():
+            stream_started = False
             try:
                 # Emit high-level tool activity labels
                 for label in tool_executor.activity_labels:
@@ -103,27 +115,20 @@ async def chat_endpoint(
 
                 async with ai_call_gate.acquire(settings.AI_ACQUIRE_TIMEOUT_SECONDS):
                     async for token in client.stream_chat(raw_messages, system_prompt):
+                        stream_started = True
                         payload = json.dumps({"content": token, "done": False})
                         yield f"data: {payload}\n\n"
                 yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
-            except GateTimeout:
-                err_payload = json.dumps({"error": "The AI assistant is busy right now. Please retry shortly.", "done": True})
-                yield f"data: {err_payload}\n\n"
-            except AiRateLimitError:
-                err_payload = json.dumps({"error": "Rate limit reached. Please wait a moment and try again.", "done": True})
-                yield f"data: {err_payload}\n\n"
-            except AiModelUnavailableError:
-                err_payload = json.dumps({"error": "Configured AI model is currently unavailable.", "done": True})
-                yield f"data: {err_payload}\n\n"
-            except AiTimeoutError:
-                err_payload = json.dumps({"error": "AI request timed out. Please try again.", "done": True})
-                yield f"data: {err_payload}\n\n"
-            except AiProviderError as e:
-                err_payload = json.dumps({"error": e.message, "done": True})
-                yield f"data: {err_payload}\n\n"
             except Exception as e:
-                logger.exception("Unexpected error during AI stream generation")
-                err_payload = json.dumps({"error": "An unexpected error occurred while processing AI response.", "done": True})
+                code = classify(e, stream_started=stream_started)
+                detail = getattr(e, "message", None) or getattr(e, "detail", None) or str(e)
+                if code in (AiErrorCode.INTERNAL_ERROR, AiErrorCode.STREAM_INTERRUPTED):
+                    logger.exception("AI stream failed [%s]", code.value)
+                else:
+                    logger.warning("AI stream failed [%s]: %s", code.value, detail)
+                err_payload = json.dumps(
+                    {"error": user_message(code), "code": code.value, "done": True}
+                )
                 yield f"data: {err_payload}\n\n"
 
         return StreamingResponse(
@@ -144,14 +149,11 @@ async def chat_endpoint(
             content=result["content"],
             model=result["model"],
         )
-    except GateTimeout:
-        raise HTTPException(
-            status_code=503, detail="The AI assistant is busy right now. Please retry shortly."
-        )
-    except AiProviderError as e:
-        raise HTTPException(status_code=e.status_code, detail=e.message)
     except HTTPException:
         raise
-    except Exception:
+    except (GateTimeout, AiProviderError) as e:
+        code = classify(e)
+        _raise_ai_http(code, getattr(e, "message", None) or str(e))
+    except Exception as e:
         logger.exception("Unexpected error during AI chat execution")
-        raise HTTPException(status_code=500, detail="Internal AI service error.")
+        _raise_ai_http(AiErrorCode.INTERNAL_ERROR, str(e))
