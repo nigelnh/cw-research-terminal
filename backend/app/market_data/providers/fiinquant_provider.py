@@ -8,6 +8,7 @@ from typing import Iterator, List, Dict, Any, Optional, Callable, Set
 from datetime import datetime, timedelta
 
 from app.core.config import settings
+from app.market_data.market_session import market_session
 from app.market_data.market_schemas import (
     CIRCUIT_REASON_AUTH,
     CIRCUIT_REASON_RATE_LIMIT,
@@ -145,6 +146,15 @@ class FiinQuantProvider(MarketDataProvider):
         self._reconnect_task: Optional[asyncio.Task] = None
         self._reconnect_backoff_index: int = 0
         self._reconnect_backoffs = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
+        # Outside an active HOSE session FiinQuant closes the subscription streams within
+        # seconds, so the in-session fast backoff would reconnect ~every 10s indefinitely.
+        # Off-session we instead poll at this cadence, but never sleep past the next
+        # session open (see ``_compute_reconnect_delay``). Injectable for deterministic tests.
+        self._off_session_reconnect_seconds: float = 300.0
+        self._market_is_active: Callable[[], bool] = market_session.is_trading_active
+        self._seconds_to_next_session: Callable[[], float] = (
+            market_session.seconds_until_next_trading_session
+        )
 
         # ---- Historical provider health & circuit breaker ----
         self._historical_circuit_open_until: float = 0.0
@@ -413,12 +423,35 @@ class FiinQuantProvider(MarketDataProvider):
         if self._loop and self._loop.is_running():
             self._reconnect_task = self._loop.create_task(self._reconnect_worker())
 
+    def _compute_reconnect_delay(self) -> float:
+        """Seconds to wait before the next reconnect attempt.
+
+        During an active HOSE session: the existing fast bounded backoff - a stream that
+        drops mid-session is a real failure worth retrying hard.
+
+        Outside the session (pre-open, lunch, post-close, weekend): FiinQuant tears the
+        subscription streams down within seconds, so a fast retry just loops forever. Poll
+        at ``_off_session_reconnect_seconds`` instead - but never sleep past the next
+        session open, so the provider is back LIVE when trading resumes. This only changes
+        the *pacing* of reconnects; it never stops them, and it never blocks a cold start
+        (startup goes through ``connect`` / ``set_subscriptions``, not this worker).
+        """
+        base = self._reconnect_backoffs[min(self._reconnect_backoff_index, len(self._reconnect_backoffs) - 1)]
+        try:
+            if self._market_is_active():
+                return base
+            secs_to_open = max(0.0, float(self._seconds_to_next_session()))
+        except Exception:  # noqa: BLE001 - never let a calendar bug wedge reconnect
+            return base
+        return max(base, min(self._off_session_reconnect_seconds, secs_to_open))
+
     async def _reconnect_worker(self) -> None:
         """Single-flighted, bounded-backoff reconnect loop owned exclusively by FiinQuantProvider."""
-        delay = self._reconnect_backoffs[min(self._reconnect_backoff_index, len(self._reconnect_backoffs) - 1)]
+        delay = self._compute_reconnect_delay()
         logger.info(
-            "SignalR stream disconnected. Scheduling provider reconnect in %.1fs (generation %d)...",
-            delay, self._generation,
+            "SignalR stream disconnected. Scheduling provider reconnect in %.1fs "
+            "(generation %d, session_active=%s)...",
+            delay, self._generation, self._market_is_active(),
         )
         await asyncio.sleep(delay)
 
