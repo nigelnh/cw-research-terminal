@@ -36,6 +36,17 @@ class Settings(BaseSettings):
     FIINQUANT_ENABLED: bool = Field(default=True, description="Enable live FiinQuant upstream connection")
     FIINQUANT_DEBOUNCE_MS: int = Field(default=300, description="Subscription debounce delay in milliseconds")
 
+    # Trading calendar (Step 13C). Optional JSON to add/remove HOSE closure dates without a
+    # code change, e.g. {"extra_closures": ["2026-07-01"], "force_open": ["2026-05-03"]}.
+    EXCHANGE_CALENDAR_OVERRIDES_JSON: str = Field(
+        default="", description="Optional JSON: {extra_closures:[YYYY-MM-DD], force_open:[YYYY-MM-DD]}"
+    )
+
+    # Last-valid market snapshot persistence (Step 13C after-hours fallback).
+    SNAPSHOT_ENABLED: bool = Field(default=True, description="Persist last-valid realtime snapshots (needs DATABASE_ENABLED)")
+    SNAPSHOT_CHECKPOINT_INTERVAL_SECONDS: int = Field(default=90, description="Min seconds between per-symbol snapshot checkpoints")
+    DASHBOARD_FALLBACK_GAPFILL: bool = Field(default=True, description="Allow the dashboard fallback resolver one controlled EOD gap-fill for a missing latest-session bar")
+
     # Redis Warm Market State Cache Configuration
     REDIS_ENABLED: bool = Field(default=True, description="Enable Redis warm market state cache")
     REDIS_URL: str = Field(default="redis://localhost:6379/0", description="Redis connection URL")

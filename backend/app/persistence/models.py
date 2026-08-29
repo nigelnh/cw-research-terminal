@@ -136,6 +136,76 @@ class MarketBar(Base):
     )
 
 
+class InstrumentSnapshot(Base):
+    """Last-valid realtime market snapshot per (symbol, trading session) — Step 13C.
+
+    Written by a throttled checkpoint task during an active session and once at the 15:00
+    ICT close / on graceful shutdown. This is the *only* durable source for an after-hours
+    closing bid/ask (FiinQuant serves no historical order book) and the crash/redeploy
+    recovery path for the current session's state. One upserted row per symbol per session.
+    """
+
+    __tablename__ = "instrument_snapshots"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    # VN trading-session date this snapshot represents. Calendar reasoning uses this.
+    session_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Last observed instant folded into this row.
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source: Mapped[str] = mapped_column(String(24), nullable=False)   # REALTIME_CHECKPOINT | SESSION_CLOSE | HISTORICAL_SEED
+    quality: Mapped[str] = mapped_column(String(16), nullable=False)  # FINAL | INTRADAY_CHECKPOINT | SEED
+    instrument_type: Mapped[str] = mapped_column(String(8), nullable=False)
+
+    reference_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    last_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    price_change: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    price_change_percent: Mapped[float | None] = mapped_column(Numeric(20, 8), nullable=True)
+    open_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    high_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    low_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    average_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    total_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    trading_value: Mapped[float | None] = mapped_column(Numeric(24, 4), nullable=True)
+
+    bid1_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    bid1_quantity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    ask1_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    ask1_quantity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    bid2_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    bid2_quantity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    ask2_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    ask2_quantity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    bid3_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    bid3_quantity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    ask3_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    ask3_quantity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    underlying_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    underlying_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "session_date", name="uq_instrument_snapshots_symbol_session"),
+        CheckConstraint(
+            "source IN ('REALTIME_CHECKPOINT','SESSION_CLOSE','HISTORICAL_SEED')",
+            name="ck_instrument_snapshots_source",
+        ),
+        CheckConstraint(
+            "quality IN ('FINAL','INTRADAY_CHECKPOINT','SEED')",
+            name="ck_instrument_snapshots_quality",
+        ),
+        CheckConstraint(_INSTRUMENT_TYPE_CHECK, name="ck_instrument_snapshots_type"),
+        Index("ix_instrument_snapshots_symbol_session", "symbol", "session_date"),
+    )
+
+
 class IngestionRun(Base):
     __tablename__ = "ingestion_runs"
 

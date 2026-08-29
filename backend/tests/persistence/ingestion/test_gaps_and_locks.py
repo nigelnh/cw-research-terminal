@@ -75,11 +75,14 @@ async def test_multi_day_cluster_is_unknown_calendar(ingestion_service):
 
 
 async def test_tet_window_missing_days_are_unknown_calendar(ingestion_service):
+    # 2023 has no authoritative HOSE holiday table -> the approximate Tet window
+    # (Jan 20-27 2023) is advisory: those weekdays are still "expected", and a missing run
+    # overlapping the window is classified UNKNOWN_CALENDAR rather than SUSPICIOUS.
     iid = await _seed_stock("SSI")
-    start = date(2026, 2, 9)
-    end = date(2026, 2, 27)
+    start = date(2023, 1, 11)
+    end = date(2023, 2, 3)
     weekdays = [start + timedelta(days=i) for i in range((end - start).days + 1) if (start + timedelta(days=i)).weekday() < 5]
-    tet_missing = {date(2026, 2, 17), date(2026, 2, 18)}  # inside the 2026 Tet window
+    tet_missing = {date(2023, 1, 24), date(2023, 1, 25)}  # inside the 2023 Tet window
     await _put_bars(iid, [d for d in weekdays if d not in tet_missing])
 
     report = await detect_gaps(

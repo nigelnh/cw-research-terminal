@@ -6,7 +6,7 @@ for active complete warrants based on realtime market price updates.
 
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, time as dtime, timezone, timedelta
 from typing import Callable, Dict, Optional, Set, Tuple, TYPE_CHECKING
 
 from app.core.config import settings
@@ -133,6 +133,9 @@ class LiveQuantEngine:
 
     def __init__(self):
         self._analytics_cache: Dict[str, WarrantAnalytics] = {}
+        # EOD analytics recomputed per (cw_symbol, session_date) - deterministic, so a plain
+        # cache. Cleared wholesale when it grows past a small bound.
+        self._eod_cache: Dict[Tuple[str, str], WarrantAnalytics] = {}
         self._watched_cw_symbols: Set[str] = set()
         self._underlying_to_cw_map: Dict[str, Set[str]] = {}
         self._market_state_getter = None
@@ -228,16 +231,22 @@ class LiveQuantEngine:
         spec: Optional[CoveredWarrantSpecification] = None,
         cw_state: Optional[CanonicalQuote] = None,
         und_state: Optional[CanonicalQuote] = None,
+        as_of: Optional[datetime] = None,
     ) -> WarrantAnalytics:
         """Full CW analytics, then stamp the truthful contract-lifecycle state onto the
         result (even when analytics are unavailable). If the warrant is no longer tradable
         (past its last trading date) the greeks/IV are cleared and `is_available` is forced
         False - intrinsic value may still be mathematically defined, but the UI must not
-        present live tradable analytics for a non-tradable contract."""
-        analytics = await self._compute_warrant_analytics_inner(cw_symbol, spec, cw_state, und_state)
+        present live tradable analytics for a non-tradable contract.
+
+        ``as_of`` (a VN-aware instant) computes a temporally-consistent snapshot for a past
+        trading session: T, DTE, the lifecycle state and ``calculated_at`` are all evaluated
+        at ``as_of`` instead of now. Callers must supply ``cw_state`` / ``und_state`` whose
+        prices belong to that same session - see ``compute_eod_analytics``."""
+        analytics = await self._compute_warrant_analytics_inner(cw_symbol, spec, cw_state, und_state, as_of=as_of)
         resolved = spec or await instrument_registry.get_instrument(cw_symbol.strip().upper())
         if resolved is not None:
-            cstate, tradable = derive_contract_state(resolved.last_trading_date, resolved.maturity_date)
+            cstate, tradable = derive_contract_state(resolved.last_trading_date, resolved.maturity_date, now=as_of)
         else:
             cstate, tradable = ContractLifecycleState.UNKNOWN, False
         analytics.contract_state = cstate
@@ -249,12 +258,98 @@ class LiveQuantEngine:
             analytics.greeks = WarrantGreeks()
         return analytics
 
+    async def compute_eod_analytics(
+        self, cw_symbol: str, session_date: "date", *, sessionmaker=None
+    ) -> WarrantAnalytics:
+        """Temporally-aligned analytics for one completed trading session.
+
+        Both legs are read for the SAME ``session_date`` from ``market_bars``: the CW close
+        (RAW) and the underlying close (ADJUSTED). T / DTE / lifecycle are evaluated at
+        15:00 ICT of that date. Produces IV-trade (CW last + underlying close are known),
+        Greeks, theoretical value, moneyness, DTE. IV-bid / IV-ask / spread are UNAVAILABLE
+        - there is no persisted end-of-day order book. HV uses the latest available HV_22
+        estimate (documented approximation - HV_22 moves negligibly in one session).
+        """
+        cw_sym = cw_symbol.strip().upper()
+        cache_key = (cw_sym, session_date.isoformat())
+        cached = self._eod_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        as_of = datetime.combine(session_date, dtime(15, 0), tzinfo=VN_TZ)
+        spec = await instrument_registry.get_instrument(cw_sym)
+        if spec is None:
+            return WarrantAnalytics(
+                symbol=cw_sym, underlying_symbol="UNKNOWN", calculated_at=as_of.isoformat(),
+                is_available=False, unavailable_reason="INSTRUMENT_NOT_IN_REGISTRY",
+            )
+        und_sym = spec.underlying_symbol.upper()
+
+        sm = sessionmaker
+        if sm is None:
+            try:
+                from app.persistence import database as _pdb
+
+                sm = _pdb.get_sessionmaker()
+            except Exception:  # noqa: BLE001
+                sm = None
+        if sm is None:
+            return WarrantAnalytics(
+                symbol=cw_sym, underlying_symbol=und_sym, calculated_at=as_of.isoformat(),
+                is_available=False, unavailable_reason="EOD_INPUT_MISSING (persistence unavailable)",
+            )
+
+        cw_close = await self._eod_close(sm, cw_sym, session_date, price_basis="RAW")
+        und_close = await self._eod_close(sm, und_sym, session_date, price_basis="ADJUSTED")
+        missing = []
+        if cw_close is None:
+            missing.append(f"cw@{session_date.isoformat()}")
+        if und_close is None:
+            missing.append(f"{und_sym}@{session_date.isoformat()}")
+        if missing:
+            return WarrantAnalytics(
+                symbol=cw_sym, underlying_symbol=und_sym, calculated_at=as_of.isoformat(),
+                is_available=False, unavailable_reason=f"EOD_INPUT_MISSING ({', '.join(missing)})",
+            )
+
+        cw_state = CanonicalQuote(symbol=cw_sym, instrument_type="CW", last_price=cw_close)
+        und_state = CanonicalQuote(symbol=und_sym, instrument_type="STOCK", last_price=und_close)
+        result = await self.compute_warrant_analytics(
+            cw_sym, spec=spec, cw_state=cw_state, und_state=und_state, as_of=as_of
+        )
+        if len(self._eod_cache) > 512:
+            self._eod_cache.clear()
+        self._eod_cache[cache_key] = result
+        return result
+
+    @staticmethod
+    async def _eod_close(sessionmaker, symbol: str, session_date: "date", *, price_basis: str) -> Optional[float]:
+        from datetime import timedelta as _td
+
+        from app.persistence.market_time import VN_TZ as _PVN_TZ
+        from app.persistence.repositories.market_bar_repository import MarketBarRepository
+
+        start = datetime.combine(session_date, dtime(0, 0), tzinfo=_PVN_TZ)
+        end = start + _td(days=1)
+        try:
+            async with sessionmaker() as session:
+                bars = await MarketBarRepository(session).get_bars(
+                    symbol=symbol, timeframe="1d", price_basis=price_basis,
+                    start=start, end=end, ascending=True, limit=2,
+                )
+        except Exception:  # noqa: BLE001
+            return None
+        for b in bars:
+            if b.session_date == session_date and b.close:
+                return float(b.close)
+        return None
+
     async def _compute_warrant_analytics_inner(
         self,
         cw_symbol: str,
         spec: Optional[CoveredWarrantSpecification] = None,
         cw_state: Optional[CanonicalQuote] = None,
         und_state: Optional[CanonicalQuote] = None,
+        as_of: Optional[datetime] = None,
     ) -> WarrantAnalytics:
         """
         Computes full quantitative analytics for a Covered Warrant.
@@ -266,7 +361,8 @@ class LiveQuantEngine:
         ``cw_state`` and ``und_state`` are all supplied this coroutine has no suspension
         point - it reads one coherent input and runs to completion atomically.
         """
-        now_iso = get_vietnam_now().isoformat()
+        _now = as_of or get_vietnam_now()
+        now_iso = _now.isoformat()
         cw_sym = cw_symbol.strip().upper()
 
         # 1. Resolve Instrument Specification
@@ -342,7 +438,7 @@ class LiveQuantEngine:
             )
 
         # 3. Time to maturity calculation
-        T, dte = calculate_time_to_maturity(spec.maturity_date)
+        T, dte = calculate_time_to_maturity(spec.maturity_date, current_time=_now)
         if T <= 0:
             return WarrantAnalytics(
                 symbol=cw_sym,
