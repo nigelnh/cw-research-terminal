@@ -70,12 +70,26 @@ def collect_production_problems(settings, *, rate_limiter_mode: str | None = Non
     else:
         p.append("PUBLIC_RATE_LIMIT_ENABLED=false in production - the public API has no rate limiting.")
 
-    # ---- Trusted proxy ----
-    if settings.RATE_LIMIT_TRUST_PROXY and not settings.trusted_proxy_cidrs():
+    # ---- Client-IP ingress mode ----
+    ip_mode = settings.client_ip_trust_mode()
+    if ip_mode == "cidr" and not settings.trusted_proxy_cidrs():
         p.append(
-            "RATE_LIMIT_TRUST_PROXY=true but TRUSTED_PROXY_CIDRS is empty - X-Forwarded-For would be "
-            "honored from every peer. Set the reverse-proxy network CIDR(s)."
+            "CLIENT_IP_TRUST_MODE=cidr (or RATE_LIMIT_TRUST_PROXY=true) but TRUSTED_PROXY_CIDRS is "
+            "empty - X-Forwarded-For would be honored from every peer. Set the proxy network CIDR(s)."
         )
+    if ip_mode == "railway":
+        import os as _os
+
+        on_railway = any(
+            _os.environ.get(k)
+            for k in ("RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID")
+        )
+        if not on_railway:
+            p.append(
+                "CLIENT_IP_TRUST_MODE=railway but no RAILWAY_* env marker is present - the process "
+                "does not appear to be on a Railway service. Rate limits would key on the socket peer "
+                "for everyone. Use 'direct'/'cidr', or deploy on Railway."
+            )
 
     # ---- Database (only when enabled) ----
     if settings.DATABASE_ENABLED and not settings.DATABASE_URL.strip():

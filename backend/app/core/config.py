@@ -295,15 +295,32 @@ class Settings(BaseSettings):
     )
 
     # ---- trusted proxy / client-IP ---------------------------------------
+    # The client IP is used ONLY as a rate-limit key. Three ingress modes:
+    #   direct  - the socket peer; forwarded headers are ignored entirely (local/dev,
+    #             or any deployment where the app is the edge).
+    #   cidr    - walk X-Forwarded-For, but ONLY when the direct peer is inside
+    #             TRUSTED_PROXY_CIDRS (a generic, self-managed reverse proxy).
+    #   railway - trust ONLY the left-most X-Forwarded-For entry, and ONLY when
+    #             ENVIRONMENT=production AND the process is running on a verified
+    #             Railway service (RAILWAY_* injected env). Railway's edge strips and
+    #             re-writes XFF so the left-most entry is the real client; its
+    #             X-Real-IP is unreliable behind the CDN and is never read. Deploy the
+    #             Railway service with CDN/edge caching DISABLED.
+    # Empty -> 'cidr' when RATE_LIMIT_TRUST_PROXY is true, else 'direct' (back-compat).
+    CLIENT_IP_TRUST_MODE: str = Field(
+        default="",
+        description="Client-IP ingress mode: direct | cidr | railway. Empty -> cidr if "
+        "RATE_LIMIT_TRUST_PROXY else direct.",
+    )
     RATE_LIMIT_TRUST_PROXY: bool = Field(
         default=False,
-        description="Honor X-Forwarded-For ONLY when the direct peer is in TRUSTED_PROXY_CIDRS. "
-        "Keep false for direct local dev; set true behind a known reverse proxy.",
+        description="Legacy switch for 'cidr' mode: honor X-Forwarded-For ONLY when the direct peer is "
+        "in TRUSTED_PROXY_CIDRS. Prefer CLIENT_IP_TRUST_MODE. Keep false for direct local dev.",
     )
     TRUSTED_PROXY_CIDRS: str = Field(
         default="",
-        description="Comma-separated CIDRs of trusted reverse proxies (e.g. '10.0.0.0/8,127.0.0.1/32'). "
-        "XFF from any other direct peer is ignored.",
+        description="'cidr' mode: comma-separated CIDRs of trusted reverse proxies "
+        "(e.g. '10.0.0.0/8,127.0.0.1/32'). XFF from any other direct peer is ignored.",
     )
 
     # ---- per-tier HTTP policies (requests / window seconds), keyed per client ----
@@ -393,6 +410,13 @@ class Settings(BaseSettings):
 
     def trusted_proxy_cidrs(self) -> list[str]:
         return [c.strip() for c in self.TRUSTED_PROXY_CIDRS.split(",") if c.strip()]
+
+    def client_ip_trust_mode(self) -> str:
+        """Resolved client-IP ingress mode: 'direct' | 'cidr' | 'railway'."""
+        m = (self.CLIENT_IP_TRUST_MODE or "").strip().lower()
+        if m in ("direct", "cidr", "railway"):
+            return m
+        return "cidr" if self.RATE_LIMIT_TRUST_PROXY else "direct"
 
     def cors_allowed_origins(self) -> list[str]:
         explicit = [o.strip() for o in self.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
