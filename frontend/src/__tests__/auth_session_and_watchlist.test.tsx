@@ -64,7 +64,7 @@ vi.mock("@/data/providers", () => ({
 import { AuthProvider, useAuth } from "@/data/auth";
 import { useWatchlist, resetWatchlistMemoryForTests } from "@/data/watchlist";
 import { queryKeys } from "@/data/query/query_keys";
-import { WATCHLIST_STORAGE_KEY_V2, createDefaultWatchlist } from "@/domain/models";
+import { WATCHLIST_STORAGE_KEY_V3, createDefaultWatchlist } from "@/domain/models";
 
 function serverItem(symbol: string) {
   return { symbol, instrumentType: "STOCK" };
@@ -118,7 +118,7 @@ describe("anonymous", () => {
     expect(getMyWatchlist).not.toHaveBeenCalled();
     // the anonymous store persists to the versioned localStorage key
     result.current.addToWatchlist({ symbol: "SSI", instrumentType: "STOCK" });
-    await waitFor(() => expect(window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V2)).toBeTruthy());
+    await waitFor(() => expect(window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V3)).toBeTruthy());
   });
 
   it("SubscriptionPlanner receives the anonymous list", async () => {

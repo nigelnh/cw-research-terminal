@@ -49,6 +49,7 @@ async def _db_session() -> AsyncIterator[AsyncSession]:
 
 
 def _to_view(it: UserWatchlistItemRow) -> WatchlistItemView:
+    """Fallback view straight from the stored row (used only if live resolution fails)."""
     return WatchlistItemView(
         symbol=it.symbol,
         instrument_type=it.instrument_type,  # type: ignore[arg-type]
@@ -62,11 +63,34 @@ def _to_view(it: UserWatchlistItemRow) -> WatchlistItemView:
     )
 
 
-def _to_response(row: UserWatchlistRow | None) -> WatchlistResponse:
+async def _resolved_view(it: UserWatchlistItemRow, resolver: InstrumentResolver) -> WatchlistItemView:
+    """Contract metadata is re-resolved from the canonical registry on every read, so a
+    later correction (e.g. a fixed strike/ratio/issuer) is reflected without the user
+    re-adding the symbol. The stored row keeps only identity + preference authority."""
+    r = await resolver.resolve(it.symbol)
+    if r is None:
+        return _to_view(it)
+    return WatchlistItemView(
+        symbol=it.symbol,
+        instrument_type=r.instrument_type,  # type: ignore[arg-type]
+        underlying_symbol=r.underlying_symbol,
+        issuer=r.issuer,
+        strike_price=r.strike_price,
+        exercise_ratio=r.exercise_ratio,
+        maturity_date=r.maturity_date.isoformat() if r.maturity_date else None,
+        last_trading_date=r.last_trading_date.isoformat() if r.last_trading_date else None,
+        data_quality=r.data_quality,
+        metadata_verification=r.metadata_verification,
+        notes=it.notes,
+    )
+
+
+async def _to_response(row: UserWatchlistRow | None, resolver: InstrumentResolver) -> WatchlistResponse:
     if row is None:
         return WatchlistResponse(items=[], updated_at=None)
+    items = [await _resolved_view(it, resolver) for it in row.items]
     return WatchlistResponse(
-        items=[_to_view(it) for it in row.items],
+        items=items,
         updated_at=row.updated_at.isoformat() if row.updated_at else None,
     )
 
@@ -78,7 +102,7 @@ async def get_my_watchlist(
 ) -> WatchlistResponse:
     repo = UserWatchlistRepository(session, max_items=settings.ME_WATCHLIST_MAX_ITEMS)
     row = await repo.get_for_owner(user.subject)
-    return _to_response(row)
+    return await _to_response(row, InstrumentResolver(session))
 
 
 @me_router.put("/watchlist", response_model=WatchlistResponse)
@@ -131,4 +155,4 @@ async def put_my_watchlist(
         ) from exc
 
     logger.info("watchlist replaced for subject=%s (%d items)", user.subject, len(row.items))
-    return _to_response(row)
+    return await _to_response(row, InstrumentResolver(session))

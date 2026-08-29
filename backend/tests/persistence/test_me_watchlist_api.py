@@ -276,6 +276,39 @@ async def test_notes_are_the_only_user_authored_field_and_are_preserved(api):
     assert item["notes"] == "watching the breakout"
 
 
+async def test_get_re_resolves_stale_stored_contract_metadata(api):
+    """A row persisted with now-stale contract terms must still return CANONICAL metadata
+    on GET - the registry is re-consulted on every read, so a later correction reaches the
+    user without them re-adding the symbol."""
+    from sqlalchemy import update
+    from app.persistence.models import UserWatchlistItem
+
+    await api.put("/api/me/watchlist", json={"items": [{"symbol": "CTCB2601"}]}, headers=_auth(SUBJECT_A))
+    # Corrupt the stored row directly (simulating a pre-correction persist).
+    async with pdb.get_sessionmaker()() as s, s.begin():
+        await s.execute(
+            update(UserWatchlistItem)
+            .where(UserWatchlistItem.symbol == "CTCB2601")
+            .values(issuer="KIS", strike_price=25000.0, exercise_ratio=2.0)
+        )
+
+    item = (await api.get("/api/me/watchlist", headers=_auth(SUBJECT_A))).json()["items"][0]
+    assert item["symbol"] == "CTCB2601"
+    assert item["issuer"] == "ACBS"          # canonical, not the stored "KIS"
+    assert item["strikePrice"] == 37000.0
+    assert item["exerciseRatio"] == 4.0
+    assert item["metadataVerification"] == "CONFLICTING"
+    assert item["dataQuality"] == "COMPLETE"
+
+
+async def test_get_surfaces_verified_current_for_a_reconciled_cw(api):
+    await api.put("/api/me/watchlist", json={"items": [{"symbol": "CVPB2615"}]}, headers=_auth(SUBJECT_A))
+    item = (await api.get("/api/me/watchlist", headers=_auth(SUBJECT_A))).json()["items"][0]
+    assert item["strikePrice"] == 28500.0 and item["exerciseRatio"] == 2.0
+    assert item["dataQuality"] == "COMPLETE"
+    assert item["metadataVerification"] == "VERIFIED_CURRENT"
+
+
 # --- validation (Section 8) ----------------------------------------------
 
 async def test_duplicate_symbols_rejected_400(api):

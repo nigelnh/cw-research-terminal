@@ -5,6 +5,7 @@ import { useWatchlist } from "@/data/watchlist";
 import { useActiveWarrants } from "@/data/query";
 import { useQuote, useCoveredWarrant } from "@/data/use_research_market";
 import { deriveSelectedInstrument } from "@/data/selected_instrument";
+import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import { InstrumentDrawer } from "@/features/warrant_info/instrument_drawer";
 
 interface ResearchUniverseProps {
@@ -54,6 +55,7 @@ export function ResearchUniverse({
 
   // Static universe metadata: server state owned by TanStack Query (cached, deduped).
   const { instruments, isLoading: loading, isError } = useActiveWarrants();
+  const { getSpec } = useInstrumentSpecs();
 
   // Drawer instrument DERIVED from the universe record + realtime store (not stored).
   const selectedQuote = useQuote(selectedSymbol);
@@ -65,11 +67,12 @@ export function ResearchUniverse({
   const selectedInstrument = useMemo(
     () =>
       deriveSelectedInstrument(selectedSymbol, {
+        instrumentSpec: getSpec(selectedSymbol),
         universeCw: selectedUniverseCw,
         quote: selectedQuote,
         cw: selectedCw,
       }),
-    [selectedSymbol, selectedUniverseCw, selectedQuote, selectedCw]
+    [selectedSymbol, selectedUniverseCw, selectedQuote, selectedCw, getSpec]
   );
 
   const underlyings = useMemo(() => {

@@ -8,14 +8,20 @@ export type WatchlistInstrumentType = "CW" | "STOCK" | "INDEX";
 export interface WatchlistItem {
   symbol: string; // Uppercase canonical symbol (e.g. "CFPT2401", "HPG", "VNINDEX")
   instrumentType: WatchlistInstrumentType;
-  underlyingSymbol?: string | null; // For CW: e.g. "FPT"
-  issuer?: string | null;
-  strikePrice?: number | null;
-  exerciseRatio?: number | null;
-  maturityDate?: string | null;
-  lastTradingDate?: string | null;
+  underlyingSymbol?: string | null; // For CW: stable identity hint (a CW's underlying never changes)
   addedAt: number; // Unix timestamp in ms
   notes?: string;
+  /**
+   * @deprecated Contract terms are NEVER authoritative here - they are resolved at render
+   * time from the canonical backend registry (`useInstrumentSpecs`). Kept optional only so
+   * older persisted payloads type-check during migration; the v3 migration nulls them and
+   * nothing reads them for display.
+   */
+  issuer?: string | null;
+  /** @deprecated see `issuer` */ strikePrice?: number | null;
+  /** @deprecated see `issuer` */ exerciseRatio?: number | null;
+  /** @deprecated see `issuer` */ maturityDate?: string | null;
+  /** @deprecated see `issuer` */ lastTradingDate?: string | null;
 }
 
 export interface ResearchWatchlist {
@@ -29,7 +35,12 @@ export interface ResearchWatchlist {
 
 export const WATCHLIST_STORAGE_KEY_V1 = "cw-research-watchlist:v1";
 export const WATCHLIST_STORAGE_KEY_V2 = "cw-research-watchlist:v2";
-export const CURRENT_WATCHLIST_SCHEMA_VERSION = 2;
+export const WATCHLIST_STORAGE_KEY_V3 = "cw-research-watchlist:v3";
+// v3: watchlist items store IDENTITY + PREFERENCE only. Frozen contract terms
+// (issuer/strike/ratio/maturity/lastTradingDate) are stripped - they are resolved live
+// from the canonical backend registry. Existing v1/v2 payloads migrate in place, keeping
+// symbols, order, instrumentType, underlyingSymbol, addedAt and notes.
+export const CURRENT_WATCHLIST_SCHEMA_VERSION = 3;
 
 /**
  * PRIMARY UI UNIVERSE
@@ -63,20 +74,12 @@ export const DEFAULT_PRIMARY_WATCHLIST_ITEMS: WatchlistItem[] = [
     symbol: "CTCB2601",
     instrumentType: "CW",
     underlyingSymbol: "TCB",
-    issuer: "KIS",
-    strikePrice: 25000,
-    exerciseRatio: 2,
-    maturityDate: "2026-12-10",
     addedAt: 0,
   },
   {
     symbol: "CVPB2615",
     instrumentType: "CW",
     underlyingSymbol: "VPB",
-    issuer: "ACBS",
-    strikePrice: null,
-    exerciseRatio: null,
-    maturityDate: null,
     addedAt: 0,
   },
 ];
@@ -101,27 +104,29 @@ export function createDefaultWatchlist(): ResearchWatchlist {
 export class WatchlistStorage {
   private storageKey: string;
 
-  constructor(storageKey: string = WATCHLIST_STORAGE_KEY_V2) {
+  constructor(storageKey: string = WATCHLIST_STORAGE_KEY_V3) {
     this.storageKey = storageKey;
   }
 
+  /**
+   * Normalise persisted items to the v3 shape: identity + preference only. Frozen contract
+   * terms from older payloads are intentionally NOT carried forward - the app resolves them
+   * live from the backend registry. Symbol order is preserved by the array order.
+   */
   private sanitizeItems(rawItems: any[]): WatchlistItem[] {
+    const seen = new Set<string>();
     return rawItems
       .filter((item: any) => item && typeof item.symbol === "string")
-      .map((item: any) => ({
+      .map((item: any): WatchlistItem => ({
         symbol: String(item.symbol).toUpperCase(),
-        instrumentType: (item.instrumentType === "CW" || item.instrumentType === "COVERED_WARRANT") 
-          ? "CW" 
+        instrumentType: (item.instrumentType === "CW" || item.instrumentType === "COVERED_WARRANT")
+          ? "CW"
           : (item.instrumentType === "INDEX" ? "INDEX" : "STOCK"),
         underlyingSymbol: item.underlyingSymbol ? String(item.underlyingSymbol).toUpperCase() : null,
-        issuer: item.issuer || null,
-        strikePrice: typeof item.strikePrice === "number" ? item.strikePrice : null,
-        exerciseRatio: typeof item.exerciseRatio === "number" ? item.exerciseRatio : null,
-        maturityDate: item.maturityDate || null,
-        lastTradingDate: item.lastTradingDate || null,
         addedAt: typeof item.addedAt === "number" ? item.addedAt : Date.now(),
         notes: item.notes || undefined,
-      }));
+      }))
+      .filter((it) => (seen.has(it.symbol) ? false : (seen.add(it.symbol), true)));
   }
 
   public loadWatchlist(): ResearchWatchlist {
@@ -130,44 +135,53 @@ export class WatchlistStorage {
     }
 
     try {
-      // 1. Check current storage key (V2)
-      const rawV2 = window.localStorage.getItem(this.storageKey);
-      if (rawV2) {
+      // 1. Current schema (v3): identity-only items.
+      const rawV3 = window.localStorage.getItem(this.storageKey);
+      if (rawV3) {
         try {
-          const parsed = JSON.parse(rawV2);
-          if (parsed && typeof parsed === "object" && Array.isArray(parsed.items)) {
-            if (parsed.version === CURRENT_WATCHLIST_SCHEMA_VERSION) {
-              return {
-                id: parsed.id || "default_personal_watchlist",
-                name: parsed.name || "My Personal Research Dashboard",
-                items: this.sanitizeItems(parsed.items),
-                createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now(),
-                updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : Date.now(),
-                version: CURRENT_WATCHLIST_SCHEMA_VERSION,
-              };
-            }
+          const parsed = JSON.parse(rawV3);
+          if (parsed && typeof parsed === "object" && Array.isArray(parsed.items) &&
+              parsed.version === CURRENT_WATCHLIST_SCHEMA_VERSION) {
+            return {
+              id: parsed.id || "default_personal_watchlist",
+              name: parsed.name || "My Personal Research Dashboard",
+              items: this.sanitizeItems(parsed.items),
+              createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now(),
+              updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : Date.now(),
+              version: CURRENT_WATCHLIST_SCHEMA_VERSION,
+            };
           }
         } catch {
-          // If V2 is corrupt, fallback below
+          // corrupt v3 -> fall through
         }
       }
 
-      // 2. Check for legacy V1 storage or pre-migration version (< 2)
-      const rawV1 = window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V1) || rawV2;
-      if (rawV1) {
+      // 2. Migrate an older payload (v1/v2, or a v3 key still holding v2 data). Keep the
+      //    user's symbols, ORDER, type, underlying hint, addedAt and notes; drop frozen
+      //    contract terms.
+      const rawOlder =
+        window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V2) ||
+        window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V1) ||
+        rawV3;
+      if (rawOlder) {
         try {
-          const parsedV1 = JSON.parse(rawV1);
-          if (parsedV1 && typeof parsedV1 === "object" && Array.isArray(parsedV1.items)) {
-            // One-time migration: Replace legacy default seeded items with exact 5 primary universe symbols
-            const migrated = createDefaultWatchlist();
+          const old = JSON.parse(rawOlder);
+          if (old && typeof old === "object" && Array.isArray(old.items) && old.items.length > 0) {
+            const migrated: ResearchWatchlist = {
+              id: old.id || "default_personal_watchlist",
+              name: old.name || "My Personal Research Dashboard",
+              items: this.sanitizeItems(old.items),
+              createdAt: typeof old.createdAt === "number" ? old.createdAt : Date.now(),
+              updatedAt: Date.now(),
+              version: CURRENT_WATCHLIST_SCHEMA_VERSION,
+            };
             this.saveWatchlist(migrated);
-            if (this.storageKey !== WATCHLIST_STORAGE_KEY_V1) {
-              window.localStorage.removeItem(WATCHLIST_STORAGE_KEY_V1);
-            }
+            window.localStorage.removeItem(WATCHLIST_STORAGE_KEY_V1);
+            window.localStorage.removeItem(WATCHLIST_STORAGE_KEY_V2);
             return migrated;
           }
         } catch {
-          // Fall through to default
+          // fall through to default
         }
       }
 
