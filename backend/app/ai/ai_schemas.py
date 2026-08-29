@@ -60,6 +60,11 @@ class ResearchContextEnvelope(BaseModel):
     quoteDisplayEligible: Optional[bool] = None
     feedConnected: Optional[bool] = None
     serverTime: Optional[str] = None
+    # Step 13C temporal context
+    dataState: Optional[str] = None
+    quoteAsOf: Optional[str] = None
+    latestCompletedSession: Optional[str] = None
+    calendarConfidence: Optional[str] = None
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage] = Field(..., min_length=1, max_length=30, description="Conversation history")

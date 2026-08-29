@@ -3,6 +3,8 @@ import { X } from "lucide-react";
 import type { WatchlistItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
+import { useDashboardData } from "@/data/query/use_dashboard_data";
+import { asOfLabel, temporalLabel } from "@/domain/temporal";
 import { deriveSelectedInstrument } from "@/data/selected_instrument";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import { Change } from "@/components/common/change";
@@ -39,6 +41,14 @@ export function PersonalDashboard({
   const { quotes, warrants } = useResearchMarket();
   const { getSpec } = useInstrumentSpecs();
 
+  // After-hours / crash-safe fallback layer. During an active session `getRow` returns the
+  // live WS quote; outside trading it returns the last completed session's resolved values
+  // with provenance, so the table is populated rather than empty. Realtime-only fields with
+  // no legitimate fallback stay "—".
+  const allSymbols = useMemo(() => items.map((i) => i.symbol), [items]);
+  const { getRow, meta } = useDashboardData(allSymbols);
+  const resolvedQuote = (symbol: string) => getRow(symbol)?.quote ?? quotes.get(symbol);
+
   const setSelectedSymbol = onSelectSymbol ?? (() => {});
 
   // Contract metadata = canonical backend registry spec; watchlist item = identity only;
@@ -74,12 +84,21 @@ export function PersonalDashboard({
     return `${(val * 100).toFixed(1)}%`;
   };
 
-  const calculateDTE = (lastTradingDate: string | null | undefined, maturityDate: string | null | undefined): string => {
+  // DTE anchored to the VN trading calendar date (not the viewer's local clock). When the
+  // backend supplies a computed DTE (analytics group) that value wins.
+  const vnTodayIso = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Ho_Chi_Minh" });
+  const calculateDTE = (
+    lastTradingDate: string | null | undefined,
+    maturityDate: string | null | undefined,
+    backendDte?: number | null
+  ): string => {
+    if (typeof backendDte === "number") return backendDte >= 0 ? `${backendDte}d` : "Expired";
     const target = lastTradingDate || maturityDate;
     if (!target) return "—";
-    const targetTime = new Date(target).getTime();
-    if (isNaN(targetTime)) return "—";
-    const diffDays = Math.ceil((targetTime - Date.now()) / (1000 * 60 * 60 * 24));
+    const t = Date.parse(`${String(target).slice(0, 10)}T00:00:00+07:00`);
+    const now = Date.parse(`${vnTodayIso}T00:00:00+07:00`);
+    if (isNaN(t) || isNaN(now)) return "—";
+    const diffDays = Math.round((t - now) / 86_400_000);
     return diffDays >= 0 ? `${diffDays}d` : "Expired";
   };
 
@@ -114,6 +133,13 @@ export function PersonalDashboard({
         </h1>
         <p className="tnum" style={{ marginTop: "4px", fontSize: "12px", color: "var(--muted-foreground)", margin: "4px 0 0 0" }}>
           {items.length} instruments · {plan.symbolCount} slots
+          {!meta.marketSessionActive && meta.latestCompletedSession ? (
+            <span style={{ marginLeft: "10px", color: "var(--subtle-foreground)" }}>
+              · Market closed — showing {asOfLabel({ state: "LAST_SESSION", source: "EOD", sessionDate: meta.latestCompletedSession }) || "last session"} close
+            </span>
+          ) : meta.marketSessionActive ? (
+            <span style={{ marginLeft: "10px", color: "var(--subtle-foreground)" }}>· {temporalLabel("LIVE")}</span>
+          ) : null}
         </p>
       </header>
 
@@ -141,7 +167,7 @@ export function PersonalDashboard({
               </thead>
               <tbody>
                 {stockItems.map((item: WatchlistItem) => {
-                  const q = quotes.get(item.symbol);
+                  const q = resolvedQuote(item.symbol);
                   const lastPrice = q?.lastPrice;
                   const refPrice = q?.referencePrice;
                   const bidPrice = q?.bidPrice;
@@ -256,8 +282,10 @@ export function PersonalDashboard({
               </thead>
               <tbody>
                 {cwItems.map((item: WatchlistItem) => {
-                  const q = quotes.get(item.symbol);
+                  const row = getRow(item.symbol);
+                  const q = row?.quote ?? quotes.get(item.symbol);
                   const cw = warrants.get(item.symbol);
+                  const fbAnalytics = row?.analytics ?? null;
 
                   const lastPrice = q?.lastPrice ?? cw?.quote?.lastPrice;
                   const bidPrice = q?.bidPrice ?? cw?.quote?.bidPrice;
@@ -271,16 +299,23 @@ export function PersonalDashboard({
                   const underlyingSymbol =
                     spec?.underlyingSymbol || item.underlyingSymbol || cw?.underlyingSymbol || null;
                   const underlyingPrice =
-                    cw?.underlyingPrice ?? (underlyingSymbol ? quotes.get(underlyingSymbol)?.lastPrice : null);
+                    cw?.underlyingPrice ??
+                    (underlyingSymbol
+                      ? getRow(underlyingSymbol)?.quote?.lastPrice ??
+                        quotes.get(underlyingSymbol)?.lastPrice ??
+                        null
+                      : null);
                   const issuer = spec?.issuer ?? null;
                   const strikePrice = spec?.strikePrice ?? null;
                   const exerciseRatio = spec?.exerciseRatio ?? null;
                   const lastTradingDate = spec?.lastTradingDate ?? null;
                   const maturityDate = spec?.maturityDate ?? null;
 
-                  const ivAsk = cw?.ivAsk;
-                  const ivTrade = cw?.ivTrade;
-                  const ivBid = cw?.ivBid;
+                  // Live IV from the realtime analytics stream; else the EOD analytics
+                  // group from the fallback resolver (iv_trade only - no EOD order book).
+                  const ivAsk = cw?.ivAsk ?? fbAnalytics?.ivAsk ?? null;
+                  const ivTrade = cw?.ivTrade ?? fbAnalytics?.ivTrade ?? null;
+                  const ivBid = cw?.ivBid ?? fbAnalytics?.ivBid ?? null;
 
                   const isSelected = selectedSymbol === item.symbol;
                   // "partial" reflects the registry's data_quality; "conflicting" is a distinct
@@ -324,13 +359,13 @@ export function PersonalDashboard({
                           )}
                           {isConflicting && (
                             <span
-                              title="Contract terms are known but disagree across public sources (e.g. an unresolved corporate-action adjustment). Quant analytics are held back until the effective terms are reconciled."
+                              title="Contract terms are known but disagree across public sources (e.g. an unresolved corporate-action adjustment). Quant analytics are held back until the effective terms are reconciled. Full provenance is in the instrument detail panel."
                               aria-label="Conflicting contract terms"
                               style={{
                                 display: "inline-flex",
                                 alignItems: "center",
                                 fontSize: "10px",
-                                color: "var(--destructive)",
+                                color: "var(--muted-foreground)",
                                 backgroundColor: "var(--secondary)",
                                 padding: "1px 4px",
                                 borderRadius: "2px",
@@ -338,7 +373,7 @@ export function PersonalDashboard({
                                 fontWeight: 400,
                               }}
                             >
-                              conflicting
+                              unverified
                             </span>
                           )}
                         </div>
@@ -380,7 +415,7 @@ export function PersonalDashboard({
                         {typeof exerciseRatio === "number" && !isNaN(exerciseRatio) && exerciseRatio > 0 ? `${exerciseRatio}:1` : "—"}
                       </td>
                       <td className="tnum" style={{ padding: "0 12px", textAlign: "right", fontSize: "12px", color: "var(--subtle-foreground)" }}>
-                        {calculateDTE(lastTradingDate, maturityDate)}
+                        {calculateDTE(lastTradingDate, maturityDate, fbAnalytics?.dte)}
                       </td>
                       <td className="tnum" style={{ padding: "0 12px", textAlign: "right", fontSize: "12px", color: "var(--muted-foreground)" }}>
                         {formatIV(ivBid)}

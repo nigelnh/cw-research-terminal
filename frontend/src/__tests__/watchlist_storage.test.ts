@@ -124,7 +124,7 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
     // Second reload (e.g. page refresh)
     const secondLoad = defaultStorage.loadWatchlist();
     expect(secondLoad.items.length).toBe(5);
-    expect(secondLoad.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CTCB2601", "CVPB2615"]);
+    expect(secondLoad.items.map((i) => i.symbol)).toEqual(["CHPG2602", "CVPB2615", "HPG", "VPB", "VNINDEX"]);
   });
 
   it("4. Post-migration user edit persists across subsequent reloads", () => {
@@ -155,7 +155,7 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
     const loaded = storage.loadWatchlist();
     expect(loaded).toBeDefined();
     expect(loaded.items.length).toBe(5);
-    expect(loaded.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CTCB2601", "CVPB2615"]);
+    expect(loaded.items.map((i) => i.symbol)).toEqual(["CHPG2602", "CVPB2615", "HPG", "VPB", "VNINDEX"]);
     expect(loaded.version).toBe(CURRENT_WATCHLIST_SCHEMA_VERSION);
   });
 
@@ -164,7 +164,7 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
 
     const loaded = storage.loadWatchlist();
     expect(loaded.items.length).toBe(5);
-    expect(loaded.items.map((i) => i.symbol)).toEqual(["HPG", "NVL", "VHM", "CTCB2601", "CVPB2615"]);
+    expect(loaded.items.map((i) => i.symbol)).toEqual(["CHPG2602", "CVPB2615", "HPG", "VPB", "VNINDEX"]);
   });
 
   it("7. Sanitizes corrupted watchlist item records in V2 payload", () => {

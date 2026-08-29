@@ -39,18 +39,18 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     resetWatchlistMemoryForTests(fresh);
   });
 
-  it("1, 2, 3, 4. Dashboard contains Stocks (3) [HPG, NVL, VHM] and Covered Warrants (2) [CTCB2601, CVPB2615]", () => {
+  it("1, 2, 3, 4. Dashboard contains Stocks (3) [HPG, VPB, VNINDEX] and Covered Warrants (2) [CHPG2602, CVPB2615]", () => {
     const html = renderMarkup(<PersonalDashboard />);
 
-    // Section 1: Stocks (3)
+    // Section 1: Stocks (3) - the curated default underlyings + index
     expect(html).toContain("Stocks (3)");
     expect(html).toContain("HPG");
-    expect(html).toContain("NVL");
-    expect(html).toContain("VHM");
+    expect(html).toContain("VPB");
+    expect(html).toContain("VNINDEX");
 
-    // Section 2: Covered Warrants (2)
+    // Section 2: Covered Warrants (2) - the verified default CWs
     expect(html).toContain("Covered Warrants (2)");
-    expect(html).toContain("CTCB2601");
+    expect(html).toContain("CHPG2602");
     expect(html).toContain("CVPB2615");
 
     // Must NOT say Covered Warrants (5)

@@ -11,7 +11,13 @@ export class BackendInstrumentProvider implements InstrumentProvider {
   }
 
   async getActiveCoveredWarrants(filter?: ActiveInstrumentFilter): Promise<CoveredWarrant[]> {
-    const rawItems = await this.client.getActiveInstruments(filter?.issuer, filter?.underlyingSymbol);
+    const rawItems = await this.client.getActiveInstruments(
+      filter?.issuer,
+      filter?.underlyingSymbol,
+      undefined,
+      undefined,
+      filter?.status === "ALL" ? "ALL" : undefined
+    );
     return rawItems.map(mapInstrumentToCoveredWarrant);
   }
 
