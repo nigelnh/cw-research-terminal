@@ -257,6 +257,14 @@ def _ai_daily_budget_snapshot() -> dict:
         return {"enabled": False}
 
 
+@app.get("/healthz", tags=["System"], include_in_schema=False)
+async def liveness():
+    """Cheap liveness probe for the platform healthcheck. No I/O: a 200 means the
+    process is up and the event loop is responsive. Readiness detail (DB, Redis,
+    provider, security posture) lives on /health."""
+    return {"status": "ok"}
+
+
 @app.get("/health", tags=["System"])
 async def root_health():
     health_data = subscription_manager.provider.get_health()
@@ -301,6 +309,7 @@ async def root_health():
             "cors_origins_configured": bool(settings.CORS_ALLOWED_ORIGINS.strip()),
             "allowed_hosts_enforced": bool(settings.ALLOWED_HOSTS.strip()),
             "hsts_enabled": bool(settings.SECURITY_HSTS_ENABLED),
+            "client_ip_trust_mode": settings.client_ip_trust_mode(),
             "gates": {
                 "ai_calls": {"limit": ai_call_gate.limit, "in_flight": ai_call_gate.in_flight},
                 "history_gapfill": {

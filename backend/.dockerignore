@@ -1,0 +1,24 @@
+# Keep the image small and secret-free.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage*
+htmlcov/
+tests/
+poc/
+scripts/
+cw_pg_test_*/
+*.rdb
+dump.rdb
+.git/
+.gitignore
+.DS_Store
+*.md
+!alembic/README
