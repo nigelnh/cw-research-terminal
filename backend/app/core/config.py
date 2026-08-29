@@ -449,6 +449,21 @@ class Settings(BaseSettings):
             return "postgresql+psycopg2://" + url[len("postgresql://"):]
         return url
 
+    def async_database_url(self) -> str:
+        """The async (asyncpg) form of DATABASE_URL. Managed Postgres providers (Railway,
+        Heroku, Render, ...) hand out a bare ``postgresql://`` / ``postgres://`` URL; the
+        async engine needs the ``+asyncpg`` driver spelled out."""
+        url = self.DATABASE_URL
+        if url.startswith("postgresql+asyncpg://"):
+            return url
+        if url.startswith("postgresql+psycopg2://"):
+            return "postgresql+asyncpg://" + url[len("postgresql+psycopg2://"):]
+        if url.startswith("postgres://"):
+            return "postgresql+asyncpg://" + url[len("postgres://"):]
+        if url.startswith("postgresql://"):
+            return "postgresql+asyncpg://" + url[len("postgresql://"):]
+        return url
+
     model_config = SettingsConfigDict(
         env_file=(
             str(PROJECT_ROOT / ".env"),
