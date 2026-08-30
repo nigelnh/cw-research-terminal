@@ -235,6 +235,13 @@ export function SortHeader({
   align?: "left" | "right";
   width?: number | string;
 }) {
+  // Fixed-width marker slot so the header never shifts when a sort mark appears.
+  // Right-aligned columns put it before the label, left-aligned after.
+  const slot = (
+    <span style={{ display: "inline-block", width: 10, textAlign: "center", fontSize: "9px" }}>
+      {mark}
+    </span>
+  );
   return (
     <th
       onClick={onClick}
@@ -242,9 +249,33 @@ export function SortHeader({
       aria-sort={mark === "▲" ? "ascending" : mark === "▼" ? "descending" : "none"}
       style={{ ...HEAD_STYLE, textAlign: align, width }}
     >
-      {label}
-      {mark ? <span style={{ marginLeft: 4, fontSize: "9px" }}>{mark}</span> : null}
+      {align === "right" ? (
+        <>
+          {slot}
+          {label}
+        </>
+      ) : (
+        <>
+          {label}
+          {slot}
+        </>
+      )}
     </th>
+  );
+}
+
+/** Static (non-sortable) column header, styled to match SortHeader. */
+export function PlainHeader({
+  label,
+  align = "right",
+  width,
+}: {
+  label: string;
+  align?: "left" | "right";
+  width?: number | string;
+}) {
+  return (
+    <th style={{ ...HEAD_STYLE, cursor: "default", textAlign: align, width }}>{label}</th>
   );
 }
 

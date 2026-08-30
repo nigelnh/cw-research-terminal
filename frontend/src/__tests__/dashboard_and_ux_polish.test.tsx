@@ -40,13 +40,17 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
   it("1. Watchlist renders two mono tables with the Grid Terminal column sets", () => {
     const html = renderMarkup(<PersonalDashboard />);
     expect(html).toContain("Watchlist");
-    // stock table
+    // stock table — incl. the absolute-change (+/-) column between TRD and CHG%
     expect(html).toContain("SYMBOL");
+    expect(html).toContain("+/-");
     expect(html).toContain("FRN ROOM");
     // CW table
     expect(html).toContain("UND.PRC");
     expect(html).toContain("STRIKE");
     expect(html).toContain("IV TRD");
+    // the market-overview index strip was removed in the v3 design
+    expect(html).not.toContain("VNXALL");
+    expect(html).not.toContain("HNXUPCOM");
   });
 
   it("2. Bid/ask are em-dash outside a live session (no fabricated book)", () => {

@@ -64,6 +64,20 @@ describe("InstrumentPanel — bottom split panel", () => {
     expect(html).not.toMatch(/>\s*\d+d\s*</); // never "24d"
   });
 
+  it("3b. OVERVIEW right pane is TIME & SALES (session-gated, honest empty state)", () => {
+    const closed = renderMarkup(
+      <InstrumentPanel instrument={cw} marketSessionActive={false} onClose={vi.fn()} />,
+    );
+    expect(closed).toContain("TIME &amp; SALES");
+    expect(closed).toContain("unavailable outside a live session");
+    expect(closed).not.toContain("PRICE HISTORY");
+
+    const live = renderMarkup(
+      <InstrumentPanel instrument={cw} marketSessionActive={true} onClose={vi.fn()} />,
+    );
+    expect(live).toContain("not yet wired");
+  });
+
   it("4. CONFLICTING metadata -> explained in the panel, analytics withheld as em-dash", () => {
     const conflicting = { ...cw, metadataVerification: "CONFLICTING" as const };
     const html = renderMarkup(
