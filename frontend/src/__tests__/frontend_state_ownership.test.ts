@@ -120,6 +120,44 @@ describe("Selected instrument is derived, never stored", () => {
       strikePrice: 20_000,
     });
   });
+
+  it("canonical registry spec wins over a STALE watchlist item (issuer / strike / ratio)", () => {
+    const staleWl = {
+      symbol: "CTCB2601",
+      instrumentType: "CW",
+      underlyingSymbol: "TCB",
+      issuer: "KIS",
+      strikePrice: 25_000,
+      exerciseRatio: 2,
+      maturityDate: "2026-12-10",
+      lastTradingDate: null,
+    } as WatchlistItem;
+    const spec = {
+      symbol: "CTCB2601",
+      instrumentType: "CW",
+      issuer: "ACBS",
+      underlyingSymbol: "TCB",
+      strikePrice: 37_000,
+      exerciseRatio: 4,
+      maturityDate: "2026-10-26",
+      lastTradingDate: "2026-10-22",
+      status: "ACTIVE",
+      dataQuality: "COMPLETE",
+      metadataVerification: "CONFLICTING",
+    } as any;
+
+    const view = deriveSelectedInstrument("CTCB2601", { instrumentSpec: spec, watchlistItem: staleWl });
+    expect(view).toMatchObject({
+      issuer: "ACBS",
+      strikePrice: 37_000,
+      exerciseRatio: 4,
+      maturityDate: "2026-10-26",
+      metadataVerification: "CONFLICTING",
+    });
+    // the frozen KIS / 25,000 / 2 terms must not survive
+    expect(view?.issuer).not.toBe("KIS");
+    expect(view?.strikePrice).not.toBe(25_000);
+  });
 });
 
 describe("Single realtime store - no duplicate quote pipelines", () => {
