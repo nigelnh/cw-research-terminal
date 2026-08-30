@@ -372,16 +372,21 @@ export function InstrumentPanel({
                     <div
                       key={p.date}
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
+                        display: "grid",
+                        gridTemplateColumns: "1fr auto auto",
+                        columnGap: 24,
                         padding: "4px 0",
                         fontSize: 11,
                         borderBottom: "1px solid var(--border-row)",
                       }}
                     >
                       <span style={{ color: "var(--t-50)" }}>{p.date}</span>
-                      <span style={{ color: "var(--t-85)" }}>{fmtPrice(p.close)}</span>
-                      <span style={{ color: p.chg.color }}>{p.chg.text}</span>
+                      <span style={{ color: "var(--t-85)", textAlign: "right", minWidth: 64 }}>
+                        {fmtPrice(p.close)}
+                      </span>
+                      <span style={{ color: p.chg.color, textAlign: "right", minWidth: 64 }}>
+                        {p.chg.text}
+                      </span>
                     </div>
                   ))
                 )}
