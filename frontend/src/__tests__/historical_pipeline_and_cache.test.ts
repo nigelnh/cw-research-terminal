@@ -75,6 +75,21 @@ describe("Historical data shaping (pure)", () => {
     expect(sliceBars(bars, "1Y")).toHaveLength(200);
     expect(sliceBars([], "1M")).toEqual([]);
   });
+
+  it("the instrument-panel chart window (6M) loads materially more daily context than 1M", () => {
+    // 1D is the BAR INTERVAL; the timeframe is the client-side window over the same
+    // Postgres-first `daily_1y` dataset — no extra backend call.
+    const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().split("T")[0];
+    const bars = Array.from({ length: 260 }, (_, i) => ({ symbol: "HPG", ...daily(day(259 - i), 10) }));
+
+    const oneMonth = sliceBars(bars, "1M").length;
+    const sixMonth = sliceBars(bars, "6M").length;
+
+    expect(oneMonth).toBeLessThanOrEqual(31);
+    expect(sixMonth).toBeGreaterThan(60);
+    expect(sixMonth).toBeGreaterThan(oneMonth * 3);
+    expect(resolveDataset("6M")).toEqual({ dataset: "daily_1y", backendTimeframe: "1D" });
+  });
 });
 
 describe("Central query-key factory", () => {

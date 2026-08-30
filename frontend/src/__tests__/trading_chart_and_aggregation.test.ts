@@ -119,6 +119,21 @@ describe("Current Bar Builder & Realtime Merge", () => {
     expect(liveBar.volume).toBe(11200000);
   });
 
+  it("1b. Returns completed bars UNCHANGED when there is no live quote (market closed)", () => {
+    // The instrument panel passes liveQuote only while the session is active; outside a
+    // session the chart must show exactly the persisted daily bars — no synthetic
+    // "today" candle fabricated from a last-session snapshot price.
+    const closedNull = mergeCompletedBarsWithLiveQuote(completedBars, null, "1D");
+    expect(closedNull).toBe(completedBars);
+
+    const closedUndef = mergeCompletedBarsWithLiveQuote(completedBars, undefined, "1D");
+    expect(closedUndef).toBe(completedBars);
+
+    // A quote object with no matched trade price is likewise ignored.
+    const noTrade = { symbol: "HPG", lastPrice: null } as unknown as MarketQuote;
+    expect(mergeCompletedBarsWithLiveQuote(completedBars, noTrade, "1D")).toBe(completedBars);
+  });
+
   it("2. Does NOT fabricate CW trade candle when CW only has Bid/Ask and no Last trade", () => {
     const cwQuoteNoTrade = {
       symbol: "CHPG2541",
