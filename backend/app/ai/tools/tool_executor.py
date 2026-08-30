@@ -54,6 +54,22 @@ ORDER_BOOK_KEYWORDS = (
     "order book", "sổ lệnh", "depth", "dư mua", "dư bán", "bid ask", "bid/ask", "khối lượng",
 )
 
+# Step 14A research enrichment: PostgreSQL-backed disclosure & corporate-action reads.
+NEWS_KEYWORDS = {
+    "news", "disclosure", "disclosures", "announcement", "announced", "headline", "filing",
+    "press release", "tin tức", "tin bài", "công bố thông tin", "công bố", "thông báo",
+    "bản tin",
+}
+
+CORP_ACTION_KEYWORDS = {
+    "dividend", "dividends", "corporate action", "corporate actions", "record date",
+    "ex-date", "ex date", "ex-dividend", "rights issue", "bonus issue", "bonus share",
+    "stock dividend", "cash dividend", "agm", "egm", "shareholder meeting",
+    "general meeting", "cổ tức", "chia cổ tức", "trả cổ tức", "quyền mua", "cổ phiếu thưởng",
+    "ngày chốt quyền", "ngày giao dịch không hưởng quyền", "đại hội cổ đông", "đhđcđ",
+    "họp cổ đông", "phát hành thêm",
+}
+
 
 def generate_activity_label(tool_name: str, args: Dict[str, Any]) -> str:
     """Generates clean, user-facing activity labels for tool execution."""
@@ -72,6 +88,10 @@ def generate_activity_label(tool_name: str, args: Dict[str, Any]) -> str:
         return "Checking your dashboard…"
     elif tool_name == "get_market_status":
         return "Checking market session status…"
+    elif tool_name == "get_news":
+        return f"Reading {sym} disclosures…" if sym else "Reading exchange disclosures…"
+    elif tool_name == "get_corporate_actions":
+        return f"Reading {sym} corporate actions…" if sym else "Reading corporate actions…"
     return "Analyzing market context…"
 
 
@@ -178,6 +198,9 @@ class ToolExecutor:
         wants_history = any(k in q_lower for k in HISTORY_KEYWORDS)
         wants_order_book = any(k in q_lower for k in ORDER_BOOK_KEYWORDS)
         is_dashboard_query = any(k in q_lower for k in DASHBOARD_KEYWORDS)
+        wants_corp_actions = any(k in q_lower for k in CORP_ACTION_KEYWORDS)
+        wants_news = any(k in q_lower for k in NEWS_KEYWORDS)
+        on_news_page = context is not None and context.activePage == "news"
         # Outside an active session there is no live quote to fetch - pull the last
         # completed session's end-of-day series so the model cites real closing values
         # instead of the "no quote available" dead end (Step 13C).
@@ -195,8 +218,20 @@ class ToolExecutor:
                 elif wants_order_book:
                     await self.call_tool("get_order_book", {"symbol": sym})
 
+                # Step 14A: PostgreSQL-backed research reads. Corporate actions are the
+                # more specific intent; news is the broader one. Both are read-only and
+                # never contact an upstream source.
+                if wants_corp_actions and inst.instrument_type != "CW":
+                    await self.call_tool("get_corporate_actions", {"symbol": sym})
+                if wants_news:
+                    await self.call_tool("get_news", {"symbol": sym})
+
                 if pull_eod:
                     await self.call_tool("get_history", {"symbol": sym, "lookback_days": 30})
+
+        # Case 2a: news / disclosure query with no specific symbol (or on the NEWS page)
+        elif wants_news or (on_news_page and not is_dashboard_query):
+            await self.call_tool("get_news", {})
 
         # Case 2: dashboard comparison query (e.g. "which stock is doing best?")
         elif is_dashboard_query:

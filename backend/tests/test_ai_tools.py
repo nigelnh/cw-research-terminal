@@ -226,3 +226,96 @@ async def test_11_chat_endpoint_supplies_canonical_data_for_hpg():
         assert "<canonical_market_data>" in captured_system_prompt
         assert "HPG" in captured_system_prompt
         assert "22000.0" in captured_system_prompt or "22000" in captured_system_prompt
+
+
+# --------------------------------------------------------------------------- #
+# Step 14A: research-enrichment tool routing (get_news / get_corporate_actions)
+# --------------------------------------------------------------------------- #
+from app.ai.ai_system_prompt import build_system_prompt  # noqa: E402
+from app.ai.tools import research_tools  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_12_corporate_action_query_routes_get_corporate_actions():
+    """A dividend / corporate-action question about a resolved symbol pulls get_corporate_actions."""
+    executor = ToolExecutor(max_tool_calls=4)
+    envelope = ResearchContextEnvelope(
+        activePage="dashboard",
+        selectedInstrument=SelectedInstrumentContext(symbol="HPG", instrumentType="STOCK"),
+    )
+    executed = await executor.resolve_and_execute_proactive_tools(
+        "has HPG paid any dividends recently, and when is the record date?", envelope
+    )
+    tools = {e["tool"] for e in executed}
+    assert "get_corporate_actions" in tools
+    ca = next(e for e in executed if e["tool"] == "get_corporate_actions")
+    assert ca["args"]["symbol"] == "HPG"
+    assert ca["result"]["provenance"] == "RESEARCH_ENRICHMENT"
+
+
+@pytest.mark.asyncio
+async def test_13_news_query_without_symbol_routes_get_news():
+    """A general disclosure question (no symbol) on the NEWS page pulls get_news with no symbol."""
+    executor = ToolExecutor(max_tool_calls=4)
+    envelope = ResearchContextEnvelope(activePage="news")
+    executed = await executor.resolve_and_execute_proactive_tools(
+        "any notable exchange disclosures today?", envelope
+    )
+    tools = {e["tool"] for e in executed}
+    assert tools == {"get_news"}
+    assert "symbol" not in executed[0]["args"] or not executed[0]["args"].get("symbol")
+    assert executed[0]["result"]["provenance"] == "RESEARCH_ENRICHMENT"
+
+
+@pytest.mark.asyncio
+async def test_14_symbol_news_query_routes_get_news_for_that_symbol():
+    executor = ToolExecutor(max_tool_calls=4)
+    envelope = ResearchContextEnvelope(
+        activePage="research",
+        selectedInstrument=SelectedInstrumentContext(symbol="VPB", instrumentType="STOCK"),
+    )
+    executed = await executor.resolve_and_execute_proactive_tools(
+        "what has VPB announced lately?", envelope
+    )
+    news = next((e for e in executed if e["tool"] == "get_news"), None)
+    assert news is not None and news["args"]["symbol"] == "VPB"
+
+
+@pytest.mark.asyncio
+async def test_15_plain_price_query_does_not_pull_research_tools():
+    """No false positives: a pure price question must not trigger news / corporate actions."""
+    executor = ToolExecutor(max_tool_calls=4)
+    envelope = ResearchContextEnvelope(
+        activePage="dashboard",
+        selectedInstrument=SelectedInstrumentContext(symbol="HPG", instrumentType="STOCK"),
+    )
+    executed = await executor.resolve_and_execute_proactive_tools("is HPG up or down today?", envelope)
+    tools = {e["tool"] for e in executed}
+    assert "get_news" not in tools
+    assert "get_corporate_actions" not in tools
+
+
+@pytest.mark.asyncio
+async def test_16_research_tools_unavailable_without_db_but_well_formed():
+    n = await research_tools.get_news(symbol="HPG")
+    assert n["status"] == "UNAVAILABLE"
+    assert n["provenance"] == "RESEARCH_ENRICHMENT"
+    bad = await research_tools.get_corporate_actions("")
+    assert bad["status"] == "INVALID_ARGUMENT"
+
+
+def test_17_system_prompt_documents_research_provenance_and_causal_restraint():
+    prompt = build_system_prompt(
+        context=None,
+        tool_results=[{
+            "symbol": "HPG",
+            "count": 1,
+            "items": [{"title": "HPG: board resolution", "published_at": "2026-08-20", "source": "HSX"}],
+            "causal_note": "These items were disclosed/effective near the stated dates. Do not assert they caused any price movement",
+            "provenance": "RESEARCH_ENRICHMENT",
+        }],
+    )
+    assert "RESEARCH_ENRICHMENT" in prompt
+    assert "get_news" in prompt and "get_corporate_actions" in prompt
+    assert "caused" in prompt.lower()
+    assert "SCHEDULED" in prompt  # scheduled-vs-confirmed distinction is spelled out
