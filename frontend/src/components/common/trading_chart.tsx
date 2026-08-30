@@ -53,12 +53,19 @@ import {
 } from "@/domain/historical/technical_overlays";
 import { RotateCcw } from "lucide-react";
 
-/** Fixed pixels between adjacent bars — the knob for candle density. */
-const BAR_SPACING = 20;
+/** Initial bar spacing (px) — the lib recomputes it to satisfy the visible range below. */
+const BAR_SPACING = 12;
 /** Floor so an aggressive zoom-out still leaves the candles legible. */
-const MIN_BAR_SPACING = 5;
+const MIN_BAR_SPACING = 4;
 /** Empty bars kept to the right of the newest candle. */
-const RIGHT_OFFSET = 5;
+const RIGHT_OFFSET = 4;
+/**
+ * How many recent bars to frame on first load. Bounding the window (rather than fitting
+ * the whole dataset) keeps candles at a professional density AND scopes the price-scale
+ * autoscale to recent bars — so a warrant that decayed 20x over the year still shows its
+ * last weeks legibly instead of a flat line pinned to the axis.
+ */
+const INITIAL_VISIBLE_BARS = 55;
 
 interface Props {
   symbol: string;
@@ -508,10 +515,18 @@ export function TradingChart({
     }
 
     if (viewportSymbolRef.current !== symbol) {
-      viewportSymbolRef.current = symbol;
-      // Anchor once: newest bar at the right edge with RIGHT_OFFSET of air, bars at
-      // the fixed BAR_SPACING density. No stretching a thin dataset across the width.
-      chart.timeScale().scrollToRealTime();
+      // Frame the last INITIAL_VISIBLE_BARS once per symbol. Never re-run on a data
+      // tick / resize, so the user's zoom/pan is preserved.
+      const len =
+        mode === "RELATIVE"
+          ? Math.max(effectiveCwBars.length, effectiveUndBars.length)
+          : (mode === "UNDERLYING" ? effectiveUndBars : effectiveCwBars).length;
+      if (len > 0) {
+        viewportSymbolRef.current = symbol;
+        const from = Math.max(0, len - INITIAL_VISIBLE_BARS) - 0.5;
+        const to = len - 1 + RIGHT_OFFSET;
+        chart.timeScale().setVisibleLogicalRange({ from, to });
+      }
     }
   }, [effectiveCwBars, effectiveUndBars, mode, symbol, overlayKey, toChartTime, prepareSeriesData]);
 
@@ -547,7 +562,7 @@ export function TradingChart({
               {activeReadout ? activeReadout.symbol : symbol}
             </span>
             <span style={{ color: "var(--subtle-foreground)" }}>·</span>
-            <span style={{ color: "var(--primary)", fontWeight: 500 }}>{interval}</span>
+            <span className="tnum" style={{ color: "var(--primary)", fontWeight: 500 }}>{interval}</span>
             {activeReadout && (
               <>
                 <span style={{ color: "var(--subtle-foreground)" }}>·</span>
