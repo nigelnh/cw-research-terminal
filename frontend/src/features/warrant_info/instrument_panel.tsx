@@ -105,9 +105,12 @@ export function InstrumentPanel({
 
   const nowTick = useTick(marketSessionActive);
 
+  // Daily bars, ~6 months of recent sessions. "1D" is the bar INTERVAL; the "6M"
+  // timeframe is the client-side window over the Postgres-first `daily_1y` dataset
+  // (same backend call as any other daily request — no extra provider traffic).
   const bars = useHistoricalBars({
     symbol: symbol ?? undefined,
-    timeframe: "1M",
+    timeframe: "6M",
     interval: "1D",
     adjusted: true,
     enabled: hasInstrument && !isIndex,
@@ -345,8 +348,7 @@ export function InstrumentPanel({
                   symbol={instrument!.symbol}
                   isCW={isCW}
                   bars={bars.bars}
-                  liveQuote={q ?? null}
-                  range="1M"
+                  liveQuote={marketSessionActive ? q ?? null : null}
                   interval="1D"
                   referencePrice={ref}
                   height={300}
@@ -481,8 +483,7 @@ export function InstrumentPanel({
                     <TradingChart
                       symbol={instrument!.symbol}
                       bars={bars.bars}
-                      liveQuote={q ?? null}
-                      range="1M"
+                      liveQuote={marketSessionActive ? q ?? null : null}
                       interval="1D"
                       referencePrice={ref}
                       height={300}
