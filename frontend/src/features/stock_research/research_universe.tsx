@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useWatchlist } from "@/data/watchlist";
 import { useActiveWarrants } from "@/data/query";
-import { MarketOverviewStrip } from "@/components/common/market_overview_strip";
 import {
   EMPTY_FILTER,
   RegistryFilter,
@@ -125,8 +124,6 @@ export function ResearchUniverse({
 
   return (
     <div>
-      <MarketOverviewStrip />
-
       <div
         style={{
           display: "flex",
