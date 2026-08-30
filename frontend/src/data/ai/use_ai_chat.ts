@@ -105,7 +105,7 @@ export interface SelectedInstrumentContext {
 }
 
 export interface ResearchContextEnvelope {
-  activePage: "dashboard" | "research";
+  activePage: "dashboard" | "research" | "news";
   selectedInstrument?: SelectedInstrumentContext | null;
   watchlist?: string[];
   realtimeStatus?: string;

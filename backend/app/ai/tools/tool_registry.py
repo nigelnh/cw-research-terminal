@@ -17,6 +17,7 @@ from app.ai.tools.market_tools import (
 from app.ai.tools.instrument_tools import get_instrument
 from app.ai.tools.quant_tools import get_quant
 from app.ai.tools.history_tools import get_history
+from app.ai.tools.research_tools import get_news, get_corporate_actions
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,47 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_news",
+            "description": (
+                "Returns recent HOSE exchange news / disclosure headlines from the project's "
+                "PostgreSQL store (ingested from the HSX public feed). Read-only, never fetches. "
+                "Optionally filter to one symbol. Use for 'what was disclosed recently'. "
+                "State only what was disclosed and when — never claim a disclosure caused a price move."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Optional ticker filter (e.g. HPG). Omit for the market-wide feed."},
+                    "limit": {"type": "integer", "description": "Max headlines to return (clamped, default 12)."},
+                    "lang": {"type": "string", "enum": ["vi", "en"], "description": "Headline language; default 'vi'."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_corporate_actions",
+            "description": (
+                "Returns structured corporate-action events (cash/stock dividends, bonus/rights "
+                "issues, AGM/EGM) for one symbol from the project's PostgreSQL store (ingested from "
+                "VNDirect). Read-only. Includes ex/record/payment dates, cash amount per share, and "
+                "distribution ratio. Describe timing/content only — do not assert causation of price moves."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Stock or underlying ticker (e.g. HPG, VPB)."},
+                    "limit": {"type": "integer", "description": "Max events (clamped, default 12)."},
+                },
+                "required": ["symbol"],
+            },
+        },
+    },
 ]
 
 # Strict Whitelist of callable tool handlers
@@ -151,6 +193,8 @@ TOOL_HANDLERS = {
     "get_instrument": get_instrument,
     "get_quant": get_quant,
     "get_history": get_history,
+    "get_news": get_news,
+    "get_corporate_actions": get_corporate_actions,
 }
 
 

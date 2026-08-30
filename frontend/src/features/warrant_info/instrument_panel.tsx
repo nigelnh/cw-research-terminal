@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import type { SelectedInstrumentView } from "@/data/selected_instrument";
 import type { DashboardRow } from "@/data/query/use_dashboard_data";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
+import type { CorporateActionItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
-import { useHistoricalBars } from "@/data/query";
+import { useHistoricalBars, useCorporateActions } from "@/data/query";
 import { TradingChart } from "@/components/common/trading_chart";
 import { AiReplBar } from "@/features/ai_assistant/ai_repl_bar";
 import { DASH, fmtChg, fmtIV, fmtPrice, fmtRatio, dteDisplay } from "@/components/common/grid_table";
@@ -16,6 +17,8 @@ interface InstrumentPanelProps {
   marketSessionActive: boolean;
   context?: ResearchContextEnvelope;
   onClose: () => void;
+  /** Test-only: force the initial sub-tab. Production always starts on "overview". */
+  initialTab?: "overview" | "quant";
 }
 
 /* ---------------------------------------------------------------- helpers */
@@ -82,6 +85,39 @@ function greek(v: number | null | undefined, dp = 2): string {
   return v.toFixed(dp);
 }
 
+/* -------------------------------------------------- corporate-events display */
+
+const CORP_EVENT_LABELS: Record<string, string> = {
+  CASH_DIVIDEND: "CASH DIV",
+  STOCK_DIVIDEND: "STOCK DIV",
+  BONUS_ISSUE: "BONUS",
+  RIGHTS_ISSUE: "RIGHTS",
+  AGM: "AGM",
+  EGM: "EGM",
+  LISTING: "LISTING",
+  DELISTING: "DELISTING",
+  OTHER: "OTHER",
+};
+
+function corpEventLabel(t: string): string {
+  return CORP_EVENT_LABELS[t] ?? t;
+}
+
+function isoDay(v: string | null | undefined): string {
+  if (!v) return DASH;
+  return v.slice(0, 10);
+}
+
+function corpEventDesc(ev: CorporateActionItem): string {
+  if (ev.action_type === "CASH_DIVIDEND" && typeof ev.cash_amount_vnd === "number") {
+    return `${Math.round(ev.cash_amount_vnd).toLocaleString("en-US")} đ/sh`;
+  }
+  if (ev.ratio_text) return ev.ratio_text;
+  if (typeof ev.ratio_pct === "number") return `${ev.ratio_pct}%`;
+  if (ev.note) return ev.note;
+  return DASH;
+}
+
 const TS_COLS = "48px 44px 42px 50px 50px 24px";
 
 /**
@@ -137,9 +173,10 @@ export function InstrumentPanel({
   marketSessionActive,
   context,
   onClose,
+  initialTab = "overview",
 }: InstrumentPanelProps) {
   const { isInWatchlist, addToWatchlist, removeFromWatchlist, canAdd } = useWatchlist();
-  const [tab, setTab] = useState<"overview" | "quant">("overview");
+  const [tab, setTab] = useState<"overview" | "quant">(initialTab);
   const [addNote, setAddNote] = useState<string | null>(null);
 
   const hasInstrument = !!instrument;
@@ -163,6 +200,13 @@ export function InstrumentPanel({
     interval: "1D",
     adjusted: true,
     enabled: hasInstrument && !isIndex,
+  });
+
+  // Corporate actions apply to the underlying company — stocks only, and only when
+  // the QUANT tab (which hosts the CORP EVENTS table) is actually open.
+  const corpActions = useCorporateActions(symbol, {
+    enabled: hasInstrument && !isCW && !isIndex && tab === "quant",
+    limit: 12,
   });
 
   const cw = instrument?.cw;
@@ -540,9 +584,38 @@ export function InstrumentPanel({
                       <span>ISSUE</span>
                       <span>DESC</span>
                     </div>
-                    <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8 }}>
-                      {DASH} corporate-events feed not yet wired — pending data provider
-                    </div>
+                    {corpActions.isLoading ? (
+                      <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8 }}>loading…</div>
+                    ) : corpActions.isError ? (
+                      <div style={{ fontSize: 10.5, color: "var(--down)", paddingTop: 8 }}>
+                        corporate-events feed unavailable
+                      </div>
+                    ) : corpActions.items.length === 0 ? (
+                      <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8 }}>
+                        {DASH} no corporate events on record for {symbol}
+                      </div>
+                    ) : (
+                      corpActions.items.map((ev) => (
+                        <div
+                          key={ev.id}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "86px 60px 60px 1fr",
+                            gap: "4px 8px",
+                            fontSize: 10,
+                            padding: "5px 0",
+                            borderBottom: "1px solid var(--border-row)",
+                          }}
+                        >
+                          <span style={{ color: "var(--t-80)" }}>{corpEventLabel(ev.action_type)}</span>
+                          <span style={{ color: "var(--t-55)" }}>{isoDay(ev.ex_date)}</span>
+                          <span style={{ color: "var(--t-50)" }}>
+                            {isoDay(ev.record_date ?? ev.disclosure_date)}
+                          </span>
+                          <span style={{ color: "var(--t-60)" }}>{corpEventDesc(ev)}</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                 )}
               </div>
@@ -551,9 +624,9 @@ export function InstrumentPanel({
         </div>
       )}
 
-      {hasInstrument && !isCW && tab === "quant" && (
+      {hasInstrument && !isCW && !isIndex && tab === "quant" && (
         <div style={{ padding: "0 20px 8px 20px", fontSize: 9.5, color: "var(--t-42)" }} className="mono">
-          — fundamentals &amp; corp events: pending data provider
+          — fundamentals: pending data provider · corp events: disclosed timing only, not causation
         </div>
       )}
 
