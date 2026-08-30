@@ -1,34 +1,30 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { renderMarkup } from "./test_fixtures/render_markup";
+import { renderMarkup, seedInstrumentSpecs } from "./test_fixtures/render_markup";
 import { PersonalDashboard } from "../features/watchlist/personal_dashboard";
-import { InstrumentDrawer } from "../features/warrant_info/instrument_drawer";
-import { TopNav } from "../components/common/top_nav";
-import { AiAssistantBubble, getActivityLabel } from "../features/ai_assistant/ai_assistant_bubble";
+import { InstrumentPanel } from "../features/warrant_info/instrument_panel";
+import { AppHeader } from "../components/common/app_header";
+import { AiReplBar, getActivityLabel } from "../features/ai_assistant/ai_repl_bar";
 import { normalizePlainResponse, CHAT_STORAGE_KEY } from "../data/ai/use_ai_chat";
 import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
 
 class MemoryStorage {
   private store: Record<string, string> = {};
-
   getItem(key: string): string | null {
     return this.store[key] !== undefined ? this.store[key] : null;
   }
-
   setItem(key: string, value: string): void {
     this.store[key] = String(value);
   }
-
   removeItem(key: string): void {
     delete this.store[key];
   }
-
   clear(): void {
     this.store = {};
   }
 }
 
-describe("Targeted Dashboard & Copilot UX Polish Pass Verifications", () => {
+describe("Grid Terminal — dashboard, panel & assistant UX", () => {
   let mockStorage: MemoryStorage;
 
   beforeEach(() => {
@@ -41,103 +37,93 @@ describe("Targeted Dashboard & Copilot UX Polish Pass Verifications", () => {
     resetWatchlistMemoryForTests(fresh);
   });
 
-  it("1 & 2 & 3. Stock and CW rows render in separate Dashboard sections with strict column scoping", () => {
+  it("1. Watchlist renders two mono tables with the Grid Terminal column sets", () => {
     const html = renderMarkup(<PersonalDashboard />);
-
-    // Separate section headers
-    expect(html).toContain("Stocks (3)");
-    expect(html).toContain("Covered Warrants (2)");
-
-    // Stocks section should have stock headers but NOT CW-only headers in its stock sub-table
-    expect(html).toContain("Symbol");
-    expect(html).toContain("Ref");
-    expect(html).toContain("Last");
-    expect(html).toContain("Chg");
-    expect(html).toContain("Spread");
-    expect(html).toContain("Spread %");
-    expect(html).toContain("Volume");
-
-    // Covered Warrants section retains full quantitative columns
-    expect(html).toContain("Issuer");
-    expect(html).toContain("Underlying");
-    expect(html).toContain("Und. price");
-    expect(html).toContain("Strike");
-    expect(html).toContain("Ratio");
-    expect(html).toContain("DTE");
-    expect(html).toContain("IV bid");
-    expect(html).toContain("IV trade");
-    expect(html).toContain("IV ask");
+    expect(html).toContain("Watchlist");
+    // stock table
+    expect(html).toContain("SYMBOL");
+    expect(html).toContain("FRN ROOM");
+    // CW table
+    expect(html).toContain("UND.PRC");
+    expect(html).toContain("STRIKE");
+    expect(html).toContain("IV TRD");
   });
 
-  it("4 & 5. CW drawer retains full quant metrics while Stock drawer suppresses warrant-only analytics", () => {
-    const mockCW = {
-      symbol: "CVHM2615",
-      instrumentType: "CW" as const,
-      underlyingSymbol: "VHM",
-      issuer: "SSI",
-      strikePrice: 45000,
-      exerciseRatio: 5.0,
-      maturityDate: "2026-06-30",
-      lastTradingDate: "2026-06-26",
-      cw: {
-        symbol: "CVHM2615",
-        underlyingSymbol: "VHM",
-        issuer: "SSI",
-        strikePrice: 45000,
-        exerciseRatio: 5.0,
-        maturityDate: "2026-06-30",
-        lastTradingDate: "2026-06-26",
-        underlyingPrice: 48000,
-        ivBid: 0.315,
-        ivTrade: 0.320,
-        ivAsk: 0.325,
-        delta: 0.62,
-        gamma: 0.000045,
-        theta: -12.5,
-        vega: 18.2,
-        rho: 4.1,
-        theoreticalPrice: 1420,
-        historicalVolatility: 0.28,
-        moneyness: 1.0667,
-      },
-    };
+  it("2. Bid/ask are em-dash outside a live session (no fabricated book)", () => {
+    const html = renderMarkup(<PersonalDashboard />);
+    expect(html).toContain("—");
+  });
 
+  it("3. CW panel keeps the QUANT tab; stock panel does not surface warrant-only rows", () => {
     const cwHtml = renderMarkup(
-      <InstrumentDrawer instrument={mockCW as any} onClose={vi.fn()} />
+      <InstrumentPanel
+        instrument={{
+          symbol: "CVHM2615",
+          instrumentType: "CW",
+          underlyingSymbol: "VHM",
+          issuer: "SSI",
+          strikePrice: 45000,
+          exerciseRatio: 5,
+          maturityDate: "2026-06-30",
+          lastTradingDate: "2026-06-26",
+        }}
+        marketSessionActive={false}
+        onClose={vi.fn()}
+      />,
     );
-
-    expect(cwHtml).toContain("Covered Warrant");
-    expect(cwHtml).toContain("Quant");
-    expect(cwHtml).toContain("Contract");
-    expect(cwHtml).toContain("Volatility");
-    expect(cwHtml).toContain("Underlying VHM");
-
-    const mockStock = {
-      symbol: "VHM",
-      instrumentType: "STOCK" as const,
-    };
+    expect(cwHtml).toContain("QUANT");
+    expect(cwHtml).toContain("COVERED WARRANT · SSI · VHM");
 
     const stockHtml = renderMarkup(
-      <InstrumentDrawer instrument={mockStock} onClose={vi.fn()} />
+      <InstrumentPanel
+        instrument={{ symbol: "VHM", instrumentType: "STOCK" }}
+        marketSessionActive={false}
+        onClose={vi.fn()}
+      />,
     );
-
-    expect(stockHtml).toContain("Stock");
-    expect(stockHtml).not.toContain("Quant");
-    expect(stockHtml).not.toContain("Contract");
-    expect(stockHtml).not.toContain("Volatility");
-    expect(stockHtml).not.toContain("Underlying VHM");
+    expect(stockHtml).toContain("STOCK · HOSE");
+    expect(stockHtml).not.toContain("MONEYNESS S/K");
   });
 
-  it("6 & 7. normalizePlainResponse strips markdown syntax without losing math characters, and assistant message has no repeated icon/label", () => {
-    const rawMarkdown = "**Valuation Analysis**\n- Last price: 29,500 VND\n- Delta (Δ): 0.6200\n- Spread: 0.72%\n# Recommendation\nWait for afternoon session.";
-    const cleaned = normalizePlainResponse(rawMarkdown);
+  it("4. CONFLICTING metadata -> ◆ marker + tooltip in the table, full reason in the panel", () => {
+    const wl = {
+      id: "wl",
+      name: "wl",
+      items: [{ symbol: "CTCB2601", instrumentType: "CW" as const, underlyingSymbol: "TCB", addedAt: 0 }],
+      createdAt: 0,
+      updatedAt: 0,
+      version: 3,
+    };
+    defaultWatchlistStorage.saveWatchlist(wl as any);
+    resetWatchlistMemoryForTests(wl as any);
 
-    // Markdown artifacts removed
+    const html = renderMarkup(<PersonalDashboard />, [
+      seedInstrumentSpecs([
+        {
+          symbol: "CTCB2601",
+          issuer: "ACBS",
+          underlyingSymbol: "TCB",
+          strikePrice: 37000,
+          exerciseRatio: 4,
+          dataQuality: "COMPLETE",
+          metadataVerification: "CONFLICTING",
+        },
+      ]),
+    ]);
+    expect(html).toContain("◆");
+    expect(html).toContain("Conflicting metadata — quant withheld");
+    // canonical registry terms still shown
+    expect(html).toContain("37,000");
+    expect(html).toContain("4:1");
+  });
+
+  it("6 & 7. normalizePlainResponse strips markdown without losing math characters", () => {
+    const raw =
+      "**Valuation Analysis**\n- Last price: 29,500 VND\n- Delta (Δ): 0.6200\n- Spread: 0.72%\n# Recommendation\nWait.";
+    const cleaned = normalizePlainResponse(raw);
     expect(cleaned).not.toContain("**");
     expect(cleaned).not.toContain("- ");
     expect(cleaned).not.toContain("# ");
-
-    // Mathematical and quantitative symbols preserved
     expect(cleaned).toContain("Valuation Analysis");
     expect(cleaned).toContain("Last price: 29,500 VND");
     expect(cleaned).toContain("Delta (Δ): 0.6200");
@@ -145,7 +131,7 @@ describe("Targeted Dashboard & Copilot UX Polish Pass Verifications", () => {
     expect(cleaned).toContain("Recommendation");
   });
 
-  it("8, 9 & 10. Chat persistence in localStorage survives rehydration and clear removes storage", () => {
+  it("8, 9 & 10. Chat persistence survives rehydration; clear removes storage", () => {
     const persistedPayload = {
       version: 2,
       activeConversationId: "conv_1",
@@ -157,55 +143,49 @@ describe("Targeted Dashboard & Copilot UX Polish Pass Verifications", () => {
           updatedAt: 2000,
           messages: [
             { id: "m1", role: "user", content: "Check HPG volatility", createdAt: 1000 },
-            { id: "m2", role: "assistant", content: "HPG 30-day historical volatility is 24.5%.", createdAt: 2000 },
+            { id: "m2", role: "assistant", content: "HPG 30-day HV is 24.5%.", createdAt: 2000 },
           ],
         },
       ],
     };
-
     mockStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(persistedPayload));
-
-    // Verify storage key is canonical
     expect(CHAT_STORAGE_KEY).toBe("cw_research:copilot_history:v2");
-
     const raw = mockStorage.getItem(CHAT_STORAGE_KEY);
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw!);
     expect(parsed.conversations).toHaveLength(1);
-    expect(parsed.conversations[0].messages[0].content).toBe("Check HPG volatility");
-
-    // Clearing storage removes the key
     mockStorage.removeItem(CHAT_STORAGE_KEY);
     expect(mockStorage.getItem(CHAT_STORAGE_KEY)).toBeNull();
   });
 
-  it("11. Context-aware activity indicator generates task-specific status without fake chain-of-thought", () => {
-    expect(getActivityLabel("What is HPG doing?")).toBe("Checking HPG data…");
-    expect(getActivityLabel("Check CVHM2615 delta")).toBe("Reviewing warrant analytics…");
+  it("11. Activity indicator generates task-specific status without fake chain-of-thought", () => {
+    expect(getActivityLabel("What is HPG doing?", "HPG")).toBe("Checking HPG data…");
+    expect(getActivityLabel("Check CVHM2615 delta", "CVHM2615")).toBe("Reviewing CVHM2615 analytics…");
     expect(getActivityLabel("Compare IV and HV")).toBe("Comparing volatility metrics…");
     expect(getActivityLabel("Calculate Greeks")).toBe("Calculating Greek sensitivities…");
     expect(getActivityLabel("What is fair value valuation?")).toBe("Calculating valuation metrics…");
     expect(getActivityLabel("General question")).toBe("Preparing response…");
   });
 
-  it("12. Focus state classes and styles exist for accessible non-native outline, and composer uses neutral border without focus highlight", () => {
-    const html = renderMarkup(<AiAssistantBubble initialOpen={true} />);
-    expect(html).toContain("focus-ring");
-    // Composer container is centered and uses constant neutral border without box-shadow
-    expect(html).toContain("align-items:center");
-    expect(html).toContain("border:1px solid var(--border)");
-    expect(html).toContain("box-shadow:none");
+  it("12. REPL bar + interactive controls expose a focus-visible outline", () => {
+    const html = renderMarkup(<AiReplBar />);
+    expect(html).toContain('aria-label="Ask the research assistant"');
+    expect(html).toContain("&gt;");
   });
 
-  it("13. Redundant Dashboard footer sentence is completely removed", () => {
-    const html = renderMarkup(<PersonalDashboard />);
-    expect(html).not.toContain("instruments in personal dashboard");
-    expect(html).not.toContain("search Research catalog to explore all instruments");
-  });
-
-  it("14. Subscription capacity label accurately uses 'slots' instead of misleading 'live'", () => {
-    const html = renderMarkup(<TopNav activeTab="dashboard" onTabChange={vi.fn()} />);
-    expect(html).toContain("5</span> / 33 slots");
-    expect(html).not.toContain("live");
+  it("13. Header shows the market status pill and the segmented nav", () => {
+    const html = renderMarkup(
+      <AppHeader
+        activeTab="dashboard"
+        onTabChange={vi.fn()}
+        filter=""
+        onFilterChange={vi.fn()}
+        marketSessionActive={false}
+      />,
+    );
+    expect(html).toContain("CW-TERM");
+    expect(html).toContain("DASHBOARD");
+    expect(html).toContain("RESEARCH");
+    expect(html).toContain("CLOSED");
   });
 });

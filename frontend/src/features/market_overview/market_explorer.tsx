@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import { TopNav } from "@/components/common/top_nav";
+import { AppHeader } from "@/components/common/app_header";
 import { PersonalDashboard } from "@/features/watchlist/personal_dashboard";
 import { ResearchUniverse } from "@/features/stock_research/research_universe";
-import { AiAssistantBubble } from "@/features/ai_assistant/ai_assistant_bubble";
+import { InstrumentPanel } from "@/features/warrant_info/instrument_panel";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket, useQuote, useCoveredWarrant } from "@/data/use_research_market";
 import { useSearchParam, useNullableSearchParam } from "@/data/url/use_url_state";
@@ -15,25 +15,29 @@ import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
 type Tab = "dashboard" | "research";
 
 export function MarketExplorer() {
-  // Shareable/navigation state lives in the URL: ?tab= & ?symbol=
   const [tabParam, setTabParam] = useSearchParam("tab", "dashboard");
   const activeTab: Tab = tabParam === "research" ? "research" : "dashboard";
   const [selectedSymbol, setSelectedSymbol] = useNullableSearchParam("symbol");
+  const [filter, setFilter] = useSearchParam("q", "");
 
   const { items } = useWatchlist();
   const { getSpec } = useInstrumentSpecs();
-  const { quotes, connectionState, upstreamFeedState, marketSession, marketSessionActive, dataMode } =
-    useResearchMarket();
+  const {
+    quotes,
+    connectionState,
+    upstreamFeedState,
+    marketSession,
+    marketSessionActive,
+    dataMode,
+  } = useResearchMarket();
   const dashSymbols = useMemo(() => items.map((i) => i.symbol), [items]);
   const { getRow: getDashRow, meta: dashMeta } = useDashboardData(dashSymbols);
 
-  // Derived (never stored): contract metadata is the canonical backend registry spec; the
-  // watchlist item contributes identity only; live quote/analytics come from the realtime store.
   const selectedQuote = useQuote(selectedSymbol);
   const selectedCw = useCoveredWarrant(selectedSymbol);
   const watchlistItem = useMemo(
     () => items.find((i) => i.symbol.toUpperCase() === (selectedSymbol ?? "").toUpperCase()) ?? null,
-    [items, selectedSymbol]
+    [items, selectedSymbol],
   );
   const selectedSpec = getSpec(selectedSymbol);
   const selected = useMemo(
@@ -44,25 +48,24 @@ export function MarketExplorer() {
         quote: selectedQuote,
         cw: selectedCw,
       }),
-    [selectedSymbol, selectedSpec, watchlistItem, selectedQuote, selectedCw]
+    [selectedSymbol, selectedSpec, watchlistItem, selectedQuote, selectedCw],
   );
+
+  const selectedDashRow = selected?.symbol ? getDashRow(selected.symbol) : undefined;
 
   const contextEnvelope = useMemo<ResearchContextEnvelope>(() => {
     let selectedContext = null;
     if (selected) {
-      const q = selected.quote;
+      const qv = selected.quote;
       const cw = selected.cw;
-      const lastPrice = q?.lastPrice ?? cw?.quote?.lastPrice;
-      const bidPrice = q?.bidPrice ?? cw?.quote?.bidPrice;
-      const askPrice = q?.askPrice ?? cw?.quote?.askPrice;
-      const chgPct = q?.priceChangePercent ?? cw?.quote?.priceChangePercent;
-      const volume = q?.totalVolume ?? cw?.quote?.totalVolume;
+      const lastPrice = qv?.lastPrice ?? cw?.quote?.lastPrice;
+      const bidPrice = qv?.bidPrice ?? cw?.quote?.bidPrice;
+      const askPrice = qv?.askPrice ?? cw?.quote?.askPrice;
+      const chgPct = qv?.priceChangePercent ?? cw?.quote?.priceChangePercent;
+      const volume = qv?.totalVolume ?? cw?.quote?.totalVolume;
       const underlyingPrice =
         cw?.underlyingPrice ??
         (selected.underlyingSymbol ? quotes.get(selected.underlyingSymbol)?.lastPrice ?? null : null);
-      // Spread: the ONE canonical convention (ask - bid) / mid. Moneyness: canonical from the
-      // backend quant engine - the client never derives S/K, so if the quant gate rejected
-      // this contract's metadata the AI sees `moneyness: null` exactly as the UI shows "—".
       const { abs: spread, pct: spreadPercent } = computeSpread(bidPrice, askPrice);
 
       selectedContext = {
@@ -79,8 +82,8 @@ export function MarketExplorer() {
         askPrice: askPrice ?? null,
         lastPrice: lastPrice ?? null,
         priceChangePercent: chgPct ?? null,
-        spread: spread,
-        spreadPercent: spreadPercent,
+        spread,
+        spreadPercent,
         volume: volume ?? null,
         ivBid: cw?.ivBid ?? null,
         ivTrade: cw?.ivTrade ?? null,
@@ -109,8 +112,6 @@ export function MarketExplorer() {
         ? "Connecting feed"
         : "Feed unavailable";
 
-    const selRow = selected?.symbol ? getDashRow(selected.symbol) : undefined;
-
     return {
       activePage: activeTab,
       selectedInstrument: selectedContext,
@@ -120,16 +121,18 @@ export function MarketExplorer() {
       marketSession,
       marketSessionActive,
       quoteDisplayEligible: marketSessionActive,
-      // Step 13C temporal context: lets the assistant say "as of Friday's close" rather
-      // than implying every number is live.
-      dataState: selRow?.displayState ?? (marketSessionActive ? "LIVE" : "LAST_SESSION"),
-      quoteAsOf: selRow?.provenance?.quote?.asOf ?? selRow?.provenance?.quote?.sessionDate ?? null,
+      dataState: selectedDashRow?.displayState ?? (marketSessionActive ? "LIVE" : "LAST_SESSION"),
+      quoteAsOf:
+        selectedDashRow?.provenance?.quote?.asOf ??
+        selectedDashRow?.provenance?.quote?.sessionDate ??
+        null,
       latestCompletedSession: dashMeta.latestCompletedSession,
       calendarConfidence: dashMeta.calendarConfidence,
     };
   }, [
     activeTab,
     selected,
+    selectedDashRow,
     items,
     quotes,
     dataMode,
@@ -137,7 +140,6 @@ export function MarketExplorer() {
     upstreamFeedState,
     marketSession,
     marketSessionActive,
-    getDashRow,
     dashMeta,
   ]);
 
@@ -147,35 +149,49 @@ export function MarketExplorer() {
   return (
     <div
       style={{
+        height: "100vh",
+        overflow: "hidden",
         display: "flex",
         flexDirection: "column",
-        minHeight: "100vh",
-        height: "100%",
-        backgroundColor: "var(--background)",
-        color: "var(--foreground)",
-        fontFamily: "var(--font-sans)",
-        overflowY: "auto",
+        background: "var(--bg)",
+        color: "var(--t-92)",
       }}
     >
-      <TopNav activeTab={activeTab} onTabChange={goToTab} />
+      <AppHeader
+        activeTab={activeTab}
+        onTabChange={goToTab}
+        filter={filter}
+        onFilterChange={(v) => setFilter(v, "replace")}
+        marketSessionActive={marketSessionActive}
+      />
 
-      <main style={{ flex: 1, padding: "28px", maxWidth: "1600px", width: "100%", margin: "0 auto" }}>
-        {activeTab === "dashboard" ? (
-          <PersonalDashboard
-            onNavigateToUniverse={() => goToTab("research")}
-            selectedSymbol={selectedSymbol}
-            onSelectSymbol={selectSymbol}
-          />
-        ) : (
-          <ResearchUniverse
-            onNavigateToDashboard={() => goToTab("dashboard")}
-            selectedSymbol={selectedSymbol}
-            onSelectSymbol={selectSymbol}
-          />
-        )}
-      </main>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <main style={{ flex: 1, overflow: "auto", padding: "16px 20px", minHeight: 180 }}>
+          {activeTab === "dashboard" ? (
+            <PersonalDashboard
+              onNavigateToUniverse={() => goToTab("research")}
+              selectedSymbol={selectedSymbol}
+              onSelectSymbol={selectSymbol}
+              filter={filter}
+            />
+          ) : (
+            <ResearchUniverse
+              onNavigateToDashboard={() => goToTab("dashboard")}
+              selectedSymbol={selectedSymbol}
+              onSelectSymbol={selectSymbol}
+              filter={filter}
+            />
+          )}
+        </main>
 
-      <AiAssistantBubble context={contextEnvelope} />
+        <InstrumentPanel
+          instrument={selected}
+          dashRow={selectedDashRow}
+          marketSessionActive={marketSessionActive}
+          context={contextEnvelope}
+          onClose={() => selectSymbol(null)}
+        />
+      </div>
     </div>
   );
 }

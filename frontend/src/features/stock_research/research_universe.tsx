@@ -1,408 +1,226 @@
-import React, { useState, useMemo } from "react";
-import { Search, Plus, Check } from "lucide-react";
-import type { CoveredWarrant } from "@/domain/models";
+import { useMemo, useState } from "react";
 import { useWatchlist } from "@/data/watchlist";
 import { useActiveWarrants } from "@/data/query";
-import { useQuote, useCoveredWarrant } from "@/data/use_research_market";
-import { deriveSelectedInstrument } from "@/data/selected_instrument";
-import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
-import { InstrumentDrawer } from "@/features/warrant_info/instrument_drawer";
+import { MarketOverviewStrip } from "@/components/common/market_overview_strip";
+import {
+  EMPTY_FILTER,
+  RegistryFilter,
+  isFilterActive,
+  rowMatchesFilter,
+  type FilterState,
+} from "@/components/common/registry_filter";
+import {
+  DASH,
+  PinCell,
+  PinHeader,
+  SortHeader,
+  dteDisplay,
+  dteNumber,
+  fmtPrice,
+  fmtRatio,
+  useSortPin,
+  type SortFields,
+} from "@/components/common/grid_table";
 
 interface ResearchUniverseProps {
   onNavigateToDashboard?: () => void;
   selectedSymbol?: string | null;
   onSelectSymbol?: (symbol: string | null) => void;
+  filter?: string;
 }
 
-const H = ({ children, right }: { children: React.ReactNode; right?: boolean }) => (
-  <th
-    className="col-head"
-    style={{
-      whiteSpace: "nowrap",
-      borderBottom: "1px solid var(--border-strong)",
-      backgroundColor: "var(--background)",
-      padding: "8px 12px",
-      fontWeight: 500,
-      textAlign: right ? "right" : "left",
-    }}
-  >
-    {children}
-  </th>
-);
+interface RegistryRow {
+  symbol: string;
+  issuer: string | null;
+  underlying: string | null;
+  strike: number | null;
+  ratio: number | null;
+  maturity: string | null;
+  lastTradingDate: string | null;
+  dte: number | null;
+  dteText: string;
+  tracked: boolean;
+}
 
-const selectStyle: React.CSSProperties = {
-  cursor: "pointer",
-  backgroundColor: "transparent",
-  border: "none",
-  fontSize: "12px",
-  color: "var(--foreground)",
-  outline: "none",
-  padding: "2px 4px",
+const FIELDS: SortFields<RegistryRow> = {
+  symbol: (r) => r.symbol,
+  issuer: (r) => r.issuer,
+  und: (r) => r.underlying,
+  strike: (r) => r.strike,
+  ratio: (r) => r.ratio,
+  maturity: (r) => r.maturity,
+  dte: (r) => r.dte,
+  status: (r) => (r.tracked ? "TRACKED" : "REFERENCE"),
 };
 
+const TD: React.CSSProperties = { padding: "0 8px", textAlign: "right" };
+
 export function ResearchUniverse({
-  onNavigateToDashboard,
   selectedSymbol = null,
   onSelectSymbol,
+  filter = "",
 }: ResearchUniverseProps) {
-  // Local, transient UI state - search/filter are not shareable navigation state.
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedIssuer, setSelectedIssuer] = useState<string>("all");
-  const [selectedUnderlying, setSelectedUnderlying] = useState<string>("all");
+  const setSelected = onSelectSymbol ?? (() => {});
+  const { isInWatchlist } = useWatchlist();
+  const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
 
-  const setSelectedSymbol = onSelectSymbol ?? (() => {});
-  const { isInWatchlist, addToWatchlist, removeFromWatchlist, canAdd } = useWatchlist();
+  const term = filter.trim().toUpperCase().replace(/^\//, "").trim();
+  const browseAll = term.length > 0 || isFilterActive(filterState);
 
-  // Default view = genuinely active warrants (small, all real terms). Typing a search
-  // expands to the whole discovered registry so any listed warrant is findable, without
-  // dumping 500+ mostly-empty rows on first load.
-  const browseAll = searchTerm.trim().length > 0 || selectedIssuer !== "all" || selectedUnderlying !== "all";
-  const { instruments, isLoading: loading, isError } = useActiveWarrants({
+  const { instruments, isLoading, isError } = useActiveWarrants({
     status: browseAll ? "ALL" : "ACTIVE",
   });
-  const { getSpec } = useInstrumentSpecs();
 
-  // Drawer instrument DERIVED from the universe record + realtime store (not stored).
-  const selectedQuote = useQuote(selectedSymbol);
-  const selectedCw = useCoveredWarrant(selectedSymbol);
-  const selectedUniverseCw = useMemo(
-    () => instruments.find((cw) => cw.symbol.toUpperCase() === (selectedSymbol ?? "").toUpperCase()) ?? null,
-    [instruments, selectedSymbol]
+  const activeCount = useMemo(
+    () => instruments.filter((cw) => (cw as { status?: string }).status !== "EXPIRED").length,
+    [instruments],
   );
-  const selectedInstrument = useMemo(
+
+  const rows: RegistryRow[] = useMemo(
     () =>
-      deriveSelectedInstrument(selectedSymbol, {
-        instrumentSpec: getSpec(selectedSymbol),
-        universeCw: selectedUniverseCw,
-        quote: selectedQuote,
-        cw: selectedCw,
-      }),
-    [selectedSymbol, selectedUniverseCw, selectedQuote, selectedCw, getSpec]
+      instruments
+        .map((cw) => {
+          const lastTradingDate = cw.lastTradingDate ?? null;
+          const maturity = cw.maturityDate ?? null;
+          return {
+            symbol: cw.symbol,
+            issuer: cw.issuer ?? null,
+            underlying: cw.underlyingSymbol ?? null,
+            strike: cw.strikePrice ?? null,
+            ratio: typeof cw.exerciseRatio === "number" ? cw.exerciseRatio : null,
+            maturity,
+            lastTradingDate,
+            dte: dteNumber(lastTradingDate, maturity),
+            dteText: dteDisplay(lastTradingDate, maturity),
+            tracked: isInWatchlist(cw.symbol),
+          };
+        })
+        .filter((r) => {
+          if (term) {
+            const hit =
+              r.symbol.toUpperCase().includes(term) ||
+              (r.underlying ?? "").toUpperCase().includes(term) ||
+              (r.issuer ?? "").toUpperCase().includes(term);
+            if (!hit) return false;
+          }
+          return rowMatchesFilter(filterState, {
+            underlying: r.underlying,
+            issuer: r.issuer,
+            lastTradingDate: r.lastTradingDate,
+          });
+        }),
+    [instruments, term, filterState, isInWatchlist],
   );
 
-  const underlyings = useMemo(() => {
-    const set = new Set<string>();
-    instruments.forEach((cw) => {
-      if (cw.underlyingSymbol) set.add(cw.underlyingSymbol.toUpperCase());
-    });
-    return ["all", ...Array.from(set).sort()];
-  }, [instruments]);
+  const underlyingOptions = useMemo(
+    () => [...new Set(instruments.map((c) => c.underlyingSymbol).filter((v): v is string => !!v))].sort(),
+    [instruments],
+  );
+  const issuerOptions = useMemo(
+    () => [...new Set(instruments.map((c) => c.issuer).filter((v): v is string => !!v))].sort(),
+    [instruments],
+  );
 
-  const issuers = useMemo(() => {
-    const set = new Set<string>();
-    instruments.forEach((cw) => {
-      if (cw.issuer) set.add(cw.issuer.toUpperCase());
-    });
-    return ["all", ...Array.from(set).sort()];
-  }, [instruments]);
-
-  const filteredInstruments = useMemo(() => {
-    const term = searchTerm.trim().toUpperCase();
-    return instruments.filter((cw) => {
-      const matchSearch =
-        !term ||
-        cw.symbol.toUpperCase().includes(term) ||
-        (cw.underlyingSymbol && cw.underlyingSymbol.toUpperCase().includes(term)) ||
-        (cw.issuer && cw.issuer.toUpperCase().includes(term));
-
-      const matchIssuer = selectedIssuer === "all" || cw.issuer?.toUpperCase() === selectedIssuer;
-      const matchUnderlying = selectedUnderlying === "all" || cw.underlyingSymbol?.toUpperCase() === selectedUnderlying;
-
-      return matchSearch && matchIssuer && matchUnderlying;
-    });
-  }, [instruments, searchTerm, selectedIssuer, selectedUnderlying]);
-
-  const formatPrice = (val?: number | null) => {
-    if (val === null || val === undefined || isNaN(val)) return "—";
-    return val.toLocaleString("en-US");
-  };
-
-  // DTE anchored to the VN calendar date, not the viewer's local clock.
-  const vnTodayIso = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Ho_Chi_Minh" });
-  const calculateDTE = (lastTradingDate?: string | null, maturityDate?: string | null) => {
-    const target = lastTradingDate || maturityDate;
-    if (!target) return "—";
-    const t = Date.parse(`${String(target).slice(0, 10)}T00:00:00+07:00`);
-    const now = Date.parse(`${vnTodayIso}T00:00:00+07:00`);
-    if (isNaN(t) || isNaN(now)) return "—";
-    const diff = Math.round((t - now) / 86_400_000);
-    return diff >= 0 ? `${diff}d` : "Expired";
-  };
-
-  const handleToggle = (e: React.MouseEvent, cw: CoveredWarrant) => {
-    e.stopPropagation();
-    if (isInWatchlist(cw.symbol)) {
-      removeFromWatchlist(cw.symbol);
-      return;
-    }
-
-    const check = canAdd({
-      symbol: cw.symbol,
-      instrumentType: "CW",
-      underlyingSymbol: cw.underlyingSymbol,
-    });
-
-    if (!check.allowed && check.reason) {
-      alert(check.reason);
-      return;
-    }
-
-    addToWatchlist({
-      symbol: cw.symbol,
-      instrumentType: "CW",
-      underlyingSymbol: cw.underlyingSymbol,
-      issuer: cw.issuer,
-      strikePrice: cw.strikePrice,
-      exerciseRatio: cw.exerciseRatio,
-      maturityDate: cw.maturityDate,
-      lastTradingDate: cw.lastTradingDate,
-    });
-  };
-
-  const isFiltered = searchTerm !== "" || selectedIssuer !== "all" || selectedUnderlying !== "all";
+  const grid = useSortPin(rows, FIELDS);
 
   return (
     <div>
-      <h1 style={{ fontSize: "15px", fontWeight: 500, letterSpacing: "-0.01em", color: "var(--foreground)", margin: 0 }}>
-        Research
-      </h1>
+      <MarketOverviewStrip />
 
-      {/* Search Line */}
       <div
         style={{
-          marginTop: "16px",
           display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          borderBottom: "1px solid var(--border)",
-          paddingBottom: "12px",
+          alignItems: "baseline",
+          gap: 12,
+          marginBottom: 3,
+          position: "relative",
         }}
       >
-        <Search size={15} strokeWidth={1.5} className="text-subtle" />
-        <input
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Search symbol, underlying, or issuer…"
-          className="focus-ring"
-          style={{
-            width: "100%",
-            backgroundColor: "transparent",
-            fontSize: "14px",
-            color: "var(--foreground)",
-            border: "none",
-            outline: "none",
-          }}
+        <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
+          Registry
+        </span>
+        <span style={{ fontSize: 10.5, color: "var(--t-42)", fontStyle: "italic" }}>
+          “{browseAll ? "browsing the full discovered registry" : "verified terms only"}”
+        </span>
+        <RegistryFilter
+          underlyingOptions={underlyingOptions}
+          issuerOptions={issuerOptions}
+          value={filterState}
+          onChange={setFilterState}
         />
       </div>
+      <p style={{ fontSize: 11, color: "var(--t-46)", marginBottom: 14 }}>
+        {browseAll
+          ? `${rows.length} match${rows.length === 1 ? "" : "es"}`
+          : `${activeCount} verified · type in the header bar to filter across ~530 discovered`}
+      </p>
 
-      {/* Filters Bar */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: "20px",
-          padding: "12px 0",
-          fontSize: "12px",
-          color: "var(--muted-foreground)",
-        }}
-      >
-        <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          Underlying:
-          <select
-            value={selectedUnderlying}
-            onChange={(e) => setSelectedUnderlying(e.target.value)}
-            className="focus-ring"
-            style={selectStyle}
-          >
-            {underlyings.map((u) => (
-              <option key={u} value={u} style={{ backgroundColor: "var(--surface)", color: "var(--foreground)" }}>
-                {u === "all" ? "All" : u}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          Issuer:
-          <select
-            value={selectedIssuer}
-            onChange={(e) => setSelectedIssuer(e.target.value)}
-            className="focus-ring"
-            style={selectStyle}
-          >
-            {issuers.map((i) => (
-              <option key={i} value={i} style={{ backgroundColor: "var(--surface)", color: "var(--foreground)" }}>
-                {i === "all" ? "All" : i}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {isFiltered && (
-          <button
-            onClick={() => {
-              setSearchTerm("");
-              setSelectedUnderlying("all");
-              setSelectedIssuer("all");
-            }}
-            className="focus-ring"
-            style={{
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              fontSize: "12px",
-              color: "var(--subtle-foreground)",
-            }}
-          >
-            Clear
-          </button>
-        )}
-
-        <span className="tnum" style={{ marginLeft: "auto", color: "var(--subtle-foreground)" }}>
-          {browseAll
-            ? `${filteredInstruments.length} results`
-            : `${filteredInstruments.length} active · search to browse all listed warrants`}
-        </span>
-      </div>
-
-      {/* Research Table */}
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: "860px", borderCollapse: "collapse" }}>
-          <thead>
+      <table className="mono" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
+            <PinHeader />
+            <SortHeader label="SYMBOL" align="left" mark={grid.sortMark("symbol")} onClick={() => grid.toggleSort("symbol")} />
+            <SortHeader label="ISSUER" align="left" mark={grid.sortMark("issuer")} onClick={() => grid.toggleSort("issuer")} />
+            <SortHeader label="UNDERLYING" align="left" mark={grid.sortMark("und")} onClick={() => grid.toggleSort("und")} />
+            <SortHeader label="STRIKE" mark={grid.sortMark("strike")} onClick={() => grid.toggleSort("strike")} />
+            <SortHeader label="RATIO" mark={grid.sortMark("ratio")} onClick={() => grid.toggleSort("ratio")} />
+            <SortHeader label="MATURITY" mark={grid.sortMark("maturity")} onClick={() => grid.toggleSort("maturity")} />
+            <SortHeader label="DTE" mark={grid.sortMark("dte")} onClick={() => grid.toggleSort("dte")} />
+            <SortHeader label="STATUS" mark={grid.sortMark("status")} onClick={() => grid.toggleSort("status")} />
+          </tr>
+        </thead>
+        <tbody>
+          {isLoading ? (
             <tr>
-              <H>Symbol</H>
-              <H>Issuer</H>
-              <H>Underlying</H>
-              <H right>Strike</H>
-              <H right>Ratio</H>
-              <H right>Maturity</H>
-              <H right>DTE</H>
-              <H right>Status</H>
-              <th style={{ width: "32px", borderBottom: "1px solid var(--border-strong)", backgroundColor: "var(--background)" }} />
+              <td colSpan={9} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
+                Loading research registry…
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={9} style={{ padding: "64px 0", textAlign: "center", fontSize: "12px", color: "var(--subtle-foreground)" }}>
-                  Loading research universe...
-                </td>
-              </tr>
-            ) : isError ? (
-              <tr>
-                <td colSpan={9} style={{ padding: "64px 0", textAlign: "center", fontSize: "12px", color: "var(--destructive)" }}>
-                  Could not load the research universe. Retry shortly.
-                </td>
-              </tr>
-            ) : filteredInstruments.length === 0 ? (
-              <tr>
-                <td colSpan={9} style={{ padding: "64px 0", textAlign: "center", fontSize: "12px", color: "var(--subtle-foreground)" }}>
-                  No instruments match.
-                </td>
-              </tr>
-            ) : (
-              filteredInstruments.map((cw) => {
-                const watched = isInWatchlist(cw.symbol);
-                const isSelected = selectedSymbol === cw.symbol;
-
-                return (
-                  <tr
-                    key={cw.symbol}
-                    tabIndex={0}
-                    onClick={() => setSelectedSymbol(cw.symbol)}
-                    onKeyDown={(e) => e.key === "Enter" && setSelectedSymbol(cw.symbol)}
-                    className={`table-row ${isSelected ? "table-row-selected" : ""}`}
-                    style={{
-                      height: "40px",
-                      cursor: "pointer",
-                      borderBottom: "1px solid var(--border)",
-                    }}
-                  >
-                    <td className="tnum text-primary" style={{ padding: "0 12px", fontSize: "13px" }}>
-                      {cw.symbol}
-                    </td>
-                    <td style={{ padding: "0 12px", fontSize: "12px", color: "var(--muted-foreground)" }}>
-                      {cw.issuer || "—"}
-                    </td>
-                    <td className="tnum" style={{ padding: "0 12px", fontSize: "12px", color: "var(--foreground)" }}>
-                      {cw.underlyingSymbol || "—"}
-                    </td>
-                    <td className="tnum" style={{ padding: "0 12px", textAlign: "right", fontSize: "12px", color: "var(--foreground)" }}>
-                      {formatPrice(cw.strikePrice)}
-                    </td>
-                    <td className="tnum" style={{ padding: "0 12px", textAlign: "right", fontSize: "12px", color: "var(--muted-foreground)" }}>
-                      {cw.exerciseRatio ? `${cw.exerciseRatio}:1` : "—"}
-                    </td>
-                    <td className="tnum" style={{ padding: "0 12px", textAlign: "right", fontSize: "12px", color: "var(--muted-foreground)" }}>
-                      {cw.maturityDate || "—"}
-                    </td>
-                    <td className="tnum" style={{ padding: "0 12px", textAlign: "right", fontSize: "12px", color: "var(--subtle-foreground)" }}>
-                      {calculateDTE(cw.lastTradingDate, cw.maturityDate)}
-                    </td>
-                    <td style={{ padding: "0 12px", textAlign: "right", fontSize: "12px" }}>
-                      {watched ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (onNavigateToDashboard) onNavigateToDashboard();
-                          }}
-                          className="focus-ring"
-                          title="On your dashboard. Click to view."
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            padding: "2px 4px",
-                            cursor: onNavigateToDashboard ? "pointer" : "default",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "6px",
-                            color: "var(--muted-foreground)",
-                          }}
-                        >
-                          <span style={{ width: "4px", height: "4px", borderRadius: "50%", backgroundColor: "var(--primary)" }} />
-                          Tracked
-                        </button>
-                      ) : (
-                        <span style={{ color: "var(--subtle-foreground)" }}>
-                          {(cw as any).status === "ACTIVE" || !("status" in (cw as any)) ? "Reference" : "—"}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ paddingRight: "8px", textAlign: "right" }}>
-                      <button
-                        title={watched ? "Remove from dashboard" : "Add to dashboard"}
-                        aria-label={watched ? `Remove ${cw.symbol} from dashboard` : `Add ${cw.symbol} to dashboard`}
-                        onClick={(e) => handleToggle(e, cw)}
-                        className="focus-ring"
-                        style={{
-                          background: "transparent",
-                          border: "none",
-                          cursor: "pointer",
-                          padding: "4px",
-                          borderRadius: "2px",
-                          color: watched ? "var(--primary)" : "var(--subtle-foreground)",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          transition: "color 0.15s ease",
-                        }}
-                      >
-                        {watched ? <Check size={14} strokeWidth={1.5} /> : <Plus size={14} strokeWidth={1.5} />}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Detail Drawer */}
-      <InstrumentDrawer
-        instrument={selectedInstrument}
-        onClose={() => setSelectedSymbol(null)}
-      />
+          ) : isError ? (
+            <tr>
+              <td colSpan={9} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--down)" }}>
+                Could not load the research registry. Retry shortly.
+              </td>
+            </tr>
+          ) : grid.ordered.length === 0 ? (
+            <tr>
+              <td colSpan={9} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
+                No instruments match.
+              </td>
+            </tr>
+          ) : (
+            grid.ordered.map((r) => {
+              const selected = selectedSymbol === r.symbol;
+              return (
+                <tr
+                  key={r.symbol}
+                  tabIndex={0}
+                  onClick={() => setSelected(r.symbol)}
+                  onKeyDown={(e) => e.key === "Enter" && setSelected(r.symbol)}
+                  style={{
+                    cursor: "pointer",
+                    height: 27,
+                    background: selected ? "var(--panel-3)" : "transparent",
+                    borderBottom: "1px solid var(--border-row)",
+                  }}
+                >
+                  <PinCell symbol={r.symbol} fill={grid.pinFill(r.symbol)} onToggle={grid.togglePin} />
+                  <td style={{ padding: "0 8px", color: "var(--accent)" }}>{r.symbol}</td>
+                  <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.issuer ?? DASH}</td>
+                  <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.underlying ?? DASH}</td>
+                  <td style={{ ...TD, color: "var(--t-80)" }}>{fmtPrice(r.strike)}</td>
+                  <td style={{ ...TD, color: "var(--t-50)" }}>{fmtRatio(r.ratio)}</td>
+                  <td style={{ ...TD, color: "var(--t-50)" }}>{r.maturity ?? DASH}</td>
+                  <td style={{ ...TD, color: "var(--t-46)" }}>{r.dteText}</td>
+                  <td style={{ ...TD, color: r.tracked ? "var(--accent)" : "var(--t-46)" }}>
+                    {r.tracked ? "TRACKED" : "REFERENCE"}
+                  </td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
