@@ -338,7 +338,14 @@ export function InstrumentPanel({
           </div>
 
           <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 16 }}>
-            <div style={{ flex: 1, minWidth: 0, border: "1px solid var(--border)", display: "flex" }}>
+            <div
+              style={{
+                flex: isIndex ? 1 : 1.7,
+                minWidth: 0,
+                border: "1px solid var(--border)",
+                display: "flex",
+              }}
+            >
               {bars.isLoading || bars.isEmpty || bars.bars.length === 0 ? (
                 <div style={{ margin: "auto", fontSize: 11, color: "var(--t-42)" }}>
                   {bars.isLoading ? "loading daily bars…" : "no daily history"}
@@ -356,7 +363,7 @@ export function InstrumentPanel({
               )}
             </div>
             {!isIndex && (
-              <div className="mono" style={{ width: 190, flexShrink: 0, overflowY: "auto" }}>
+              <div className="mono" style={{ flex: 1, minWidth: 240, overflowY: "auto" }}>
                 <div style={MICRO}>PRICE HISTORY</div>
                 {priceHistory.length === 0 ? (
                   <div style={{ fontSize: 11, color: "var(--t-42)" }}>{DASH}</div>
