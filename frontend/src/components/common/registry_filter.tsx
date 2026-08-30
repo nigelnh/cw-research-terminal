@@ -110,14 +110,10 @@ export function RegistryFilter({
         FILTER ▾
       </button>
       {open && (
+        <div style={{ position: "absolute", right: 0, top: "100%", paddingTop: 6, zIndex: 55 }}>
         <div
           className="mono"
           style={{
-            position: "absolute",
-            right: 0,
-            top: "100%",
-            marginTop: 6,
-            zIndex: 55,
             background: "var(--panel-2)",
             border: "1px solid var(--border-30)",
             padding: 14,
@@ -212,6 +208,7 @@ export function RegistryFilter({
               </button>
             </div>
           </div>
+        </div>
         </div>
       )}
     </div>

@@ -179,28 +179,40 @@ export function AiReplBar({ context }: AiReplBarProps) {
         <div
           className="mono"
           style={{
-            padding: "8px 20px 0 20px",
+            height: 90,
+            padding: "6px 20px 0 20px",
             fontSize: 11.5,
-            lineHeight: 1.6,
+            lineHeight: 1.5,
             color: "var(--t-70)",
           }}
         >
-          {lastQuery && <div style={{ color: "var(--accent)" }}>&gt; {lastQuery}</div>}
-          {lastAnswer && (
+          {lastQuery && (
             <div
               style={{
-                color: inFlight ? "var(--t-55)" : "var(--t-80)",
-                fontStyle: inFlight ? "italic" : "normal",
-                marginTop: 4,
-                paddingBottom: 8,
-                whiteSpace: "pre-wrap",
+                height: 17,
+                overflow: "hidden",
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                color: "var(--accent)",
               }}
             >
-              {lastAnswer}
+              &gt; {lastQuery}
             </div>
           )}
-          {error && (
-            <div style={{ color: "var(--down)", marginTop: 4, paddingBottom: 8 }}>{error}</div>
+          {(lastAnswer || error) && (
+            <div
+              style={{
+                height: 52,
+                marginTop: 3,
+                paddingBottom: 6,
+                overflowY: "auto",
+                whiteSpace: "pre-wrap",
+                color: error ? "var(--down)" : inFlight ? "var(--t-55)" : "var(--t-80)",
+                fontStyle: inFlight ? "italic" : "normal",
+              }}
+            >
+              {error || lastAnswer}
+            </div>
           )}
         </div>
       )}
@@ -235,9 +247,20 @@ export function AiReplBar({ context }: AiReplBarProps) {
 
       <form
         onSubmit={submit}
-        style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 20px" }}
+        style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 20px" }}
       >
-        <span style={{ color: "var(--accent-violet)" }}>&gt;</span>
+        <span
+          className="mono"
+          style={{
+            color: "var(--accent-violet)",
+            fontSize: 11.5,
+            lineHeight: 1,
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          &gt;
+        </span>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -248,7 +271,8 @@ export function AiReplBar({ context }: AiReplBarProps) {
             background: "transparent",
             border: "none",
             outline: "none",
-            fontFamily: "inherit",
+            boxShadow: "none",
+            fontFamily: "var(--font-mono)",
             fontSize: 11.5,
             color: "var(--t-92)",
           }}

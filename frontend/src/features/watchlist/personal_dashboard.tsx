@@ -5,7 +5,6 @@ import { useResearchMarket } from "@/data/use_research_market";
 import { useDashboardData } from "@/data/query/use_dashboard_data";
 import { asOfLabel } from "@/domain/temporal";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
-import { MarketOverviewStrip } from "@/components/common/market_overview_strip";
 import {
   EMPTY_FILTER,
   RegistryFilter,
@@ -16,6 +15,7 @@ import {
   DASH,
   PinCell,
   PinHeader,
+  PlainHeader,
   SortHeader,
   dteDisplay,
   dteNumber,
@@ -244,8 +244,6 @@ export function PersonalDashboard({
 
   return (
     <div>
-      <MarketOverviewStrip />
-
       <div
         style={{
           display: "flex",
@@ -311,6 +309,7 @@ export function PersonalDashboard({
               <SortHeader label="BID" mark={stocks.sortMark("bid")} onClick={() => stocks.toggleSort("bid")} />
               <SortHeader label="ASK" mark={stocks.sortMark("ask")} onClick={() => stocks.toggleSort("ask")} />
               <SortHeader label="TRD" mark={stocks.sortMark("trd")} onClick={() => stocks.toggleSort("trd")} />
+              <PlainHeader label="+/-" />
               <SortHeader label="CHG%" mark={stocks.sortMark("chg")} onClick={() => stocks.toggleSort("chg")} />
               <SortHeader label="VOLUME" mark={stocks.sortMark("vol")} onClick={() => stocks.toggleSort("vol")} />
               <SortHeader label="FRN BUY" mark={stocks.sortMark("forBuy")} onClick={() => stocks.toggleSort("forBuy")} />
@@ -339,6 +338,11 @@ export function PersonalDashboard({
                   <td style={{ ...TD, color: priceColor(r.bid, priceRef(r)) }}>{fmtPrice(r.bid)}</td>
                   <td style={{ ...TD, color: priceColor(r.ask, priceRef(r)) }}>{fmtPrice(r.ask)}</td>
                   <td style={{ ...TD, color: priceColor(r.last, priceRef(r)) }}>{fmtPrice(r.last)}</td>
+                  <td style={{ ...TD, color: chg.color }}>
+                    {r.last !== null && r.ref !== null
+                      ? Math.abs(r.last - r.ref).toLocaleString("en-US", { maximumFractionDigits: 2 })
+                      : DASH}
+                  </td>
                   <td style={{ ...TD, color: chg.color }}>{chg.text}</td>
                   <td style={{ ...TD, color: "var(--t-50)" }}>{fmtVol(r.vol)}</td>
                   <td style={{ ...TD, color: "var(--t-60)" }}>{fmtVol(r.forBuy)}</td>
@@ -408,7 +412,7 @@ export function PersonalDashboard({
                   <td style={{ ...TD, color: "var(--t-50)" }}>{fmtRatio(r.ratio)}</td>
                   <td style={{ ...TD, color: "var(--t-46)" }}>{r.dteText}</td>
                   <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivBid)}</td>
-                  <td style={{ ...TD, color: "var(--accent)" }}>{fmtIV(r.ivTrade)}</td>
+                  <td style={{ ...TD, color: "var(--t-85)" }}>{fmtIV(r.ivTrade)}</td>
                   <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivAsk)}</td>
                 </tr>
               );
