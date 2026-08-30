@@ -1,4 +1,9 @@
 import { config } from "@/config";
+import type {
+  CompanyProfileResponse,
+  CorporateActionsResponse,
+  ResearchNewsResponse,
+} from "@/domain/models";
 
 /** Resolves the current access token (or null when anonymous). Set by the AuthProvider. */
 export type AccessTokenProvider = () => string | null | Promise<string | null>;
@@ -262,6 +267,51 @@ export class BackendClient {
 
   async getWarrantAnalytics(symbol: string): Promise<any> {
     return this.get<any>(`/api/quant/${encodeURIComponent(symbol)}`);
+  }
+
+  // --- Research enrichment (Step 14A) ---------------------------------------
+  // PostgreSQL-backed reads only. These never trigger an upstream fetch; an
+  // un-ingested deployment answers 200 with an empty, well-formed payload.
+
+  async getResearchNews(
+    params: { symbol?: string; q?: string; lang?: string; limit?: number; before?: string } = {},
+    signal?: AbortSignal
+  ): Promise<ResearchNewsResponse> {
+    return this.get<ResearchNewsResponse>(
+      "/api/research/news",
+      {
+        symbol: params.symbol,
+        q: params.q,
+        lang: params.lang,
+        limit: params.limit,
+        before: params.before,
+      },
+      signal
+    );
+  }
+
+  async getResearchNewsFacets(lang: string = "vi", signal?: AbortSignal): Promise<{ symbols: string[] }> {
+    return this.get<{ symbols: string[] }>("/api/research/news/facets", { lang }, signal);
+  }
+
+  async getCorporateActions(
+    symbol: string,
+    limit?: number,
+    signal?: AbortSignal
+  ): Promise<CorporateActionsResponse> {
+    return this.get<CorporateActionsResponse>(
+      `/api/research/corporate-actions/${encodeURIComponent(symbol.toUpperCase())}`,
+      { limit },
+      signal
+    );
+  }
+
+  async getCompanyProfile(symbol: string, signal?: AbortSignal): Promise<CompanyProfileResponse> {
+    return this.get<CompanyProfileResponse>(
+      `/api/research/company/${encodeURIComponent(symbol.toUpperCase())}`,
+      undefined,
+      signal
+    );
   }
 }
 

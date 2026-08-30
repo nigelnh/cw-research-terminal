@@ -113,6 +113,20 @@ class Settings(BaseSettings):
     DATABASE_BULK_CHUNK_SIZE: int = Field(default=5000, description="Rows per INSERT ... ON CONFLICT statement during bulk bar upserts")
 
     # ------------------------------------------------------------------ #
+    # Step 14A — research data enrichment (news / corporate actions / company reference).
+    # Read APIs are always available when the rows exist; these settings only gate the
+    # CLI ingestion side. There is no scheduler and no app-startup coupling.
+    # ------------------------------------------------------------------ #
+    ENRICHMENT_HTTP_TIMEOUT_SECONDS: float = Field(default=20.0, description="Connect+read timeout for an enrichment source fetch")
+    ENRICHMENT_HTTP_MAX_RETRIES: int = Field(default=3, description="Bounded retries on transient (429/5xx/transport) enrichment fetch failures")
+    ENRICHMENT_NEWS_MAX_PAGES: int = Field(default=40, description="Hard cap on pages walked per news ingestion run")
+    ENRICHMENT_NEWS_PAGE_SIZE: int = Field(default=50, description="Items per news page request")
+    HSX_NEWS_BASE_URL: str = Field(default="https://api.hsx.vn/n/api/v1", description="HSX public news API base")
+    VNDIRECT_FINFO_BASE_URL: str = Field(default="https://api-finfo.vndirect.com.vn/v4", description="VNDirect finfo v4 API base")
+    AI_NEWS_MAX_RESULTS: int = Field(default=12, description="Max news rows the AI get_news tool returns")
+    AI_CORPORATE_ACTIONS_MAX_RESULTS: int = Field(default=12, description="Max rows the AI get_corporate_actions tool returns")
+
+    # ------------------------------------------------------------------ #
     # Historical ingestion (Step 6) - resumable, quota-safe FiinQuant backfill  #
     # ------------------------------------------------------------------ #
     # Conservative by design: predictable + resumable + quota-safe, NOT fastest.
