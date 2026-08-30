@@ -8,12 +8,9 @@ backend/provider change before the UI can light up.
 | Surface | Where | What it needs |
 |---|---|---|
 | **Foreign flow** — `FRN BUY` / `FRN SELL` / `FRN ROOM` | Watchlist → Stocks table | `foreignBuy` / `foreignSell` / `foreignRoom` on the quote wire + populate `map_snapshot.ts` / `map_patch.ts` (the `MarketQuote` fields already exist, the mappers just don't set them). |
-| **Index-strip breadth** — `VOL(MIL)` / `VAL(BIL)` / gainers-flat-losers | `MarketOverviewStrip` (both tabs) | Per-index aggregate volume, traded value, and advance/decline counts. No current source. |
-| **Non-VNINDEX index quotes** — VN30 / HNX30 / HNXINDEX / VNXALL / HNXUPCOM | `MarketOverviewStrip` | Only `VNINDEX` is in the subscribed realtime set. Either subscribe these indices (costs capacity) or add a lightweight REST index-snapshot endpoint. |
-| **Index-card sparklines** | `MarketOverviewStrip` cards (hatched placeholder + `1D`) | A short intraday or daily series per index. |
-| **Stock / index fundamentals** — EPS, PE, PB, ROE, ROA, ROIC, gross margin, net margin | Instrument panel → QUANT tab (stock/index) | A fundamentals provider/endpoint. All rows render `—`. |
+| **Stock / index fundamentals** — EPS, PE, PB, ROE, ROA, ROIC, gross margin, net margin, and the quarterly revenue/profit bar chart | Instrument panel → QUANT tab (stock/index) | A fundamentals / financial-statement provider. All rows render `—`; the left chart slot is a labelled placeholder. |
 | **Corporate events** — cash/stock dividends, rights issues, ex-div / issue dates | Instrument panel → QUANT tab (stock/index), `CORP EVENTS` table | A corp-actions feed. Table renders an empty state. |
-| **Live Time & Sales** | Instrument panel → QUANT tab (CW), during a live session | A trade-print feed. Shown as a "not yet wired" note even when the session is active. |
+| **Live Time & Sales** — `TIME \| TRD \| +/- \| CHG% \| VOL \| B/S` | Instrument panel → OVERVIEW tab (all non-index instruments) | A trade-print feed. Session-gated honest empty state. The v3 design replaced the OVERVIEW price-history mini-table with this panel; historical price context is now carried by the chart alone. |
 | **Price Depth / Market Depth panels** | Instrument panel → QUANT tab (CW), during a live session | Full L2 book. The existing `LiquidityDonut` covers only a summary; the two depth panes are placeholders. |
 | **AI attachment upload** | REPL bar `@` button | Multipart support in `/api/ai/chat`. The file picker works and shows a chip, but the chip is labelled "not yet sent". |
 

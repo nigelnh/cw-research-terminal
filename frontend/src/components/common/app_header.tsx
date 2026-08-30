@@ -107,14 +107,10 @@ function SignInControl() {
         {label}
       </span>
       {menuOpen && (
+        <div style={{ position: "absolute", right: 0, top: "100%", paddingTop: 8, zIndex: 60 }}>
         <div
           role="menu"
           style={{
-            position: "absolute",
-            right: 0,
-            top: "100%",
-            marginTop: 8,
-            zIndex: 60,
             background: "var(--panel-2)",
             border: "1px solid var(--border-30)",
             padding: "10px 12px",
@@ -165,6 +161,7 @@ function SignInControl() {
               CANCEL
             </button>
           </div>
+        </div>
         </div>
       )}
     </div>

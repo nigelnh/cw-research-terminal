@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { SelectedInstrumentView } from "@/data/selected_instrument";
 import type { DashboardRow } from "@/data/query/use_dashboard_data";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
@@ -53,19 +53,21 @@ function MetricRow({
   color = "var(--t-92)",
   size = 13,
   top = false,
+  pad = "5px 0",
 }: {
   label: string;
   value: React.ReactNode;
   color?: string;
   size?: number;
   top?: boolean;
+  pad?: string;
 }) {
   return (
     <div
       style={{
         display: "flex",
         justifyContent: "space-between",
-        padding: "5px 0",
+        padding: pad,
         ...(top ? { borderTop: "1px solid var(--border-mid)", marginTop: 4, paddingTop: 8 } : null),
       }}
     >
@@ -78,6 +80,53 @@ function MetricRow({
 function greek(v: number | null | undefined, dp = 2): string {
   if (typeof v !== "number" || Number.isNaN(v)) return DASH;
   return v.toFixed(dp);
+}
+
+const TS_COLS = "48px 44px 42px 50px 50px 24px";
+
+/**
+ * TIME & SALES panel (OVERVIEW tab). There is no live trade feed yet, so this is an
+ * honest empty state — session-gated per the UX data contract. Tracked as a follow-up.
+ */
+function TimeSalesPanel({ live }: { live: boolean }) {
+  return (
+    <div
+      className="mono"
+      style={{
+        width: 340,
+        flexShrink: 0,
+        height: "100%",
+        border: "1px solid var(--border)",
+        padding: "8px 12px",
+        overflowY: "auto",
+      }}
+    >
+      <div style={MICRO}>TIME &amp; SALES</div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: TS_COLS,
+          gap: "2px 6px",
+          fontSize: 9,
+          color: "var(--t-42)",
+          paddingBottom: 4,
+          borderBottom: "1px solid var(--border-mid)",
+        }}
+      >
+        <span>TIME</span>
+        <span style={{ textAlign: "right" }}>TRD</span>
+        <span style={{ textAlign: "right" }}>+/-</span>
+        <span style={{ textAlign: "right" }}>CHG%</span>
+        <span style={{ textAlign: "right" }}>VOL</span>
+        <span style={{ textAlign: "right" }}>B/S</span>
+      </div>
+      <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8, lineHeight: 1.5 }}>
+        {live
+          ? "Live trade feed not yet wired — pending backend support."
+          : "Time & sales unavailable outside a live session."}
+      </div>
+    </div>
+  );
 }
 
 /* ---------------------------------------------------------------- panel */
@@ -145,21 +194,6 @@ export function InstrumentPanel({
 
   const conflicting = instrument?.metadataVerification === "CONFLICTING";
 
-  const priceHistory = useMemo(() => {
-    const rows = bars.bars.filter((b) => typeof b.close === "number");
-    return rows
-      .slice(-12)
-      .map((b, i, arr) => {
-        const prev = arr[i - 1];
-        const p =
-          prev && typeof prev.close === "number" && prev.close !== 0
-            ? ((b.close as number) / prev.close - 1) * 100
-            : null;
-        return { date: b.date.slice(5), close: b.close as number, chg: fmtChg(p) };
-      })
-      .reverse();
-  }, [bars.bars]);
-
   const kindLine = !instrument
     ? ""
     : isCW
@@ -214,7 +248,7 @@ export function InstrumentPanel({
   return (
     <section
       style={{
-        height: hasInstrument ? "min(460px, 55vh)" : "auto",
+        height: hasInstrument ? "min(460px, 58vh)" : "auto",
         flexShrink: 0,
         borderTop: "1px solid var(--border-strong)",
         display: "flex",
@@ -298,25 +332,28 @@ export function InstrumentPanel({
       {hasInstrument && tab === "overview" && (
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", gap: 22, minHeight: 0 }}>
           <div className="mono" style={{ width: 220, flexShrink: 0 }}>
-            <div style={{ display: "flex", flexDirection: "column", marginBottom: 14 }}>
-              <MetricRow label="TRD" value={fmtPrice(last)} color={trdColor} />
-              <MetricRow label="CHG%" value={chg.text} color={chg.color} />
-              <MetricRow label="BID · ASK" value={bidAsk} color="var(--t-70)" />
+            <div style={{ display: "flex", flexDirection: "column", marginBottom: 10 }}>
+              <MetricRow label="TRD" value={fmtPrice(last)} color={trdColor} size={11} pad="3px 0" />
+              <MetricRow label="CHG%" value={chg.text} color={chg.color} size={11} pad="3px 0" />
+              <MetricRow label="BID · ASK" value={bidAsk} color="var(--t-70)" size={11} pad="3px 0" />
               <MetricRow
                 label="AS OF"
                 value={asOfText(marketSessionActive, context?.quoteAsOf, nowTick)}
                 color="var(--t-50)"
                 size={11}
+                pad="3px 0"
               />
             </div>
             {isCW && (
-              <div style={{ borderTop: "1px solid var(--border-mid)", paddingTop: 10 }}>
-                <MetricRow label="STRIKE" value={fmtPrice(instrument!.strikePrice)} />
-                <MetricRow label="RATIO" value={fmtRatio(instrument!.exerciseRatio)} />
-                <MetricRow label="MATURITY" value={instrument!.maturityDate ?? DASH} />
+              <div style={{ borderTop: "1px solid var(--border-mid)", paddingTop: 8 }}>
+                <MetricRow label="STRIKE" value={fmtPrice(instrument!.strikePrice)} size={11} pad="3px 0" />
+                <MetricRow label="RATIO" value={fmtRatio(instrument!.exerciseRatio)} size={11} pad="3px 0" />
+                <MetricRow label="MATURITY" value={instrument!.maturityDate ?? DASH} size={11} pad="3px 0" />
                 <MetricRow
                   label="DTE"
                   value={dteDisplay(instrument!.lastTradingDate, instrument!.maturityDate, an?.dte)}
+                  size={11}
+                  pad="3px 0"
                 />
               </div>
             )}
@@ -337,11 +374,12 @@ export function InstrumentPanel({
             )}
           </div>
 
-          <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 16 }}>
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", gap: 16 }}>
             <div
               style={{
-                flex: isIndex ? 1 : 1.7,
+                flex: 1,
                 minWidth: 0,
+                height: "100%",
                 border: "1px solid var(--border)",
                 display: "flex",
               }}
@@ -362,36 +400,7 @@ export function InstrumentPanel({
                 />
               )}
             </div>
-            {!isIndex && (
-              <div className="mono" style={{ flex: 1, minWidth: 240, overflowY: "auto" }}>
-                <div style={MICRO}>PRICE HISTORY</div>
-                {priceHistory.length === 0 ? (
-                  <div style={{ fontSize: 11, color: "var(--t-42)" }}>{DASH}</div>
-                ) : (
-                  priceHistory.map((p) => (
-                    <div
-                      key={p.date}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr auto auto",
-                        columnGap: 24,
-                        padding: "4px 0",
-                        fontSize: 11,
-                        borderBottom: "1px solid var(--border-row)",
-                      }}
-                    >
-                      <span style={{ color: "var(--t-50)" }}>{p.date}</span>
-                      <span style={{ color: "var(--t-85)", textAlign: "right", minWidth: 64 }}>
-                        {fmtPrice(p.close)}
-                      </span>
-                      <span style={{ color: p.chg.color, textAlign: "right", minWidth: 64 }}>
-                        {p.chg.text}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
+            {!isIndex && <TimeSalesPanel live={marketSessionActive} />}
           </div>
         </div>
       )}
@@ -404,29 +413,29 @@ export function InstrumentPanel({
               <div className="mono" style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                 <MetricRow
                   label="IV BID·TRD·ASK"
-                  color="var(--accent)"
-                  size={12}
+                  color="var(--t-85)"
+                  size={11}
                   value={`${fmtIV(pick("ivBid"))} · ${fmtIV(pick("ivTrade"))} · ${fmtIV(pick("ivAsk"))}`}
                 />
-                <MetricRow label="HV22" color="var(--accent)" size={12} value={fmtIV(pick("historicalVolatility"))} />
+                <MetricRow label="HV22" color="var(--t-85)" size={11} value={fmtIV(pick("historicalVolatility"))} />
                 <MetricRow
                   label="MONEYNESS S/K"
-                  color="var(--accent)"
-                  size={12}
+                  color="var(--t-85)"
+                  size={11}
                   value={
                     pick("moneynessRatio") !== null
                       ? `${pick("moneynessRatio")!.toFixed(3)}${moneynessCat ? ` · ${moneynessCat}` : ""}`
                       : DASH
                   }
                 />
-                <MetricRow label="THEO PRICE" color="var(--accent)" size={12} value={fmtPrice(pick("theoreticalPrice"))} />
-                <MetricRow label="DELTA" color="var(--accent)" size={12} value={greek(pick("delta"), 4)} />
-                <MetricRow label="GAMMA" color="var(--accent)" size={12} value={greek(pick("gamma"), 6)} />
-                <MetricRow label="THETA/DAY" color="var(--accent)" size={12} value={greek(pick("theta"), 2)} />
+                <MetricRow label="THEO PRICE" color="var(--t-85)" size={11} value={fmtPrice(pick("theoreticalPrice"))} />
+                <MetricRow label="DELTA" color="var(--t-85)" size={11} value={greek(pick("delta"), 4)} />
+                <MetricRow label="GAMMA" color="var(--t-85)" size={11} value={greek(pick("gamma"), 6)} />
+                <MetricRow label="THETA/DAY" color="var(--t-85)" size={11} value={greek(pick("theta"), 2)} />
                 <MetricRow
                   label="VEGA·RHO /1%"
-                  color="var(--accent)"
-                  size={12}
+                  color="var(--t-85)"
+                  size={11}
                   value={`${greek(pick("vega"), 2)} · ${greek(pick("rho"), 2)}`}
                 />
               </div>
@@ -438,12 +447,6 @@ export function InstrumentPanel({
                     </div>
                     <div style={{ flex: 1, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       <span style={{ fontSize: 10.5, color: "var(--t-42)" }}>MARKET DEPTH · live</span>
-                    </div>
-                    <div className="mono" style={{ flex: 1, border: "1px solid var(--border)", padding: "8px 12px", overflowY: "auto" }}>
-                      <div style={{ fontSize: 9.5, color: "var(--t-42)", marginBottom: 4 }}>TIME &amp; SALES</div>
-                      <div style={{ fontSize: 10.5, color: "var(--t-42)" }}>
-                        {DASH} live trade feed not yet wired — pending backend support
-                      </div>
                     </div>
                   </div>
                 ) : (
@@ -475,40 +478,56 @@ export function InstrumentPanel({
                   </div>
                 ) : (
                   <>
-                    <MetricRow label="EPS" color="var(--accent)" size={12} value={DASH} />
-                    <MetricRow label="PE · PB" color="var(--accent)" size={12} value={`${DASH} · ${DASH}`} />
-                    <MetricRow label="ROE" color="var(--accent)" size={12} value={DASH} top />
-                    <MetricRow label="ROA" color="var(--accent)" size={12} value={DASH} />
-                    <MetricRow label="ROIC" color="var(--accent)" size={12} value={DASH} />
-                    <MetricRow label="GROSS MARGIN" color="var(--accent)" size={12} value={DASH} />
-                    <MetricRow label="NET MARGIN" color="var(--accent)" size={12} value={DASH} />
+                    <MetricRow label="EPS" color="var(--t-85)" size={12} value={DASH} />
+                    <MetricRow label="PE · PB" color="var(--t-85)" size={12} value={`${DASH} · ${DASH}`} />
+                    <MetricRow label="ROE" color="var(--t-85)" size={12} value={DASH} top />
+                    <MetricRow label="ROA" color="var(--t-85)" size={12} value={DASH} />
+                    <MetricRow label="ROIC" color="var(--t-85)" size={12} value={DASH} />
+                    <MetricRow label="GROSS MARGIN" color="var(--t-85)" size={12} value={DASH} />
+                    <MetricRow label="NET MARGIN" color="var(--t-85)" size={12} value={DASH} />
                   </>
                 )}
               </div>
-              <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 12 }}>
-                <div style={{ flex: 1.4, minWidth: 0, border: "1px solid var(--border)", display: "flex" }}>
-                  {bars.isLoading || bars.bars.length === 0 ? (
-                    <div style={{ margin: "auto", fontSize: 11, color: "var(--t-42)" }}>
-                      {bars.isLoading ? "loading daily bars…" : "no daily history"}
-                    </div>
-                  ) : (
-                    <TradingChart
-                      symbol={instrument!.symbol}
-                      bars={bars.bars}
-                      liveQuote={marketSessionActive ? q ?? null : null}
-                      interval="1D"
-                      referencePrice={ref}
-                      height={300}
-                    />
-                  )}
+              <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", gap: 16 }}>
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    height: "100%",
+                    border: "1px solid var(--border)",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 4,
+                    padding: 8,
+                    textAlign: "center",
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: "var(--t-42)" }}>
+                    revenue &amp; profit, quarterly (billion VND)
+                  </span>
+                  <span style={{ fontSize: 9, color: "var(--t-40)" }}>
+                    financial-statement data — pending data provider
+                  </span>
                 </div>
                 {!isIndex && (
-                  <div className="mono" style={{ flex: 1, minWidth: 0, border: "1px solid var(--border)", padding: "8px 12px", overflowY: "auto" }}>
+                  <div
+                    className="mono"
+                    style={{
+                      width: 340,
+                      flexShrink: 0,
+                      height: "100%",
+                      border: "1px solid var(--border)",
+                      padding: "8px 12px",
+                      overflowY: "auto",
+                    }}
+                  >
                     <div style={MICRO}>CORP EVENTS</div>
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "100px 74px 74px 1fr",
+                        gridTemplateColumns: "86px 60px 60px 1fr",
                         gap: "4px 8px",
                         fontSize: 9,
                         color: "var(--t-42)",
