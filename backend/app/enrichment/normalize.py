@@ -76,13 +76,22 @@ def normalize_hsx_news(item: dict, *, lang: str, base_web: str = "https://www.hs
         url = f"{base_web}/Modules/CMS/Web/ViewArticle/{alias}"
     elif item.get("link"):
         url = str(item["link"])
+    cat_id = item.get("catId")
+    try:
+        cat_id = int(cat_id) if cat_id is not None else None
+    except (TypeError, ValueError):
+        cat_id = None
     return {
         "source": "HSX",
         "source_id": nid,
         "lang": lang,
         "title": title[:1000],
         "summary_html": (str(item["summary"])[:8000] if item.get("summary") else None),
+        # The list endpoint carries only a numeric catId; catName arrives from the detail
+        # endpoint. The CLI backfills category names with one bounded detail call per
+        # distinct catId (see enrichment/cli.py::_resolve_categories).
         "category": (str(item["catName"])[:200] if item.get("catName") else None),
+        "cat_id": cat_id,
         "symbols": extract_symbols_from_title(title),
         "related_source_id": (str(item["relatedId"]) if item.get("relatedId") is not None else None),
         "published_at": _epoch_to_dt(item.get("publishFrom")) or _epoch_to_dt(item.get("postedDate")),

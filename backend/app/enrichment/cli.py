@@ -96,6 +96,31 @@ def _emit(args, payload) -> None:
 
 
 # --------------------------------------------------------------------------- #
+async def _resolve_categories(src, rows: list[dict], *, lang: str, cache: dict[tuple, str]) -> None:
+    """Backfill ``category`` names for rows that only have a numeric ``cat_id``.
+
+    HSX's list endpoint omits ``catName``; the detail endpoint has it. We fetch detail
+    ONCE per distinct ``(lang, catId)`` (≈15-20 categories per language), cache the
+    mapping for the whole run, and never fetch again. A failed lookup is cached as "" so
+    it is not retried.
+    """
+    for r in rows:
+        cid = r.get("cat_id")
+        if not cid or r.get("category"):
+            continue
+        key = (lang, cid)
+        if key not in cache:
+            detail = None
+            try:
+                detail = await src.get_detail(r["source_id"], lang=lang)
+            except Exception:  # noqa: BLE001 - category is cosmetic; never break ingestion
+                detail = None
+            name = (detail or {}).get("catName") if isinstance(detail, dict) else None
+            cache[key] = str(name)[:200] if name else ""
+        if cache[key]:
+            r["category"] = cache[key]
+
+
 async def _cmd_news(args) -> int:
     from app.enrichment.http import EnrichmentHttpClient
     from app.enrichment.normalize import normalize_hsx_news
@@ -110,6 +135,7 @@ async def _cmd_news(args) -> int:
     svc = EnrichmentService(sm)
     total = UpsertResult()
     per_lang = {}
+    cat_cache: dict[tuple, str] = {}
     try:
         async with EnrichmentHttpClient(sessionmaker=sm) as client:
             src = HsxNewsSource(client)
@@ -121,6 +147,7 @@ async def _cmd_news(args) -> int:
                 ):
                     pages = page
                     rows = [normalize_hsx_news(it, lang=lang) for it in items]
+                    await _resolve_categories(src, rows, lang=lang, cache=cat_cache)
                     r = await svc.upsert_news(rows)
                     acc.merge(r)
                 per_lang[lang] = {"pages": pages, "inserted": acc.inserted, "updated": acc.updated, "skipped": acc.skipped}
