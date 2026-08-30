@@ -63,6 +63,17 @@ def test_normalize_hsx_news_missing_dates():
     assert row["symbols"] == ["XYZ"]
 
 
+def test_normalize_hsx_news_cat_id_without_name():
+    # list endpoint: numeric catId, no catName -> category stays None, cat_id captured
+    row = N.normalize_hsx_news({"id": 5, "title": "ABC: x", "catId": 21}, lang="vi")
+    assert row["category"] is None
+    assert row["cat_id"] == 21
+    # detail endpoint: catName present -> used directly
+    row2 = N.normalize_hsx_news({"id": 5, "title": "ABC: x", "catId": 21, "catName": "Tin Tổ chức niêm yết"}, lang="vi")
+    assert row2["category"] == "Tin Tổ chức niêm yết"
+    assert row2["cat_id"] == 21
+
+
 # --------------------------------------------------------------- VNDirect events
 def test_classify_stock_dividend():
     ev = {"id": "1.VN", "code": "HPG", "type": "schedDiv", "group": "schedEvent",
