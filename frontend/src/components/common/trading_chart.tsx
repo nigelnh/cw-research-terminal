@@ -207,7 +207,7 @@ export function TradingChart({
         background: { type: ColorType.Solid, color: "#111418" },
         textColor: "#94a3b8",
         fontSize: 11,
-        fontFamily: "'JetBrains Mono', monospace",
+        fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
       },
       grid: {
         vertLines: { color: "rgba(255, 255, 255, 0.04)" },

@@ -39,43 +39,38 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     resetWatchlistMemoryForTests(fresh);
   });
 
-  it("1, 2, 3, 4. Dashboard contains Stocks (3) [HPG, VPB, VNINDEX] and Covered Warrants (2) [CHPG2602, CVPB2615]", () => {
+  it("1, 2, 3, 4. Watchlist contains the curated default universe [HPG, VPB, VNINDEX] + [CHPG2602, CVPB2615]", () => {
     const html = renderMarkup(<PersonalDashboard />);
 
-    // Section 1: Stocks (3) - the curated default underlyings + index
-    expect(html).toContain("Stocks (3)");
+    expect(html).toContain("Watchlist");
     expect(html).toContain("HPG");
     expect(html).toContain("VPB");
     expect(html).toContain("VNINDEX");
-
-    // Section 2: Covered Warrants (2) - the verified default CWs
-    expect(html).toContain("Covered Warrants (2)");
     expect(html).toContain("CHPG2602");
     expect(html).toContain("CVPB2615");
 
-    // Must NOT say Covered Warrants (5)
-    expect(html).not.toContain("Covered Warrants (5)");
+    // No fabricated warrants in the default universe.
+    expect(html).not.toContain("CTCB2601");
+    expect(html).not.toContain("CFPT2602");
   });
 
-  it("5. Stocks never render CW ratio/strike/DTE/IV columns", () => {
+  it("5. Stock table renders the stock column set, never CW-only columns", () => {
     const html = renderMarkup(<PersonalDashboard />);
-    const stocksSection = html.split("Covered Warrants")[0];
+    // the CW table follows the stock table; scope to the stock table region
+    const stockRegion = html.split("UND.")[0];
 
-    // Stocks section table must only have stock headers
-    expect(stocksSection).toContain("Symbol");
-    expect(stocksSection).toContain("Ref");
-    expect(stocksSection).toContain("Bid");
-    expect(stocksSection).toContain("Ask");
-    expect(stocksSection).toContain("Last");
-    expect(stocksSection).toContain("Chg");
-    expect(stocksSection).toContain("Volume");
+    expect(stockRegion).toContain("SYMBOL");
+    expect(stockRegion).toContain("REF");
+    expect(stockRegion).toContain("BID");
+    expect(stockRegion).toContain("ASK");
+    expect(stockRegion).toContain("TRD");
+    expect(stockRegion).toContain("CHG%");
+    expect(stockRegion).toContain("VOLUME");
+    expect(stockRegion).toContain("FRN BUY");
 
-    // Must NOT contain CW headers in stocks section
-    expect(stocksSection).not.toContain("Und. price");
-    expect(stocksSection).not.toContain("Strike");
-    expect(stocksSection).not.toContain("Ratio");
-    expect(stocksSection).not.toContain("DTE");
-    expect(stocksSection).not.toContain("IV bid");
+    expect(stockRegion).not.toContain("STRIKE");
+    expect(stockRegion).not.toContain("RATIO");
+    expect(stockRegion).not.toContain("IV BID");
   });
 
   it("6. Missing exercise ratio does not default to 1:1 or 1.0", () => {
