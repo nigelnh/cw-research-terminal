@@ -5,3 +5,4 @@ export * from "./historical_bar";
 export * from "./strategy";
 export * from "./backtest";
 export * from "./watchlist";
+export * from "./research";

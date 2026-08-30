@@ -22,6 +22,7 @@ from app.market_data.market_subscription_manager import subscription_manager
 from app.instruments.instrument_router import instruments_router
 from app.instruments.instrument_registry import instrument_registry
 from app.quant.quant_router import quant_router
+from app.enrichment.router import research_router
 from app.me import me_router
 from app.quant.quant_engine import live_quant_engine
 from app.quant.historical_volatility_service import historical_volatility_service
@@ -276,6 +277,7 @@ app.include_router(instruments_router)
 app.include_router(quant_router)
 app.include_router(me_router)
 app.include_router(ws_router)
+app.include_router(research_router)
 
 
 def _ai_daily_budget_snapshot() -> dict:
