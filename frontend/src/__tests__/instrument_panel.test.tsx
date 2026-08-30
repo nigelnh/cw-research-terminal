@@ -84,5 +84,7 @@ describe("InstrumentPanel — bottom split panel", () => {
     expect(html).toContain("STOCK · HOSE");
     expect(html).not.toContain("COVERED WARRANT");
     expect(html).not.toContain("MONEYNESS S/K");
+    expect(html).not.toContain("IV BID");
+    expect(html).not.toContain("STRIKE");
   });
 });
