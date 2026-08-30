@@ -62,7 +62,7 @@ const RIGHT_OFFSET = 4;
  * dataset) keeps a professional density AND scopes the price-scale autoscale to
  * recent bars.
  */
-const INITIAL_VISIBLE_BARS = 55;
+const INITIAL_VISIBLE_BARS = 45;
 
 const UP = "#22c55e";
 const DOWN = "#ef4444";
