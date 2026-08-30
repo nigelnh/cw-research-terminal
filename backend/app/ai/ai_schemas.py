@@ -46,7 +46,7 @@ class SelectedInstrumentContext(BaseModel):
     rho: Optional[float] = None
 
 class ResearchContextEnvelope(BaseModel):
-    activePage: Optional[Literal["dashboard", "research"]] = "dashboard"
+    activePage: Optional[Literal["dashboard", "research", "news"]] = "dashboard"
     selectedInstrument: Optional[SelectedInstrumentContext] = None
     selectedSymbol: Optional[str] = None
     selectedInstrumentType: Optional[str] = None

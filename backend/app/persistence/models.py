@@ -357,3 +357,169 @@ class UserWatchlistItem(Base):
         CheckConstraint("position >= 0", name="ck_user_watchlist_items_position"),
         Index("ix_user_watchlist_items_watchlist", "watchlist_id"),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Step 14A — research data enrichment. Supplementary reference domains fed by  #
+# controlled backend ingestion from public exchange / broker APIs. Every row  #
+# is auditable (source + source_id + timestamps + raw). Read APIs over these  #
+# tables NEVER touch an upstream source. A source failure here cannot affect  #
+# /healthz, realtime, quant, or the core market APIs.                         #
+# --------------------------------------------------------------------------- #
+_CORPORATE_ACTION_TYPE_CHECK = (
+    "action_type IN ('CASH_DIVIDEND','STOCK_DIVIDEND','BONUS_ISSUE','RIGHTS_ISSUE',"
+    "'AGM','EGM','LISTING','DELISTING','OTHER')"
+)
+_CORPORATE_ACTION_STATUS_CHECK = "status IN ('SCHEDULED','CONFIRMED','CANCELLED','UNKNOWN')"
+
+
+class ExternalNews(Base):
+    """Exchange news / disclosure headlines (HSX). Incremental, deduplicated on
+    ``(source, source_id)``. Symbol linkage is derived from the HOSE title-prefix
+    convention (``MSH: ...`` / ``VHM.ACBS.8M.112 ...``) and only when confident."""
+
+    __tablename__ = "external_news"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    source: Mapped[str] = mapped_column(String(24), nullable=False)          # HSX
+    source_id: Mapped[str] = mapped_column(String(64), nullable=False)       # upstream news id
+    lang: Mapped[str] = mapped_column(String(4), nullable=False, server_default=text("'vi'"))
+
+    title: Mapped[str] = mapped_column(String(1000), nullable=False)
+    summary_html: Mapped[str | None] = mapped_column(String(8000), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # Best-effort symbol linkage (list of tickers). Empty when we can't be sure.
+    symbols: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    related_source_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    raw: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("source", "source_id", "lang", name="uq_external_news_identity"),
+        Index("ix_external_news_published", "published_at"),
+        Index("ix_external_news_symbols", "symbols", postgresql_using="gin"),
+    )
+
+
+class CorporateAction(Base):
+    """Structured corporate-action events (VNDirect ``v4/events``). Deduplicated on
+    ``(source, source_id)``. Cash amounts in VND/share; ``ratio_pct`` for share
+    distributions. Contract/history adjustment logic consumes these read-only."""
+
+    __tablename__ = "corporate_actions"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    source: Mapped[str] = mapped_column(String(24), nullable=False)          # VNDIRECT
+    source_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    action_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, server_default=text("'UNKNOWN'"))
+
+    ex_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    record_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    payment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    disclosure_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    cash_amount_vnd: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    ratio_pct: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
+    ratio_text: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dividend_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    raw: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("source", "source_id", name="uq_corporate_actions_identity"),
+        CheckConstraint(_CORPORATE_ACTION_TYPE_CHECK, name="ck_corporate_actions_type"),
+        CheckConstraint(_CORPORATE_ACTION_STATUS_CHECK, name="ck_corporate_actions_status"),
+        Index("ix_corporate_actions_symbol_ex", "symbol", "ex_date"),
+    )
+
+
+class CompanyProfile(Base):
+    """Underlying / listed-company reference data (VNDirect ``company_profiles``).
+    One row per symbol. Reference only — never feeds quant or contract terms."""
+
+    __tablename__ = "company_profiles"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    exchange: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    vn_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    en_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    found_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    tax_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    website: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    listed_shares: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    outstanding_shares: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    source: Mapped[str] = mapped_column(String(24), nullable=False)
+    source_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    raw: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("symbol", name="uq_company_profiles_symbol"),
+    )
+
+
+class SourceFetchLog(Base):
+    """One row per external HTTP fetch attempt against an enrichment source. Pure
+    observability — bounded retention is a later concern."""
+
+    __tablename__ = "source_fetch_log"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    source: Mapped[str] = mapped_column(String(24), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(120), nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    ok: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_source_fetch_log_source_time", "source", "fetched_at"),
+    )

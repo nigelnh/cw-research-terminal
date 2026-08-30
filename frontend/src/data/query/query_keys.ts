@@ -54,6 +54,22 @@ export const queryKeys = {
       ["cw-research", "quant", "analytics", symbol.trim().toUpperCase()] as const,
   },
 
+  /** Research enrichment (Step 14A): PostgreSQL-backed news / corporate actions. */
+  research: {
+    all: ["cw-research", "research"] as const,
+    news: (p: { symbol?: string | null; q?: string | null; lang?: string }) =>
+      [
+        "cw-research",
+        "research",
+        "news",
+        (p.symbol ?? "").trim().toUpperCase() || null,
+        (p.q ?? "").trim() || null,
+        p.lang ?? "vi",
+      ] as const,
+    corporateActions: (symbol: string) =>
+      ["cw-research", "research", "corporate-actions", symbol.trim().toUpperCase()] as const,
+  },
+
   /**
    * Per-user server state. EVERY key is scoped by the verified auth subject so nothing
    * survives a user switch: `queryClient.clear()` on identity change wipes it, and even

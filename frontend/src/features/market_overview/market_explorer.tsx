@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { AppHeader } from "@/components/common/app_header";
 import { PersonalDashboard } from "@/features/watchlist/personal_dashboard";
 import { ResearchUniverse } from "@/features/stock_research/research_universe";
+import { NewsFeed } from "@/features/news_feed/news_feed";
 import { InstrumentPanel } from "@/features/warrant_info/instrument_panel";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket, useQuote, useCoveredWarrant } from "@/data/use_research_market";
@@ -12,11 +13,12 @@ import { useDashboardData } from "@/data/query/use_dashboard_data";
 import { computeSpread } from "@/domain/quant_display";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
 
-type Tab = "dashboard" | "research";
+type Tab = "dashboard" | "research" | "news";
 
 export function MarketExplorer() {
   const [tabParam, setTabParam] = useSearchParam("tab", "dashboard");
-  const activeTab: Tab = tabParam === "research" ? "research" : "dashboard";
+  const activeTab: Tab =
+    tabParam === "research" ? "research" : tabParam === "news" ? "news" : "dashboard";
   const [selectedSymbol, setSelectedSymbol] = useNullableSearchParam("symbol");
   const [filter, setFilter] = useSearchParam("q", "");
 
@@ -173,6 +175,12 @@ export function MarketExplorer() {
               selectedSymbol={selectedSymbol}
               onSelectSymbol={selectSymbol}
               filter={filter}
+            />
+          ) : activeTab === "news" ? (
+            <NewsFeed
+              filter={filter}
+              selectedSymbol={selectedSymbol}
+              onSelectSymbol={selectSymbol}
             />
           ) : (
             <ResearchUniverse

@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/data/auth";
 import { SignInDialog } from "@/features/auth/sign_in_dialog";
 
-type Tab = "dashboard" | "research";
+type Tab = "dashboard" | "research" | "news";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "dashboard", label: "DASHBOARD" },
+  { id: "research", label: "RESEARCH" },
+  { id: "news", label: "NEWS" },
+];
 
 interface AppHeaderProps {
   activeTab: Tab;
@@ -198,32 +204,22 @@ export function AppHeader({
       </span>
 
       <div style={{ display: "flex", gap: 2, background: "var(--panel-2)", padding: 2, borderRadius: 3 }}>
-        <button
-          type="button"
-          onClick={() => onTabChange("dashboard")}
-          className="focus-ring"
-          aria-pressed={activeTab === "dashboard"}
-          style={{
-            ...TAB_BASE,
-            background: activeTab === "dashboard" ? "var(--panel-active)" : "transparent",
-            color: activeTab === "dashboard" ? "var(--t-92)" : "var(--t-55)",
-          }}
-        >
-          DASHBOARD
-        </button>
-        <button
-          type="button"
-          onClick={() => onTabChange("research")}
-          className="focus-ring"
-          aria-pressed={activeTab === "research"}
-          style={{
-            ...TAB_BASE,
-            background: activeTab === "research" ? "var(--panel-active)" : "transparent",
-            color: activeTab === "research" ? "var(--t-92)" : "var(--t-55)",
-          }}
-        >
-          RESEARCH
-        </button>
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onTabChange(t.id)}
+            className="focus-ring"
+            aria-pressed={activeTab === t.id}
+            style={{
+              ...TAB_BASE,
+              background: activeTab === t.id ? "var(--panel-active)" : "transparent",
+              color: activeTab === t.id ? "var(--t-92)" : "var(--t-55)",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       <input

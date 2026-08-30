@@ -47,6 +47,10 @@ _ALL_TABLES = (
     "instruments",
     "user_watchlist_items",
     "user_watchlists",
+    "external_news",
+    "corporate_actions",
+    "company_profiles",
+    "source_fetch_log",
 )
 
 
