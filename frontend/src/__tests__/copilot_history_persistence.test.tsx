@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
 import {
   COPILOT_STORAGE_KEY_V2,
   LEGACY_STORAGE_KEY_V1,
@@ -10,7 +9,8 @@ import {
   formatRelativeTime,
   type CopilotHistoryStore,
 } from "../data/ai/copilot_history_store";
-import { AiAssistantBubble } from "../features/ai_assistant/ai_assistant_bubble";
+import { renderMarkup } from "./test_fixtures/render_markup";
+import { AiReplBar } from "../features/ai_assistant/ai_repl_bar";
 
 class MemoryStorage {
   private store: Record<string, string> = {};
@@ -271,22 +271,20 @@ describe("Targeted Copilot Chat Persistence & History Store Verifications", () =
     expect(reloaded.conversations.some((c) => c.id === "conv_30")).toBe(true);
   });
 
-  it("12. Header control group renders History icon immediately to the left of Close (X) button", () => {
-    const html = renderToStaticMarkup(<AiAssistantBubble initialOpen={true} />);
+  it("12. REPL bar exposes new-chat, history and attach controls", () => {
+    const html = renderMarkup(<AiReplBar />);
 
-    // Check accessible buttons in header
-    expect(html).toContain('title="New conversation"');
-    expect(html).toContain('aria-label="New conversation"');
-    expect(html).toContain('title="Chat history"');
-    expect(html).toContain('aria-label="Open chat history"');
-    expect(html).toContain('title="Close Assistant"');
-    expect(html).toContain('aria-label="Close Assistant"');
+    expect(html).toContain('aria-label="Ask the research assistant"');
+    expect(html).toContain('aria-label="New chat"');
+    expect(html).toContain('aria-label="Chat history"');
+    expect(html).toContain('aria-label="Attach file"');
 
-    // History button appears before Close button in markup
-    const historyIndex = html.indexOf('aria-label="Open chat history"');
-    const closeIndex = html.indexOf('aria-label="Close Assistant"');
-    expect(historyIndex).toBeGreaterThan(-1);
-    expect(closeIndex).toBeGreaterThan(-1);
-    expect(historyIndex).toBeLessThan(closeIndex);
+    // New-chat appears before history, history before attach.
+    const newIdx = html.indexOf('aria-label="New chat"');
+    const histIdx = html.indexOf('aria-label="Chat history"');
+    const attachIdx = html.indexOf('aria-label="Attach file"');
+    expect(newIdx).toBeGreaterThan(-1);
+    expect(newIdx).toBeLessThan(histIdx);
+    expect(histIdx).toBeLessThan(attachIdx);
   });
 });

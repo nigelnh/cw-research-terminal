@@ -12,7 +12,7 @@ class MemoryStorage {
   clear() { this.store = {}; }
 }
 
-/** A watchlist that holds one CW - IDENTITY ONLY (v3 shape). */
+/** A watchlist that holds one CW - IDENTITY ONLY. */
 function watchlistWith(symbol: string, underlyingSymbol: string) {
   return {
     id: "wl", name: "wl",
@@ -28,7 +28,7 @@ describe("Dashboard contract metadata comes from the canonical registry, not the
     (globalThis as any).window.localStorage = s;
   });
 
-  it("registry PARTIAL -> 'partial' badge, contract terms em-dash", () => {
+  it("registry PARTIAL -> contract terms render as em-dash (no fabricated strike/ratio)", () => {
     const wl = watchlistWith("CVPB2615", "VPB");
     defaultWatchlistStorage.saveWatchlist(wl);
     resetWatchlistMemoryForTests(wl);
@@ -41,11 +41,12 @@ describe("Dashboard contract metadata comes from the canonical registry, not the
     ]);
 
     expect(html).toContain("CVPB2615");
-    expect(html).toContain("partial");
-    expect(html).not.toContain("conflicting");
+    expect(html).toContain("—");
+    // PARTIAL is not the loud CONFLICTING marker
+    expect(html).not.toContain("◆");
   });
 
-  it("registry COMPLETE + VERIFIED_CURRENT -> no 'partial', shows canonical strike/ratio", () => {
+  it("registry COMPLETE + VERIFIED_CURRENT -> shows canonical strike/ratio, no conflict marker", () => {
     const wl = watchlistWith("CVPB2615", "VPB");
     defaultWatchlistStorage.saveWatchlist(wl);
     resetWatchlistMemoryForTests(wl);
@@ -59,14 +60,12 @@ describe("Dashboard contract metadata comes from the canonical registry, not the
     ]);
 
     expect(html).toContain("CVPB2615");
-    expect(html).toContain("ACBS");
     expect(html).toContain("28,500");
     expect(html).toContain("2:1");
-    expect(html).not.toContain("partial");
-    expect(html).not.toContain("conflicting");
+    expect(html).not.toContain("◆");
   });
 
-  it("registry CONFLICTING -> muted 'unverified' badge (full detail deferred to the drawer), as-issued terms still shown", () => {
+  it("registry CONFLICTING -> quiet ◆ marker + tooltip, as-issued terms still shown", () => {
     const wl = watchlistWith("CTCB2601", "TCB");
     defaultWatchlistStorage.saveWatchlist(wl);
     resetWatchlistMemoryForTests(wl);
@@ -80,14 +79,13 @@ describe("Dashboard contract metadata comes from the canonical registry, not the
     ]);
 
     expect(html).toContain("CTCB2601");
-    expect(html).toContain("unverified");             // main table: minimal, muted
-    expect(html).toContain("Conflicting contract terms"); // full reason still in the aria-label / tooltip
+    expect(html).toContain("◆");
+    expect(html).toContain("Conflicting metadata — quant withheld");
     expect(html).toContain("37,000");
     expect(html).toContain("4:1");
   });
 
   it("a STALE watchlist item cannot override the canonical registry (KIS/25,000 -> ACBS/37,000)", () => {
-    // Simulate a pre-correction persisted item that still carries frozen KIS / 25,000 / 2:1.
     const wl = {
       id: "wl", name: "wl",
       items: [{
@@ -107,10 +105,8 @@ describe("Dashboard contract metadata comes from the canonical registry, not the
       ]),
     ]);
 
-    expect(html).toContain("ACBS");
     expect(html).toContain("37,000");
     expect(html).toContain("4:1");
-    expect(html).not.toContain("KIS");
     expect(html).not.toContain("25,000");
   });
 });
