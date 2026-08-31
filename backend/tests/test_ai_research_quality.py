@@ -49,11 +49,11 @@ async def test_reply_language_is_detected_from_the_latest_message_only():
     assert detect_reply_language("") == "English"
     assert detect_reply_language(None) == "English"
 
-    # the directive is injected into the built prompt, English by default
+    # the directive is injected at the very start of the built prompt, English by default
     en = build_system_prompt(latest_user_message="what about VPB?")
-    assert "Response language (authoritative for THIS reply): English" in en
+    assert en.startswith("RESPONSE LANGUAGE FOR THIS REPLY: English")
     vi = build_system_prompt(latest_user_message="còn VPB thì sao?")
-    assert "Response language (authoritative for THIS reply): Vietnamese" in vi
+    assert vi.startswith("RESPONSE LANGUAGE FOR THIS REPLY: Vietnamese")
 
 
 async def test_full_prompt_has_injection_resistance_and_tool_provenance_mapping():

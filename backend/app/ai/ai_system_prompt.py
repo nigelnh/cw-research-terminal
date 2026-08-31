@@ -99,17 +99,18 @@ def build_system_prompt(
         context_str = json.dumps(context_dict, indent=2)
 
     # Deterministic per-request language directive — the free model does not always
-    # honour the mixed-thread language rule on its own, so we compute it and state it.
+    # honour the mixed-thread language rule on its own, so we compute it, put it first,
+    # and (in the router) also append it to the final user turn.
     reply_lang = detect_reply_language(latest_user_message)
     lang_directive = (
-        f"\n\n### Response language (authoritative for THIS reply): {reply_lang}.\n"
-        f"The user's latest message is in {reply_lang}. Write the entire reply in "
-        f"{reply_lang}, regardless of what language earlier turns or the retrieved "
-        f"source records use. If {reply_lang} is English and the source records are "
-        f"Vietnamese, translate/paraphrase them into English and keep the provenance."
+        f"RESPONSE LANGUAGE FOR THIS REPLY: {reply_lang}. The user's latest message is "
+        f"in {reply_lang}; write the entire reply in {reply_lang} regardless of the "
+        f"language of earlier turns or of the retrieved source records. If the reply "
+        f"language is English and a source record is Vietnamese, translate/paraphrase it "
+        f"into English and keep the provenance.\n\n"
     )
 
-    prompt = f"""{BASE_SYSTEM_INSTRUCTIONS}{lang_directive}
+    prompt = f"""{lang_directive}{BASE_SYSTEM_INSTRUCTIONS}
 
 <application_context>
 {context_str}
