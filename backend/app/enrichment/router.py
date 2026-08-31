@@ -19,6 +19,12 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.enrichment import repository as repo
+from app.enrichment.english import (
+    category_en,
+    event_class_label_en,
+    event_label_en,
+    headline_en,
+)
 from app.persistence import database as persistence_db
 
 logger = logging.getLogger("cw-research-backend.research")
@@ -28,9 +34,15 @@ research_router = APIRouter(prefix="/api/research", tags=["Research Enrichment"]
 
 class NewsItem(BaseModel):
     id: int
-    title: str
-    summary: str | None
-    category: str | None
+    # English-first (docs/design/LANGUAGE_POLICY.md). `*_en` are the default display
+    # fields; the raw Vietnamese `title` / `category` / `summary` are kept for provenance.
+    title_en: str
+    title_en_exact: bool          # False => a category/verb classification, not a rendered translation
+    category_en: str
+    title: str                    # original HOSE wording, verbatim
+    summary: str | None           # original Vietnamese summary, verbatim
+    category: str | None          # original HOSE catName
+    source_language: str
     symbols: list[str]
     published_at: str | None
     url: str | None
@@ -47,10 +59,12 @@ class NewsResponse(BaseModel):
 class CorporateActionItem(BaseModel):
     id: int
     symbol: str
+    event_label: str            # English display label (from event_class / event_type)
     action_type: str            # kept for backwards compatibility (== event_type)
     event_type: str
     event_class: str
-    event_name: str | None = None
+    event_name: str | None = None   # original Vietnamese, provenance only
+    source_language: str = "vi"
     status: str
     ex_date: str | None
     record_date: str | None
@@ -70,9 +84,13 @@ class FeedItem(BaseModel):
     id: str
     symbol: str | None
     published_at: str | None
-    title: str
-    summary: str | None
-    category: str | None
+    title_en: str
+    title_en_exact: bool
+    category_en: str
+    title: str                  # original Vietnamese, verbatim
+    summary: str | None         # original Vietnamese summary / event note
+    category: str | None        # original HOSE catName / event_class
+    source_language: str
     content_type: str
     source: str
     source_url: str | None
@@ -138,19 +156,26 @@ async def get_news_feed(
         )
     has_more = len(rows) > limit
     rows = rows[:limit]
-    items = [
-        NewsItem(
-            id=r.id,
-            title=r.title,
-            summary=_strip_html(r.summary_html),
-            category=r.category,
-            symbols=r.symbols or [],
-            published_at=_iso(r.published_at),
-            url=r.url,
-            source=r.source,
+    items = []
+    for r in rows:
+        syms = r.symbols or []
+        t_en, exact = headline_en(r.title, category=r.category, symbol=(syms[0] if syms else None))
+        items.append(
+            NewsItem(
+                id=r.id,
+                title_en=t_en,
+                title_en_exact=exact,
+                category_en=category_en(r.category),
+                title=r.title,
+                summary=_strip_html(r.summary_html),
+                category=r.category,
+                source_language=r.lang or "vi",
+                symbols=syms,
+                published_at=_iso(r.published_at),
+                url=r.url,
+                source=r.source,
+            )
         )
-        for r in rows
-    ]
     next_before = _iso(rows[-1].published_at) if (has_more and rows and rows[-1].published_at) else None
     return NewsResponse(items=items, count=len(items), has_more=has_more, next_before=next_before)
 
@@ -169,6 +194,7 @@ def _event_item(r) -> CorporateActionItem:
     return CorporateActionItem(
         id=r.id,
         symbol=r.symbol,
+        event_label=event_label_en(r.event_class, r.event_type),
         action_type=r.event_type,
         event_type=r.event_type,
         event_class=r.event_class,
@@ -241,14 +267,25 @@ async def get_feed(
             s, symbol=symbol, source=source, content_type=content_type, category=category,
             event_class=event_class, query=q, lang=lang, limit=limit, before=before,
         )
-    items = [
-        FeedItem(
-            id=r.id, symbol=r.symbol, published_at=r.published_at, title=r.title,
-            summary=_strip_html(r.summary), category=r.category, content_type=r.content_type,
-            source=r.source, source_url=r.source_url,
+    items = []
+    for r in rows:
+        if r.content_type == "company_event":
+            label = event_label_en(r.ev_class, r.ev_type)
+            t_en = f"{r.symbol} · {label}" if r.symbol else label
+            exact = True
+            cat_en = event_class_label_en(r.ev_class)
+        else:
+            t_en, exact = headline_en(r.title, category=r.category, symbol=r.symbol)
+            cat_en = category_en(r.category)
+        items.append(
+            FeedItem(
+                id=r.id, symbol=r.symbol, published_at=r.published_at,
+                title_en=t_en, title_en_exact=exact, category_en=cat_en,
+                title=r.title, summary=_strip_html(r.summary), category=r.category,
+                source_language="vi",  # HOSE disclosures + SSI/VNDirect event text are Vietnamese at source
+                content_type=r.content_type, source=r.source, source_url=r.source_url,
+            )
         )
-        for r in rows
-    ]
     next_before = str(rows[-1]._sort) if (has_more and rows) else None
     return FeedResponse(items=items, count=len(items), has_more=has_more, next_before=next_before)
 

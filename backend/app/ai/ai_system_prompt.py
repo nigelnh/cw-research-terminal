@@ -2,6 +2,23 @@ import json
 from typing import Optional, List, Dict, Any
 from app.ai.ai_schemas import ResearchContextEnvelope
 
+# Vietnamese-specific letters (đ + toned vowels). Their presence in the user's own
+# message is a near-perfect signal that the message is Vietnamese.
+_VN_CHARS = set(
+    "đĐàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ"
+)
+
+
+def detect_reply_language(latest_user_message: str | None) -> str:
+    """Deterministic language for the reply, from the user's own latest message.
+
+    Returns ``"Vietnamese"`` if the message carries Vietnamese diacritics, else
+    ``"English"`` (the default). Never inspects thread history or retrieved text.
+    """
+    if latest_user_message and (_VN_CHARS & set(latest_user_message)):
+        return "Vietnamese"
+    return "English"
+
 BASE_SYSTEM_INSTRUCTIONS = """You are the research companion embedded in CW Research Terminal, a professional Covered Warrant (CW) and equity quantitative workspace for the Vietnam market (HOSE).
 
 ### Persona & Style:
@@ -70,6 +87,7 @@ State or make obvious which origin a figure has whenever it matters. Never merge
 def build_system_prompt(
     context: Optional[ResearchContextEnvelope] = None,
     tool_results: Optional[List[Dict[str, Any]]] = None,
+    latest_user_message: Optional[str] = None,
 ) -> str:
     """
     Constructs the complete system prompt with structured application context and canonical tool results.
@@ -80,7 +98,18 @@ def build_system_prompt(
         context_dict = context.model_dump(exclude_none=True)
         context_str = json.dumps(context_dict, indent=2)
 
-    prompt = f"""{BASE_SYSTEM_INSTRUCTIONS}
+    # Deterministic per-request language directive — the free model does not always
+    # honour the mixed-thread language rule on its own, so we compute it and state it.
+    reply_lang = detect_reply_language(latest_user_message)
+    lang_directive = (
+        f"\n\n### Response language (authoritative for THIS reply): {reply_lang}.\n"
+        f"The user's latest message is in {reply_lang}. Write the entire reply in "
+        f"{reply_lang}, regardless of what language earlier turns or the retrieved "
+        f"source records use. If {reply_lang} is English and the source records are "
+        f"Vietnamese, translate/paraphrase them into English and keep the provenance."
+    )
+
+    prompt = f"""{BASE_SYSTEM_INSTRUCTIONS}{lang_directive}
 
 <application_context>
 {context_str}
