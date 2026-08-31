@@ -328,7 +328,8 @@ def test_ai_system_prompt_includes_market_session_and_tone_directives():
 
     # Tone & persona directives
     assert "Warm, cheerful, approachable, competent, concise" in prompt
-    assert "Always match the language of the user's message" in prompt
+    assert "English-first product" in prompt
+    assert "DEFAULT response language is English" in prompt
     assert "LUNCH_BREAK" in prompt
     assert "Live ticks are paused because the exchange is on lunch break" in prompt
 
