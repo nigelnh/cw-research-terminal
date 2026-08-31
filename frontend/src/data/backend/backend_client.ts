@@ -2,6 +2,8 @@ import { config } from "@/config";
 import type {
   CompanyProfileResponse,
   CorporateActionsResponse,
+  ResearchFeedQuery,
+  ResearchFeedResponse,
   ResearchNewsResponse,
 } from "@/domain/models";
 
@@ -292,6 +294,25 @@ export class BackendClient {
 
   async getResearchNewsFacets(lang: string = "vi", signal?: AbortSignal): Promise<{ symbols: string[] }> {
     return this.get<{ symbols: string[] }>("/api/research/news/facets", { lang }, signal);
+  }
+
+  /** Unified research feed: HOSE disclosures + company events, cursor-paginated. */
+  async getResearchFeed(params: ResearchFeedQuery = {}, signal?: AbortSignal): Promise<ResearchFeedResponse> {
+    return this.get<ResearchFeedResponse>(
+      "/api/research/feed",
+      {
+        symbol: params.symbol,
+        source: params.source,
+        content_type: params.content_type,
+        category: params.category,
+        event_class: params.event_class,
+        q: params.q,
+        lang: params.lang,
+        limit: params.limit,
+        before: params.before,
+      },
+      signal
+    );
   }
 
   async getCorporateActions(

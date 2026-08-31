@@ -136,3 +136,59 @@ def _vnd_data(payload: Any) -> list[dict]:
     if isinstance(payload, dict) and isinstance(payload.get("data"), list):
         return payload["data"]
     return []
+
+
+class SsiCompanyEventsSource:
+    """SSI structured company events: ``statistics/company/ssmi/corporate-actions``.
+
+    The endpoint silently returns an empty payload for date ranges longer than ~1 year, so
+    the caller MUST pass windows of <= 1 calendar year. Pagination is real but small
+    (a single symbol rarely exceeds one page at pageSize=1000).
+    """
+
+    def __init__(self, client: EnrichmentHttpClient) -> None:
+        self._c = client
+        self._base = settings.SSI_IBOARD_API_BASE_URL.rstrip("/")
+
+    async def iter_events(
+        self,
+        symbol: str,
+        *,
+        from_date: date,
+        to_date: date,
+        language: str = "vi",
+        page_size: int = 1000,
+        max_pages: int = 10,
+    ):
+        """Yields ``(page, items, paging)`` for one symbol over one <=1y window."""
+        url = f"{self._base}/statistics/company/ssmi/corporate-actions"
+        page = 1
+        while page <= max_pages:
+            res = await self._c.get_json(
+                url,
+                source="SSI",
+                endpoint="company-events",
+                symbol=symbol,
+                params={
+                    "pageSize": page_size,
+                    "page": page,
+                    "language": language,
+                    "symbol": symbol.upper(),
+                    "fromDate": from_date.strftime("%d/%m/%Y"),
+                    "toDate": to_date.strftime("%d/%m/%Y"),
+                },
+                item_count_fn=lambda d: len(_ssi_data(d)),
+            )
+            items = _ssi_data(res.json)
+            paging = (res.json or {}).get("paging") or {}
+            yield page, items, paging
+            total = paging.get("totalPage") or 0
+            if not items or page >= int(total or 0):
+                break
+            page += 1
+
+
+def _ssi_data(payload: Any) -> list[dict]:
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        return payload["data"]
+    return []

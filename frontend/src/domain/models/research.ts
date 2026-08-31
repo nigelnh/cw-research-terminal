@@ -25,6 +25,40 @@ export interface ResearchNewsResponse {
   next_before: string | null;
 }
 
+/** Unified research feed (Step 14B): HOSE disclosures + SSI/VNDirect company events. */
+export type FeedContentType = "exchange_disclosure" | "company_event";
+
+export interface ResearchFeedItem {
+  id: string;
+  symbol: string | null;
+  published_at: string | null;
+  title: string;
+  summary: string | null;
+  category: string | null;
+  content_type: FeedContentType;
+  source: string;
+  source_url: string | null;
+}
+
+export interface ResearchFeedResponse {
+  items: ResearchFeedItem[];
+  count: number;
+  has_more: boolean;
+  next_before: string | null;
+}
+
+export interface ResearchFeedQuery {
+  symbol?: string;
+  source?: string;
+  content_type?: FeedContentType;
+  category?: string;
+  event_class?: string;
+  q?: string;
+  lang?: "vi" | "en";
+  limit?: number;
+  before?: string;
+}
+
 export type CorporateActionType =
   | "CASH_DIVIDEND"
   | "STOCK_DIVIDEND"

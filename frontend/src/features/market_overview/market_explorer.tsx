@@ -3,6 +3,8 @@ import { AppHeader } from "@/components/common/app_header";
 import { PersonalDashboard } from "@/features/watchlist/personal_dashboard";
 import { ResearchUniverse } from "@/features/stock_research/research_universe";
 import { NewsFeed } from "@/features/news_feed/news_feed";
+import { AiChatProvider } from "@/data/ai/ai_chat_provider";
+import { AiAnchor } from "@/features/ai_assistant/ai_anchor";
 import { InstrumentPanel } from "@/features/warrant_info/instrument_panel";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket, useQuote, useCoveredWarrant } from "@/data/use_research_market";
@@ -149,6 +151,7 @@ export function MarketExplorer() {
   const selectSymbol = (sym: string | null) => setSelectedSymbol(sym, "push");
 
   return (
+    <AiChatProvider>
     <div
       style={{
         height: "100vh",
@@ -200,6 +203,8 @@ export function MarketExplorer() {
           onClose={() => selectSymbol(null)}
         />
       </div>
+      <AiAnchor />
     </div>
+    </AiChatProvider>
   );
 }
