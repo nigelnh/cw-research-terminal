@@ -317,3 +317,88 @@ export function PinCell({
 export function PinHeader() {
   return <th style={{ width: 20, padding: "5px 4px" }} aria-hidden />;
 }
+
+/* ---------------------------------------------------------- dismiss (hide row) */
+
+/**
+ * Client-side "remove from view" for a table. Non-destructive and session-only —
+ * hidden symbols come back on reload. Watchlist membership / registry data are
+ * untouched.
+ */
+export function useHiddenRows() {
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const hide = useCallback((symbol: string) => {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.add(symbol.toUpperCase());
+      return next;
+    });
+  }, []);
+  const reset = useCallback(() => setHidden(new Set()), []);
+  const isHidden = useCallback((symbol: string) => hidden.has(symbol.toUpperCase()), [hidden]);
+  return { hidden, count: hidden.size, hide, reset, isHidden };
+}
+
+/** Trailing "×" cell — hides the row from the current view. */
+export function DismissCell({
+  symbol,
+  onDismiss,
+}: {
+  symbol: string;
+  onDismiss: (symbol: string) => void;
+}) {
+  return (
+    <td style={{ padding: "0 6px", textAlign: "center", width: 22 }}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDismiss(symbol);
+        }}
+        title={`Hide ${symbol} from this view`}
+        aria-label={`Hide ${symbol} from this view`}
+        className="focus-ring"
+        style={{
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          padding: 2,
+          lineHeight: 1,
+          fontSize: 12,
+          color: "var(--t-42)",
+        }}
+      >
+        ×
+      </button>
+    </td>
+  );
+}
+
+export function DismissHeader() {
+  return <th style={{ width: 22, padding: "5px 4px" }} aria-hidden />;
+}
+
+/** "· N hidden — show all" affordance shown next to a section heading. */
+export function HiddenNote({ count, onReset }: { count: number; onReset: () => void }) {
+  if (count === 0) return null;
+  return (
+    <span style={{ fontSize: 10.5, color: "var(--t-46)" }}>
+      · {count} hidden{" "}
+      <button
+        type="button"
+        onClick={onReset}
+        className="focus-ring"
+        style={{
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          font: "inherit",
+          color: "var(--accent)",
+          textDecoration: "underline",
+        }}
+      >
+        show all
+      </button>
+    </span>
+  );
+}
