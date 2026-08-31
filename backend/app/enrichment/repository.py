@@ -7,7 +7,7 @@ empty result — the API layer turns that into a truthful empty state, not an er
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import String, and_, cast, desc, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -227,6 +227,12 @@ async def list_feed(
     stmt = select(sub).order_by(desc(sub.c.sort_ts), desc(sub.c.id)).limit(limit + 1)
     if before:
         stmt = stmt.where(sub.c.sort_ts < before)
+    elif not symbol:
+        # Default market-wide view is "recent" — far-future scheduled listings (VNDirect /
+        # SSI often carry effective dates years out) must not dominate the top of the feed.
+        # A per-symbol view or an explicit cursor still reaches them.
+        horizon = (date.today() + timedelta(days=14)).isoformat()
+        stmt = stmt.where(sub.c.sort_ts <= horizon)
 
     raw = (await session.execute(stmt)).mappings().all()
     has_more = len(raw) > limit

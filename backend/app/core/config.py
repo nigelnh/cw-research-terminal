@@ -128,6 +128,10 @@ class Settings(BaseSettings):
     SSI_IBOARD_API_BASE_URL: str = Field(default="https://iboard-api.ssi.com.vn", description="SSI iboard-api base (statistics/company events)")
     ENRICHMENT_INCREMENTAL_SSI_DAYS: int = Field(default=45, description="Rolling overlap window for SSI incremental crawl")
     ENRICHMENT_INCREMENTAL_HOSE_DAYS: int = Field(default=10, description="Rolling overlap window for HOSE incremental crawl")
+    ENRICHMENT_DB_SIZE_CEILING_MB: int = Field(
+        default=280,
+        description="Enrichment write commands abort at/above this DB size (MB). Guards a small volume against a corpus-fill incident.",
+    )
     AI_NEWS_MAX_RESULTS: int = Field(default=12, description="Max news rows the AI get_news tool returns")
     AI_CORPORATE_ACTIONS_MAX_RESULTS: int = Field(default=12, description="Max rows the AI get_corporate_actions / get_company_events tool returns")
 

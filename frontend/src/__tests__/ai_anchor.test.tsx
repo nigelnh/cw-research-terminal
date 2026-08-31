@@ -32,9 +32,10 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
   it("defaults to the bottom-right of the viewport with a safe inset", () => {
     const { getByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
-    // 1440x900, anchor 34, edge 16 -> x = 1440-34-16 = 1390, y = 900-34-16-4 = 846
+    // 1440x900, anchor 34, edge 16, repl-bar clearance 48
+    // -> x = 1440-34-16 = 1390, y = 900-34-16-48 = 802
     expect(btn.style.left).toBe("1390px");
-    expect(btn.style.top).toBe("846px");
+    expect(btn.style.top).toBe("802px");
     expect(btn.getAttribute("aria-expanded")).toBe("false");
   });
 
@@ -43,8 +44,8 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
     const btn = getByRole("button", { name: /open research assistant/i });
     expect(queryByRole("dialog")).toBeNull();
 
-    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 846, pointerId: 1 });
-    fireEvent.pointerUp(btn, { clientX: 1390, clientY: 846, pointerId: 1 });
+    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 802, pointerId: 1 });
+    fireEvent.pointerUp(btn, { clientX: 1390, clientY: 802, pointerId: 1 });
 
     const panel = getByRole("dialog", { name: /research assistant conversation/i });
     // fixed, bounded dimensions — never grows with content
@@ -58,7 +59,7 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
     const { getByRole, queryByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
 
-    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 846, pointerId: 1 });
+    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 802, pointerId: 1 });
     fireEvent.pointerMove(btn, { clientX: 900, clientY: 400, pointerId: 1 });
     fireEvent.pointerUp(btn, { clientX: 900, clientY: 400, pointerId: 1 });
 
@@ -72,7 +73,7 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
   it("clamps a drag that would leave the viewport", () => {
     const { getByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
-    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 846, pointerId: 1 });
+    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 802, pointerId: 1 });
     fireEvent.pointerMove(btn, { clientX: 5000, clientY: 5000, pointerId: 1 });
     fireEvent.pointerUp(btn, { clientX: 5000, clientY: 5000, pointerId: 1 });
     // clamped to maxX = 1440-34-16 = 1390, maxY = 900-34-16 = 850
