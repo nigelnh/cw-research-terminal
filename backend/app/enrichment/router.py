@@ -47,18 +47,42 @@ class NewsResponse(BaseModel):
 class CorporateActionItem(BaseModel):
     id: int
     symbol: str
-    action_type: str
+    action_type: str            # kept for backwards compatibility (== event_type)
+    event_type: str
+    event_class: str
+    event_name: str | None = None
     status: str
     ex_date: str | None
     record_date: str | None
     payment_date: str | None
     disclosure_date: str | None
+    public_date: str | None = None
     cash_amount_vnd: float | None
     ratio_pct: float | None
     ratio_text: str | None
+    value_text: str | None = None
     dividend_year: int | None
     note: str | None
     source: str
+
+
+class FeedItem(BaseModel):
+    id: str
+    symbol: str | None
+    published_at: str | None
+    title: str
+    summary: str | None
+    category: str | None
+    content_type: str
+    source: str
+    source_url: str | None
+
+
+class FeedResponse(BaseModel):
+    items: list[FeedItem]
+    count: int
+    has_more: bool
+    next_before: str | None
 
 
 class CompanyProfileResponse(BaseModel):
@@ -141,36 +165,92 @@ async def get_news_facets(lang: str = Query(default="vi", pattern="^(vi|en)$")):
     return {"symbols": syms}
 
 
+def _event_item(r) -> CorporateActionItem:
+    return CorporateActionItem(
+        id=r.id,
+        symbol=r.symbol,
+        action_type=r.event_type,
+        event_type=r.event_type,
+        event_class=r.event_class,
+        event_name=r.event_name,
+        status=r.status,
+        ex_date=_iso(r.ex_date),
+        record_date=_iso(r.record_date),
+        payment_date=_iso(r.payment_date),
+        disclosure_date=_iso(r.disclosure_date),
+        public_date=_iso(r.public_date),
+        cash_amount_vnd=float(r.cash_amount_vnd) if r.cash_amount_vnd is not None else None,
+        ratio_pct=float(r.ratio_pct) if r.ratio_pct is not None else None,
+        ratio_text=r.ratio_text,
+        value_text=r.value_text,
+        dividend_year=r.dividend_year,
+        note=r.note,
+        source=r.source,
+    )
+
+
 @research_router.get("/corporate-actions/{symbol}")
 async def get_corporate_actions(
     symbol: str,
     limit: int = Query(default=20, ge=1, le=100),
 ):
+    """Price-adjustment + meeting + listing events (the pre-14B corporate-actions view)."""
     if not persistence_db.is_configured():
         return {"symbol": symbol.upper(), "items": [], "count": 0}
     maker = persistence_db.get_sessionmaker()
     async with maker() as s:
         rows = await repo.list_corporate_actions(s, symbol=symbol, limit=limit)
+    items = [_event_item(r) for r in rows]
+    return {"symbol": symbol.upper(), "items": items, "count": len(items)}
+
+
+@research_router.get("/events/{symbol}")
+async def get_company_events(
+    symbol: str,
+    limit: int = Query(default=30, ge=1, le=100),
+    event_class: str | None = Query(default=None, description="DIVIDEND|RIGHTS|MEETING|LISTING|FINANCIAL|OWNERSHIP|OTHER"),
+):
+    """The full company-event stream for a symbol (financials + insider + actions)."""
+    if not persistence_db.is_configured():
+        return {"symbol": symbol.upper(), "items": [], "count": 0}
+    classes = [c.strip().upper() for c in event_class.split(",")] if event_class else None
+    maker = persistence_db.get_sessionmaker()
+    async with maker() as s:
+        rows = await repo.list_company_events(s, symbol=symbol, limit=limit, classes=classes)
+    items = [_event_item(r) for r in rows]
+    return {"symbol": symbol.upper(), "items": items, "count": len(items)}
+
+
+@research_router.get("/feed", response_model=FeedResponse)
+async def get_feed(
+    symbol: str | None = Query(default=None, max_length=32),
+    source: str | None = Query(default=None, description="HOSE|SSI|VNDIRECT"),
+    content_type: str | None = Query(default=None, description="exchange_disclosure|company_event"),
+    category: str | None = Query(default=None, max_length=200),
+    event_class: str | None = Query(default=None, max_length=20),
+    q: str | None = Query(default=None, max_length=120),
+    lang: str = Query(default="vi", pattern="^(vi|en)$"),
+    limit: int = Query(default=30, ge=1, le=100),
+    before: str | None = Query(default=None, description="cursor: sort_ts of the last row seen"),
+):
+    if not persistence_db.is_configured():
+        return FeedResponse(items=[], count=0, has_more=False, next_before=None)
+    maker = persistence_db.get_sessionmaker()
+    async with maker() as s:
+        rows, has_more = await repo.list_feed(
+            s, symbol=symbol, source=source, content_type=content_type, category=category,
+            event_class=event_class, query=q, lang=lang, limit=limit, before=before,
+        )
     items = [
-        CorporateActionItem(
-            id=r.id,
-            symbol=r.symbol,
-            action_type=r.action_type,
-            status=r.status,
-            ex_date=_iso(r.ex_date),
-            record_date=_iso(r.record_date),
-            payment_date=_iso(r.payment_date),
-            disclosure_date=_iso(r.disclosure_date),
-            cash_amount_vnd=float(r.cash_amount_vnd) if r.cash_amount_vnd is not None else None,
-            ratio_pct=float(r.ratio_pct) if r.ratio_pct is not None else None,
-            ratio_text=r.ratio_text,
-            dividend_year=r.dividend_year,
-            note=r.note,
-            source=r.source,
+        FeedItem(
+            id=r.id, symbol=r.symbol, published_at=r.published_at, title=r.title,
+            summary=_strip_html(r.summary), category=r.category, content_type=r.content_type,
+            source=r.source, source_url=r.source_url,
         )
         for r in rows
     ]
-    return {"symbol": symbol.upper(), "items": items, "count": len(items)}
+    next_before = str(rows[-1]._sort) if (has_more and rows) else None
+    return FeedResponse(items=items, count=len(items), has_more=has_more, next_before=next_before)
 
 
 @research_router.get("/company/{symbol}", response_model=CompanyProfileResponse)

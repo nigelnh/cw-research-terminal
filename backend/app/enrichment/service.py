@@ -15,8 +15,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.persistence.models import (
+    CompanyEvent,
     CompanyProfile,
-    CorporateAction,
     ExternalNews,
 )
 
@@ -59,6 +59,7 @@ class EnrichmentService:
                     title=r["title"],
                     summary_html=r.get("summary_html"),
                     category=r.get("category"),
+                    content_type=r.get("content_type", "exchange_disclosure"),
                     symbols=r.get("symbols") or [],
                     related_source_id=r.get("related_source_id"),
                     published_at=r.get("published_at"),
@@ -72,6 +73,7 @@ class EnrichmentService:
                         "title": stmt.excluded.title,
                         "summary_html": stmt.excluded.summary_html,
                         "category": stmt.excluded.category,
+                        "content_type": stmt.excluded.content_type,
                         "symbols": stmt.excluded.symbols,
                         "published_at": stmt.excluded.published_at,
                         "approved_at": stmt.excluded.approved_at,
@@ -88,10 +90,13 @@ class EnrichmentService:
             await s.commit()
         return res
 
-    # ------------------------------------------------------ corporate actions
-    async def upsert_corporate_actions(self, rows: list[dict | None]) -> UpsertResult:
+    # ------------------------------------------------------ company events
+    async def upsert_company_events(self, rows: list[dict | None]) -> UpsertResult:
+        """Upsert normalized company events (VNDirect or SSI) keyed on (source, source_id)."""
         res = UpsertResult()
-        clean: list[dict] = [r for r in rows if r and r.get("source_id") and r.get("symbol")]
+        clean: list[dict] = [
+            r for r in rows if r and r.get("source_id") and r.get("symbol") and r.get("event_type")
+        ]
         res.skipped += len([r for r in rows if r]) - len(clean)
         if not clean:
             return res
@@ -101,37 +106,47 @@ class EnrichmentService:
             by_key[(r["source"], r["source_id"])] = r
         async with self._sm() as s:
             for r in by_key.values():
-                stmt = pg_insert(CorporateAction).values(
+                stmt = pg_insert(CompanyEvent).values(
                     source=r["source"],
                     source_id=r["source_id"],
                     symbol=r["symbol"],
-                    action_type=r["action_type"],
+                    event_type=r["event_type"],
+                    event_class=r.get("event_class", "OTHER"),
+                    event_name=r.get("event_name"),
+                    source_event_code=r.get("source_event_code"),
                     status=r.get("status", "UNKNOWN"),
                     ex_date=r.get("ex_date"),
                     record_date=r.get("record_date"),
                     payment_date=r.get("payment_date"),
                     disclosure_date=r.get("disclosure_date"),
+                    public_date=r.get("public_date"),
                     cash_amount_vnd=r.get("cash_amount_vnd"),
                     ratio_pct=r.get("ratio_pct"),
                     ratio_text=r.get("ratio_text"),
+                    value_text=r.get("value_text"),
                     dividend_year=r.get("dividend_year"),
                     note=r.get("note"),
                     url=r.get("url"),
                     raw=r.get("raw") or {},
                 )
                 stmt = stmt.on_conflict_do_update(
-                    constraint="uq_corporate_actions_identity",
+                    constraint="uq_company_events_identity",
                     set_={
                         "symbol": stmt.excluded.symbol,
-                        "action_type": stmt.excluded.action_type,
+                        "event_type": stmt.excluded.event_type,
+                        "event_class": stmt.excluded.event_class,
+                        "event_name": stmt.excluded.event_name,
+                        "source_event_code": stmt.excluded.source_event_code,
                         "status": stmt.excluded.status,
                         "ex_date": stmt.excluded.ex_date,
                         "record_date": stmt.excluded.record_date,
                         "payment_date": stmt.excluded.payment_date,
                         "disclosure_date": stmt.excluded.disclosure_date,
+                        "public_date": stmt.excluded.public_date,
                         "cash_amount_vnd": stmt.excluded.cash_amount_vnd,
                         "ratio_pct": stmt.excluded.ratio_pct,
                         "ratio_text": stmt.excluded.ratio_text,
+                        "value_text": stmt.excluded.value_text,
                         "dividend_year": stmt.excluded.dividend_year,
                         "note": stmt.excluded.note,
                         "raw": stmt.excluded.raw,
@@ -145,6 +160,10 @@ class EnrichmentService:
                     res.updated += 1
             await s.commit()
         return res
+
+    # backwards-compatible alias for the VNDirect ingestion path
+    async def upsert_corporate_actions(self, rows: list[dict | None]) -> UpsertResult:
+        return await self.upsert_company_events(rows)
 
     # ------------------------------------------------------ company profiles
     async def upsert_company_profile(self, row: dict | None) -> UpsertResult:
