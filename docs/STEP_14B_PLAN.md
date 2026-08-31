@@ -167,15 +167,20 @@ Reuse shared classes; no arbitrary px bumps. Visual QA News vs Research at 1440/
 - `ai_repl_bar.tsx` refactor: split input (docked) from output (panel). `useAiChat`
   unchanged.
 
-## Part 8 — Scheduling
+## Part 8 — Scheduling (DECIDED — needs one approval)
 
-Decision after Part 3: Railway Free Trial has **no cron primitive** without a paid plan /
-a new always-on service. GitHub Actions `schedule:` is zero-cost, secure (repo secret for a
-scoped ingestion token or the DB URL), and does not touch the FiinQuant process. Proposed:
-a scheduled workflow that runs `python -m app.enrichment.cli enrich-incremental` against the
-production DB on a cadence (SSI daily post-close ~10:00 ICT; HOSE every 6h). **No public
-"run ingestion" endpoint.** If the user prefers not to put the prod DB URL in a GH secret,
-the CLI stays manual and this is the one approval gate.
+Railway Free Trial has **no cron primitive** without a paid plan / a new always-on service,
+and ingestion must not run inside the one-process FiinQuant lifecycle.
+
+**Chosen: GitHub Actions `schedule:`.** Zero-cost, runs off-box, never touches the backend
+process. `.github/workflows/enrichment-incremental.yml` is committed but **inert**:
+`workflow_dispatch` only, and the job is `if: secrets.PRODUCTION_DATABASE_URL != ''`
+(skips when the secret is absent). No public "run ingestion" endpoint.
+
+**Activation gate (repo owner):** (1) add repo secret `PRODUCTION_DATABASE_URL`
+(Railway Postgres URL); (2) uncomment the `schedule:` block. Proposed cadence: daily
+`0 3 * * *` UTC (~10:00 ICT, post-close) for `enrich-incremental` (SSI 45-day + HOSE
+10-day rolling overlap). The backfill itself proceeds manually now via `railway ssh`.
 
 ## Part 9 — Tests, backfill, deploy
 

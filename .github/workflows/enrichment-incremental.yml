@@ -1,0 +1,50 @@
+name: Research enrichment — incremental crawl
+
+# Ongoing incremental ingestion for the Step 14B research corpus (SSI company events +
+# HOSE disclosures). Rolling-overlap windows; every upsert is idempotent so overlap is
+# expected and safe.
+#
+# Why GitHub Actions and not a Railway cron: the Railway Free Trial plan has no cron
+# primitive without a paid upgrade / a new always-on service, and this must not run inside
+# the one-process FiinQuant realtime lifecycle. GH Actions is zero-cost, runs off-box, and
+# never touches the backend process. There is NO public "run ingestion" endpoint.
+#
+# ACTIVATION GATE (needs the repo owner):
+#   1. Add repo secret PRODUCTION_DATABASE_URL  (the Railway Postgres URL).
+#   2. Uncomment the `schedule:` block below.
+# Until then this workflow is manual-only (workflow_dispatch) and the job is skipped
+# when the secret is absent.
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "0 3 * * *"    # SSI + HOSE incremental, daily ~10:00 ICT (post-close)
+  #   - cron: "0 3,9,15 * * *"  # HOSE-only, more frequent — see the step guard
+
+concurrency:
+  group: enrichment-incremental
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.PRODUCTION_DATABASE_URL != '' }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - name: Incremental crawl (rolling overlap)
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: python -m app.enrichment.cli enrich-incremental
+      - name: Coverage report
+        if: always()
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: python -m app.enrichment.cli coverage
