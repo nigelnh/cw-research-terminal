@@ -233,3 +233,23 @@ async def test_read_api_empty_then_populated(_wired_db):
         assert got["count"] == 1
         assert got["items"][0]["title"] == "HPG: hello"
         assert got["items"][0]["summary"] == "body"  # html stripped
+
+
+# ------------------------------------------------------------ incident hardening
+async def test_preflight_aborts_above_db_size_ceiling(sessionmaker_, monkeypatch):
+    """The write-command guard added after the 2026-08-31 volume-fill incident."""
+    import pytest as _pytest
+
+    from app.enrichment import cli
+    from app.core.config import settings
+
+    # tiny ceiling so any non-empty DB trips it
+    monkeypatch.setattr(settings, "ENRICHMENT_DB_SIZE_CEILING_MB", 0)
+    with _pytest.raises(SystemExit) as ei:
+        await cli._preflight(sessionmaker_)
+    assert ei.value.code == 3
+
+    # generous ceiling -> returns the measured size, no raise
+    monkeypatch.setattr(settings, "ENRICHMENT_DB_SIZE_CEILING_MB", 100_000)
+    size = await cli._preflight(sessionmaker_)
+    assert isinstance(size, float) and size > 0
