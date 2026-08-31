@@ -13,6 +13,8 @@ from captured payload shapes.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from app.ai.tools import research_tools
@@ -166,6 +168,23 @@ async def test_unified_feed_unions_news_and_events_recent_first_no_dedup(session
     assert len(news_only) == 1 and news_only[0].source == "HOSE"
 
 
+async def test_feed_default_view_hides_far_future_scheduled_events(sessionmaker_):
+    """A LISTING with an effective date years out must not dominate the market-wide feed."""
+    svc = EnrichmentService(sessionmaker_)
+    await svc.upsert_news([N.normalize_hsx_news(_news_item(1, "HPG: recent disclosure", epoch=1_787_000_000), lang="vi")])
+    await svc.upsert_company_events([
+        {"source": "VNDIRECT", "source_id": "future1", "symbol": "FPT", "event_type": "LISTING",
+         "event_class": "LISTING", "status": "CONFIRMED", "ex_date": date(2035, 5, 7),
+         "note": "additional listing", "raw": {}},
+    ])
+    async with sessionmaker_() as s:
+        market_wide, _ = await repo.list_feed(s, lang="vi", limit=10)   # no symbol -> horizon applies
+        fpt_view, _ = await repo.list_feed(s, symbol="FPT", lang="vi", limit=10)  # per-symbol -> full
+
+    assert [r.title for r in market_wide] == ["HPG: recent disclosure"]  # 2035 row excluded
+    assert any("LISTING" in r.title for r in fpt_view)  # still reachable per-symbol
+
+
 # ------------------------------------------------------------------ AI tools
 @pytest.fixture
 def _wired_db(sessionmaker_, monkeypatch):
@@ -214,3 +233,23 @@ async def test_read_api_empty_then_populated(_wired_db):
         assert got["count"] == 1
         assert got["items"][0]["title"] == "HPG: hello"
         assert got["items"][0]["summary"] == "body"  # html stripped
+
+
+# ------------------------------------------------------------ incident hardening
+async def test_preflight_aborts_above_db_size_ceiling(sessionmaker_, monkeypatch):
+    """The write-command guard added after the 2026-08-31 volume-fill incident."""
+    import pytest as _pytest
+
+    from app.enrichment import cli
+    from app.core.config import settings
+
+    # tiny ceiling so any non-empty DB trips it
+    monkeypatch.setattr(settings, "ENRICHMENT_DB_SIZE_CEILING_MB", 0)
+    with _pytest.raises(SystemExit) as ei:
+        await cli._preflight(sessionmaker_)
+    assert ei.value.code == 3
+
+    # generous ceiling -> returns the measured size, no raise
+    monkeypatch.setattr(settings, "ENRICHMENT_DB_SIZE_CEILING_MB", 100_000)
+    size = await cli._preflight(sessionmaker_)
+    assert isinstance(size, float) and size > 0

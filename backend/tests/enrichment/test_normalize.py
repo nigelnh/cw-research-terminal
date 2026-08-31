@@ -56,6 +56,14 @@ def test_normalize_hsx_news_epochs_and_url():
     assert isinstance(row["approved_at"], datetime)
     assert row["url"] and "cong-bo-thong-tin-msh" in row["url"]
     assert row["related_source_id"] == "2829"
+    assert "raw" not in row  # 0006: full payload is no longer persisted for news
+
+
+def test_normalize_hsx_news_url_falls_back_to_id_page():
+    # HSX exposes no direct PDF link; the ViewArticle page (keyed by numeric id) is the
+    # canonical human-viewable disclosure page.
+    row = N.normalize_hsx_news({"id": 2493262, "title": "MSH: x"}, lang="vi")
+    assert row["url"] == "https://www.hsx.vn/Modules/CMS/Web/ViewArticle/2493262"
 
 
 def test_normalize_hsx_news_missing_dates():

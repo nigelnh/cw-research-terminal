@@ -10,6 +10,9 @@ import {
 } from "@/components/common/registry_filter";
 import {
   DASH,
+  DismissCell,
+  DismissHeader,
+  HiddenNote,
   PinCell,
   PinHeader,
   SortHeader,
@@ -17,6 +20,7 @@ import {
   dteNumber,
   fmtPrice,
   fmtRatio,
+  useHiddenRows,
   useSortPin,
   type SortFields,
 } from "@/components/common/grid_table";
@@ -62,6 +66,7 @@ export function ResearchUniverse({
   const setSelected = onSelectSymbol ?? (() => {});
   const { isInWatchlist } = useWatchlist();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
+  const hiddenRows = useHiddenRows();
 
   const term = filter.trim().toUpperCase().replace(/^\//, "").trim();
   const browseAll = term.length > 0 || isFilterActive(filterState);
@@ -102,13 +107,14 @@ export function ResearchUniverse({
               (r.issuer ?? "").toUpperCase().includes(term);
             if (!hit) return false;
           }
+          if (hiddenRows.isHidden(r.symbol)) return false;
           return rowMatchesFilter(filterState, {
             underlying: r.underlying,
             issuer: r.issuer,
             lastTradingDate: r.lastTradingDate,
           });
         }),
-    [instruments, term, filterState, isInWatchlist],
+    [instruments, term, filterState, isInWatchlist, hiddenRows],
   );
 
   const underlyingOptions = useMemo(
@@ -139,6 +145,7 @@ export function ResearchUniverse({
         <span style={{ fontSize: 10.5, color: "var(--t-42)", fontStyle: "italic" }}>
           “{browseAll ? "browsing the full discovered registry" : "verified terms only"}”
         </span>
+        <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
         <RegistryFilter
           underlyingOptions={underlyingOptions}
           issuerOptions={issuerOptions}
@@ -164,24 +171,25 @@ export function ResearchUniverse({
             <SortHeader label="MATURITY" mark={grid.sortMark("maturity")} onClick={() => grid.toggleSort("maturity")} />
             <SortHeader label="DTE" mark={grid.sortMark("dte")} onClick={() => grid.toggleSort("dte")} />
             <SortHeader label="STATUS" mark={grid.sortMark("status")} onClick={() => grid.toggleSort("status")} />
+            <DismissHeader />
           </tr>
         </thead>
         <tbody>
           {isLoading ? (
             <tr>
-              <td colSpan={9} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
+              <td colSpan={10} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
                 Loading research registry…
               </td>
             </tr>
           ) : isError ? (
             <tr>
-              <td colSpan={9} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--down)" }}>
+              <td colSpan={10} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--down)" }}>
                 Could not load the research registry. Retry shortly.
               </td>
             </tr>
           ) : grid.ordered.length === 0 ? (
             <tr>
-              <td colSpan={9} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
+              <td colSpan={10} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
                 No instruments match.
               </td>
             </tr>
@@ -212,6 +220,7 @@ export function ResearchUniverse({
                   <td style={{ ...TD, color: r.tracked ? "var(--accent)" : "var(--t-46)" }}>
                     {r.tracked ? "TRACKED" : "REFERENCE"}
                   </td>
+                  <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
                 </tr>
               );
             })

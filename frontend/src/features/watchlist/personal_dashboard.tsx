@@ -13,6 +13,9 @@ import {
 } from "@/components/common/registry_filter";
 import {
   DASH,
+  DismissCell,
+  DismissHeader,
+  HiddenNote,
   PinCell,
   PinHeader,
   PlainHeader,
@@ -25,6 +28,7 @@ import {
   fmtRatio,
   fmtVol,
   priceColor,
+  useHiddenRows,
   useSortPin,
   type SortFields,
 } from "@/components/common/grid_table";
@@ -120,6 +124,7 @@ export function PersonalDashboard({
   const { quotes, warrants, marketSessionActive } = useResearchMarket();
   const { getSpec } = useInstrumentSpecs();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
+  const hiddenRows = useHiddenRows();
 
   const allSymbols = useMemo(() => items.map((i) => i.symbol), [items]);
   const { getRow, meta } = useDashboardData(allSymbols);
@@ -153,8 +158,9 @@ export function PersonalDashboard({
             room: quote?.foreignRoom ?? null,
           };
         })
-        .filter((r) => textMatch(r.symbol)),
-    [items, getRow, quotes, q],
+        .filter((r) => textMatch(r.symbol))
+        .filter((r) => !hiddenRows.isHidden(r.symbol)),
+    [items, getRow, quotes, q, hiddenRows],
   );
 
   const cwRows: CwRow[] = useMemo(
@@ -201,6 +207,7 @@ export function PersonalDashboard({
           };
         })
         .filter((r) => textMatch(r.symbol, r.underlying))
+        .filter((r) => !hiddenRows.isHidden(r.symbol))
         .filter((r) =>
           rowMatchesFilter(filterState, {
             underlying: r.underlying,
@@ -208,7 +215,7 @@ export function PersonalDashboard({
             lastTradingDate: r.lastTradingDate,
           }),
         ),
-    [items, getRow, quotes, warrants, getSpec, q, filterState],
+    [items, getRow, quotes, warrants, getSpec, q, filterState, hiddenRows],
   );
 
   const underlyingOptions = useMemo(
@@ -262,6 +269,7 @@ export function PersonalDashboard({
         <span className="mono" style={{ fontSize: 10.5, color: "var(--t-46)" }}>
           {plan.symbolCount} / {plan.capacity ?? 33}
         </span>
+        <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
         <RegistryFilter
           underlyingOptions={underlyingOptions}
           issuerOptions={issuerOptions}
@@ -315,6 +323,7 @@ export function PersonalDashboard({
               <SortHeader label="FRN BUY" mark={stocks.sortMark("forBuy")} onClick={() => stocks.toggleSort("forBuy")} />
               <SortHeader label="FRN SELL" mark={stocks.sortMark("forSell")} onClick={() => stocks.toggleSort("forSell")} />
               <SortHeader label="FRN ROOM" mark={stocks.sortMark("room")} onClick={() => stocks.toggleSort("room")} />
+              <DismissHeader />
             </tr>
           </thead>
           <tbody>
@@ -348,6 +357,7 @@ export function PersonalDashboard({
                   <td style={{ ...TD, color: "var(--t-60)" }}>{fmtVol(r.forBuy)}</td>
                   <td style={{ ...TD, color: "var(--t-60)" }}>{fmtVol(r.forSell)}</td>
                   <td style={{ ...TD, color: "var(--t-50)" }}>{fmtVol(r.room)}</td>
+                  <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
                 </tr>
               );
             })}
@@ -373,6 +383,7 @@ export function PersonalDashboard({
               <SortHeader label="IV BID" mark={cws.sortMark("ivBid")} onClick={() => cws.toggleSort("ivBid")} />
               <SortHeader label="IV TRD" mark={cws.sortMark("ivTrade")} onClick={() => cws.toggleSort("ivTrade")} />
               <SortHeader label="IV ASK" mark={cws.sortMark("ivAsk")} onClick={() => cws.toggleSort("ivAsk")} />
+              <DismissHeader />
             </tr>
           </thead>
           <tbody>
@@ -414,6 +425,7 @@ export function PersonalDashboard({
                   <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivBid)}</td>
                   <td style={{ ...TD, color: "var(--t-85)" }}>{fmtIV(r.ivTrade)}</td>
                   <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivAsk)}</td>
+                  <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
                 </tr>
               );
             })}

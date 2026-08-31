@@ -414,7 +414,12 @@ class ExternalNews(Base):
     observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    raw: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    # NOTE (0006): the full upstream JSON payload is NOT stored for news. HOSE is public
+    # and re-fetchable by (source, source_id); a 24-month market-wide corpus of full raw
+    # blobs exhausted the production volume. Normalized provenance (source / source_id /
+    # lang / title / summary_html / symbols / category / content_type / timestamps / url)
+    # is retained and sufficient. company_events.raw is kept — SSI payloads are small and
+    # materially useful for reclassification.
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
