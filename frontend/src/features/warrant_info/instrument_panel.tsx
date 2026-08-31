@@ -110,11 +110,11 @@ function isoDay(v: string | null | undefined): string {
 
 function corpEventDesc(ev: CorporateActionItem): string {
   if (ev.action_type === "CASH_DIVIDEND" && typeof ev.cash_amount_vnd === "number") {
-    return `${Math.round(ev.cash_amount_vnd).toLocaleString("en-US")} đ/sh`;
+    return `${Math.round(ev.cash_amount_vnd).toLocaleString("en-US")} VND/sh`;
   }
   if (ev.ratio_text) return ev.ratio_text;
   if (typeof ev.ratio_pct === "number") return `${ev.ratio_pct}%`;
-  if (ev.note) return ev.note;
+  // the raw `note` is Vietnamese — not shown as a primary UI label (LANGUAGE_POLICY.md)
   return DASH;
 }
 
@@ -607,7 +607,7 @@ export function InstrumentPanel({
                             borderBottom: "1px solid var(--border-row)",
                           }}
                         >
-                          <span style={{ color: "var(--t-80)" }}>{corpEventLabel(ev.action_type)}</span>
+                          <span style={{ color: "var(--t-80)" }}>{ev.event_label || corpEventLabel(ev.action_type)}</span>
                           <span style={{ color: "var(--t-55)" }}>{isoDay(ev.ex_date)}</span>
                           <span style={{ color: "var(--t-50)" }}>
                             {isoDay(ev.record_date ?? ev.disclosure_date)}

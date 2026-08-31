@@ -9,9 +9,13 @@
 
 export interface ResearchNewsItem {
   id: number;
+  title_en: string;
+  title_en_exact: boolean;
+  category_en: string;
   title: string;
   summary: string | null;
   category: string | null;
+  source_language: string;
   symbols: string[];
   published_at: string | null;
   url: string | null;
@@ -32,9 +36,16 @@ export interface ResearchFeedItem {
   id: string;
   symbol: string | null;
   published_at: string | null;
+  /** English-first display fields (docs/design/LANGUAGE_POLICY.md). */
+  title_en: string;
+  /** false = a category/verb classification, not a rendered translation — see original. */
+  title_en_exact: boolean;
+  category_en: string;
+  /** original Vietnamese, verbatim — provenance, shown in the expanded detail only. */
   title: string;
   summary: string | null;
   category: string | null;
+  source_language: string;
   content_type: FeedContentType;
   source: string;
   source_url: string | null;
@@ -73,7 +84,12 @@ export type CorporateActionType =
 export interface CorporateActionItem {
   id: number;
   symbol: string;
+  event_label: string;
   action_type: CorporateActionType | string;
+  event_type?: string;
+  event_class?: string;
+  event_name?: string | null;
+  source_language?: string;
   status: string;
   ex_date: string | null;
   record_date: string | null;

@@ -147,19 +147,28 @@ News row: **English `title_en` as the headline**, `category_en` in the CATEGORY 
 the expand row shows `SOURCE: HOSE · ORIGINAL LANGUAGE: VI · OFFICIAL SOURCE ↗` and the
 verbatim Vietnamese `title` / `summary` under an "Original (Vietnamese)" label.
 
-### 2e. Scope / effort
+### 2e. Scope / status — **BUILT** (`app/enrichment/english.py`, migration-free)
 
-| Piece | Size | Migration? |
+| Piece | Status | Migration? |
 |---|---|---|
-| AI system-prompt English-first rule | **done (this change)** | no |
-| `category_en` + `event_name_en` dictionaries + read-time wiring + tests | small (~1 day) | **no** |
-| `title_en` template dictionary (top ~200 patterns) + fallback + tests | medium (~2–3 days, mostly curating patterns) | **no** |
-| `source_language` field + feed serializer + News UI (headline/category/original block) | small–medium | no (additive field) |
-| Layer 4 lazy `summary_en` | deferred | yes (2 nullable cols) |
+| AI system-prompt English-first rule | **shipped** (PR #9) | no |
+| `category_en` — 30-entry HOSE-category dictionary, 100% coverage | **shipped** | no |
+| `event_label_en` / `event_class_label_en` — English labels from the enums | **shipped** | no |
+| `headline_en` — ~110 keyword rules + period-token + honest fallback | **shipped** | no |
+| `title_en` / `title_en_exact` / `category_en` / `source_language` on `/api/research/feed` + `/news`; `event_label` on `/events` + `/corporate-actions`; English fields in the AI `get_news` / `get_company_events` / `get_corporate_actions` payloads | **shipped** | no (additive) |
+| News UI: `DATE · SYMBOL · TYPE · HEADLINE · SOURCE`; expand shows English headline + `category_en` + `ORIGINAL LANGUAGE: VI` + `OFFICIAL SOURCE ↗` + `Original (Vietnamese):` | **shipped** | no |
+| Layer 4 lazy persisted `summary_en` | **deferred** (needs a translation mechanism decision) | yes (2 nullable cols) |
 
-Layers 1–3 are **additive, migration-free, zero-cost, deterministic**. They are a
-bounded piece of work, not a feature phase — but they are **not yet built**; this
-document is the design + the product owner's go/no-go gate.
+**Measured coverage over the 81,322-row VI corpus** (`headline_en`):
+
+| bucket | share | meaning |
+|---|---|---|
+| specific disclosure-type rule (`title_en_exact = true`) | **91.1%** | e.g. *"Corporate governance report, 2025 — HPG"*, *"ETF net asset value (NAV) notice, 27/08/2026 — FUEKIV30"* |
+| leading-verb classification (`exact = false`) | 7.3% | *"Notice — VCB"*, *"Report — …"* — directionally right, original carries the detail |
+| category classification (`exact = false`) | 1.6% | *"Listed-issuer disclosure — XYZ"* — honest fallback, never a fabricated translation |
+
+100% of rows get an English headline; the verbatim Vietnamese `title` / `summary` and the
+official HOSE link are always preserved and shown in the expanded detail.
 
 ---
 
@@ -170,10 +179,11 @@ document is the design + the product owner's go/no-go gate.
   ingestion stays **disabled** — `enrich-incremental` / `bootstrap` default to
   `ENRICHMENT_INCREMENTAL_HOSE_LANGS=vi`; a deliberate EN pull is still an explicit
   `backfill-news --lang en`.
-- **Product language:** English-first on every user-facing surface. UI chrome is already
-  fully English. Data free-text (News title/summary/category, event_name) still surfaces
-  Vietnamese — closed by the deterministic English-presentation layer in §2 (designed,
-  gated on product-owner approval).
+- **Product language:** English-first on every user-facing surface. UI chrome was already
+  fully English; the News/event free-text gap (title, category, event_name) is now closed
+  by the deterministic English-presentation layer in §2 — 91.1% of disclosure titles get
+  a specific English disclosure-type headline, the rest an honest classification, with the
+  original Vietnamese always preserved and one click away.
 - **AI language:** English by default; Vietnamese only when the user's own latest
   substantive message is Vietnamese. Never inferred from thread history, retrieved
   source text, or the selected symbol. Enforced in `ai_system_prompt.py`
