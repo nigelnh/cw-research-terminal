@@ -108,6 +108,18 @@ async def chat_endpoint(
     )
     raw_messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
+    # Weak free models drift to the thread's dominant language. Reinforce the
+    # deterministic per-reply language (from the user's OWN latest message) right where
+    # the model looks last — appended to the final user turn.
+    from app.ai.ai_system_prompt import detect_reply_language
+
+    _reply_lang = detect_reply_language(last_user_query)
+    for _m in reversed(raw_messages):
+        if _m["role"] == "user":
+            _tag = "Trả lời bằng tiếng Việt." if _reply_lang == "Vietnamese" else "Respond in English."
+            _m["content"] = f"{_m['content']}\n\n[{_tag}]"
+            break
+
     if req.stream:
         async def event_generator():
             stream_started = False
