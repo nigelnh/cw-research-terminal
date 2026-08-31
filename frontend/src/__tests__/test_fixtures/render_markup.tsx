@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AiChatProvider } from "@/data/ai/ai_chat_provider";
 
 export interface SeedQuery {
   queryKey: unknown[];
@@ -20,7 +21,11 @@ export function renderMarkup(ui: ReactElement, seedQueries: SeedQuery[] = []): s
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: Infinity } },
   });
   for (const q of seedQueries) client.setQueryData(q.queryKey, q.data);
-  return renderToStaticMarkup(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return renderToStaticMarkup(
+    <QueryClientProvider client={client}>
+      <AiChatProvider>{ui}</AiChatProvider>
+    </QueryClientProvider>,
+  );
 }
 
 /** Build the seed entry for `useInstrumentSpecs` from an array of partial specs. */

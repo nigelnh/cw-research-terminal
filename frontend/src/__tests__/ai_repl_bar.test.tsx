@@ -23,7 +23,7 @@ describe("AiReplBar — assistant surface, context awareness & secret hygiene", 
   it("renders the REPL input, prompt glyph and the three controls", () => {
     const html = renderMarkup(<AiReplBar />);
     expect(html).toContain('aria-label="Ask the research assistant"');
-    expect(html).toContain("ask about pricing, greeks, or contract terms");
+    expect(html).toContain("ask about pricing, greeks, contract terms");
     expect(html).toContain('aria-label="New chat"');
     expect(html).toContain('aria-label="Chat history"');
     expect(html).toContain('aria-label="Attach file"');

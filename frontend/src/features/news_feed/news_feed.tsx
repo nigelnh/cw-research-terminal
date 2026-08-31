@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import { useResearchNews } from "@/data/query";
+import { useResearchFeed } from "@/data/query";
 import { DASH } from "@/components/common/grid_table";
-import type { ResearchNewsItem } from "@/domain/models";
+import type { FeedContentType, ResearchFeedItem } from "@/domain/models";
 
 interface NewsFeedProps {
   /** Shared header filter (`?q=`). A bare token that looks like a ticker filters by
-   *  symbol; anything else is a free-text headline search. */
+   *  symbol; anything else is a free-text search. */
   filter?: string;
   selectedSymbol?: string | null;
   onSelectSymbol?: (symbol: string | null) => void;
@@ -14,31 +14,81 @@ interface NewsFeedProps {
 const TICKER_RE = /^[A-Z][A-Z0-9]{1,11}$/;
 const VN_TZ = "Asia/Ho_Chi_Minh";
 
+type SourceFilter = "ALL" | "HOSE" | "SSI" | "VNDIRECT";
+type KindFilter = "ALL" | FeedContentType;
+
+/** Column header styled to match the Research registry (grid_table HEAD_STYLE). */
+const TH: React.CSSProperties = {
+  padding: "5px 8px",
+  textAlign: "left",
+  color: "var(--t-50)",
+  fontWeight: 500,
+  whiteSpace: "nowrap",
+  userSelect: "none",
+};
+const TD: React.CSSProperties = { padding: "0 8px" };
+
 function fmtTime(iso: string | null): string {
   if (!iso) return DASH;
-  const d = new Date(iso);
+  const d = new Date(iso.length === 10 ? `${iso}T00:00:00+07:00` : iso);
   if (Number.isNaN(d.getTime())) return DASH;
   return new Intl.DateTimeFormat("en-GB", {
     timeZone: VN_TZ,
+    year: "2-digit",
     month: "short",
     day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
   }).format(d);
 }
 
-function NewsRow({
+function FilterChips<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { id: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 2, background: "var(--panel-2)", padding: 2, borderRadius: 3 }}>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onChange(o.id)}
+          aria-pressed={value === o.id}
+          className="focus-ring"
+          style={{
+            border: "none",
+            cursor: "pointer",
+            fontFamily: "var(--font-display)",
+            fontSize: 10.5,
+            letterSpacing: "0.02em",
+            padding: "3px 9px",
+            borderRadius: 2,
+            background: value === o.id ? "var(--panel-active)" : "transparent",
+            color: value === o.id ? "var(--t-92)" : "var(--t-55)",
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FeedRow({
   item,
   expanded,
   onToggle,
   onSelectSymbol,
 }: {
-  item: ResearchNewsItem;
+  item: ResearchFeedItem;
   expanded: boolean;
   onToggle: () => void;
   onSelectSymbol?: (s: string) => void;
 }) {
+  const isEvent = item.content_type === "company_event";
   return (
     <>
       <tr
@@ -47,64 +97,62 @@ function NewsRow({
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onToggle())}
         style={{
           cursor: "pointer",
-          height: 26,
+          height: 27,
           background: expanded ? "var(--panel-3)" : "transparent",
           borderBottom: "1px solid var(--border-row)",
         }}
       >
-        <td style={{ padding: "0 10px", color: "var(--t-50)", whiteSpace: "nowrap" }}>
-          {fmtTime(item.published_at)}
-        </td>
-        <td style={{ padding: "0 10px", whiteSpace: "nowrap" }}>
-          {item.symbols.length === 0 ? (
-            <span style={{ color: "var(--t-42)" }}>{DASH}</span>
+        <td style={{ ...TD, color: "var(--t-50)", whiteSpace: "nowrap" }}>{fmtTime(item.published_at)}</td>
+        <td style={{ ...TD, whiteSpace: "nowrap" }}>
+          {item.symbol ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectSymbol?.(item.symbol as string);
+              }}
+              style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer", color: "var(--accent)" }}
+            >
+              {item.symbol}
+            </button>
           ) : (
-            item.symbols.slice(0, 3).map((s, i) => (
-              <span key={s}>
-                {i > 0 && <span style={{ color: "var(--t-40)" }}>, </span>}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectSymbol?.(s);
-                  }}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    padding: 0,
-                    font: "inherit",
-                    cursor: "pointer",
-                    color: "var(--accent)",
-                  }}
-                >
-                  {s}
-                </button>
-              </span>
-            ))
+            <span style={{ color: "var(--t-42)" }}>{DASH}</span>
           )}
         </td>
-        <td style={{ padding: "0 10px", color: "var(--t-55)", whiteSpace: "nowrap", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }}>
+        <td style={{ ...TD, whiteSpace: "nowrap", color: isEvent ? "var(--accent-violet)" : "var(--t-55)" }}>
+          {isEvent ? "EVENT" : "DISCLOSURE"}
+        </td>
+        <td
+          style={{
+            ...TD,
+            color: "var(--t-55)",
+            whiteSpace: "nowrap",
+            maxWidth: 200,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
           {item.category ?? DASH}
         </td>
-        <td style={{ padding: "0 10px", color: "var(--t-85)" }}>{item.title}</td>
+        <td style={{ ...TD, color: "var(--t-85)" }}>{item.title}</td>
       </tr>
       {expanded && (
         <tr style={{ background: "var(--panel-2)", borderBottom: "1px solid var(--border-row)" }}>
-          <td colSpan={4} style={{ padding: "10px 14px 12px" }}>
-            <div style={{ fontSize: 11, color: "var(--t-70)", lineHeight: 1.55, maxWidth: 760 }}>
-              {item.summary ?? "No summary text was published with this disclosure."}
+          <td colSpan={5} style={{ padding: "10px 14px 12px" }}>
+            <div style={{ fontSize: 11.5, color: "var(--t-70)", lineHeight: 1.55, maxWidth: 780 }}>
+              {item.summary ?? "No summary text was published with this item."}
             </div>
             <div style={{ marginTop: 8, display: "flex", gap: 14, fontSize: 10, color: "var(--t-46)" }}>
               <span>SOURCE {item.source}</span>
-              {item.url && (
+              {item.source_url && (
                 <a
-                  href={item.url}
+                  href={item.source_url}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
                   style={{ color: "var(--accent)" }}
                 >
-                  OPEN DISCLOSURE ↗
+                  OPEN ↗
                 </a>
               )}
             </div>
@@ -118,54 +166,87 @@ function NewsRow({
 export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }: NewsFeedProps) {
   const term = filter.trim().replace(/^\//, "").trim();
   const looksLikeTicker = TICKER_RE.test(term.toUpperCase());
-  const symbol = looksLikeTicker ? term.toUpperCase() : selectedSymbol ?? undefined;
+  const headerSymbol = looksLikeTicker ? term.toUpperCase() : undefined;
   const query = looksLikeTicker ? undefined : term || undefined;
 
-  const { items, isLoading, isError, isEmpty, refetch } = useResearchNews({ symbol, query });
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("ALL");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("ALL");
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  const symbol = headerSymbol ?? selectedSymbol ?? undefined;
+
+  const { items, isLoading, isError, isEmpty, hasNextPage, fetchNextPage, isFetchingNextPage, refetch } =
+    useResearchFeed({
+      symbol,
+      source: sourceFilter === "ALL" ? undefined : sourceFilter,
+      contentType: kindFilter === "ALL" ? undefined : kindFilter,
+      query,
+    });
 
   const subtitle = useMemo(() => {
-    if (symbol) return `disclosures linked to ${symbol}`;
-    if (query) return `headline search · “${query}”`;
-    return "HOSE issuer & exchange disclosures";
+    if (symbol) return `feed for ${symbol}`;
+    if (query) return `search · “${query}”`;
+    return "HOSE disclosures & structured company events";
   }, [symbol, query]);
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 3 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 3, flexWrap: "wrap" }}>
         <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
           News
         </span>
         <span style={{ fontSize: 10.5, color: "var(--t-42)", fontStyle: "italic" }}>“{subtitle}”</span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <FilterChips
+            value={kindFilter}
+            onChange={setKindFilter}
+            options={[
+              { id: "ALL", label: "ALL" },
+              { id: "exchange_disclosure", label: "DISCLOSURES" },
+              { id: "company_event", label: "EVENTS" },
+            ]}
+          />
+          <FilterChips
+            value={sourceFilter}
+            onChange={setSourceFilter}
+            options={[
+              { id: "ALL", label: "ALL SRC" },
+              { id: "HOSE", label: "HOSE" },
+              { id: "SSI", label: "SSI" },
+              { id: "VNDIRECT", label: "VND" },
+            ]}
+          />
+        </span>
       </div>
       <p style={{ fontSize: 11, color: "var(--t-46)", marginBottom: 14 }}>
         {isLoading
-          ? "Loading disclosures…"
+          ? "Loading…"
           : isError
           ? "feed unavailable"
-          : `${items.length} item${items.length === 1 ? "" : "s"} · disclosed near the stated time — timing only, not causation`}
+          : `${items.length}${hasNextPage ? "+" : ""} item${items.length === 1 ? "" : "s"} · shown near the stated date — timing only, not causation`}
       </p>
 
       <table className="mono" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
-            <th style={{ padding: "0 10px 6px", textAlign: "left", fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", fontWeight: 400 }}>TIME</th>
-            <th style={{ padding: "0 10px 6px", textAlign: "left", fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", fontWeight: 400 }}>SYMBOL</th>
-            <th style={{ padding: "0 10px 6px", textAlign: "left", fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", fontWeight: 400 }}>CATEGORY</th>
-            <th style={{ padding: "0 10px 6px", textAlign: "left", fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", fontWeight: 400 }}>HEADLINE</th>
+            <th style={TH}>DATE</th>
+            <th style={TH}>SYMBOL</th>
+            <th style={TH}>KIND</th>
+            <th style={TH}>CATEGORY</th>
+            <th style={TH}>HEADLINE</th>
           </tr>
         </thead>
         <tbody>
           {isLoading ? (
             <tr>
-              <td colSpan={4} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
-                Loading disclosures…
+              <td colSpan={5} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
+                Loading…
               </td>
             </tr>
           ) : isError ? (
             <tr>
-              <td colSpan={4} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--down)" }}>
-                Could not load the news feed.{" "}
+              <td colSpan={5} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--down)" }}>
+                Could not load the feed.{" "}
                 <button
                   type="button"
                   onClick={() => refetch()}
@@ -177,15 +258,15 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
             </tr>
           ) : isEmpty ? (
             <tr>
-              <td colSpan={4} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
+              <td colSpan={5} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
                 {symbol || query
-                  ? "No disclosures match this filter yet."
-                  : "No disclosures ingested yet — pending the next ingestion run."}
+                  ? "Nothing matches this filter yet."
+                  : "No items ingested yet — pending the next ingestion run."}
               </td>
             </tr>
           ) : (
             items.map((item) => (
-              <NewsRow
+              <FeedRow
                 key={item.id}
                 item={item}
                 expanded={openId === item.id}
@@ -196,6 +277,29 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
           )}
         </tbody>
       </table>
+
+      {hasNextPage && !isLoading && !isError && (
+        <div style={{ textAlign: "center", padding: "16px 0 4px" }}>
+          <button
+            type="button"
+            onClick={fetchNextPage}
+            disabled={isFetchingNextPage}
+            className="focus-ring"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: 11,
+              letterSpacing: "0.04em",
+              padding: "6px 18px",
+              border: "1px solid var(--border-strong)",
+              background: "var(--panel-2)",
+              color: "var(--t-80)",
+              cursor: isFetchingNextPage ? "default" : "pointer",
+            }}
+          >
+            {isFetchingNextPage ? "LOADING…" : "LOAD OLDER"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
