@@ -6,7 +6,11 @@ from datetime import date
 
 import httpx
 
-from app.enrichment.cli import _months_ago, _year_chunks
+import argparse
+
+from app.core.config import settings
+from app.enrichment import cli as enrich_cli
+from app.enrichment.cli import _incremental_hose_langs, _months_ago, _year_chunks
 from app.enrichment.hose_crawler import crawl_window, month_windows
 from app.enrichment.http import EnrichmentHttpClient
 from app.enrichment.sources import HsxNewsSource
@@ -27,6 +31,39 @@ def test_24_month_window_is_partial_year_full_year_ytd():
 
 def test_months_ago_clamps_day():
     assert _months_ago(date(2026, 8, 31), 6) == date(2026, 2, 28)
+
+
+# -------------------------------------------------- incremental HOSE language policy
+def test_incremental_hose_langs_defaults_to_vi_only(monkeypatch):
+    monkeypatch.setattr(settings, "ENRICHMENT_INCREMENTAL_HOSE_LANGS", "vi")
+    assert _incremental_hose_langs() == ["vi"]
+    # garbage / empty falls back to vi, never silently to en
+    monkeypatch.setattr(settings, "ENRICHMENT_INCREMENTAL_HOSE_LANGS", "  , xx ")
+    assert _incremental_hose_langs() == ["vi"]
+    # EN market-wide is only ingested when explicitly configured
+    monkeypatch.setattr(settings, "ENRICHMENT_INCREMENTAL_HOSE_LANGS", "vi,en")
+    assert _incremental_hose_langs() == ["vi", "en"]
+
+
+async def test_enrich_incremental_crawls_hose_vi_only_by_default(monkeypatch):
+    monkeypatch.setattr(settings, "ENRICHMENT_INCREMENTAL_HOSE_LANGS", "vi")
+    seen: dict = {}
+
+    async def _fake_events(ns):
+        return 0
+
+    async def _fake_news(ns):
+        seen["lang"] = ns.lang
+        return 0
+
+    monkeypatch.setattr(enrich_cli, "_cmd_backfill_events", _fake_events)
+    monkeypatch.setattr(enrich_cli, "_cmd_backfill_news", _fake_news)
+
+    rc = await enrich_cli._cmd_enrich_incremental(
+        argparse.Namespace(database_url=None, json=True, verbose=False)
+    )
+    assert rc == 0
+    assert seen["lang"] == ["vi"]  # never re-crawls the deferred EN market-wide corpus
 
 
 def test_month_windows_cover_span_contiguously():
