@@ -40,26 +40,34 @@ async def get_news(symbol: str | None = None, limit: int | None = None, lang: st
     sym = symbol.strip().upper() if symbol else None
 
     from app.enrichment import repository as repo
+    from app.enrichment.english import category_en, headline_en
     from app.enrichment.normalize import strip_html
 
     maker = persistence_db.get_sessionmaker()
     async with maker() as s:
         rows = await repo.list_news(s, symbol=sym, lang=lang, limit=n)
 
-    return {
-        "symbol": sym,
-        "count": len(rows),
-        "items": [
+    items = []
+    for r in rows:
+        syms = r.symbols or []
+        t_en, exact = headline_en(r.title, category=r.category, symbol=(syms[0] if syms else None))
+        items.append(
             {
-                "title": r.title,
-                "summary": strip_html(r.summary_html),
-                "symbols": r.symbols or [],
-                "category": r.category,
+                "title_en": t_en,                       # English disclosure-type rendering
+                "title_en_exact": exact,                 # False -> a classification, not a translation
+                "category_en": category_en(r.category),
+                "title_original": r.title,               # verbatim Vietnamese (provenance)
+                "summary_original": strip_html(r.summary_html),
+                "source_language": r.lang or "vi",
+                "symbols": syms,
                 "published_at": r.published_at.date().isoformat() if r.published_at else None,
                 "source": r.source,
             }
-            for r in rows
-        ],
+        )
+    return {
+        "symbol": sym,
+        "count": len(rows),
+        "items": items,
         "causal_note": _CAUSAL_NOTE,
         "provenance": "RESEARCH_ENRICHMENT",
     }
@@ -74,6 +82,7 @@ async def get_corporate_actions(symbol: str, limit: int | None = None) -> Dict[s
     n = max(1, min(int(limit or settings.AI_CORPORATE_ACTIONS_MAX_RESULTS), int(settings.AI_CORPORATE_ACTIONS_MAX_RESULTS)))
 
     from app.enrichment import repository as repo
+    from app.enrichment.english import event_label_en
 
     maker = persistence_db.get_sessionmaker()
     async with maker() as s:
@@ -87,6 +96,7 @@ async def get_corporate_actions(symbol: str, limit: int | None = None) -> Dict[s
         "count": len(rows),
         "items": [
             {
+                "label": event_label_en(r.event_class, r.event_type),
                 "type": r.event_type,
                 "event_class": r.event_class,
                 "status": r.status,
@@ -96,7 +106,8 @@ async def get_corporate_actions(symbol: str, limit: int | None = None) -> Dict[s
                 "cash_amount_vnd_per_share": float(r.cash_amount_vnd) if r.cash_amount_vnd is not None else None,
                 "ratio_pct": float(r.ratio_pct) if r.ratio_pct is not None else None,
                 "dividend_year": r.dividend_year,
-                "note": r.note,
+                "note_original": r.note,
+                "source_language": "vi",
                 "source": r.source,
             }
             for r in rows
@@ -122,6 +133,7 @@ async def get_company_events(
     classes = [c.strip().upper() for c in event_class.split(",")] if event_class else None
 
     from app.enrichment import repository as repo
+    from app.enrichment.english import event_label_en
 
     maker = persistence_db.get_sessionmaker()
     async with maker() as s:
@@ -135,9 +147,11 @@ async def get_company_events(
         "count": len(rows),
         "items": [
             {
+                "label": event_label_en(r.event_class, r.event_type),
                 "event_class": r.event_class,
                 "type": r.event_type,
-                "name": r.event_name,
+                "name_original": r.event_name,
+                "source_language": "vi",
                 "status": r.status,
                 "public_date": _d(r.public_date),
                 "ex_date": _d(r.ex_date),
@@ -145,7 +159,7 @@ async def get_company_events(
                 "ratio_pct": float(r.ratio_pct) if r.ratio_pct is not None else None,
                 "cash_amount_vnd_per_share": float(r.cash_amount_vnd) if r.cash_amount_vnd is not None else None,
                 "value_text": r.value_text,
-                "note": (r.note[:280] if r.note else None),
+                "note_original": (r.note[:280] if r.note else None),
                 "source": r.source,
             }
             for r in rows

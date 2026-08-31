@@ -8,16 +8,23 @@ import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
 
 const FEED_KEY = queryKeys.research.feed({ symbol: null, source: null, contentType: null, eventClass: null, q: null, lang: "vi" });
 
-/** useInfiniteQuery cache shape. */
-function feedPages(items: unknown[], next_before: string | null = null) {
+/** useInfiniteQuery cache shape. English-first fields default from the raw `title`. */
+function feedPages(items: any[], next_before: string | null = null) {
+  const withEn = items.map((it) => ({
+    title_en: it.title,
+    title_en_exact: true,
+    category_en: it.category ?? "HOSE disclosure",
+    source_language: "vi",
+    ...it,
+  }));
   return {
-    pages: [{ items, count: items.length, has_more: next_before != null, next_before }],
+    pages: [{ items: withEn, count: withEn.length, has_more: next_before != null, next_before }],
     pageParams: [undefined],
   };
 }
 
 describe("NewsFeed — unified research feed", () => {
-  it("renders the dense DATE / SYMBOL / KIND / CATEGORY / HEADLINE table from seeded rows", () => {
+  it("renders the dense DATE / SYMBOL / TYPE / HEADLINE / SOURCE table from seeded rows", () => {
     const html = renderMarkup(<NewsFeed />, [
       {
         queryKey: [...FEED_KEY],
@@ -49,9 +56,12 @@ describe("NewsFeed — unified research feed", () => {
     ]);
     expect(html).toContain("DATE");
     expect(html).toContain("HEADLINE");
+    expect(html).toContain(">SOURCE<");
     expect(html).toContain("HPG: Board resolution on 2025 dividend");
     expect(html).toContain("DISCLOSURE");
     expect(html).toContain("EVENT");
+    // Vietnamese category label is not in the collapsed table
+    expect(html).not.toContain("Tin Tổ chức niêm yết");
     // causal restraint is stated, never "caused"
     expect(html).toContain("not causation");
     expect(html).not.toMatch(/caused (the |a )?price/i);
@@ -161,7 +171,9 @@ describe("InstrumentPanel — CORP EVENTS wired to /api/research/corporate-actio
     expect(html).toContain("CORP EVENTS");
     expect(html).toContain("CASH DIV");
     expect(html).toContain("2026-07-10");
-    expect(html).toContain("đ/sh");
+    expect(html).toContain("VND/sh");
+    // no Vietnamese unit label
+    expect(html).not.toContain("đ/sh");
     // the "not yet wired" placeholder is gone
     expect(html).not.toContain("not yet wired");
   });
