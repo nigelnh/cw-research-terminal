@@ -152,6 +152,25 @@ select:focus-visible,
   outline-offset: 1px;
 }
 
+/* The AI composer uses the terminal's own language: no rectangular box around the
+   textarea — a caret, a faint ground shift, and a subtle accent on the container's
+   top border. Consistent across Chrome/Safari (both draw a default textarea :focus
+   ring otherwise). */
+.ai-composer textarea {
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.ai-composer textarea:focus,
+.ai-composer textarea:focus-visible {
+  outline: none !important;
+}
+.ai-composer:focus-within {
+  border-top-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;

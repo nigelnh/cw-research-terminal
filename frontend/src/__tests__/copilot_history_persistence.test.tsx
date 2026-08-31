@@ -9,8 +9,6 @@ import {
   formatRelativeTime,
   type CopilotHistoryStore,
 } from "../data/ai/copilot_history_store";
-import { renderMarkup } from "./test_fixtures/render_markup";
-import { AiReplBar } from "../features/ai_assistant/ai_repl_bar";
 
 class MemoryStorage {
   private store: Record<string, string> = {};
@@ -271,20 +269,7 @@ describe("Targeted Copilot Chat Persistence & History Store Verifications", () =
     expect(reloaded.conversations.some((c) => c.id === "conv_30")).toBe(true);
   });
 
-  it("12. REPL bar exposes new-chat, history and attach controls", () => {
-    const html = renderMarkup(<AiReplBar />);
-
-    expect(html).toContain('aria-label="Ask the research assistant"');
-    expect(html).toContain('aria-label="New chat"');
-    expect(html).toContain('aria-label="Chat history"');
-    expect(html).toContain('aria-label="Attach file"');
-
-    // New-chat appears before history, history before attach.
-    const newIdx = html.indexOf('aria-label="New chat"');
-    const histIdx = html.indexOf('aria-label="Chat history"');
-    const attachIdx = html.indexOf('aria-label="Attach file"');
-    expect(newIdx).toBeGreaterThan(-1);
-    expect(newIdx).toBeLessThan(histIdx);
-    expect(histIdx).toBeLessThan(attachIdx);
-  });
+  // The conversation surface's controls (new chat, history, composer) are covered in
+  // ai_anchor.test.tsx against a real DOM — the anchor renders through a portal, which
+  // the static renderMarkup helper here cannot capture.
 });
