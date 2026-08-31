@@ -119,6 +119,8 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     // canonical registry terms still shown
     expect(html).toContain("37,000");
     expect(html).toContain("4:1");
+    // each row carries a "remove from view" control (non-destructive, session-only)
+    expect(html).toContain('aria-label="Hide CTCB2601 from this view"');
   });
 
   it("6 & 7. normalizePlainResponse strips markdown without losing math characters", () => {
