@@ -31,6 +31,16 @@ async def test_system_prompt_declares_provenance_and_guardrails():
     assert "Implied volatility" in p and "historical" in p.lower()
 
 
+async def test_system_prompt_enforces_english_first_language_policy():
+    p = BASE_SYSTEM_INSTRUCTIONS.lower()
+    assert "english-first" in p
+    assert "default response language is english" in p
+    # Vietnamese is opt-in on the user's own latest message, not inferred from context
+    assert "latest substantive message is written in vietnamese" in p
+    assert "not because the retrieved disclosure" in p or "not because" in p
+    assert "translate or paraphrase" in p  # VI source -> English answer, provenance kept
+
+
 async def test_full_prompt_has_injection_resistance_and_tool_provenance_mapping():
     ctx = ResearchContextEnvelope(activePage="research")
     full = build_system_prompt(ctx, tool_results=[{"symbol": "X", "provenance": "MARKET_STATE"}])
