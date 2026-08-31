@@ -41,6 +41,21 @@ async def test_system_prompt_enforces_english_first_language_policy():
     assert "translate or paraphrase" in p  # VI source -> English answer, provenance kept
 
 
+async def test_reply_language_is_detected_from_the_latest_message_only():
+    from app.ai.ai_system_prompt import build_system_prompt, detect_reply_language
+
+    assert detect_reply_language("How is IV different from HV?") == "English"
+    assert detect_reply_language("HPG gần đây có tin gì?") == "Vietnamese"
+    assert detect_reply_language("") == "English"
+    assert detect_reply_language(None) == "English"
+
+    # the directive is injected into the built prompt, English by default
+    en = build_system_prompt(latest_user_message="what about VPB?")
+    assert "Response language (authoritative for THIS reply): English" in en
+    vi = build_system_prompt(latest_user_message="còn VPB thì sao?")
+    assert "Response language (authoritative for THIS reply): Vietnamese" in vi
+
+
 async def test_full_prompt_has_injection_resistance_and_tool_provenance_mapping():
     ctx = ResearchContextEnvelope(activePage="research")
     full = build_system_prompt(ctx, tool_results=[{"symbol": "X", "provenance": "MARKET_STATE"}])

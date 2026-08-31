@@ -101,7 +101,11 @@ async def chat_endpoint(
     executed_tools = await tool_executor.resolve_and_execute_proactive_tools(last_user_query, req.context)
     tool_results = [t["result"] for t in executed_tools]
 
-    system_prompt = build_system_prompt(req.context, tool_results=tool_results if tool_results else None)
+    system_prompt = build_system_prompt(
+        req.context,
+        tool_results=tool_results if tool_results else None,
+        latest_user_message=last_user_query,
+    )
     raw_messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
     if req.stream:
