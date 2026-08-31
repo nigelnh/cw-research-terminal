@@ -48,11 +48,14 @@ def _split(s: str) -> list[str]:
 
 
 def _incremental_hose_langs() -> list[str]:
-    """HOSE languages the unattended crawls (enrich-incremental / bootstrap) ingest.
+    """Which HOSE *source* feed(s) the unattended crawls ingest — a data-ownership
+    choice, not the product's display language (the product is English-first
+    regardless; see docs/design/LANGUAGE_POLICY.md).
 
-    Defaults to ``["vi"]`` — EN market-wide ingestion is deferred (post-incident
-    policy: VI/EN are disjoint HOSE id-spaces and EN is ETF-NAV / foreign-holding
-    noise). A deliberate EN pull still runs via ``backfill-news --lang en``.
+    Defaults to ``["vi"]``: VI (langId=1) is the canonical HOSE feed with full,
+    useful coverage. EN (langId=2) is a disjoint id-space dominated by ETF-NAV /
+    foreign-holding notices, so EN market-wide ingestion stays off. A deliberate
+    EN pull is still an explicit ``backfill-news --lang en``.
     """
     langs = [x.strip().lower() for x in settings.ENRICHMENT_INCREMENTAL_HOSE_LANGS.split(",") if x.strip()]
     return [x for x in langs if x in ("vi", "en")] or ["vi"]

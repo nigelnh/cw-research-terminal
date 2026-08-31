@@ -128,7 +128,7 @@ class Settings(BaseSettings):
     SSI_IBOARD_API_BASE_URL: str = Field(default="https://iboard-api.ssi.com.vn", description="SSI iboard-api base (statistics/company events)")
     ENRICHMENT_INCREMENTAL_SSI_DAYS: int = Field(default=45, description="Rolling overlap window for SSI incremental crawl")
     ENRICHMENT_INCREMENTAL_HOSE_DAYS: int = Field(default=10, description="Rolling overlap window for HOSE incremental crawl")
-    ENRICHMENT_INCREMENTAL_HOSE_LANGS: str = Field(default="vi", description="Comma-separated HOSE languages the incremental / bootstrap crawl ingests. EN market-wide ingestion is deferred post-incident (VI/EN are disjoint HOSE id-spaces, EN is dominated by ETF-NAV / foreign-holding noise); a deliberate EN pull still runs via `backfill-news --lang en`.")
+    ENRICHMENT_INCREMENTAL_HOSE_LANGS: str = Field(default="vi", description="Which HOSE *source* feed(s) the unattended crawl ingests — a data-ownership choice, NOT the product's display language. VI (langId=1) is canonical: full coverage, the useful corpus. EN (langId=2) is a disjoint id-space dominated by ETF-NAV / foreign-holding noise, so EN market-wide ingestion stays off; a deliberate EN pull is still an explicit `backfill-news --lang en`. The product itself is English-first regardless — see docs/design/LANGUAGE_POLICY.md.")
     ENRICHMENT_DB_SIZE_CEILING_MB: int = Field(
         default=280,
         description="Enrichment write commands abort at/above this DB size (MB). Guards a small volume against a corpus-fill incident.",
