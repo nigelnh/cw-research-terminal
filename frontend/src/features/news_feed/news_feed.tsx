@@ -89,6 +89,7 @@ function FeedRow({
   onSelectSymbol?: (s: string) => void;
 }) {
   const isEvent = item.content_type === "company_event";
+  const hasOriginal = item.title && item.title !== item.title_en;
   return (
     <>
       <tr
@@ -122,28 +123,38 @@ function FeedRow({
         <td style={{ ...TD, whiteSpace: "nowrap", color: isEvent ? "var(--accent-violet)" : "var(--t-55)" }}>
           {isEvent ? "EVENT" : "DISCLOSURE"}
         </td>
-        <td
-          style={{
-            ...TD,
-            color: "var(--t-55)",
-            whiteSpace: "nowrap",
-            maxWidth: 200,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {item.category ?? DASH}
+        <td style={{ ...TD, color: "var(--t-85)" }}>
+          {item.title_en}
+          {!item.title_en_exact && (
+            <span
+              title="Classified from the disclosure category — see the original Vietnamese title below"
+              style={{ marginLeft: 6, color: "var(--t-42)", fontSize: 10 }}
+            >
+              ~
+            </span>
+          )}
         </td>
-        <td style={{ ...TD, color: "var(--t-85)" }}>{item.title}</td>
+        <td style={{ ...TD, whiteSpace: "nowrap", color: "var(--t-50)" }}>{item.source}</td>
       </tr>
       {expanded && (
         <tr style={{ background: "var(--panel-2)", borderBottom: "1px solid var(--border-row)" }}>
           <td colSpan={5} style={{ padding: "10px 14px 12px" }}>
-            <div style={{ fontSize: 11.5, color: "var(--t-70)", lineHeight: 1.55, maxWidth: 780 }}>
-              {item.summary ?? "No summary text was published with this item."}
+            <div style={{ fontSize: 12, color: "var(--t-85)", lineHeight: 1.5, maxWidth: 820, fontWeight: 500 }}>
+              {item.title_en}
             </div>
-            <div style={{ marginTop: 8, display: "flex", gap: 14, fontSize: 10, color: "var(--t-46)" }}>
+            <div style={{ marginTop: 3, fontSize: 10.5, color: "var(--t-50)" }}>
+              {item.category_en}
+              {!item.title_en_exact && " · headline classified from category, not a translation"}
+            </div>
+            {item.summary && (
+              <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--t-70)", lineHeight: 1.55, maxWidth: 820 }}>
+                {item.summary}
+                <span style={{ marginLeft: 6, color: "var(--t-42)", fontSize: 10 }}>(original Vietnamese)</span>
+              </div>
+            )}
+            <div style={{ marginTop: 10, display: "flex", gap: 14, fontSize: 10, color: "var(--t-46)", flexWrap: "wrap" }}>
               <span>SOURCE {item.source}</span>
+              <span>ORIGINAL LANGUAGE {(item.source_language || "vi").toUpperCase()}</span>
               {item.source_url && (
                 <a
                   href={item.source_url}
@@ -152,10 +163,16 @@ function FeedRow({
                   onClick={(e) => e.stopPropagation()}
                   style={{ color: "var(--accent)" }}
                 >
-                  OPEN ↗
+                  OFFICIAL SOURCE ↗
                 </a>
               )}
             </div>
+            {hasOriginal && (
+              <div style={{ marginTop: 8, fontSize: 11, color: "var(--t-55)", lineHeight: 1.5, maxWidth: 820 }}>
+                <span style={{ color: "var(--t-42)", fontSize: 10 }}>Original (Vietnamese): </span>
+                {item.title}
+              </div>
+            )}
           </td>
         </tr>
       )}
@@ -231,9 +248,9 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
           <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
             <th style={TH}>DATE</th>
             <th style={TH}>SYMBOL</th>
-            <th style={TH}>KIND</th>
-            <th style={TH}>CATEGORY</th>
+            <th style={TH}>TYPE</th>
             <th style={TH}>HEADLINE</th>
+            <th style={TH}>SOURCE</th>
           </tr>
         </thead>
         <tbody>

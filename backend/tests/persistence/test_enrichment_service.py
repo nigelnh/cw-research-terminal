@@ -231,8 +231,35 @@ async def test_read_api_empty_then_populated(_wired_db):
 
         got = (await ac.get("/api/research/news", params={"symbol": "HPG"})).json()
         assert got["count"] == 1
-        assert got["items"][0]["title"] == "HPG: hello"
-        assert got["items"][0]["summary"] == "body"  # html stripped
+        it = got["items"][0]
+        assert it["title"] == "HPG: hello"          # original Vietnamese preserved
+        assert it["summary"] == "body"              # html stripped
+        # English-first fields present
+        assert it["source_language"] == "vi"
+        assert it["category_en"]  # non-empty deterministic English category
+        assert it["title_en"]
+        assert isinstance(it["title_en_exact"], bool)
+
+
+async def test_read_api_news_english_layer_renders_known_pattern(_wired_db):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    svc = EnrichmentService(_wired_db)
+    await svc.upsert_news([
+        N.normalize_hsx_news(
+            {"id": 77, "title": "HPG: Báo cáo tình hình quản trị công ty năm 2025",
+             "publishFrom": 1_787_875_200, "catName": "Tin Tổ chức niêm yết"},
+            lang="vi",
+        )
+    ])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        it = (await ac.get("/api/research/news", params={"symbol": "HPG"})).json()["items"][0]
+    assert it["title_en"] == "Corporate governance report, 2025 — HPG"
+    assert it["title_en_exact"] is True
+    assert it["category_en"] == "Listed-issuer disclosure"
+    assert it["title"] == "HPG: Báo cáo tình hình quản trị công ty năm 2025"  # verbatim VI kept
 
 
 # ------------------------------------------------------------ incident hardening

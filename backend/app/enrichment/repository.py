@@ -129,6 +129,8 @@ class FeedRow:
     content_type: str
     source: str
     source_url: str | None
+    ev_class: str | None  # company_event rows only — for the English label
+    ev_type: str | None
     _sort: datetime | date | None  # cursor key, not serialised
 
 
@@ -143,6 +145,8 @@ def _news_feed_select(lang: str):
         ExternalNews.content_type.label("content_type"),
         ExternalNews.source.label("source"),
         ExternalNews.url.label("source_url"),
+        literal(None).label("ev_class"),
+        literal(None).label("ev_type"),
         cast(func.coalesce(ExternalNews.published_at, ExternalNews.observed_at), String).label("sort_ts"),
     ).where(ExternalNews.lang == lang)
 
@@ -158,6 +162,8 @@ def _event_feed_select():
         literal("company_event").label("content_type"),
         CompanyEvent.source.label("source"),
         CompanyEvent.url.label("source_url"),
+        CompanyEvent.event_class.label("ev_class"),
+        CompanyEvent.event_type.label("ev_type"),
         func.coalesce(
             cast(_event_sort_col(), String),
             cast(CompanyEvent.observed_at, String),
@@ -251,6 +257,8 @@ async def list_feed(
                 content_type=m["content_type"],
                 source=m["source"],
                 source_url=m["source_url"],
+                ev_class=m["ev_class"],
+                ev_type=m["ev_type"],
                 _sort=m["sort_ts"],
             )
         )
