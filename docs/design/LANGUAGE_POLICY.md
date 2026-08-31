@@ -167,9 +167,9 @@ document is the design + the product owner's go/no-go gate.
 
 - **Source language:** Vietnamese is the canonical HOSE ingestion feed (full coverage;
   EN is disjoint + noisy). SSI/VNDirect events are Vietnamese at source. EN market-wide
-  ingestion stays **disabled** — [`fix/incremental-vi-only`](#) makes `enrich-incremental`
-  / `bootstrap` default to `ENRICHMENT_INCREMENTAL_HOSE_LANGS=vi`; a deliberate EN pull is
-  still an explicit `backfill-news --lang en`.
+  ingestion stays **disabled** — `enrich-incremental` / `bootstrap` default to
+  `ENRICHMENT_INCREMENTAL_HOSE_LANGS=vi`; a deliberate EN pull is still an explicit
+  `backfill-news --lang en`.
 - **Product language:** English-first on every user-facing surface. UI chrome is already
   fully English. Data free-text (News title/summary/category, event_name) still surfaces
   Vietnamese — closed by the deterministic English-presentation layer in §2 (designed,
