@@ -366,11 +366,20 @@ class UserWatchlistItem(Base):
 # tables NEVER touch an upstream source. A source failure here cannot affect  #
 # /healthz, realtime, quant, or the core market APIs.                         #
 # --------------------------------------------------------------------------- #
-_CORPORATE_ACTION_TYPE_CHECK = (
-    "action_type IN ('CASH_DIVIDEND','STOCK_DIVIDEND','BONUS_ISSUE','RIGHTS_ISSUE',"
-    "'AGM','EGM','LISTING','DELISTING','OTHER')"
+# Step 14B — `corporate_actions` was renamed to `company_events` and generalised: it now
+# also holds financial-statement disclosures and insider/ownership transactions from SSI,
+# which are company events but NOT price-adjustment corporate actions. `event_class` is the
+# discriminator; `repository.list_corporate_actions()` filters to the price-sensitive +
+# meeting subset for backwards compatibility.
+_COMPANY_EVENT_TYPE_CHECK = (
+    "event_type IN ('CASH_DIVIDEND','STOCK_DIVIDEND','BONUS_ISSUE','RIGHTS_ISSUE',"
+    "'AGM','EGM','LISTING','DELISTING','ADDITIONAL_LISTING','FINANCIAL_STATEMENT',"
+    "'INSIDER_TRANSACTION','OTHER')"
 )
-_CORPORATE_ACTION_STATUS_CHECK = "status IN ('SCHEDULED','CONFIRMED','CANCELLED','UNKNOWN')"
+_COMPANY_EVENT_CLASS_CHECK = (
+    "event_class IN ('DIVIDEND','RIGHTS','MEETING','LISTING','FINANCIAL','OWNERSHIP','OTHER')"
+)
+_COMPANY_EVENT_STATUS_CHECK = "status IN ('SCHEDULED','CONFIRMED','CANCELLED','UNKNOWN')"
 
 
 class ExternalNews(Base):
@@ -388,6 +397,11 @@ class ExternalNews(Base):
     title: Mapped[str] = mapped_column(String(1000), nullable=False)
     summary_html: Mapped[str | None] = mapped_column(String(8000), nullable=True)
     category: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Coarse artifact kind for the unified research feed. HSX/HOSE rows are exchange
+    # disclosures; the column exists so the feed can union news with company events.
+    content_type: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default=text("'exchange_disclosure'")
+    )
 
     # Best-effort symbol linkage (list of tickers). Empty when we can't be sure.
     symbols: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
@@ -413,34 +427,47 @@ class ExternalNews(Base):
         UniqueConstraint("source", "source_id", "lang", name="uq_external_news_identity"),
         Index("ix_external_news_published", "published_at"),
         Index("ix_external_news_symbols", "symbols", postgresql_using="gin"),
+        Index("ix_external_news_feed", "published_at", "id"),
     )
 
 
-class CorporateAction(Base):
-    """Structured corporate-action events (VNDirect ``v4/events``). Deduplicated on
-    ``(source, source_id)``. Cash amounts in VND/share; ``ratio_pct`` for share
-    distributions. Contract/history adjustment logic consumes these read-only."""
+class CompanyEvent(Base):
+    """Structured company events for a listed symbol, from VNDirect ``v4/events`` and SSI
+    ``company/ssmi/corporate-actions``. Deduplicated on ``(source, source_id)``.
 
-    __tablename__ = "corporate_actions"
+    ``event_class`` is the discriminator: ``DIVIDEND`` / ``RIGHTS`` (price-sensitive,
+    ex-date bearing), ``MEETING`` (AGM/EGM), ``LISTING``, ``FINANCIAL`` (SSI financial
+    statements), ``OWNERSHIP`` (SSI insider / major-holder transactions), ``OTHER``.
+    Only ``DIVIDEND`` / ``RIGHTS`` are corporate actions in the price-adjustment sense.
+    Cash amounts in VND/share; ``ratio_pct`` for share distributions. All consumers are
+    read-only; contract/quant logic never mutates these."""
+
+    __tablename__ = "company_events"
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
-    source: Mapped[str] = mapped_column(String(24), nullable=False)          # VNDIRECT
+    source: Mapped[str] = mapped_column(String(24), nullable=False)          # VNDIRECT | SSI
     source_id: Mapped[str] = mapped_column(String(80), nullable=False)
     symbol: Mapped[str] = mapped_column(String(32), nullable=False)
 
-    action_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    event_class: Mapped[str] = mapped_column(String(12), nullable=False, server_default=text("'OTHER'"))
+    event_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    # The source's own label for the event (e.g. SSI ``eventName`` / ``eventListCode``).
+    event_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    source_event_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     status: Mapped[str] = mapped_column(String(12), nullable=False, server_default=text("'UNKNOWN'"))
 
     ex_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     record_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     payment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     disclosure_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    public_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     cash_amount_vnd: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
     ratio_pct: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
     ratio_text: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    value_text: Mapped[str | None] = mapped_column(String(120), nullable=True)
     dividend_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     observed_at: Mapped[datetime] = mapped_column(
@@ -456,10 +483,13 @@ class CorporateAction(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("source", "source_id", name="uq_corporate_actions_identity"),
-        CheckConstraint(_CORPORATE_ACTION_TYPE_CHECK, name="ck_corporate_actions_type"),
-        CheckConstraint(_CORPORATE_ACTION_STATUS_CHECK, name="ck_corporate_actions_status"),
-        Index("ix_corporate_actions_symbol_ex", "symbol", "ex_date"),
+        UniqueConstraint("source", "source_id", name="uq_company_events_identity"),
+        CheckConstraint(_COMPANY_EVENT_TYPE_CHECK, name="ck_company_events_type"),
+        CheckConstraint(_COMPANY_EVENT_CLASS_CHECK, name="ck_company_events_class"),
+        CheckConstraint(_COMPANY_EVENT_STATUS_CHECK, name="ck_company_events_status"),
+        Index("ix_company_events_symbol_ex", "symbol", "ex_date"),
+        Index("ix_company_events_symbol_class", "symbol", "event_class"),
+        Index("ix_company_events_sort", "public_date", "ex_date"),
     )
 
 
@@ -519,6 +549,14 @@ class SourceFetchLog(Base):
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+    # Step 14B — historical-crawl bookkeeping so coverage completeness is queryable.
+    window_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    window_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    inserted: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    complete: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     __table_args__ = (
         Index("ix_source_fetch_log_source_time", "source", "fetched_at"),

@@ -6,16 +6,22 @@ empty result — the API layer turns that into a truthful empty state, not an er
 
 from __future__ import annotations
 
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import date, datetime
 
-from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy import String, and_, cast, desc, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.persistence.models import CompanyProfile, CorporateAction, ExternalNews
+from app.persistence.models import CompanyEvent, CompanyProfile, ExternalNews
 
 _MAX_LIMIT = 100
 
+# The "corporate action" subset of company events — price-sensitive distributions plus
+# the meeting / listing events consumers expect from the pre-14B model.
+_CA_CLASSES = ("DIVIDEND", "RIGHTS", "MEETING", "LISTING")
 
+
+# --------------------------------------------------------------------------- news
 async def list_news(
     session: AsyncSession,
     *,
@@ -50,26 +56,59 @@ async def news_symbol_facets(session: AsyncSession, *, lang: str = "vi", limit: 
     return [r[0] for r in (await session.execute(stmt)).all()]
 
 
+async def news_count_for_symbol(session: AsyncSession, symbol: str, *, lang: str = "vi") -> int:
+    stmt = (
+        select(func.count())
+        .select_from(ExternalNews)
+        .where(and_(ExternalNews.lang == lang, ExternalNews.symbols.contains([symbol.upper()])))
+    )
+    return int((await session.execute(stmt)).scalar() or 0)
+
+
+# ------------------------------------------------------------------- company events
+def _event_sort_col():
+    return func.coalesce(
+        CompanyEvent.ex_date,
+        CompanyEvent.public_date,
+        CompanyEvent.record_date,
+        CompanyEvent.disclosure_date,
+    )
+
+
+async def list_company_events(
+    session: AsyncSession,
+    *,
+    symbol: str,
+    limit: int = 20,
+    classes: list[str] | None = None,
+    types: list[str] | None = None,
+) -> list[CompanyEvent]:
+    limit = max(1, min(int(limit), _MAX_LIMIT))
+    stmt = select(CompanyEvent).where(CompanyEvent.symbol == symbol.upper())
+    if classes:
+        stmt = stmt.where(CompanyEvent.event_class.in_([c.upper() for c in classes]))
+    if types:
+        stmt = stmt.where(CompanyEvent.event_type.in_([t.upper() for t in types]))
+    stmt = stmt.order_by(desc(_event_sort_col())).limit(limit)
+    return list((await session.execute(stmt)).scalars().all())
+
+
 async def list_corporate_actions(
     session: AsyncSession,
     *,
     symbol: str,
     limit: int = 20,
     action_types: list[str] | None = None,
-) -> list[CorporateAction]:
+) -> list[CompanyEvent]:
+    """The price-adjustment + meeting subset — the pre-14B `corporate_actions` semantics."""
     limit = max(1, min(int(limit), _MAX_LIMIT))
-    stmt = select(CorporateAction).where(CorporateAction.symbol == symbol.upper())
+    stmt = select(CompanyEvent).where(
+        CompanyEvent.symbol == symbol.upper(),
+        CompanyEvent.event_class.in_(_CA_CLASSES),
+    )
     if action_types:
-        stmt = stmt.where(CorporateAction.action_type.in_(action_types))
-    stmt = stmt.order_by(
-        desc(
-            func.coalesce(
-                CorporateAction.ex_date,
-                CorporateAction.record_date,
-                CorporateAction.disclosure_date,
-            )
-        )
-    ).limit(limit)
+        stmt = stmt.where(CompanyEvent.event_type.in_(action_types))
+    stmt = stmt.order_by(desc(_event_sort_col())).limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
 
@@ -78,10 +117,135 @@ async def get_company_profile(session: AsyncSession, symbol: str) -> CompanyProf
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def news_count_for_symbol(session: AsyncSession, symbol: str, *, lang: str = "vi") -> int:
-    stmt = (
-        select(func.count())
-        .select_from(ExternalNews)
-        .where(and_(ExternalNews.lang == lang, ExternalNews.symbols.contains([symbol.upper()])))
+# --------------------------------------------------------------------- unified feed
+@dataclass(slots=True)
+class FeedRow:
+    id: str
+    symbol: str | None
+    published_at: str | None
+    title: str
+    summary: str | None
+    category: str | None
+    content_type: str
+    source: str
+    source_url: str | None
+    _sort: datetime | date | None  # cursor key, not serialised
+
+
+def _news_feed_select(lang: str):
+    return select(
+        (literal("news_") + cast(ExternalNews.id, String)).label("id"),
+        ExternalNews.symbols.label("symbols"),
+        cast(ExternalNews.published_at, String).label("published_at"),
+        ExternalNews.title.label("title"),
+        cast(ExternalNews.summary_html, String).label("summary"),
+        ExternalNews.category.label("category"),
+        ExternalNews.content_type.label("content_type"),
+        ExternalNews.source.label("source"),
+        ExternalNews.url.label("source_url"),
+        cast(func.coalesce(ExternalNews.published_at, ExternalNews.observed_at), String).label("sort_ts"),
+    ).where(ExternalNews.lang == lang)
+
+
+def _event_feed_select():
+    return select(
+        (literal("event_") + cast(CompanyEvent.id, String)).label("id"),
+        func.jsonb_build_array(CompanyEvent.symbol).label("symbols"),
+        cast(_event_sort_col(), String).label("published_at"),
+        func.concat(CompanyEvent.symbol, literal(" · "), func.coalesce(CompanyEvent.event_name, CompanyEvent.event_type)).label("title"),
+        cast(CompanyEvent.note, String).label("summary"),
+        CompanyEvent.event_class.label("category"),
+        literal("company_event").label("content_type"),
+        CompanyEvent.source.label("source"),
+        CompanyEvent.url.label("source_url"),
+        func.coalesce(
+            cast(_event_sort_col(), String),
+            cast(CompanyEvent.observed_at, String),
+        ).label("sort_ts"),
     )
-    return int((await session.execute(stmt)).scalar() or 0)
+
+
+async def list_feed(
+    session: AsyncSession,
+    *,
+    symbol: str | None = None,
+    source: str | None = None,
+    content_type: str | None = None,
+    category: str | None = None,
+    event_class: str | None = None,
+    query: str | None = None,
+    lang: str = "vi",
+    limit: int = 30,
+    before: str | None = None,
+) -> tuple[list[FeedRow], bool]:
+    """Unified, cursor-paginated research feed over news + company events.
+
+    Returns (rows, has_more). The cursor is an ISO timestamp string on the row sort key;
+    `before` pages backwards in time. Kept deliberately simple — a lexical string compare
+    on the coalesced date works because all keys are ISO-ordered.
+    """
+    limit = max(1, min(int(limit), _MAX_LIMIT))
+    want_news = content_type in (None, "exchange_disclosure")
+    want_events = content_type in (None, "company_event")
+    if source == "HOSE":
+        want_events = False
+    if source in ("SSI", "VNDIRECT"):
+        want_news = False
+
+    selects = []
+    if want_news:
+        ns = _news_feed_select(lang)
+        if symbol:
+            ns = ns.where(ExternalNews.symbols.contains([symbol.upper()]))
+        if source:
+            ns = ns.where(ExternalNews.source == source)
+        if category:
+            ns = ns.where(ExternalNews.category == category)
+        if query:
+            ns = ns.where(ExternalNews.title.ilike(f"%{query.strip()}%"))
+        selects.append(ns)
+    if want_events:
+        es = _event_feed_select()
+        if symbol:
+            es = es.where(CompanyEvent.symbol == symbol.upper())
+        if source:
+            es = es.where(CompanyEvent.source == source)
+        if event_class:
+            es = es.where(CompanyEvent.event_class == event_class.upper())
+        if query:
+            es = es.where(
+                or_(CompanyEvent.note.ilike(f"%{query.strip()}%"),
+                    CompanyEvent.event_name.ilike(f"%{query.strip()}%"))
+            )
+        selects.append(es)
+
+    if not selects:
+        return [], False
+
+    union = selects[0] if len(selects) == 1 else selects[0].union_all(*selects[1:])
+    sub = union.subquery("feed")
+    stmt = select(sub).order_by(desc(sub.c.sort_ts), desc(sub.c.id)).limit(limit + 1)
+    if before:
+        stmt = stmt.where(sub.c.sort_ts < before)
+
+    raw = (await session.execute(stmt)).mappings().all()
+    has_more = len(raw) > limit
+    raw = raw[:limit]
+    rows: list[FeedRow] = []
+    for m in raw:
+        syms = m["symbols"] or []
+        rows.append(
+            FeedRow(
+                id=m["id"],
+                symbol=(syms[0] if syms else None),
+                published_at=(str(m["published_at"]) if m["published_at"] is not None else None),
+                title=m["title"],
+                summary=m["summary"],
+                category=m["category"],
+                content_type=m["content_type"],
+                source=m["source"],
+                source_url=m["source_url"],
+                _sort=m["sort_ts"],
+            )
+        )
+    return rows, has_more

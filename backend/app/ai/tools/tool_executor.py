@@ -70,6 +70,17 @@ CORP_ACTION_KEYWORDS = {
     "họp cổ đông", "phát hành thêm",
 }
 
+# The broader SSI company-event stream: financial statements + insider / major-holder deals.
+COMPANY_EVENT_KEYWORDS = {
+    "financial statement", "financial statements", "financial report", "earnings report",
+    "quarterly results", "quarterly earnings", "annual report", "q1", "q2", "q3", "q4",
+    "insider", "insider transaction", "insider trading", "insider buying", "insider selling",
+    "major shareholder", "major holder", "ownership change", "related party",
+    "company events", "corporate events", "recent events", "what has happened",
+    "báo cáo tài chính", "bctc", "kết quả kinh doanh", "lợi nhuận quý", "giao dịch nội bộ",
+    "cổ đông lớn", "người nội bộ", "sự kiện doanh nghiệp",
+}
+
 
 def generate_activity_label(tool_name: str, args: Dict[str, Any]) -> str:
     """Generates clean, user-facing activity labels for tool execution."""
@@ -92,6 +103,8 @@ def generate_activity_label(tool_name: str, args: Dict[str, Any]) -> str:
         return f"Reading {sym} disclosures…" if sym else "Reading exchange disclosures…"
     elif tool_name == "get_corporate_actions":
         return f"Reading {sym} corporate actions…" if sym else "Reading corporate actions…"
+    elif tool_name == "get_company_events":
+        return f"Reading {sym} company events…" if sym else "Reading company events…"
     return "Analyzing market context…"
 
 
@@ -199,6 +212,7 @@ class ToolExecutor:
         wants_order_book = any(k in q_lower for k in ORDER_BOOK_KEYWORDS)
         is_dashboard_query = any(k in q_lower for k in DASHBOARD_KEYWORDS)
         wants_corp_actions = any(k in q_lower for k in CORP_ACTION_KEYWORDS)
+        wants_company_events = any(k in q_lower for k in COMPANY_EVENT_KEYWORDS)
         wants_news = any(k in q_lower for k in NEWS_KEYWORDS)
         on_news_page = context is not None and context.activePage == "news"
         # Outside an active session there is no live quote to fetch - pull the last
@@ -218,11 +232,14 @@ class ToolExecutor:
                 elif wants_order_book:
                     await self.call_tool("get_order_book", {"symbol": sym})
 
-                # Step 14A: PostgreSQL-backed research reads. Corporate actions are the
-                # more specific intent; news is the broader one. Both are read-only and
-                # never contact an upstream source.
-                if wants_corp_actions and inst.instrument_type != "CW":
-                    await self.call_tool("get_corporate_actions", {"symbol": sym})
+                # Step 14A/B: PostgreSQL-backed research reads — read-only, no upstream.
+                # get_corporate_actions = dividends / ex-dates / meetings (price-adjustment
+                # sense); get_company_events = the broader stream incl. financials + insider.
+                if inst.instrument_type != "CW":
+                    if wants_company_events:
+                        await self.call_tool("get_company_events", {"symbol": sym})
+                    if wants_corp_actions:
+                        await self.call_tool("get_corporate_actions", {"symbol": sym})
                 if wants_news:
                     await self.call_tool("get_news", {"symbol": sym})
 

@@ -1,11 +1,14 @@
-"""Command-line entrypoints for Step 14A research enrichment ingestion.
+"""Command-line entrypoints for research-enrichment ingestion (Step 14A + 14B).
 
     python -m app.enrichment.cli news --days 30 --lang vi
-    python -m app.enrichment.cli news --start 2026-08-01 --end 2026-08-31 --lang vi --lang en
     python -m app.enrichment.cli corporate-actions --symbols HPG,VPB,TCB
     python -m app.enrichment.cli company-profiles --symbols HPG,VPB,TCB
+    python -m app.enrichment.cli backfill-events        # SSI company events, ~24mo, registry universe
+    python -m app.enrichment.cli backfill-news --lang vi --lang en   # HOSE news, ~24mo, adaptive split
+    python -m app.enrichment.cli enrich-incremental     # rolling-overlap incremental crawl
+    python -m app.enrichment.cli coverage               # per-window completeness report
     python -m app.enrichment.cli validate-history --symbols HPG,VPB,TCB,VHM --days 30
-    python -m app.enrichment.cli bootstrap        # curated universe + 30d news window
+    python -m app.enrichment.cli bootstrap              # curated universe + 30d news window
     python -m app.enrichment.cli status
 
 Only ``news`` / ``corporate-actions`` / ``company-profiles`` / ``bootstrap`` write to the
@@ -42,6 +45,49 @@ def _parse_date(s: str) -> date:
     return datetime.strptime(s.strip(), "%Y-%m-%d").date()
 
 
+def _vn_today() -> date:
+    """Canonical Asia/Ho_Chi_Minh calendar date."""
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+
+
+def _months_ago(d: date, months: int) -> date:
+    y, m = d.year, d.month - months
+    while m <= 0:
+        m += 12
+        y -= 1
+    # clamp day (e.g. 31 Aug - 6 months -> 28/29 Feb)
+    import calendar
+
+    return date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
+
+
+def _year_chunks(start: date, end: date) -> list[tuple[date, date]]:
+    """Split [start, end] into <=1-calendar-year windows (SSI rejects longer ranges)."""
+    out: list[tuple[date, date]] = []
+    cur = start
+    while cur <= end:
+        year_end = date(cur.year, 12, 31)
+        w_end = min(year_end, end)
+        out.append((cur, w_end))
+        cur = date(cur.year + 1, 1, 1)
+    return out
+
+
+async def _underlying_universe() -> list[str]:
+    """CW underlying symbols from the canonical registry — not the watchlist."""
+    from app.instruments.instrument_registry import instrument_registry
+
+    try:
+        await instrument_registry.initialize()
+        unds = await instrument_registry.get_underlyings(active_only=False)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("registry unavailable (%s); falling back to bootstrap set", e)
+        return list(BOOTSTRAP_SYMBOLS)
+    return sorted(set(unds) | set(BOOTSTRAP_SYMBOLS)) if unds else list(BOOTSTRAP_SYMBOLS)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m app.enrichment.cli", description=__doc__)
     p.add_argument("--database-url", default=None)
@@ -56,11 +102,28 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("--lang", action="append", choices=["vi", "en"], help="repeatable; default vi")
     n.add_argument("--max-pages", type=int, default=None)
 
-    ca = sub.add_parser("corporate-actions", help="ingest VNDirect corporate events for symbols")
+    ca = sub.add_parser("corporate-actions", help="ingest VNDirect company events for symbols")
     ca.add_argument("--symbols", required=True, type=_split)
 
     cp = sub.add_parser("company-profiles", help="ingest VNDirect company reference for symbols")
     cp.add_argument("--symbols", required=True, type=_split)
+
+    be = sub.add_parser("backfill-events", help="SSI structured company events — ~24mo, per underlying, year chunks")
+    be.add_argument("--symbols", type=_split, default=None, help="default: CW underlying universe from the registry")
+    be.add_argument("--months", type=int, default=24)
+    be.add_argument("--start", type=_parse_date, default=None)
+    be.add_argument("--end", type=_parse_date, default=None)
+
+    bn = sub.add_parser("backfill-news", help="HOSE news — ~24mo, monthly windows with adaptive splitting")
+    bn.add_argument("--lang", action="append", choices=["vi", "en"], help="repeatable; default vi")
+    bn.add_argument("--months", type=int, default=24)
+    bn.add_argument("--start", type=_parse_date, default=None)
+    bn.add_argument("--end", type=_parse_date, default=None)
+    bn.add_argument("--page-size", type=int, default=None)
+    bn.add_argument("--max-pages", type=int, default=None)
+
+    sub.add_parser("enrich-incremental", help="rolling-overlap incremental crawl (SSI + HOSE)")
+    sub.add_parser("coverage", help="report per-window backfill completeness")
 
     vh = sub.add_parser("validate-history", help="compare VNDirect EOD vs production canonical history")
     vh.add_argument("--symbols", required=True, type=_split)
@@ -282,6 +345,191 @@ async def _cmd_validate_history(args) -> int:
         await engine.dispose()
 
 
+async def _log_window(sm, *, source, endpoint, symbol, window, page, ok, item_count, inserted, updated, complete, error=None):
+    from app.persistence.models import SourceFetchLog
+
+    try:
+        async with sm() as s:
+            s.add(SourceFetchLog(
+                source=source, endpoint=endpoint[:120], symbol=symbol,
+                http_status=200 if ok else None, item_count=item_count, ok=ok,
+                error=(error[:1000] if error else None), duration_ms=None,
+                window_start=window[0], window_end=window[1], page=page,
+                inserted=inserted, updated=updated, complete=complete,
+            ))
+            await s.commit()
+    except Exception as e:  # noqa: BLE001 - observability must never break ingestion
+        logger.warning("window log failed: %s", e)
+
+
+# --------------------------------------------------------------------------- #
+async def _cmd_backfill_events(args) -> int:
+    """SSI structured company events — ~24 months, per underlying, year chunks."""
+    from app.enrichment.http import EnrichmentHttpClient
+    from app.enrichment.normalize import normalize_ssi_event
+    from app.enrichment.service import EnrichmentService, UpsertResult
+    from app.enrichment.sources import SsiCompanyEventsSource
+
+    engine, sm = await _wire(args)
+    symbols = args.symbols or await _underlying_universe()
+    end = args.end or _vn_today()
+    start = args.start or _months_ago(end, args.months)
+    svc = EnrichmentService(sm)
+    total = UpsertResult()
+    per_symbol: dict = {}
+    try:
+        async with EnrichmentHttpClient(sessionmaker=sm) as client:
+            src = SsiCompanyEventsSource(client)
+            for sym in symbols:
+                acc = UpsertResult()
+                fetched = 0
+                dates: list = []
+                try:
+                    for w_start, w_end in _year_chunks(start, end):
+                        async for page, items, paging in src.iter_events(
+                            sym, from_date=w_start, to_date=w_end, language="vi"
+                        ):
+                            fetched += len(items)
+                            rows = [normalize_ssi_event(it) for it in items]
+                            dates += [r["public_date"] for r in rows if r and r.get("public_date")]
+                            r = await svc.upsert_company_events(rows)
+                            acc.merge(r)
+                            await _log_window(
+                                sm, source="SSI", endpoint="company-events", symbol=sym,
+                                window=(w_start, w_end), page=page, ok=True,
+                                item_count=len(items), inserted=r.inserted, updated=r.updated,
+                                complete=(page >= int(paging.get("totalPage") or 1)),
+                            )
+                except Exception as e:  # noqa: BLE001
+                    per_symbol[sym] = {"error": str(e)}
+                    total.errors.append(f"{sym}: {e}")
+                    continue
+                per_symbol[sym] = {
+                    "fetched": fetched, "inserted": acc.inserted, "updated": acc.updated,
+                    "earliest": min(dates).isoformat() if dates else None,
+                    "latest": max(dates).isoformat() if dates else None,
+                }
+                total.merge(acc)
+        _emit(args, {
+            "command": "backfill-events", "window": [start.isoformat(), end.isoformat()],
+            "symbols": symbols, "per_symbol": per_symbol,
+            "totals": {"inserted": total.inserted, "updated": total.updated,
+                       "skipped": total.skipped, "errors": total.errors},
+        })
+        return 0 if not total.errors else 1
+    finally:
+        await engine.dispose()
+
+
+async def _cmd_backfill_news(args) -> int:
+    """HOSE news — ~24 months, market-wide, monthly windows with adaptive splitting."""
+    from app.enrichment.hose_crawler import crawl_window, month_windows
+    from app.enrichment.http import EnrichmentHttpClient
+    from app.enrichment.normalize import normalize_hsx_news
+    from app.enrichment.service import EnrichmentService, UpsertResult
+    from app.enrichment.sources import HsxNewsSource
+
+    engine, sm = await _wire(args)
+    langs = args.lang or ["vi"]
+    end = args.end or _vn_today()
+    start = args.start or _months_ago(end, args.months)
+    page_size = int(args.page_size or settings.ENRICHMENT_BACKFILL_PAGE_SIZE)
+    svc = EnrichmentService(sm)
+    total = UpsertResult()
+    per_lang: dict = {}
+    incomplete: list = []
+    try:
+        async with EnrichmentHttpClient(sessionmaker=sm) as client:
+            src = HsxNewsSource(client)
+            cat_cache: dict = {}
+            for lang in langs:
+                acc = UpsertResult()
+                months = 0
+                splits = 0
+                for w_start, w_end in month_windows(start, end):
+                    months += 1
+
+                    async def on_page(items, _lang=lang):
+                        rows = [normalize_hsx_news(it, lang=_lang) for it in items]
+                        await _resolve_categories(src, rows, lang=_lang, cache=cat_cache)
+                        r = await svc.upsert_news(rows)
+                        acc.merge(r)
+
+                    wr = await crawl_window(
+                        src, lang=lang, start=w_start, end=w_end, on_page=on_page,
+                        page_size=page_size, max_pages=args.max_pages,
+                    )
+                    splits += wr.splits
+                    for leaf in wr.flatten():
+                        await _log_window(
+                            sm, source="HOSE", endpoint="news", symbol=None,
+                            window=(leaf.start, leaf.end), page=leaf.pages, ok=True,
+                            item_count=leaf.items, inserted=None, updated=None,
+                            complete=leaf.complete,
+                        )
+                        if not leaf.complete:
+                            incomplete.append(f"{lang} {leaf.start}..{leaf.end}")
+                per_lang[lang] = {"months": months, "adaptive_splits": splits,
+                                  "inserted": acc.inserted, "updated": acc.updated}
+                total.merge(acc)
+        _emit(args, {
+            "command": "backfill-news", "window": [start.isoformat(), end.isoformat()],
+            "per_lang": per_lang, "incomplete_windows": incomplete,
+            "totals": {"inserted": total.inserted, "updated": total.updated, "skipped": total.skipped},
+        })
+        return 0 if not incomplete else 1
+    finally:
+        await engine.dispose()
+
+
+async def _cmd_enrich_incremental(args) -> int:
+    """Rolling-overlap incremental crawl for SSI + HOSE. Idempotent; safe to run often."""
+    end = _vn_today()
+    ssi_start = end - timedelta(days=settings.ENRICHMENT_INCREMENTAL_SSI_DAYS)
+    hose_start = end - timedelta(days=settings.ENRICHMENT_INCREMENTAL_HOSE_DAYS)
+    common = dict(database_url=getattr(args, "database_url", None), json=True, verbose=False)
+    rc = 0
+    rc |= await _cmd_backfill_events(argparse.Namespace(
+        **common, symbols=None, months=2, start=ssi_start, end=end))
+    rc |= await _cmd_backfill_news(argparse.Namespace(
+        **common, lang=["vi", "en"], months=1, start=hose_start, end=end,
+        page_size=None, max_pages=None))
+    return rc
+
+
+async def _cmd_coverage(args) -> int:
+    from sqlalchemy import func, select
+
+    from app.persistence import database as db
+    from app.persistence.models import SourceFetchLog
+
+    engine = db.create_engine_from_url(_resolve_db_url(args))
+    sm = db.configure(engine)
+    try:
+        async with sm() as s:
+            rows = (await s.execute(
+                select(SourceFetchLog.source, SourceFetchLog.window_start, SourceFetchLog.window_end,
+                       SourceFetchLog.complete, func.count().label("n"))
+                .where(SourceFetchLog.window_start.isnot(None))
+                .group_by(SourceFetchLog.source, SourceFetchLog.window_start,
+                          SourceFetchLog.window_end, SourceFetchLog.complete)
+                .order_by(SourceFetchLog.source, SourceFetchLog.window_start)
+            )).all()
+        incomplete = [
+            {"source": r.source, "start": r.window_start.isoformat(), "end": r.window_end.isoformat()}
+            for r in rows if r.complete is False
+        ]
+        _emit(args, {
+            "command": "coverage",
+            "windows_logged": len(rows),
+            "incomplete": incomplete,
+            "all_complete": not incomplete,
+        })
+        return 0 if not incomplete else 1
+    finally:
+        await engine.dispose()
+
+
 async def _cmd_bootstrap(args) -> int:
     common = dict(database_url=getattr(args, "database_url", None), json=True, verbose=False)
     news_args = argparse.Namespace(**common, days=30, start=None, end=None, lang=["vi", "en"], max_pages=None)
@@ -298,8 +546,8 @@ async def _cmd_status(args) -> int:
 
     from app.persistence import database as db
     from app.persistence.models import (
+        CompanyEvent,
         CompanyProfile,
-        CorporateAction,
         ExternalNews,
         SourceFetchLog,
     )
@@ -309,14 +557,26 @@ async def _cmd_status(args) -> int:
     try:
         async with sm() as s:
             counts = {}
-            for m in (ExternalNews, CorporateAction, CompanyProfile, SourceFetchLog):
+            for m in (ExternalNews, CompanyEvent, CompanyProfile, SourceFetchLog):
                 counts[m.__tablename__] = int((await s.execute(select(func.count()).select_from(m))).scalar() or 0)
+            by_class = {
+                r[0]: r[1] for r in (await s.execute(
+                    select(CompanyEvent.event_class, func.count()).group_by(CompanyEvent.event_class)
+                )).all()
+            }
+            by_news_source = {
+                r[0]: r[1] for r in (await s.execute(
+                    select(ExternalNews.source, func.count()).group_by(ExternalNews.source)
+                )).all()
+            }
             recent = (
                 await s.execute(select(SourceFetchLog).order_by(desc(SourceFetchLog.fetched_at)).limit(10))
             ).scalars().all()
         _emit(args, {
             "command": "status",
             "counts": counts,
+            "company_events_by_class": by_class,
+            "news_by_source": by_news_source,
             "recent_fetches": [
                 {"source": r.source, "endpoint": r.endpoint, "symbol": r.symbol, "status": r.http_status,
                  "items": r.item_count, "ok": r.ok, "ms": r.duration_ms, "at": r.fetched_at}
@@ -332,6 +592,10 @@ _HANDLERS = {
     "news": _cmd_news,
     "corporate-actions": _cmd_corporate_actions,
     "company-profiles": _cmd_company_profiles,
+    "backfill-events": _cmd_backfill_events,
+    "backfill-news": _cmd_backfill_news,
+    "enrich-incremental": _cmd_enrich_incremental,
+    "coverage": _cmd_coverage,
     "validate-history": _cmd_validate_history,
     "bootstrap": _cmd_bootstrap,
     "status": _cmd_status,
