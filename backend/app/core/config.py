@@ -119,12 +119,17 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     ENRICHMENT_HTTP_TIMEOUT_SECONDS: float = Field(default=20.0, description="Connect+read timeout for an enrichment source fetch")
     ENRICHMENT_HTTP_MAX_RETRIES: int = Field(default=3, description="Bounded retries on transient (429/5xx/transport) enrichment fetch failures")
-    ENRICHMENT_NEWS_MAX_PAGES: int = Field(default=40, description="Hard cap on pages walked per news ingestion run")
-    ENRICHMENT_NEWS_PAGE_SIZE: int = Field(default=50, description="Items per news page request")
+    ENRICHMENT_NEWS_MAX_PAGES: int = Field(default=40, description="Hard cap on pages per news window before adaptive date-splitting kicks in")
+    ENRICHMENT_NEWS_PAGE_SIZE: int = Field(default=50, description="Items per news page request (incremental)")
+    ENRICHMENT_BACKFILL_PAGE_SIZE: int = Field(default=200, description="Items per news page request (historical backfill)")
+    ENRICHMENT_BACKFILL_MONTHS: int = Field(default=24, description="Historical lookback for the corpus backfill, in months")
     HSX_NEWS_BASE_URL: str = Field(default="https://api.hsx.vn/n/api/v1", description="HSX public news API base")
     VNDIRECT_FINFO_BASE_URL: str = Field(default="https://api-finfo.vndirect.com.vn/v4", description="VNDirect finfo v4 API base")
+    SSI_IBOARD_API_BASE_URL: str = Field(default="https://iboard-api.ssi.com.vn", description="SSI iboard-api base (statistics/company events)")
+    ENRICHMENT_INCREMENTAL_SSI_DAYS: int = Field(default=45, description="Rolling overlap window for SSI incremental crawl")
+    ENRICHMENT_INCREMENTAL_HOSE_DAYS: int = Field(default=10, description="Rolling overlap window for HOSE incremental crawl")
     AI_NEWS_MAX_RESULTS: int = Field(default=12, description="Max news rows the AI get_news tool returns")
-    AI_CORPORATE_ACTIONS_MAX_RESULTS: int = Field(default=12, description="Max rows the AI get_corporate_actions tool returns")
+    AI_CORPORATE_ACTIONS_MAX_RESULTS: int = Field(default=12, description="Max rows the AI get_corporate_actions / get_company_events tool returns")
 
     # ------------------------------------------------------------------ #
     # Historical ingestion (Step 6) - resumable, quota-safe FiinQuant backfill  #

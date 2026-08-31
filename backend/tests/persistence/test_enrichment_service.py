@@ -20,7 +20,7 @@ from app.enrichment import normalize as N
 from app.enrichment import repository as repo
 from app.enrichment.service import EnrichmentService
 from app.persistence import database as persistence_db
-from app.persistence.models import CompanyProfile, CorporateAction, ExternalNews
+from app.persistence.models import CompanyEvent, CompanyProfile, ExternalNews
 
 pytestmark = pytest.mark.asyncio
 
@@ -57,7 +57,7 @@ async def test_upsert_corporate_actions_dedupes_within_batch(sessionmaker_):
     res = await svc.upsert_corporate_actions([dup_a, dup_b, other, None])
     # 55.VN and 55.EN_GB collapse to source_id "55"; None is dropped.
     assert res.inserted == 2
-    assert await svc.count(CorporateAction) == 2
+    assert await svc.count(CompanyEvent) == 2
 
     # last write in the batch wins for the deduped key
     async with sessionmaker_() as s:
@@ -102,6 +102,68 @@ async def test_corporate_actions_ordering_prefers_ex_date(sessionmaker_):
     async with sessionmaker_() as s:
         rows = await repo.list_corporate_actions(s, symbol="HPG")
     assert [r.source_id for r in rows] == ["2", "1"]
+
+
+def _ssi_item(code, title, **extra):
+    return {"symbol": "HPG", "eventListCode": code, "eventName": code, "eventTitle": title,
+            "eventDescription": title, "exchange": "HOSE", "value": "0", "ratio": "0",
+            "eventCode": None, "publicDate": "01/06/2026", **extra}
+
+
+async def test_company_events_generalised_model_and_corporate_action_view(sessionmaker_):
+    """SSI financials/insider are stored but excluded from the corporate-actions view."""
+    svc = EnrichmentService(sessionmaker_)
+    rows = [
+        N.normalize_ssi_event(_ssi_item("KQQY", "HPG - BCTC Quý 2/2026", publicDate="30/07/2026")),
+        N.normalize_ssi_event(_ssi_item("DDRP", "HPG - Giao dịch nội bộ", publicDate="10/07/2026")),
+        N.normalize_ssi_event(_ssi_item("ISS", "HPG - trả cổ tức bằng cổ phiếu tỷ lệ 20%",
+                                        exrightDate="26/06/2026", ratio="0.2")),
+        N.normalize_vndirect_event(_event("900.VN", "HPG", "trả cổ tức bằng tiền",
+                                          dividend=1000.0, effectiveDate="2026-05-10")),
+    ]
+    res = await svc.upsert_company_events(rows)
+    assert res.inserted == 4
+
+    async with sessionmaker_() as s:
+        all_events = await repo.list_company_events(s, symbol="HPG", limit=50)
+        ca_only = await repo.list_corporate_actions(s, symbol="HPG", limit=50)
+        fin = await repo.list_company_events(s, symbol="HPG", classes=["FINANCIAL"])
+
+    assert {e.event_class for e in all_events} == {"FINANCIAL", "OWNERSHIP", "DIVIDEND"}
+    assert {e.event_class for e in ca_only} == {"DIVIDEND"}   # financials + insider excluded
+    assert len(ca_only) == 2  # SSI stock dividend + VNDirect cash dividend
+    assert len(fin) == 1 and fin[0].event_type == "FINANCIAL_STATEMENT"
+
+
+async def test_ssi_reingest_is_idempotent_on_deterministic_key(sessionmaker_):
+    svc = EnrichmentService(sessionmaker_)
+    item = _ssi_item("AGME", "HPG - ĐHĐCĐ thường niên 2026", exrightDate="14/03/2026")
+    r1 = await svc.upsert_company_events([N.normalize_ssi_event(item)])
+    r2 = await svc.upsert_company_events([N.normalize_ssi_event(dict(item))])
+    assert (r1.inserted, r2.inserted, r2.updated) == (1, 0, 1)
+    assert await svc.count(CompanyEvent) == 1
+
+
+async def test_unified_feed_unions_news_and_events_recent_first_no_dedup(sessionmaker_):
+    svc = EnrichmentService(sessionmaker_)
+    await svc.upsert_news([N.normalize_hsx_news(_news_item(1, "HPG: dividend plan", epoch=1_780_000_000), lang="vi")])
+    await svc.upsert_company_events([
+        N.normalize_ssi_event(_ssi_item("ISS", "HPG - trả cổ tức bằng cổ phiếu 2025",
+                                        exrightDate="01/09/2026", ratio="0.1")),
+    ])
+    async with sessionmaker_() as s:
+        rows, has_more = await repo.list_feed(s, symbol="HPG", lang="vi", limit=10)
+        events_only, _ = await repo.list_feed(s, symbol="HPG", content_type="company_event", limit=10)
+        news_only, _ = await repo.list_feed(s, source="HOSE", limit=10)
+
+    assert has_more is False
+    kinds = [r.content_type for r in rows]
+    assert "company_event" in kinds and "exchange_disclosure" in kinds
+    # both a news row AND an event row about the same dividend survive — no cross-dedup
+    assert len(rows) == 2
+    assert rows[0].content_type == "company_event"  # 2026 ex-date newer than the news epoch
+    assert len(events_only) == 1 and events_only[0].content_type == "company_event"
+    assert len(news_only) == 1 and news_only[0].source == "HOSE"
 
 
 # ------------------------------------------------------------------ AI tools

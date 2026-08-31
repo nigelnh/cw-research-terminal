@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, History, Trash2, Paperclip } from "lucide-react";
-import {
-  useAiChat,
-  normalizePlainResponse,
-  type ResearchContextEnvelope,
-} from "@/data/ai/use_ai_chat";
+import { Plus, History, Paperclip } from "lucide-react";
+import { useAiChatContext } from "@/data/ai/ai_chat_provider";
+import { type ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
 import { formatRelativeTime } from "@/data/ai/copilot_history_store";
 
 interface AiReplBarProps {
@@ -18,6 +15,9 @@ export function getActivityLabel(lastUserText?: string, activeSymbol?: string): 
     return activeSymbol.startsWith("C")
       ? `Reviewing ${activeSymbol} analytics…`
       : `Checking ${activeSymbol} data…`;
+  }
+  if (text.includes("DIVIDEND") || text.includes("CORPORATE") || text.includes("EVENT") || text.includes("DISCLOS")) {
+    return "Reading disclosures & events…";
   }
   if (text.includes("IV") || text.includes("VOLATILITY") || text.includes("HV")) {
     return "Comparing volatility metrics…";
@@ -48,45 +48,30 @@ const ICON_BTN: React.CSSProperties = {
 };
 
 /**
- * Always-mounted REPL bar docked at the bottom of the instrument panel.
- * Absorbs the old floating assistant: `useAiChat` for send / stream / history.
+ * Docked REPL input at the bottom of the instrument panel. Typing lives here; the
+ * assistant's replies render in the floating draggable conversation panel (`AiAnchor`).
+ * Both read the same `useAiChat` via `AiChatProvider`.
  */
 export function AiReplBar({ context }: AiReplBarProps) {
   const {
-    messages,
     conversations,
     activeConversationId,
     isLoading,
-    activity,
-    error,
     sendMessage,
     startNewConversation,
     selectConversation,
-    deleteConversation,
-  } = useAiChat();
+    setLatestContext,
+  } = useAiChatContext();
 
   const [input, setInput] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [attachment, setAttachment] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  const activeSymbol = context?.selectedInstrument?.symbol;
-
-  // Last exchange (most recent user message + the assistant reply that follows it).
-  let lastQuery = "";
-  let lastAnswer = "";
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") {
-      lastQuery = messages[i].content;
-      const reply = messages[i + 1];
-      if (reply && reply.role === "assistant") lastAnswer = normalizePlainResponse(reply.content);
-      break;
-    }
-  }
-  const inFlight = isLoading && messages[messages.length - 1]?.role !== "assistant";
-  if (inFlight && !lastAnswer) {
-    lastAnswer = activity || getActivityLabel(lastQuery, activeSymbol);
-  }
+  // keep the shared context current so the floating panel grounds on the same selection
+  useEffect(() => {
+    setLatestContext(context);
+  }, [context, setLatestContext]);
 
   useEffect(() => {
     if (!historyOpen) return;
@@ -110,7 +95,7 @@ export function AiReplBar({ context }: AiReplBarProps) {
         <div
           className="mono"
           style={{
-            maxHeight: 180,
+            maxHeight: 160,
             overflowY: "auto",
             padding: "8px 20px",
             borderBottom: "1px solid var(--border)",
@@ -123,9 +108,7 @@ export function AiReplBar({ context }: AiReplBarProps) {
             CONVERSATIONS
           </div>
           {conversations.length === 0 ? (
-            <div style={{ fontSize: 11, color: "var(--t-46)", padding: "8px 0" }}>
-              No previous conversations.
-            </div>
+            <div style={{ fontSize: 11, color: "var(--t-46)", padding: "8px 0" }}>No previous conversations.</div>
           ) : (
             conversations.map((conv) => {
               const active = conv.id === activeConversationId;
@@ -148,71 +131,13 @@ export function AiReplBar({ context }: AiReplBarProps) {
                     color: active ? "var(--accent)" : "var(--t-70)",
                   }}
                 >
-                  <span
-                    style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                    title={conv.title}
-                  >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={conv.title}>
                     {conv.title}
                   </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                    <span style={{ color: "var(--t-46)" }}>{formatRelativeTime(conv.updatedAt)}</span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteConversation(conv.id);
-                      }}
-                      aria-label={`Delete conversation ${conv.title}`}
-                      style={{ ...ICON_BTN, color: "var(--t-46)" }}
-                    >
-                      <Trash2 size={11} strokeWidth={1.5} />
-                    </button>
-                  </span>
+                  <span style={{ color: "var(--t-46)", flexShrink: 0 }}>{formatRelativeTime(conv.updatedAt)}</span>
                 </div>
               );
             })
-          )}
-        </div>
-      )}
-
-      {(lastQuery || error) && (
-        <div
-          className="mono"
-          style={{
-            height: 90,
-            padding: "6px 20px 0 20px",
-            fontSize: 11.5,
-            lineHeight: 1.5,
-            color: "var(--t-70)",
-          }}
-        >
-          {lastQuery && (
-            <div
-              style={{
-                height: 17,
-                overflow: "hidden",
-                whiteSpace: "nowrap",
-                textOverflow: "ellipsis",
-                color: "var(--accent)",
-              }}
-            >
-              &gt; {lastQuery}
-            </div>
-          )}
-          {(lastAnswer || error) && (
-            <div
-              style={{
-                height: 52,
-                marginTop: 3,
-                paddingBottom: 6,
-                overflowY: "auto",
-                whiteSpace: "pre-wrap",
-                color: error ? "var(--down)" : inFlight ? "var(--t-55)" : "var(--t-80)",
-                fontStyle: inFlight ? "italic" : "normal",
-              }}
-            >
-              {error || lastAnswer}
-            </div>
           )}
         </div>
       )}
@@ -245,26 +170,17 @@ export function AiReplBar({ context }: AiReplBarProps) {
         </div>
       )}
 
-      <form
-        onSubmit={submit}
-        style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 20px" }}
-      >
+      <form onSubmit={submit} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 20px" }}>
         <span
           className="mono"
-          style={{
-            color: "var(--accent-violet)",
-            fontSize: 11.5,
-            lineHeight: 1,
-            display: "flex",
-            alignItems: "center",
-          }}
+          style={{ color: "var(--accent-violet)", fontSize: 11.5, lineHeight: 1, display: "flex", alignItems: "center" }}
         >
           &gt;
         </span>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="ask about pricing, greeks, or contract terms…"
+          placeholder="ask about pricing, greeks, contract terms, disclosures or events…"
           aria-label="Ask the research assistant"
           style={{
             flex: 1,

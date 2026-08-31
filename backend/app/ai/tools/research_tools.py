@@ -87,7 +87,8 @@ async def get_corporate_actions(symbol: str, limit: int | None = None) -> Dict[s
         "count": len(rows),
         "items": [
             {
-                "type": r.action_type,
+                "type": r.event_type,
+                "event_class": r.event_class,
                 "status": r.status,
                 "ex_date": _d(r.ex_date),
                 "record_date": _d(r.record_date),
@@ -96,6 +97,55 @@ async def get_corporate_actions(symbol: str, limit: int | None = None) -> Dict[s
                 "ratio_pct": float(r.ratio_pct) if r.ratio_pct is not None else None,
                 "dividend_year": r.dividend_year,
                 "note": r.note,
+                "source": r.source,
+            }
+            for r in rows
+        ],
+        "causal_note": _CAUSAL_NOTE,
+        "provenance": "RESEARCH_ENRICHMENT",
+    }
+
+
+async def get_company_events(
+    symbol: str, event_class: str | None = None, limit: int | None = None
+) -> Dict[str, Any]:
+    """Full company-event stream: dividends, meetings, listings, financial-statement
+    disclosures and insider transactions. A financial-statement disclosure or an insider
+    trade is a company *event*, not a corporate action, and never a cause of a price move.
+    """
+    if not symbol or not symbol.strip():
+        return {"status": "INVALID_ARGUMENT", "message": "symbol is required", "provenance": "RESEARCH_ENRICHMENT"}
+    if not persistence_db.is_configured():
+        return _unavailable("Company events")
+    sym = symbol.strip().upper()
+    n = max(1, min(int(limit or settings.AI_CORPORATE_ACTIONS_MAX_RESULTS), int(settings.AI_CORPORATE_ACTIONS_MAX_RESULTS)))
+    classes = [c.strip().upper() for c in event_class.split(",")] if event_class else None
+
+    from app.enrichment import repository as repo
+
+    maker = persistence_db.get_sessionmaker()
+    async with maker() as s:
+        rows = await repo.list_company_events(s, symbol=sym, limit=n, classes=classes)
+
+    def _d(v):
+        return v.isoformat() if v else None
+
+    return {
+        "symbol": sym,
+        "count": len(rows),
+        "items": [
+            {
+                "event_class": r.event_class,
+                "type": r.event_type,
+                "name": r.event_name,
+                "status": r.status,
+                "public_date": _d(r.public_date),
+                "ex_date": _d(r.ex_date),
+                "record_date": _d(r.record_date),
+                "ratio_pct": float(r.ratio_pct) if r.ratio_pct is not None else None,
+                "cash_amount_vnd_per_share": float(r.cash_amount_vnd) if r.cash_amount_vnd is not None else None,
+                "value_text": r.value_text,
+                "note": (r.note[:280] if r.note else None),
                 "source": r.source,
             }
             for r in rows

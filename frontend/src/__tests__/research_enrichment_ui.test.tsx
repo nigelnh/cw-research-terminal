@@ -6,65 +6,107 @@ import { queryKeys } from "../data/query/query_keys";
 import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
 
-const NEWS_KEY = queryKeys.research.news({ symbol: null, q: null, lang: "vi" });
+const FEED_KEY = queryKeys.research.feed({ symbol: null, source: null, contentType: null, eventClass: null, q: null, lang: "vi" });
 
-function newsResponse(items: unknown[]) {
-  return { items, count: items.length, has_more: false, next_before: null };
+/** useInfiniteQuery cache shape. */
+function feedPages(items: unknown[], next_before: string | null = null) {
+  return {
+    pages: [{ items, count: items.length, has_more: next_before != null, next_before }],
+    pageParams: [undefined],
+  };
 }
 
-describe("NewsFeed — PostgreSQL-backed disclosure feed", () => {
-  it("renders the dense TIME / SYMBOL / CATEGORY / HEADLINE table from seeded rows", () => {
+describe("NewsFeed — unified research feed", () => {
+  it("renders the dense DATE / SYMBOL / KIND / CATEGORY / HEADLINE table from seeded rows", () => {
     const html = renderMarkup(<NewsFeed />, [
       {
-        queryKey: [...NEWS_KEY],
-        data: newsResponse([
+        queryKey: [...FEED_KEY],
+        data: feedPages([
           {
-            id: 1,
+            id: "news_1",
             title: "HPG: Board resolution on 2025 dividend",
             summary: "The board approved a cash dividend.",
             category: "Tin Tổ chức niêm yết",
-            symbols: ["HPG"],
+            symbol: "HPG",
             published_at: "2026-08-20T02:30:00Z",
-            url: "https://www.hsx.vn/x",
-            source: "HSX",
+            source_url: "https://www.hsx.vn/x",
+            source: "HOSE",
+            content_type: "exchange_disclosure",
+          },
+          {
+            id: "event_5",
+            title: "HPG · FINANCIAL_STATEMENT",
+            summary: "HPG - BCTC Quý 2/2026",
+            category: "FINANCIAL",
+            symbol: "HPG",
+            published_at: "2026-07-30",
+            source_url: null,
+            source: "SSI",
+            content_type: "company_event",
           },
         ]),
       },
     ]);
-    expect(html).toContain("TIME");
+    expect(html).toContain("DATE");
     expect(html).toContain("HEADLINE");
     expect(html).toContain("HPG: Board resolution on 2025 dividend");
-    // causal restraint is stated in the feed, never "caused"
+    expect(html).toContain("DISCLOSURE");
+    expect(html).toContain("EVENT");
+    // causal restraint is stated, never "caused"
     expect(html).toContain("not causation");
     expect(html).not.toMatch(/caused (the |a )?price/i);
   });
 
   it("truthful empty state when nothing has been ingested — not an error", () => {
-    const html = renderMarkup(<NewsFeed />, [{ queryKey: [...NEWS_KEY], data: newsResponse([]) }]);
-    expect(html).toContain("No disclosures ingested yet");
+    const html = renderMarkup(<NewsFeed />, [{ queryKey: [...FEED_KEY], data: feedPages([]) }]);
+    expect(html).toContain("No items ingested yet");
     expect(html).not.toContain("Could not load");
   });
 
-  it("a symbol filter narrows the subtitle and the query", () => {
+  it("a symbol filter narrows the subtitle and the feed query", () => {
+    const key = queryKeys.research.feed({
+      symbol: "VPB", source: null, contentType: null, eventClass: null, q: null, lang: "vi",
+    });
     const html = renderMarkup(<NewsFeed filter="VPB" />, [
       {
-        queryKey: [...queryKeys.research.news({ symbol: "VPB", q: null, lang: "vi" })],
-        data: newsResponse([
+        queryKey: [...key],
+        data: feedPages([
           {
-            id: 9,
+            id: "news_9",
             title: "VPB: capital raise",
             summary: null,
             category: null,
-            symbols: ["VPB"],
+            symbol: "VPB",
             published_at: "2026-08-01T01:00:00Z",
-            url: null,
-            source: "HSX",
+            source_url: null,
+            source: "HOSE",
+            content_type: "exchange_disclosure",
           },
         ]),
       },
     ]);
-    expect(html).toContain("disclosures linked to VPB");
+    expect(html).toContain("feed for VPB");
     expect(html).toContain("VPB: capital raise");
+  });
+
+  it("uses the Research-registry typography scale (mono 11.5, weight-500 headers) — not a miniature", () => {
+    const html = renderMarkup(<NewsFeed />, [{ queryKey: [...FEED_KEY], data: feedPages([]) }]);
+    // same table treatment as research_universe.tsx
+    expect(html).toContain('class="mono" style="width:100%;border-collapse:collapse;font-size:11.5px"');
+    // headers match grid_table HEAD_STYLE (5px 8px padding, weight 500, --t-50), not 9.5px/--t-46
+    expect(html).toContain("padding:5px 8px");
+    expect(html).toContain("font-weight:500");
+    expect(html).not.toContain("font-size:9.5px");
+  });
+
+  it("shows a LOAD OLDER control when more pages exist (never the whole corpus at once)", () => {
+    const html = renderMarkup(<NewsFeed />, [
+      { queryKey: [...FEED_KEY], data: feedPages([
+        { id: "news_1", title: "x", summary: null, category: null, symbol: "HPG",
+          published_at: "2026-08-01", source_url: null, source: "HOSE", content_type: "exchange_disclosure" },
+      ], "2026-07-31T00:00:00Z") },
+    ]);
+    expect(html).toContain("LOAD OLDER");
   });
 });
 
