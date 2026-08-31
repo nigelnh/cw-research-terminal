@@ -4,8 +4,8 @@
     python -m app.enrichment.cli corporate-actions --symbols HPG,VPB,TCB
     python -m app.enrichment.cli company-profiles --symbols HPG,VPB,TCB
     python -m app.enrichment.cli backfill-events        # SSI company events, ~24mo, registry universe
-    python -m app.enrichment.cli backfill-news --lang vi --lang en   # HOSE news, ~24mo, adaptive split
-    python -m app.enrichment.cli enrich-incremental     # rolling-overlap incremental crawl
+    python -m app.enrichment.cli backfill-news --lang vi            # HOSE news, ~24mo, adaptive split (EN only on explicit --lang en)
+    python -m app.enrichment.cli enrich-incremental     # rolling-overlap incremental crawl (HOSE vi only by default)
     python -m app.enrichment.cli coverage               # per-window completeness report
     python -m app.enrichment.cli validate-history --symbols HPG,VPB,TCB,VHM --days 30
     python -m app.enrichment.cli bootstrap              # curated universe + 30d news window
@@ -17,6 +17,10 @@ at/above ``ENRICHMENT_DB_SIZE_CEILING_MB`` — a guard added after the 2026-08-3
 incident. ``backfill-news`` also re-checks between monthly windows and stops cleanly (the
 ``source_fetch_log`` window rows make it resumable). ``validate-history`` / ``coverage`` /
 ``status`` are read-only. There is no scheduler.
+
+The unattended crawls (``enrich-incremental`` / ``bootstrap``) ingest HOSE
+``ENRICHMENT_INCREMENTAL_HOSE_LANGS`` (default ``vi``) — EN market-wide ingestion is
+deferred post-incident. A deliberate EN pull is an explicit ``backfill-news --lang en``.
 """
 
 from __future__ import annotations
@@ -41,6 +45,17 @@ BOOTSTRAP_SYMBOLS = [
 
 def _split(s: str) -> list[str]:
     return [t.strip().upper() for t in s.replace(" ", ",").split(",") if t.strip()]
+
+
+def _incremental_hose_langs() -> list[str]:
+    """HOSE languages the unattended crawls (enrich-incremental / bootstrap) ingest.
+
+    Defaults to ``["vi"]`` — EN market-wide ingestion is deferred (post-incident
+    policy: VI/EN are disjoint HOSE id-spaces and EN is ETF-NAV / foreign-holding
+    noise). A deliberate EN pull still runs via ``backfill-news --lang en``.
+    """
+    langs = [x.strip().lower() for x in settings.ENRICHMENT_INCREMENTAL_HOSE_LANGS.split(",") if x.strip()]
+    return [x for x in langs if x in ("vi", "en")] or ["vi"]
 
 
 def _parse_date(s: str) -> date:
@@ -543,7 +558,7 @@ async def _cmd_enrich_incremental(args) -> int:
     rc |= await _cmd_backfill_events(argparse.Namespace(
         **common, symbols=None, months=2, start=ssi_start, end=end))
     rc |= await _cmd_backfill_news(argparse.Namespace(
-        **common, lang=["vi", "en"], months=1, start=hose_start, end=end,
+        **common, lang=_incremental_hose_langs(), months=1, start=hose_start, end=end,
         page_size=None, max_pages=None))
     return rc
 
@@ -583,7 +598,7 @@ async def _cmd_coverage(args) -> int:
 
 async def _cmd_bootstrap(args) -> int:
     common = dict(database_url=getattr(args, "database_url", None), json=True, verbose=False)
-    news_args = argparse.Namespace(**common, days=30, start=None, end=None, lang=["vi", "en"], max_pages=None)
+    news_args = argparse.Namespace(**common, days=30, start=None, end=None, lang=_incremental_hose_langs(), max_pages=None)
     sym_args = argparse.Namespace(**common, symbols=list(BOOTSTRAP_SYMBOLS))
     rc = 0
     rc |= await _cmd_news(news_args)
