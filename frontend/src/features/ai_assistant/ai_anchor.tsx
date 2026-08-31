@@ -90,9 +90,10 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
   if (steps.length === 0 && !running) return null;
 
   const totalMs = steps.reduce((s, x) => s + (x.duration_ms ?? 0), 0);
+  const dur = totalMs < 1000 ? `${totalMs} ms` : `${(totalMs / 1000).toFixed(1)}s`;
   const summary =
     steps.length > 0
-      ? `Research trace · ${steps.length} tool${steps.length === 1 ? "" : "s"} · ${(totalMs / 1000).toFixed(1)}s`
+      ? `Research trace · ${steps.length} tool${steps.length === 1 ? "" : "s"} · ${dur}`
       : "Working…";
 
   return (
