@@ -203,7 +203,7 @@ export function MarketExplorer() {
           onClose={() => selectSymbol(null)}
         />
       </div>
-      <AiAnchor />
+      <AiAnchor context={contextEnvelope} />
     </div>
     </AiChatProvider>
   );

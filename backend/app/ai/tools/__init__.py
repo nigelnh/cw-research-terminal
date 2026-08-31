@@ -11,7 +11,7 @@ from .market_tools import (
 from .instrument_tools import get_instrument
 from .quant_tools import get_quant
 from .tool_registry import TOOL_DEFINITIONS, TOOL_HANDLERS, execute_tool
-from .tool_executor import ToolExecutor, generate_activity_label
+from .tool_executor import ToolExecutor, tool_display_name
 
 __all__ = [
     "get_market_status",
@@ -24,5 +24,5 @@ __all__ = [
     "TOOL_HANDLERS",
     "execute_tool",
     "ToolExecutor",
-    "generate_activity_label",
+    "tool_display_name",
 ]

@@ -11,6 +11,7 @@ counts as a symbol only if the project actually recognises it.
 
 from typing import Dict, Any, List, Optional, Set
 import re
+import time
 import logging
 
 from app.ai.ai_schemas import ResearchContextEnvelope
@@ -82,30 +83,85 @@ COMPANY_EVENT_KEYWORDS = {
 }
 
 
-def generate_activity_label(tool_name: str, args: Dict[str, Any]) -> str:
-    """Generates clean, user-facing activity labels for tool execution."""
-    sym = args.get("symbol", "")
+# tool -> concise, human-readable display name for the user-visible research trace.
+_TOOL_DISPLAY_NAMES: Dict[str, str] = {
+    "get_quote": "Checking market quote",
+    "get_order_book": "Checking the order book",
+    "get_quant": "Computing quantitative context",
+    "get_instrument": "Retrieving contract terms",
+    "get_history": "Loading market history",
+    "get_dashboard_snapshot": "Checking your dashboard",
+    "get_market_status": "Checking market session",
+    "get_news": "Searching disclosures",
+    "get_corporate_actions": "Checking corporate actions",
+    "get_company_events": "Checking company events",
+}
+
+
+def tool_display_name(tool_name: str) -> str:
+    return _TOOL_DISPLAY_NAMES.get(tool_name, "Analysing market context")
+
+
+def tool_context_line(tool_name: str, args: Dict[str, Any]) -> str:
+    """Short, safe context string, e.g. 'HOSE · HPG · recent' — never raw args."""
+    sym = str(args.get("symbol") or "").upper()
+    if tool_name == "get_news":
+        return f"HOSE · {sym} · recent" if sym else "HOSE · market-wide · recent"
+    if tool_name in ("get_corporate_actions", "get_company_events"):
+        return f"SSI / VNDirect · {sym}" if sym else "SSI / VNDirect"
+    if tool_name == "get_history":
+        return f"{sym} · daily" if sym else "daily"
+    if tool_name == "get_quant":
+        return f"{sym} · IV / HV / Greeks" if sym else "IV / HV / Greeks"
+    if tool_name == "get_dashboard_snapshot":
+        syms = args.get("symbols")
+        return f"{len(syms)} symbols" if isinstance(syms, list) and syms else "watchlist"
+    return sym
+
+
+def _result_summary(tool_name: str, result: Dict[str, Any]) -> tuple[str, bool]:
+    """(summary, ok). Sanitised — a count / status only, never payload contents."""
+    if not isinstance(result, dict):
+        return ("done", True)
+    if result.get("error"):
+        return ("unavailable", False)
+    status = str(result.get("status") or "").upper()
+
+    if tool_name in ("get_news", "get_corporate_actions", "get_company_events"):
+        n = result.get("count")
+        if n is None:
+            n = len(result.get("items") or [])
+        if status == "UNAVAILABLE":
+            return ("not ingested for this deployment", True)
+        noun = "records" if tool_name == "get_news" else "events"
+        return (f"{n} {noun} found", True)
+
+    if tool_name == "get_history":
+        if status in ("NO_DATA", "UNKNOWN_SYMBOL"):
+            return ("no stored history", True)
+        n = len(result.get("series") or [])
+        return (f"{n} bars loaded" if n else "loaded", True)
+
+    if tool_name == "get_quant":
+        return ("complete" if result.get("is_available") else "unavailable (metadata gate)", True)
+
     if tool_name == "get_quote":
-        return f"Checking {sym} market data…" if sym else "Checking market quote…"
-    elif tool_name == "get_order_book":
-        return f"Checking {sym} order book…" if sym else "Checking order book…"
-    elif tool_name == "get_quant":
-        return f"Reviewing {sym} analytics…" if sym else "Calculating quantitative analytics…"
-    elif tool_name == "get_instrument":
-        return f"Retrieving {sym} contract terms…" if sym else "Retrieving instrument terms…"
-    elif tool_name == "get_history":
-        return f"Reading {sym} price history…" if sym else "Reading price history…"
-    elif tool_name == "get_dashboard_snapshot":
-        return "Checking your dashboard…"
-    elif tool_name == "get_market_status":
-        return "Checking market session status…"
-    elif tool_name == "get_news":
-        return f"Reading {sym} disclosures…" if sym else "Reading exchange disclosures…"
-    elif tool_name == "get_corporate_actions":
-        return f"Reading {sym} corporate actions…" if sym else "Reading corporate actions…"
-    elif tool_name == "get_company_events":
-        return f"Reading {sym} company events…" if sym else "Reading company events…"
-    return "Analyzing market context…"
+        if status in ("UNAVAILABLE", "NO_DATA"):
+            return ("no live quote (market closed)", True)
+        return ("quote retrieved", True)
+
+    if tool_name == "get_instrument":
+        mv = str(result.get("metadata_verification") or "").upper()
+        return (f"terms retrieved ({mv})" if mv else "terms retrieved", True)
+
+    if tool_name == "get_dashboard_snapshot":
+        n = len(result.get("rows") or result.get("symbols") or [])
+        return (f"{n} symbols" if n else "snapshot retrieved", True)
+
+    if tool_name == "get_market_status":
+        return (result.get("session") or result.get("market_session") or "checked", True)
+
+    return ("done", True)
 
 
 class ToolExecutor:
@@ -122,7 +178,7 @@ class ToolExecutor:
         self.max_tool_calls = max_tool_calls
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._executed_calls: List[Dict[str, Any]] = []
-        self._activity_labels: List[str] = []
+        self._trace: List[Dict[str, Any]] = []
         self._resolver = InstrumentResolver()
 
     def _cache_key(self, tool_name: str, args: Dict[str, Any]) -> str:
@@ -147,16 +203,20 @@ class ToolExecutor:
                 "provenance": "EXECUTION_BOUND_GUARD",
             }
 
-        label = generate_activity_label(tool_name, args)
-        self._activity_labels.append(label)
-
+        started = time.perf_counter()
         result = await execute_tool(tool_name, args)
+        duration_ms = int((time.perf_counter() - started) * 1000)
         self._cache[key] = result
-        self._executed_calls.append({
+
+        summary, ok = _result_summary(tool_name, result)
+        self._executed_calls.append({"tool": tool_name, "args": args, "result": result})
+        self._trace.append({
             "tool": tool_name,
-            "args": args,
-            "result": result,
-            "activity_label": label,
+            "display_name": tool_display_name(tool_name),
+            "context": tool_context_line(tool_name, args),
+            "result_summary": summary,
+            "duration_ms": duration_ms,
+            "ok": ok,
         })
         return result
 
@@ -262,8 +322,10 @@ class ToolExecutor:
         return self._executed_calls
 
     @property
-    def activity_labels(self) -> List[str]:
-        return self._activity_labels
+    def trace(self) -> List[Dict[str, Any]]:
+        """Sanitised per-tool trace for the user-visible research activity block:
+        [{tool, display_name, context, result_summary, duration_ms, ok}]."""
+        return self._trace
 
     @property
     def executed_calls(self) -> List[Dict[str, Any]]:

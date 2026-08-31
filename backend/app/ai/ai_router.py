@@ -123,18 +123,36 @@ async def chat_endpoint(
     if req.stream:
         async def event_generator():
             stream_started = False
+
+            def sse(obj: dict) -> str:
+                return f"data: {json.dumps(obj)}\n\n"
+
             try:
-                # Emit high-level tool activity labels
-                for label in tool_executor.activity_labels:
-                    act_payload = json.dumps({"type": "activity", "label": label, "done": False})
-                    yield f"data: {act_payload}\n\n"
+                # User-visible research trace. Tools have already executed (bounded,
+                # read-only, pre-stream); emit start/complete for each so the UI can show
+                # what was done. Payloads are sanitised counts/status — never raw results,
+                # never model reasoning.
+                for step in tool_executor.trace:
+                    yield sse({
+                        "type": "tool_start", "tool": step["tool"],
+                        "display_name": step["display_name"], "context": step["context"],
+                    })
+                    yield sse({
+                        "type": "tool_complete", "tool": step["tool"],
+                        "display_name": step["display_name"],
+                        "result_summary": step["result_summary"],
+                        "duration_ms": step["duration_ms"], "ok": step["ok"],
+                    })
+                yield sse({
+                    "type": "status",
+                    "label": "Synthesizing answer" if tool_executor.trace else "Thinking",
+                })
 
                 async with ai_call_gate.acquire(settings.AI_ACQUIRE_TIMEOUT_SECONDS):
                     async for token in client.stream_chat(raw_messages, system_prompt):
                         stream_started = True
-                        payload = json.dumps({"content": token, "done": False})
-                        yield f"data: {payload}\n\n"
-                yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+                        yield sse({"content": token, "done": False})
+                yield sse({"type": "answer_complete", "content": "", "done": True})
             except Exception as e:
                 code = classify(e, stream_started=stream_started)
                 detail = getattr(e, "message", None) or getattr(e, "detail", None) or str(e)
@@ -142,10 +160,10 @@ async def chat_endpoint(
                     logger.exception("AI stream failed [%s]", code.value)
                 else:
                     logger.warning("AI stream failed [%s]: %s", code.value, detail)
-                err_payload = json.dumps(
-                    {"error": user_message(code), "code": code.value, "done": True}
-                )
-                yield f"data: {err_payload}\n\n"
+                yield sse({
+                    "type": "error", "error": user_message(code),
+                    "code": code.value, "done": True,
+                })
 
         return StreamingResponse(
             event_generator(),

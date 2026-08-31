@@ -6,7 +6,6 @@ import type { CorporateActionItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
 import { TradingChart } from "@/components/common/trading_chart";
-import { AiReplBar } from "@/features/ai_assistant/ai_repl_bar";
 import { DASH, fmtChg, fmtIV, fmtPrice, fmtRatio, dteDisplay } from "@/components/common/grid_table";
 
 const VN_TZ = "Asia/Ho_Chi_Minh";
@@ -289,10 +288,14 @@ export function InstrumentPanel({
     color: tab === id ? "var(--t-92)" : "var(--t-55)",
   });
 
+  // No instrument selected -> render nothing. The AI assistant now lives entirely in the
+  // draggable Orbit panel; Dashboard / Research reclaim the vertical space.
+  if (!instrument) return null;
+
   return (
     <section
       style={{
-        height: hasInstrument ? "min(460px, 58vh)" : "auto",
+        height: "min(460px, 58vh)",
         flexShrink: 0,
         borderTop: "1px solid var(--border-strong)",
         display: "flex",
@@ -312,10 +315,10 @@ export function InstrumentPanel({
           flexShrink: 0,
         }}
       >
-        {hasInstrument ? (
+        {(
           <>
             <span className="heading" style={{ fontSize: 13, color: "var(--accent)", fontWeight: 700 }}>
-              {instrument!.symbol}
+              {instrument.symbol}
             </span>
             <span style={{ fontSize: 11, color: "var(--t-50)" }}>{kindLine}</span>
             <div style={{ display: "flex", gap: 2, marginLeft: 12 }}>
@@ -355,15 +358,6 @@ export function InstrumentPanel({
                 <path d="M18 6 6 18M6 6l12 12" />
               </svg>
             </button>
-          </>
-        ) : (
-          <>
-            <span className="heading" style={{ fontSize: 13, color: "var(--accent)", fontWeight: 700 }}>
-              RESEARCH ASSISTANT
-            </span>
-            <span style={{ fontSize: 11, color: "var(--t-46)" }}>
-              select an instrument to ground the conversation
-            </span>
           </>
         )}
       </div>
@@ -629,8 +623,6 @@ export function InstrumentPanel({
           — fundamentals: pending data provider · corp events: disclosed timing only, not causation
         </div>
       )}
-
-      <AiReplBar context={context} />
     </section>
   );
 }

@@ -9,11 +9,23 @@ export const LEGACY_STORAGE_KEY_V1 = "cw_research:copilot:v1";
 export const MAX_CONVERSATIONS = 25;
 export const MAX_MESSAGES_PER_CONVERSATION = 50;
 
+/** One step in the user-visible research trace for an assistant turn. */
+export interface TraceStep {
+  tool: string;
+  display_name: string;
+  context?: string;
+  result_summary?: string;
+  duration_ms?: number;
+  ok: boolean;
+}
+
 export interface StoredChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: number;
+  /** assistant only — the tools that ran for this turn (sanitised) */
+  trace?: TraceStep[];
 }
 
 export interface StoredConversation {
@@ -139,6 +151,7 @@ export function loadCopilotHistory(): CopilotHistoryStore {
                 role: m.role,
                 content: m.content,
                 createdAt: typeof m.createdAt === "number" ? m.createdAt : Date.now(),
+                ...(Array.isArray(m.trace) ? { trace: m.trace } : {}),
               }))
               .slice(-MAX_MESSAGES_PER_CONVERSATION),
           }));
