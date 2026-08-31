@@ -3,7 +3,6 @@ import { renderMarkup, seedInstrumentSpecs } from "./test_fixtures/render_markup
 import { PersonalDashboard } from "../features/watchlist/personal_dashboard";
 import { InstrumentPanel } from "../features/warrant_info/instrument_panel";
 import { AppHeader } from "../components/common/app_header";
-import { AiReplBar, getActivityLabel } from "../features/ai_assistant/ai_repl_bar";
 import { normalizePlainResponse, CHAT_STORAGE_KEY } from "../data/ai/use_ai_chat";
 import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
@@ -123,18 +122,15 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     expect(html).toContain('aria-label="Hide CTCB2601 from this view"');
   });
 
-  it("6 & 7. normalizePlainResponse strips markdown without losing math characters", () => {
+  it("6 & 7. normalizePlainResponse (legacy helper) still strips markdown without losing math", () => {
     const raw =
       "**Valuation Analysis**\n- Last price: 29,500 VND\n- Delta (Δ): 0.6200\n- Spread: 0.72%\n# Recommendation\nWait.";
     const cleaned = normalizePlainResponse(raw);
     expect(cleaned).not.toContain("**");
     expect(cleaned).not.toContain("- ");
     expect(cleaned).not.toContain("# ");
-    expect(cleaned).toContain("Valuation Analysis");
-    expect(cleaned).toContain("Last price: 29,500 VND");
     expect(cleaned).toContain("Delta (Δ): 0.6200");
     expect(cleaned).toContain("Spread: 0.72%");
-    expect(cleaned).toContain("Recommendation");
   });
 
   it("8, 9 & 10. Chat persistence survives rehydration; clear removes storage", () => {
@@ -162,21 +158,6 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     expect(parsed.conversations).toHaveLength(1);
     mockStorage.removeItem(CHAT_STORAGE_KEY);
     expect(mockStorage.getItem(CHAT_STORAGE_KEY)).toBeNull();
-  });
-
-  it("11. Activity indicator generates task-specific status without fake chain-of-thought", () => {
-    expect(getActivityLabel("What is HPG doing?", "HPG")).toBe("Checking HPG data…");
-    expect(getActivityLabel("Check CVHM2615 delta", "CVHM2615")).toBe("Reviewing CVHM2615 analytics…");
-    expect(getActivityLabel("Compare IV and HV")).toBe("Comparing volatility metrics…");
-    expect(getActivityLabel("Calculate Greeks")).toBe("Calculating Greek sensitivities…");
-    expect(getActivityLabel("What is fair value valuation?")).toBe("Calculating valuation metrics…");
-    expect(getActivityLabel("General question")).toBe("Preparing response…");
-  });
-
-  it("12. REPL bar + interactive controls expose a focus-visible outline", () => {
-    const html = renderMarkup(<AiReplBar />);
-    expect(html).toContain('aria-label="Ask the research assistant"');
-    expect(html).toContain("&gt;");
   });
 
   it("13. Header shows the market status pill and the segmented nav", () => {

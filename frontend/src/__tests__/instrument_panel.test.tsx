@@ -30,14 +30,11 @@ describe("InstrumentPanel — bottom split panel", () => {
     lastTradingDate: "2026-12-28",
   };
 
-  it("1. no instrument -> renders the assistant shell + REPL bar, never a modal", () => {
+  it("1. no instrument -> renders nothing (the AI assistant now lives in the Orbit panel)", () => {
     const html = renderMarkup(
       <InstrumentPanel instrument={null} marketSessionActive={false} onClose={vi.fn()} />,
     );
-    expect(html).toContain("RESEARCH ASSISTANT");
-    expect(html).toContain("select an instrument to ground the conversation");
-    expect(html).toContain('aria-label="Ask the research assistant"');
-    expect(html).not.toContain('role="dialog"');
+    expect(html.trim()).toBe("");
   });
 
   it("2. CW instrument -> symbol, kind line, OVERVIEW/QUANT tabs, WATCH control", () => {

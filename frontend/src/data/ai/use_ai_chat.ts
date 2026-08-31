@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { config } from "@/config";
 import {
   type StoredChatMessage,
+  type TraceStep,
   type CopilotHistoryStore,
   loadCopilotHistory,
   saveCopilotHistory,
@@ -67,7 +68,10 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt?: number;
+  trace?: TraceStep[];
 }
+
+export type { TraceStep };
 
 export interface SelectedInstrumentContext {
   symbol: string;
@@ -402,8 +406,36 @@ export function useAiChat(apiEndpoint: string = DEFAULT_AI_CHAT_ENDPOINT) {
                 setError(messageForAiError(data.code, data.error));
                 continue;
               }
-              if (data.type === "activity" && data.label) {
+              // --- research activity trace (sanitised; no reasoning/payloads) ---
+              if (data.type === "status" && data.label) {
                 setActivity(data.label);
+              }
+              if (data.type === "activity" && data.label) {
+                // legacy frame — keep working
+                setActivity(data.label);
+              }
+              if (data.type === "tool_complete") {
+                const step: TraceStep = {
+                  tool: data.tool,
+                  display_name: data.display_name,
+                  context: data.context,
+                  result_summary: data.result_summary,
+                  duration_ms: data.duration_ms,
+                  ok: data.ok !== false,
+                };
+                setStore((prev) => {
+                  const convs = [...prev.conversations];
+                  const cIdx = convs.findIndex((c) => c.id === targetConvId);
+                  if (cIdx === -1) return prev;
+                  const conv = convs[cIdx];
+                  const msgs = [...conv.messages];
+                  const aIdx = msgs.findIndex((m) => m.id === assistantMsgId);
+                  if (aIdx === -1) return prev;
+                  const prevTrace = msgs[aIdx].trace ?? [];
+                  msgs[aIdx] = { ...msgs[aIdx], trace: [...prevTrace, step] };
+                  convs[cIdx] = { ...conv, messages: msgs };
+                  return { ...prev, conversations: convs };
+                });
               }
               if (data.content) {
                 accumulatedText += data.content;
@@ -430,8 +462,8 @@ export function useAiChat(apiEndpoint: string = DEFAULT_AI_CHAT_ENDPOINT) {
           }
         }
 
-        // Finalize plain text and persist completed assistant message
-        const normalized = normalizePlainResponse(accumulatedText);
+        // Persist the completed assistant message. Content is kept as raw Markdown —
+        // the panel renders it (react-markdown). Only guard against a totally empty turn.
         setStore((prev) => {
           const convs = [...prev.conversations];
           const cIdx = convs.findIndex((c) => c.id === targetConvId);
@@ -442,7 +474,7 @@ export function useAiChat(apiEndpoint: string = DEFAULT_AI_CHAT_ENDPOINT) {
             if (aIdx !== -1) {
               msgs[aIdx] = {
                 ...msgs[aIdx],
-                content: normalized || accumulatedText,
+                content: accumulatedText,
               };
             }
             convs[cIdx] = {

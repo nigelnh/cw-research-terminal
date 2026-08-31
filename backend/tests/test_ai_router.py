@@ -232,18 +232,65 @@ async def test_streaming_chat_generator(mock_openrouter_client):
 
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
-        lines = response.text.strip().split("\n\n")
-        assert len(lines) >= 3
-        # Check first chunk
-        chunk1 = json.loads(lines[0].replace("data: ", ""))
-        assert chunk1["content"] == "Implied "
-        assert chunk1["done"] is False
+        frames = [json.loads(l.replace("data: ", "")) for l in response.text.strip().split("\n\n")]
 
-        # Check last chunk
-        last_chunk = json.loads(lines[-1].replace("data: ", ""))
-        assert last_chunk["done"] is True
+        # a leading status frame (no tools for "Explain IV"), then answer deltas
+        assert frames[0].get("type") == "status"
+        deltas = [f for f in frames if f.get("content") and not f.get("done")]
+        assert "".join(f["content"] for f in deltas) == "Implied volatility analysis."
+
+        # terminal frame
+        assert frames[-1]["done"] is True
+        assert frames[-1].get("type") == "answer_complete"
+        # no chain-of-thought / raw internals ever emitted
+        assert "system_prompt" not in response.text and "reasoning" not in response.text
 
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_research_trace_events_are_sanitised_and_ordered(mock_openrouter_client, monkeypatch):
+    """A tool-using turn emits tool_start -> tool_complete (count/status only) -> status,
+    before any answer delta. No raw payloads, prompts, or reasoning."""
+    import app.ai.tools.tool_executor as TE
+
+    class FakeExecutor:
+        def __init__(self, *a, **k):
+            self._trace = [{
+                "tool": "get_news", "display_name": "Searching disclosures",
+                "context": "HOSE · HPG · recent", "result_summary": "12 records found",
+                "duration_ms": 184, "ok": True,
+            }]
+
+        async def resolve_and_execute_proactive_tools(self, *a, **k):
+            return [{"tool": "get_news", "args": {"symbol": "HPG"},
+                     "result": {"items": [{"secret_field": "leak"}], "count": 12}}]
+
+        @property
+        def trace(self):
+            return self._trace
+
+    monkeypatch.setattr(TE, "ToolExecutor", FakeExecutor)
+
+    async def mock_stream_chat(messages, system_prompt):
+        yield "Answer."
+
+    with patch.object(mock_openrouter_client, "stream_chat", side_effect=mock_stream_chat):
+        app.dependency_overrides[get_client] = lambda: mock_openrouter_client
+        response = client.post(
+            "/api/ai/chat",
+            json={"messages": [{"role": "user", "content": "any HPG news?"}], "stream": True},
+        )
+        app.dependency_overrides.clear()
+
+    frames = [json.loads(l.replace("data: ", "")) for l in response.text.strip().split("\n\n")]
+    types = [f.get("type") for f in frames]
+    assert types[:3] == ["tool_start", "tool_complete", "status"]
+    tc = frames[1]
+    assert tc["result_summary"] == "12 records found" and tc["duration_ms"] == 184
+    # sanitised: no payload contents, field names, prompts, or reasoning anywhere
+    for bad in ("secret_field", "leak", "system_prompt", "reasoning", "chain-of-thought", "raw"):
+        assert bad not in response.text
 
 
 @pytest.mark.asyncio
