@@ -13,6 +13,8 @@ from captured payload shapes.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from app.ai.tools import research_tools
@@ -164,6 +166,23 @@ async def test_unified_feed_unions_news_and_events_recent_first_no_dedup(session
     assert rows[0].content_type == "company_event"  # 2026 ex-date newer than the news epoch
     assert len(events_only) == 1 and events_only[0].content_type == "company_event"
     assert len(news_only) == 1 and news_only[0].source == "HOSE"
+
+
+async def test_feed_default_view_hides_far_future_scheduled_events(sessionmaker_):
+    """A LISTING with an effective date years out must not dominate the market-wide feed."""
+    svc = EnrichmentService(sessionmaker_)
+    await svc.upsert_news([N.normalize_hsx_news(_news_item(1, "HPG: recent disclosure", epoch=1_787_000_000), lang="vi")])
+    await svc.upsert_company_events([
+        {"source": "VNDIRECT", "source_id": "future1", "symbol": "FPT", "event_type": "LISTING",
+         "event_class": "LISTING", "status": "CONFIRMED", "ex_date": date(2035, 5, 7),
+         "note": "additional listing", "raw": {}},
+    ])
+    async with sessionmaker_() as s:
+        market_wide, _ = await repo.list_feed(s, lang="vi", limit=10)   # no symbol -> horizon applies
+        fpt_view, _ = await repo.list_feed(s, symbol="FPT", lang="vi", limit=10)  # per-symbol -> full
+
+    assert [r.title for r in market_wide] == ["HPG: recent disclosure"]  # 2035 row excluded
+    assert any("LISTING" in r.title for r in fpt_view)  # still reachable per-symbol
 
 
 # ------------------------------------------------------------------ AI tools
