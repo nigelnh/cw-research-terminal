@@ -68,6 +68,27 @@ export const queryKeys = {
       ] as const,
     corporateActions: (symbol: string) =>
       ["cw-research", "research", "corporate-actions", symbol.trim().toUpperCase()] as const,
+    companyEvents: (symbol: string) =>
+      ["cw-research", "research", "company-events", symbol.trim().toUpperCase()] as const,
+    feed: (p: {
+      symbol?: string | null;
+      source?: string | null;
+      contentType?: string | null;
+      eventClass?: string | null;
+      q?: string | null;
+      lang?: string;
+    }) =>
+      [
+        "cw-research",
+        "research",
+        "feed",
+        (p.symbol ?? "").trim().toUpperCase() || null,
+        p.source ?? null,
+        p.contentType ?? null,
+        p.eventClass ?? null,
+        (p.q ?? "").trim() || null,
+        p.lang ?? "vi",
+      ] as const,
   },
 
   /**
