@@ -11,10 +11,12 @@
     python -m app.enrichment.cli bootstrap              # curated universe + 30d news window
     python -m app.enrichment.cli status
 
-Only ``news`` / ``corporate-actions`` / ``company-profiles`` / ``bootstrap`` write to the
-database (and hit an external source). ``validate-history`` reads production canonical
-history over the public API and compares — it never writes. There is no scheduler; run
-these manually or wire them into a job runner later.
+Write commands (``news`` / ``corporate-actions`` / ``company-profiles`` / ``backfill-*`` /
+``enrich-incremental`` / ``bootstrap``) run a ``_preflight`` DB-size check first and abort
+at/above ``ENRICHMENT_DB_SIZE_CEILING_MB`` — a guard added after the 2026-08-31 volume-fill
+incident. ``backfill-news`` also re-checks between monthly windows and stops cleanly (the
+``source_fetch_log`` window rows make it resumable). ``validate-history`` / ``coverage`` /
+``status`` are read-only. There is no scheduler.
 """
 
 from __future__ import annotations
@@ -154,6 +156,38 @@ async def _wire(args):
     return engine, sm
 
 
+async def _db_size_mb(sm) -> float:
+    from sqlalchemy import text
+
+    async with sm() as s:
+        b = (await s.execute(text("select pg_database_size(current_database())"))).scalar() or 0
+    return round(int(b) / (1024 * 1024), 1)
+
+
+async def _preflight(sm, *, allow_over: bool = False) -> float:
+    """Abort a write command before it can fill a small production volume.
+
+    The 2026-08-31 incident: a 24-month market-wide corpus of full raw JSON payloads
+    exhausted the 434 MiB Railway volume and crashlooped Postgres. This guard makes
+    enrichment fail loudly at a safe threshold instead.
+    """
+    size = await _db_size_mb(sm)
+    ceiling = float(settings.ENRICHMENT_DB_SIZE_CEILING_MB)
+    if size >= ceiling and not allow_over:
+        print(
+            f"error: database is {size} MB, at/over the {ceiling} MB enrichment ceiling.\n"
+            f"       Refusing to run a write command. Raise ENRICHMENT_DB_SIZE_CEILING_MB "
+            f"only after confirming real volume headroom, or reduce retention.",
+            file=sys.stderr,
+        )
+        raise SystemExit(3)
+    if size >= ceiling * 0.85:
+        print(f"[preflight] WARNING: database is {size} MB (ceiling {ceiling} MB) — approaching the limit", file=sys.stderr)
+    else:
+        print(f"[preflight] database is {size} MB / {ceiling} MB ceiling", file=sys.stderr)
+    return size
+
+
 def _emit(args, payload) -> None:
     print(json.dumps(payload, indent=2, default=str))
 
@@ -192,6 +226,7 @@ async def _cmd_news(args) -> int:
     from app.persistence.models import ExternalNews
 
     engine, sm = await _wire(args)
+    await _preflight(sm)
     langs = args.lang or ["vi"]
     start = args.start or (date.today() - timedelta(days=max(1, args.days)))
     end = args.end or date.today()
@@ -231,6 +266,7 @@ async def _cmd_corporate_actions(args) -> int:
     from app.enrichment.sources import VndirectFinfoSource
 
     engine, sm = await _wire(args)
+    await _preflight(sm)
     svc = EnrichmentService(sm)
     total = UpsertResult()
     per_symbol = {}
@@ -263,6 +299,7 @@ async def _cmd_company_profiles(args) -> int:
     from app.enrichment.sources import VndirectFinfoSource
 
     engine, sm = await _wire(args)
+    await _preflight(sm)
     svc = EnrichmentService(sm)
     total = UpsertResult()
     per_symbol = {}
@@ -371,6 +408,7 @@ async def _cmd_backfill_events(args) -> int:
     from app.enrichment.sources import SsiCompanyEventsSource
 
     engine, sm = await _wire(args)
+    await _preflight(sm)
     symbols = args.symbols or await _underlying_universe()
     end = args.end or _vn_today()
     start = args.start or _months_ago(end, args.months)
@@ -430,6 +468,7 @@ async def _cmd_backfill_news(args) -> int:
     from app.enrichment.sources import HsxNewsSource
 
     engine, sm = await _wire(args)
+    await _preflight(sm)
     langs = args.lang or ["vi"]
     end = args.end or _vn_today()
     start = args.start or _months_ago(end, args.months)
@@ -438,6 +477,8 @@ async def _cmd_backfill_news(args) -> int:
     total = UpsertResult()
     per_lang: dict = {}
     incomplete: list = []
+    stopped_early: str | None = None
+    ceiling = float(settings.ENRICHMENT_DB_SIZE_CEILING_MB)
     try:
         async with EnrichmentHttpClient(sessionmaker=sm) as client:
             src = HsxNewsSource(client)
@@ -447,6 +488,12 @@ async def _cmd_backfill_news(args) -> int:
                 months = 0
                 splits = 0
                 for w_start, w_end in month_windows(start, end):
+                    # Stop cleanly before disk pressure — the log rows make the run resumable.
+                    sz = await _db_size_mb(sm)
+                    if sz >= ceiling:
+                        stopped_early = f"{lang} at {w_start} — DB {sz} MB reached the {ceiling} MB ceiling"
+                        logger.warning("backfill-news stopping early: %s", stopped_early)
+                        break
                     months += 1
 
                     async def on_page(items, _lang=lang):
@@ -472,12 +519,16 @@ async def _cmd_backfill_news(args) -> int:
                 per_lang[lang] = {"months": months, "adaptive_splits": splits,
                                   "inserted": acc.inserted, "updated": acc.updated}
                 total.merge(acc)
+                if stopped_early:
+                    break
         _emit(args, {
             "command": "backfill-news", "window": [start.isoformat(), end.isoformat()],
             "per_lang": per_lang, "incomplete_windows": incomplete,
+            "stopped_early": stopped_early,
+            "db_size_mb": await _db_size_mb(sm),
             "totals": {"inserted": total.inserted, "updated": total.updated, "skipped": total.skipped},
         })
-        return 0 if not incomplete else 1
+        return 0 if (not incomplete and not stopped_early) else 1
     finally:
         await engine.dispose()
 

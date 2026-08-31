@@ -97,3 +97,6 @@ docs/internal/
 .agents/
 server/archive/
 .vercel
+
+# local recovery / ops scratch — never commit
+scratchpad/

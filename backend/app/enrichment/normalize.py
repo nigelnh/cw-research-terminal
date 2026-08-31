@@ -71,17 +71,26 @@ def _epoch_to_dt(v) -> datetime | None:
 def normalize_hsx_news(item: dict, *, lang: str, base_web: str = "https://www.hsx.vn") -> dict:
     title = str(item.get("title") or "").strip()
     nid = str(item.get("id") or "").strip()
+    # HSX's API exposes no direct document/PDF link (`alias` / `link` are null even on the
+    # detail endpoint). The canonical human-viewable page is the portal ViewArticle route
+    # keyed by the numeric id, which embeds the PDF once its JS loads.
     alias = item.get("alias")
-    url = None
     if alias:
         url = f"{base_web}/Modules/CMS/Web/ViewArticle/{alias}"
     elif item.get("link"):
         url = str(item["link"])
+    elif nid:
+        url = f"{base_web}/Modules/CMS/Web/ViewArticle/{nid}"
+    else:
+        url = None
     cat_id = item.get("catId")
     try:
         cat_id = int(cat_id) if cat_id is not None else None
     except (TypeError, ValueError):
         cat_id = None
+    # Full upstream payload is NOT persisted for news (0006) — HOSE is public and
+    # re-fetchable by (source, source_id). Only the fields we don't otherwise normalize
+    # and might want for re-parsing are carried on the row dict for the CLI's use.
     return {
         "source": "HOSE",
         "source_id": nid,
@@ -99,7 +108,6 @@ def normalize_hsx_news(item: dict, *, lang: str, base_web: str = "https://www.hs
         "published_at": _epoch_to_dt(item.get("publishFrom")) or _epoch_to_dt(item.get("postedDate")),
         "approved_at": _epoch_to_dt(item.get("approvedDate")),
         "url": (url[:1000] if url else None),
-        "raw": item,
     }
 
 

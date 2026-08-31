@@ -65,7 +65,6 @@ class EnrichmentService:
                     published_at=r.get("published_at"),
                     approved_at=r.get("approved_at"),
                     url=r.get("url"),
-                    raw=r.get("raw") or {},
                 )
                 stmt = stmt.on_conflict_do_update(
                     constraint="uq_external_news_identity",
@@ -78,7 +77,6 @@ class EnrichmentService:
                         "published_at": stmt.excluded.published_at,
                         "approved_at": stmt.excluded.approved_at,
                         "url": stmt.excluded.url,
-                        "raw": stmt.excluded.raw,
                         "updated_at": func.now(),
                     },
                 ).returning(_INSERTED)
