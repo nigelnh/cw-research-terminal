@@ -24,10 +24,14 @@ function clampToViewport(p: Pos): Pos {
   return { x: Math.min(Math.max(p.x, EDGE), maxX), y: Math.min(Math.max(p.y, EDGE), maxY) };
 }
 
+// The docked REPL input bar occupies ~44px at the very bottom; the default anchor sits
+// clear of it. The user can still drag the anchor down over the bar if they want.
+const REPL_BAR = 48;
+
 function defaultPos(): Pos {
   return clampToViewport({
     x: window.innerWidth - ANCHOR - EDGE,
-    y: window.innerHeight - ANCHOR - EDGE - 4,
+    y: window.innerHeight - ANCHOR - EDGE - REPL_BAR,
   });
 }
 
@@ -56,14 +60,15 @@ function savePos(p: Pos) {
 function panelBox(anchor: Pos) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  const bottomLimit = vh - EDGE - REPL_BAR; // stay clear of the docked REPL input
   const w = Math.min(PANEL_W, vw - 2 * EDGE);
-  const h = Math.min(PANEL_H, vh - 2 * EDGE - ANCHOR);
+  const h = Math.min(PANEL_H, bottomLimit - EDGE - ANCHOR);
   const openLeft = anchor.x + ANCHOR / 2 > vw / 2;
   const openUp = anchor.y + ANCHOR / 2 > vh / 2;
   let left = openLeft ? anchor.x + ANCHOR - w : anchor.x;
   let top = openUp ? anchor.y - h - 8 : anchor.y + ANCHOR + 8;
   left = Math.min(Math.max(left, EDGE), vw - w - EDGE);
-  top = Math.min(Math.max(top, EDGE), vh - h - EDGE);
+  top = Math.min(Math.max(top, EDGE), bottomLimit - h);
   return { left, top, w, h, openLeft, openUp };
 }
 
