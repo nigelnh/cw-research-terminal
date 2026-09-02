@@ -1,29 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { Search, UserRound } from "lucide-react";
 import { useAuth } from "@/data/auth";
 import { SignInDialog } from "@/features/auth/sign_in_dialog";
+import { Popover } from "./ui";
 
 type Tab = "dashboard" | "research" | "news";
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "dashboard", label: "DASHBOARD" },
-  { id: "research", label: "RESEARCH" },
-  { id: "news", label: "NEWS" },
-];
-
-interface AppHeaderProps {
+interface Props {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
-  filter: string;
-  onFilterChange: (value: string) => void;
   marketSessionActive: boolean;
+  marketSession?: string;
+  connectionState?: string;
+  symbols?: string[];
+  onSelectSymbol?: (symbol: string) => void;
+  filter?: string;
+  onFilterChange?: (value: string) => void;
 }
-
-const VN_TZ = "Asia/Ho_Chi_Minh";
-
-/**
- * "Aug 29, 2026 · 21:43:07 ICT" in Vietnam local time. Its own component + interval so
- * the once-per-second tick re-renders only this span, not the whole header.
- */
 function HeaderClock() {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -32,242 +24,212 @@ function HeaderClock() {
   }, []);
   const d = new Date(now);
   const date = new Intl.DateTimeFormat("en-US", {
-    timeZone: VN_TZ,
+    timeZone: "Asia/Ho_Chi_Minh",
     month: "short",
     day: "numeric",
     year: "numeric",
   }).format(d);
   const time = new Intl.DateTimeFormat("en-GB", {
-    timeZone: VN_TZ,
+    timeZone: "Asia/Ho_Chi_Minh",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
   }).format(d);
-  return <span className="mono">{`${date} · ${time} ICT`}</span>;
+  return (
+    <time className="header-clock mono" dateTime={d.toISOString()}>
+      <span className="header-date">{date} · </span>
+      {time} ICT
+    </time>
+  );
 }
-
-const TAB_BASE: React.CSSProperties = {
-  padding: "4px 12px",
-  borderRadius: 2,
-  border: "none",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: 11,
-  letterSpacing: "0.02em",
-};
-
 function SignInControl() {
   const { user, status, isConfigured, signOut } = useAuth();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
-
   if (!isConfigured) return null;
-  if (status === "loading") {
-    return <span style={{ fontSize: 11, color: "var(--t-50)" }} aria-hidden>·</span>;
-  }
-
-  if (status === "anonymous") {
-    return (
-      <>
-        <button
-          type="button"
-          onClick={() => setDialogOpen(true)}
-          className="focus-ring"
-          style={{
-            padding: "4px 10px",
-            border: "1px solid var(--border-32)",
-            borderRadius: 2,
-            background: "transparent",
-            color: "var(--t-85)",
-            cursor: "pointer",
-            fontFamily: "inherit",
-            fontSize: 11,
-          }}
-        >
-          SIGN IN
-        </button>
-        {dialogOpen && <SignInDialog onClose={() => setDialogOpen(false)} />}
-      </>
-    );
-  }
-
-  const label = user?.email ?? "account";
+  if (status === "loading") return <span className="muted">…</span>;
   return (
-    <div
-      ref={wrapRef}
-      style={{ position: "relative" }}
-      onMouseEnter={() => setMenuOpen(true)}
-      onMouseLeave={() => setMenuOpen(false)}
-    >
-      <span
-        style={{ color: "var(--accent)", cursor: "default", fontSize: 11 }}
-        title={label}
-      >
-        {label}
-      </span>
-      {menuOpen && (
-        <div style={{ position: "absolute", right: 0, top: "100%", paddingTop: 8, zIndex: 60 }}>
-        <div
-          role="menu"
-          style={{
-            background: "var(--panel-2)",
-            border: "1px solid var(--border-30)",
-            padding: "10px 12px",
-            width: 190,
-            boxShadow: "0 8px 20px rgba(0,0,0,0.5)",
-          }}
+    <>
+      {status === "anonymous" ? (
+        <button
+          className="btn header-signin"
+          onClick={() => setDialogOpen(true)}
         >
-          <div style={{ fontSize: 11, color: "var(--t-80)", marginBottom: 8, lineHeight: 1.4 }}>
-            Sign out of this session?
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setMenuOpen(false);
-                void signOut();
-              }}
-              style={{
-                flex: 1,
-                padding: "4px 0",
-                border: "1px solid var(--border-32)",
-                borderRadius: 2,
-                background: "transparent",
-                color: "var(--t-85)",
-                cursor: "pointer",
-                fontSize: 10.5,
-                fontFamily: "inherit",
-              }}
-            >
-              SIGN OUT
-            </button>
-            <button
-              type="button"
-              onClick={() => setMenuOpen(false)}
-              style={{
-                flex: 1,
-                padding: "4px 0",
-                border: "none",
-                borderRadius: 2,
-                background: "var(--panel-active)",
-                color: "var(--t-85)",
-                cursor: "pointer",
-                fontSize: 10.5,
-                fontFamily: "inherit",
-              }}
-            >
-              CANCEL
+          Sign in
+        </button>
+      ) : (
+        <Popover label="Account" width={270} icon={<UserRound size={16} />}>
+          <div className="account-menu">
+            <span>{user?.email}</span>
+            <p className="section-subtitle">
+              Your watchlist is synced across devices.
+            </p>
+            <button className="btn" onClick={() => void signOut()}>
+              Sign out
             </button>
           </div>
-        </div>
-        </div>
+        </Popover>
       )}
-    </div>
+      {dialogOpen && <SignInDialog onClose={() => setDialogOpen(false)} />}
+    </>
   );
 }
-
 export function AppHeader({
   activeTab,
   onTabChange,
-  filter,
-  onFilterChange,
   marketSessionActive,
-}: AppHeaderProps) {
+  marketSession,
+  connectionState,
+  symbols = [],
+  onSelectSymbol,
+}: Props) {
+  const [term, setTerm] = useState("");
+  const [open, setOpen] = useState(false);
+  const [index, setIndex] = useState(0);
+  const ref = useRef<HTMLInputElement>(null);
+  const wrap = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const clean = term.trim().toUpperCase();
+  const matches = clean
+    ? symbols
+        .filter((s) => s.includes(clean))
+        .sort(
+          (a, b) =>
+            Number(!a.startsWith(clean)) - Number(!b.startsWith(clean)) ||
+            a.localeCompare(b),
+        )
+        .slice(0, 8)
+    : [];
+  const select = (symbol: string) => {
+    onSelectSymbol?.(symbol);
+    setTerm("");
+    setOpen(false);
+    ref.current?.blur();
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      if (
+        e.key === "/" &&
+        !target.closest("input,textarea,select,[contenteditable=true]")
+      ) {
+        e.preventDefault();
+        ref.current?.focus();
+        setOpen(true);
+      }
+    };
+    const outside = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("keydown", key);
+    document.addEventListener("pointerdown", outside);
+    return () => {
+      document.removeEventListener("keydown", key);
+      document.removeEventListener("pointerdown", outside);
+    };
+  }, []);
+  const feedIssue = [
+    "ERROR",
+    "DISCONNECTED",
+    "RECONNECTING",
+    "CONNECTING",
+  ].includes(connectionState ?? "");
+  const marketLabel = marketSessionActive
+    ? "Session open"
+    : marketSession === "LUNCH_BREAK"
+      ? "Lunch break"
+      : "Market closed";
   return (
-    <header
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 16,
-        padding: "0 20px",
-        height: 42,
-        borderBottom: "1px solid var(--border-strong)",
-        flexShrink: 0,
-        background: "var(--bg)",
-      }}
-    >
-      <span
-        className="heading"
-        style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: "var(--accent)" }}
-      >
-        CW-TERMINAL
-      </span>
-
-      <div style={{ display: "flex", gap: 2, background: "var(--panel-2)", padding: 2, borderRadius: 3 }}>
-        {TABS.map((t) => (
+    <header className="app-header">
+      <span className="brand">CW-TERMINAL</span>
+      <nav aria-label="Main navigation" className="main-nav">
+        {(["dashboard", "research", "news"] as const).map((tab) => (
           <button
-            key={t.id}
-            type="button"
-            onClick={() => onTabChange(t.id)}
-            className="focus-ring"
-            aria-pressed={activeTab === t.id}
-            style={{
-              ...TAB_BASE,
-              background: activeTab === t.id ? "var(--panel-active)" : "transparent",
-              color: activeTab === t.id ? "var(--t-92)" : "var(--t-55)",
-            }}
+            key={tab}
+            className={activeTab === tab ? "active" : ""}
+            aria-pressed={activeTab === tab}
+            onClick={() => onTabChange(tab)}
           >
-            {t.label}
+            {tab.toUpperCase()}
           </button>
         ))}
+      </nav>
+      <div className="symbol-search" ref={wrap}>
+        <Search size={14} aria-hidden="true" />
+        <input
+          ref={ref}
+          role="combobox"
+          aria-label="Jump to symbol"
+          aria-autocomplete="list"
+          aria-expanded={open && !!clean}
+          aria-controls={listId}
+          aria-activedescendant={
+            open && matches[index] ? `${listId}-${index}` : undefined
+          }
+          placeholder="Jump to symbol…"
+          value={term}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            setTerm(e.target.value);
+            setIndex(0);
+            setOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setOpen(false);
+              setTerm("");
+            } else if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setOpen(true);
+              setIndex((i) => Math.min(i + 1, matches.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setIndex((i) => Math.max(0, i - 1));
+            } else if (e.key === "Enter" && matches[index]) {
+              e.preventDefault();
+              select(matches[index]);
+            }
+          }}
+        />
+        <kbd>/</kbd>
+        {open && clean && (
+          <div id={listId} className="symbol-results" role="listbox">
+            {matches.length ? (
+              matches.map((symbol, i) => (
+                <button
+                  id={`${listId}-${i}`}
+                  role="option"
+                  aria-selected={index === i}
+                  key={symbol}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => select(symbol)}
+                >
+                  <span className="mono">{symbol}</span>
+                  <span>Inspect ↵</span>
+                </button>
+              ))
+            ) : (
+              <p>No matching symbol</p>
+            )}
+          </div>
+        )}
       </div>
-
-      <input
-        value={filter}
-        onChange={(e) => onFilterChange(e.target.value)}
-        placeholder="/ filter or jump to symbol"
-        aria-label="Filter or jump to symbol"
-        className="focus-ring"
-        style={{
-          flex: 1,
-          maxWidth: 320,
-          background: "var(--panel-2)",
-          border: "1px solid var(--border-strong)",
-          borderRadius: 3,
-          padding: "5px 10px",
-          fontFamily: "inherit",
-          fontSize: 11,
-          color: "var(--t-92)",
-          outline: "none",
-        }}
-      />
-
-      <div
-        style={{
-          marginLeft: "auto",
-          display: "flex",
-          alignItems: "center",
-          gap: 18,
-          fontSize: 11,
-          color: "var(--t-66)",
-        }}
-      >
+      <div className="header-status">
         <HeaderClock />
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              background: marketSessionActive ? "var(--up)" : "var(--t-46)",
-            }}
-            aria-hidden
-          />
-          {marketSessionActive ? "LIVE" : "CLOSED"}
+        <span className={`data-status ${marketSessionActive ? "live" : ""}`}>
+          {marketLabel}
         </span>
-        <SignInControl />
+        {feedIssue && (
+          <span className="badge badge-warning">
+            {connectionState === "RECONNECTING" ||
+            connectionState === "CONNECTING"
+              ? "Connecting"
+              : "Backend offline"}
+          </span>
+        )}
       </div>
+      <SignInControl />
     </header>
   );
 }
