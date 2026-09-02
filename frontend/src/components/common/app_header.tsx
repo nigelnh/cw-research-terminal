@@ -187,41 +187,39 @@ export function AppHeader({
 }: AppHeaderProps) {
   return (
     <header
+      className="terminal-header"
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 16,
-        padding: "0 20px",
-        height: 42,
         borderBottom: "1px solid var(--border-strong)",
         flexShrink: 0,
         background: "var(--bg)",
       }}
     >
-      <span
-        className="heading"
-        style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: "var(--accent)" }}
-      >
-        CW-TERMINAL
-      </span>
+      <div className="terminal-header-start">
+        <span
+          className="heading"
+          style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: "var(--accent)" }}
+        >
+          CW-TERMINAL
+        </span>
 
-      <div style={{ display: "flex", gap: 2, background: "var(--panel-2)", padding: 2, borderRadius: 3 }}>
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => onTabChange(t.id)}
-            className="focus-ring"
-            aria-pressed={activeTab === t.id}
-            style={{
-              ...TAB_BASE,
-              background: activeTab === t.id ? "var(--panel-active)" : "transparent",
-              color: activeTab === t.id ? "var(--t-92)" : "var(--t-55)",
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
+        <div style={{ display: "flex", gap: 2, background: "var(--panel-2)", padding: 2, borderRadius: 3 }}>
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => onTabChange(t.id)}
+              className="focus-ring"
+              aria-pressed={activeTab === t.id}
+              style={{
+                ...TAB_BASE,
+                background: activeTab === t.id ? "var(--panel-active)" : "transparent",
+                color: activeTab === t.id ? "var(--t-92)" : "var(--t-55)",
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <input
@@ -229,10 +227,8 @@ export function AppHeader({
         onChange={(e) => onFilterChange(e.target.value)}
         placeholder="/ filter or jump to symbol"
         aria-label="Filter or jump to symbol"
-        className="focus-ring"
+        className="focus-ring terminal-header-search"
         style={{
-          flex: 1,
-          maxWidth: 320,
           background: "var(--panel-2)",
           border: "1px solid var(--border-strong)",
           borderRadius: 3,
@@ -245,8 +241,8 @@ export function AppHeader({
       />
 
       <div
+        className="terminal-header-end"
         style={{
-          marginLeft: "auto",
           display: "flex",
           alignItems: "center",
           gap: 18,

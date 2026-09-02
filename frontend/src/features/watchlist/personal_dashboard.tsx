@@ -404,8 +404,8 @@ export function PersonalDashboard({
         <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
           Watchlist
         </span>
-        <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
         <WatchlistSymbolSearch options={searchOptions} value={symbolSearch} onChange={setSymbolSearch} />
+        <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
         <RegistryFilter
           underlyingOptions={underlyingOptions}
           issuerOptions={issuerOptions}
