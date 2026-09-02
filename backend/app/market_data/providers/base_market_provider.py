@@ -56,3 +56,7 @@ class MarketDataProvider(ABC):
         Signature: callback(event_type: 'trade' | 'bidask', data: dict, symbol: str)
         """
         pass
+
+    async def get_market_overview(self, cw_symbols: List[str]) -> Dict[str, Any]:
+        """Return a cached, read-only market overview when the vendor supports it."""
+        raise NotImplementedError("market overview is not supported by this provider")

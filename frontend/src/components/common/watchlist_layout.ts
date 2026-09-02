@@ -53,6 +53,10 @@ export function columnOrder(preferred: readonly string[]): QuoteColumnKey[] {
     columns.splice(columns.indexOf("tradingValue"), 1);
     columns.splice(columns.indexOf("last") + 1, 0, "tradingValue");
   }
+  if (!preferred.includes("issuer")) {
+    columns.splice(columns.indexOf("issuer"), 1);
+    columns.splice(columns.indexOf("dte") + 1, 0, "issuer");
+  }
   return columns;
 }
 export function moveItem<T>(items: readonly T[], from: T, to: T): T[] {

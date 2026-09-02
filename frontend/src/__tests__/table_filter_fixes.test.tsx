@@ -85,6 +85,9 @@ vi.mock("@/data/query/use_dashboard_data", () => ({
         : undefined,
   }),
 }));
+vi.mock("@/data/query/use_market_overview", () => ({
+  useMarketOverview: () => ({ isLoading: false, data: undefined }),
+}));
 vi.mock("@/data/query", () => ({
   useHistoricalBars: () => ({ bars: [], isLoading: false }),
   useCorporateActions: () => ({ items: [], isLoading: false }),
@@ -161,7 +164,16 @@ describe("Targeted watchlist columns", () => {
       "RATIO",
       "LAST_TRD_DATE",
       "DTE",
+      "ISSUER",
     ]);
+    const headers = page.getAllByRole("columnheader").map((cell) => cell.textContent);
+    const rows = page.getAllByRole("row");
+    const stockCells = within(rows.find((row) => row.textContent?.includes("HPG"))!).getAllByRole("cell");
+    const cwCells = within(rows.find((row) => row.textContent?.includes("CHPG2602"))!).getAllByRole("cell");
+    for (const key of ["STRIKE", "RATIO", "LAST_TRD_DATE", "DTE", "ISSUER"]) {
+      expect(stockCells[headers.indexOf(key) + 1].textContent).toBe("");
+    }
+    expect(cwCells[headers.indexOf("ISSUER") + 1].textContent).toBe("ACBS");
     const symbol = page.getByText("CHPG2602", { selector: "td" });
     expect(symbol.textContent).toBe("CHPG2602");
     const cells = within(symbol.closest("tr")!).getAllByRole("cell");

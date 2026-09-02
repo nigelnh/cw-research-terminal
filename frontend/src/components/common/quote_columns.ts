@@ -29,6 +29,7 @@ export const QUOTE_COLUMNS = [
   { key: "ratio", label: "RATIO" },
   { key: "lastTradingDate", label: "LAST_TRD_DATE" },
   { key: "dte", label: "DTE" },
+  { key: "issuer", label: "ISSUER" },
 ] as const;
 export type QuoteColumnKey = (typeof QUOTE_COLUMNS)[number]["key"];
 export const QUOTE_COLUMN_HINTS: Partial<Record<QuoteColumnKey, string>> = {
@@ -37,6 +38,7 @@ export const QUOTE_COLUMN_HINTS: Partial<Record<QuoteColumnKey, string>> = {
 };
 export interface QuoteTableValues {
   symbol: string;
+  issuer?: string | null;
   ref: number | null;
   ceiling: number | null;
   floor: number | null;
@@ -111,6 +113,8 @@ export function quoteCell(
       return { text: fmtRatio(row.ratio), color: muted };
     case "lastTradingDate":
       return { text: row.lastTradingDate?.slice(0, 10) || DASH, color: muted };
+    case "issuer":
+      return { text: row.issuer || DASH, color: muted };
     case "dte":
       return { text: row.dteText, color: "var(--t-46)" };
   }
