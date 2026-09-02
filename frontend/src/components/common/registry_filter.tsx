@@ -91,6 +91,12 @@ const TEXT_INPUT: React.CSSProperties = {
   marginBottom: 6,
   fontFamily: "inherit",
   outline: "none",
+  boxSizing: "border-box",
+};
+/** Bounded, internally-scrolling checkbox list so a long options set can't grow the popover. */
+const SCROLL_LIST: React.CSSProperties = {
+  maxHeight: 132,
+  overflowY: "auto",
 };
 
 export function RegistryFilter({
@@ -143,7 +149,7 @@ export function RegistryFilter({
             boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
           }}
         >
-          <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 20, marginBottom: 12, alignItems: "flex-start" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={LABEL}>UNDERLYING</div>
               <input
@@ -154,28 +160,30 @@ export function RegistryFilter({
                 onChange={(e) => onChange({ ...value, uText: e.target.value })}
                 style={TEXT_INPUT}
               />
-              <label style={CHECK_ROW}>
-                <input
-                  type="checkbox"
-                  checked={value.underlyings === null}
-                  onChange={() =>
-                    onChange({ ...value, underlyings: value.underlyings === null ? [] : null })
-                  }
-                />
-                All
-              </label>
-              {underlyingOptions.map((u) => (
-                <label key={u} style={CHECK_ROW}>
+              <div style={SCROLL_LIST}>
+                <label style={CHECK_ROW}>
                   <input
                     type="checkbox"
-                    checked={uChecked(u)}
+                    checked={value.underlyings === null}
                     onChange={() =>
-                      onChange({ ...value, underlyings: toggle(value.underlyings, underlyingOptions, u) })
+                      onChange({ ...value, underlyings: value.underlyings === null ? [] : null })
                     }
                   />
-                  {u}
+                  All
                 </label>
-              ))}
+                {underlyingOptions.map((u) => (
+                  <label key={u} style={CHECK_ROW}>
+                    <input
+                      type="checkbox"
+                      checked={uChecked(u)}
+                      onChange={() =>
+                        onChange({ ...value, underlyings: toggle(value.underlyings, underlyingOptions, u) })
+                      }
+                    />
+                    {u}
+                  </label>
+                ))}
+              </div>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={LABEL}>ISSUER</div>
@@ -187,28 +195,30 @@ export function RegistryFilter({
                 onChange={(e) => onChange({ ...value, iText: e.target.value })}
                 style={TEXT_INPUT}
               />
-              <label style={CHECK_ROW}>
-                <input
-                  type="checkbox"
-                  checked={value.issuers === null}
-                  onChange={() =>
-                    onChange({ ...value, issuers: value.issuers === null ? [] : null })
-                  }
-                />
-                All
-              </label>
-              {issuerOptions.map((i) => (
-                <label key={i} style={CHECK_ROW}>
+              <div style={SCROLL_LIST}>
+                <label style={CHECK_ROW}>
                   <input
                     type="checkbox"
-                    checked={iChecked(i)}
+                    checked={value.issuers === null}
                     onChange={() =>
-                      onChange({ ...value, issuers: toggle(value.issuers, issuerOptions, i) })
+                      onChange({ ...value, issuers: value.issuers === null ? [] : null })
                     }
                   />
-                  {i}
+                  All
                 </label>
-              ))}
+                {issuerOptions.map((i) => (
+                  <label key={i} style={CHECK_ROW}>
+                    <input
+                      type="checkbox"
+                      checked={iChecked(i)}
+                      onChange={() =>
+                        onChange({ ...value, issuers: toggle(value.issuers, issuerOptions, i) })
+                      }
+                    />
+                    {i}
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
           <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10 }}>

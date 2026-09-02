@@ -16,6 +16,16 @@ const DRAG_THRESHOLD = 4;
 const COMPOSER_MAX = 132; // textarea auto-grow ceiling
 const NEAR_BOTTOM_PX = 64;
 
+/** Short, friendly empty-state prompts. One is picked per panel mount (see below). */
+const EMPTY_PHRASES = [
+  "What are we looking at?",
+  "Ask me anything.",
+  "What do you want to know?",
+  "Need a second opinion?",
+  "What are you researching?",
+  "What's the question?",
+];
+
 interface Pos {
   x: number;
   y: number;
@@ -290,6 +300,8 @@ export function AiAnchor({ context }: AiAnchorProps) {
 
   const [pos, setPos] = useState<Pos>(() => (typeof window === "undefined" ? { x: 0, y: 0 } : loadPos()));
   const [open, setOpen] = useState(false);
+  // Pick one empty-state phrase on mount; stays put across re-renders and messages.
+  const [emptyPhrase] = useState(() => EMPTY_PHRASES[Math.floor(Math.random() * EMPTY_PHRASES.length)]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragState = useRef<{ dx: number; dy: number; ox: number; oy: number; moved: boolean } | null>(null);
@@ -491,9 +503,16 @@ export function AiAnchor({ context }: AiAnchorProps) {
             }}
           >
             {messages.length === 0 && !streaming && (
-              <div className="mono" style={{ color: "var(--t-46)", fontSize: 11, lineHeight: 1.55 }}>
-                Ask about pricing, Greeks, contract terms, disclosures or corporate events. Grounded on the selected
-                instrument.
+              <div
+                className="mono"
+                style={{
+                  color: "var(--t-46)",
+                  fontSize: 11,
+                  lineHeight: 1.55,
+                  textAlign: "center",
+                }}
+              >
+                {emptyPhrase}
               </div>
             )}
 
