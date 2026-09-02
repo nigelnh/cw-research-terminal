@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { WatchlistItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
@@ -7,6 +7,8 @@ import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, quoteCell, type QuoteColumnKey } fro
 import { completeOrder, moveGroupedRows, useWatchlistLayout } from "@/components/common/watchlist_layout";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import { MarketOverviewStrip } from "./market_overview_strip";
+import { WatchlistSymbolSearch, matchingSymbols, prioritizeWatchlist, type WatchlistSearchOption } from "./watchlist_symbol_search";
+import { useStockProfiles } from "@/data/query/use_stock_profiles";
 import {
   EMPTY_FILTER,
   RegistryFilter,
@@ -140,10 +142,17 @@ export function PersonalDashboard({
   const { quotes, warrants } = useResearchMarket();
   const { getSpec } = useInstrumentSpecs();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
+  const [symbolSearch, setSymbolSearch] = useState("");
   const hiddenRows = useHiddenRows();
 
   const allSymbols = useMemo(() => items.map((i) => i.symbol), [items]);
   const { getRow } = useDashboardData(allSymbols);
+  const profileSymbols = useMemo(() => [...new Set(items.map(item => {
+    if (!isCwItem(item)) return item.symbol;
+    return getSpec(item.symbol)?.underlyingSymbol || item.underlyingSymbol || "";
+  }).filter(Boolean))], [items, getSpec]);
+  const { profiles } = useStockProfiles(profileSymbols);
+  const profilesBySymbol = useMemo(() => new Map(profiles.map(profile => [profile.symbol, profile])), [profiles]);
 
   const setSelected = onSelectSymbol ?? (() => {});
   const q = filter.trim().toUpperCase().replace(/^\//, "").trim();
@@ -307,17 +316,18 @@ export function PersonalDashboard({
     view.clearOrder();
   };
 
-  const stockSyms = useMemo(
-    () => new Set(stockRows.map((r) => r.symbol.toUpperCase())),
-    [stockRows],
-  );
-  const parents = view.ordered.filter((r) => r.kind === "stock");
-  const orderedCws = view.ordered.filter((r) => r.kind === "cw");
-  const childrenOf = (sym: string) =>
-    orderedCws.filter((c) => (c.underlying ?? "").toUpperCase() === sym.toUpperCase());
-  const orphanCws = orderedCws.filter(
-    (c) => !c.underlying || !stockSyms.has(c.underlying.toUpperCase()),
-  );
+  const searchOptions = useMemo<WatchlistSearchOption[]>(() => view.ordered.map(row => {
+    const profile = profilesBySymbol.get(row.kind === "stock" ? row.symbol : row.underlying ?? "");
+    return {
+      symbol: row.symbol,
+      kind: row.kind,
+      name: row.kind === "stock" ? (profile?.name || profile?.short_name || "") : `${row.underlying ?? ""}${row.issuer ? ` · ${row.issuer}` : ""}`,
+      exchange: row.kind === "stock" ? profile?.exchange ?? null : "HOSE",
+      underlying: row.underlying,
+    };
+  }), [view.ordered, profilesBySymbol]);
+  const searchMatches = useMemo(() => matchingSymbols(searchOptions, symbolSearch), [searchOptions, symbolSearch]);
+  const searched = useMemo(() => prioritizeWatchlist(view.ordered, searchMatches), [view.ordered, searchMatches]);
 
   const symbolWidth = `calc(${Math.max(8, ...unifiedRows.map((r) => r.symbol.length + (r.kind === "cw" ? 1 : 0)))}ch + 24px)`;
   const renderRow = (r: UnifiedRow) => {
@@ -326,7 +336,7 @@ export function PersonalDashboard({
       <tr
         key={r.symbol}
         data-symbol={r.symbol}
-        className={`watchlist-row${r.kind === "cw" ? " watchlist-cw" : ""}${dropTarget === r.symbol ? " is-drop-target" : ""}`}
+        className={`watchlist-row${r.kind === "cw" ? " watchlist-cw" : ""}${dropTarget === r.symbol ? " is-drop-target" : ""}${searched.highlighted.has(r.symbol) ? " is-search-match" : ""}`}
         tabIndex={0}
         draggable
         title="Drag to reorder; Alt + ↑/↓ to move"
@@ -360,7 +370,7 @@ export function PersonalDashboard({
         style={{
           cursor: "pointer",
           height: 26,
-          background: selected ? "var(--panel-3)" : r.kind === "cw" ? "var(--panel-2)" : "var(--bg)",
+          background: selected || searched.highlighted.has(r.symbol) ? "var(--panel-3)" : r.kind === "cw" ? "var(--panel-2)" : "var(--bg)",
           borderBottom: ROW_BORDER,
         }}
       >
@@ -385,9 +395,9 @@ export function PersonalDashboard({
       <div
         style={{
           display: "flex",
-          alignItems: "baseline",
-          gap: 12,
-          marginBottom: 14,
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 8,
           position: "relative",
         }}
       >
@@ -395,6 +405,7 @@ export function PersonalDashboard({
           Watchlist
         </span>
         <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
+        <WatchlistSymbolSearch options={searchOptions} value={symbolSearch} onChange={setSymbolSearch} />
         <RegistryFilter
           underlyingOptions={underlyingOptions}
           issuerOptions={issuerOptions}
@@ -471,13 +482,7 @@ export function PersonalDashboard({
             </tr>
           </thead>
           <tbody>
-            {parents.map((p) => (
-              <Fragment key={p.symbol}>
-                {renderRow(p)}
-                {childrenOf(p.symbol).map(renderRow)}
-              </Fragment>
-            ))}
-            {orphanCws.map(renderRow)}
+            {searched.rows.map(renderRow)}
           </tbody>
         </table>
         </div>

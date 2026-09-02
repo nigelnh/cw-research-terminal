@@ -88,6 +88,12 @@ vi.mock("@/data/query/use_dashboard_data", () => ({
 vi.mock("@/data/query/use_market_overview", () => ({
   useMarketOverview: () => ({ isLoading: false, data: undefined }),
 }));
+vi.mock("@/data/query/use_stock_profiles", () => ({
+  useStockProfiles: () => ({ profiles: [
+    { symbol: "HPG", name: "Hoa Phat Group Joint Stock Company", short_name: "Hoa Phat", exchange: "HOSE" },
+    { symbol: "VPB", name: "Vietnam Prosperity Joint Stock Commercial Bank", short_name: "VPBank", exchange: "HOSE" },
+  ], isLoading: false, isError: false }),
+}));
 vi.mock("@/data/query", () => ({
   useHistoricalBars: () => ({ bars: [], isLoading: false }),
   useCorporateActions: () => ({ items: [], isLoading: false }),
@@ -132,6 +138,7 @@ describe("Targeted watchlist columns", () => {
       expect(cells[headers.indexOf(header) + 1].textContent).toBe(expected);
       const stats = page.getByText("STATS").parentElement!;
       expect(within(stats).getByText("TRD_AMT").nextElementSibling?.textContent).toBe(expected);
+      expect(within(stats).queryByText("ISSUER")).toBeNull();
       expect(header.title).toContain("VND");
     } finally {
       fixture.quote.tradingValue = original;

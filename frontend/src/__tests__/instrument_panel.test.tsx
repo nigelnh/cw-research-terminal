@@ -84,7 +84,7 @@ describe("InstrumentPanel — bottom split panel", () => {
     expect(html).toContain("Quant withheld until reconciled");
   });
 
-  it("5. stock instrument -> STOCK kind line, shared stats schema with unavailable CW values", () => {
+  it("5. stock instrument -> STOCK kind line without CW-only metric rows", () => {
     const html = renderMarkup(
       <InstrumentPanel
         instrument={{ symbol: "HPG", instrumentType: "STOCK" }}
@@ -95,7 +95,8 @@ describe("InstrumentPanel — bottom split panel", () => {
     expect(html).toContain("STOCK · HOSE");
     expect(html).not.toContain("COVERED WARRANT");
     expect(html).not.toContain("MONEYNESS S/K");
-    expect(html).toContain("IV_BID");
-    expect(html).toContain("STRIKE");
+    for (const label of ["IV_BID", "IV_TRD", "IV_ASK", "STRIKE", "RATIO", "LAST_TRD_DATE", "DTE", "ISSUER"]) {
+      expect(html).not.toContain(label);
+    }
   });
 });

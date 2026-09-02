@@ -307,6 +307,17 @@ class MarketHealthResponse(BaseModel):
     quote_display_eligible: bool = False
 
 
+class StockProfile(BaseModel):
+    symbol: str
+    name: Optional[str] = None
+    short_name: Optional[str] = None
+    exchange: Optional[str] = None
+
+
+class StockProfilesResponse(BaseModel):
+    items: List[StockProfile]
+
+
 class ClientControlMessage(BaseModel):
     type: Literal["subscribe", "unsubscribe"]
     symbols: List[str]

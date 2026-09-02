@@ -27,11 +27,24 @@ class _PriceStatistics:
         return _Result([{"ticker": symbol, "timestamp": from_date, "ceilingValue": 110, "floorValue": 90} for symbol in tickers])
 
 
+class _BasicInfor:
+    def __init__(self, tickers): self.tickers = tickers
+    def get(self):
+        return _Result([{
+            "ticker": symbol, "organizationName": f"{symbol} Corporation",
+            "organizationShortName": symbol, "exchangeCode": "hose",
+        } for symbol in self.tickers])
+
+
 class _Session:
     is_login = True
+    basic_calls = 0
     def TickerList(self, ticker=None): return ["AAA", "BBB"] if ticker else ["AAA", "BBB", "CAAA2601"]
     def MarketBreadth(self): return _Breadth()
     def PriceStatistics(self): return _PriceStatistics()
+    def BasicInfor(self, tickers):
+        self.basic_calls += 1
+        return _BasicInfor(tickers)
     def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
         rows = []
         for symbol in tickers:
@@ -60,3 +73,22 @@ async def test_overview_uses_snapshot_reads_without_changing_stream_subscription
     assert result["top_cw_volume"][0]["symbol"] == "CAAA2601"
     assert result["cw_scope"] == "HOSE covered warrants"
     assert result["source"] == "FIINQUANT"
+
+
+@pytest.mark.asyncio
+async def test_stock_profiles_are_normalized_cached_and_do_not_consume_stream_slots():
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = _Session()
+    provider._is_connected = True
+    before = provider.get_active_subscriptions()
+
+    first = await provider.get_stock_profiles(["hpg", "VPB", "HPG"])
+    second = await provider.get_stock_profiles(["VPB", "HPG"])
+
+    assert first == [
+        {"symbol": "HPG", "name": "HPG Corporation", "short_name": "HPG", "exchange": "HOSE"},
+        {"symbol": "VPB", "name": "VPB Corporation", "short_name": "VPB", "exchange": "HOSE"},
+    ]
+    assert second == first
+    assert provider._session.basic_calls == 1
+    assert provider.get_active_subscriptions() == before

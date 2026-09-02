@@ -67,17 +67,17 @@ function LeaderTable({ title, rows }: { title: string; rows: VolumeLeader[] }) {
   </section>;
 }
 
-export function MarketOverviewStrip() {
+export function MarketOverviewStrip({ indicesOnly = false }: { indicesOnly?: boolean }) {
   const query = useMarketOverview();
   if (query.isLoading) return <div className="market-overview-state mono">LOADING MARKET OVERVIEW…</div>;
   if (!query.data) return <div className="market-overview-state mono">MARKET OVERVIEW UNAVAILABLE</div>;
   const data = query.data;
   const indices = ORDER.map(symbol => data.indices.find(x => x.symbol === symbol) ?? ({ symbol, value: null, change: null, change_percent: null, volume: null, trading_value: null, advancing: null, ceiling: null, unchanged: null, declining: null, floor: null, as_of: null, sparkline: [] }));
-  return <div className="market-overview-wrap">
+  return <div className={`market-overview-wrap${indicesOnly ? " indices-only" : ""}`}>
     <div className="index-viewer">{indices.map(item => <IndexCard item={item} key={item.symbol} />)}</div>
-    <div className="top-exchange-viewer">
+    {!indicesOnly && <div className="top-exchange-viewer">
       <LeaderTable title="Top Stock Trading Volume" rows={data.top_stock_volume} />
       <LeaderTable title="Top Covered Warrants Trading Volume" rows={data.top_cw_volume} />
-    </div>
+    </div>}
   </div>;
 }

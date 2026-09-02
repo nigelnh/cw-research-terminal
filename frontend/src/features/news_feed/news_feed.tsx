@@ -4,6 +4,7 @@ import { DASH } from "@/components/common/grid_table";
 import { CalendarInput } from "@/components/common/calendar_input";
 import { FilterPopover } from "@/components/common/filter_popover";
 import type { FeedContentType, ResearchFeedItem } from "@/domain/models";
+import { MarketOverviewStrip } from "@/features/watchlist/market_overview_strip";
 
 interface NewsFeedProps {
   /** Shared header filter (`?q=`). A bare token that looks like a ticker filters by
@@ -297,6 +298,7 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
 
   return (
     <div>
+      <MarketOverviewStrip indicesOnly />
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 3, flexWrap: "wrap" }}>
         <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
           News
