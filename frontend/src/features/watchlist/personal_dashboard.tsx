@@ -6,6 +6,7 @@ import { useDashboardData } from "@/data/query/use_dashboard_data";
 import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, quoteCell, type QuoteColumnKey } from "@/components/common/quote_columns";
 import { completeOrder, moveGroupedRows, useWatchlistLayout } from "@/components/common/watchlist_layout";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
+import { MarketOverviewStrip } from "./market_overview_strip";
 import {
   EMPTY_FILTER,
   RegistryFilter,
@@ -82,6 +83,7 @@ interface CwRow {
 interface UnifiedRow {
   symbol: string;
   kind: "stock" | "cw";
+  issuer: string | null;
   underlying: string | null;
   ref: number | null;
   bid: number | null;
@@ -105,6 +107,7 @@ interface UnifiedRow {
 
 const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
   symbol: (r) => r.symbol,
+  issuer: (r) => r.issuer,
   ceiling: (r) => r.ceiling,
   floor: (r) => r.floor,
   ref: (r) => r.ref,
@@ -237,6 +240,7 @@ export function PersonalDashboard({
       ...stockRows.map((s): UnifiedRow => ({
         symbol: s.symbol,
         kind: "stock",
+        issuer: null,
         underlying: null,
         ref: s.ref,
         bid: s.bid,
@@ -260,6 +264,7 @@ export function PersonalDashboard({
       ...cwRows.map((c): UnifiedRow => ({
         symbol: c.symbol,
         kind: "cw",
+        issuer: c.issuer,
         underlying: c.underlying,
         ref: c.ref,
         bid: c.bid,
@@ -367,7 +372,7 @@ export function PersonalDashboard({
               {r.symbol}
               {r.conflicting && <span title="Conflicting metadata — quant withheld" style={{ marginLeft: 5, color: "var(--down)" }}>◆</span>}
             </td>
-          ) : <td key={column.key} title={QUOTE_COLUMN_HINTS[column.key]} style={{ ...TD, color: cell.color }}>{cell.text}</td>;
+          ) : <td key={column.key} title={QUOTE_COLUMN_HINTS[column.key]} style={{ ...TD, color: cell.color }}>{r.kind === "stock" && ["strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : cell.text}</td>;
         })}
         <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
       </tr>
@@ -376,6 +381,7 @@ export function PersonalDashboard({
 
   return (
     <div>
+      <MarketOverviewStrip />
       <div
         style={{
           display: "flex",

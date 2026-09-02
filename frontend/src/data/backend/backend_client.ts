@@ -207,6 +207,10 @@ export class BackendClient {
     );
   }
 
+  async getMarketOverview(signal?: AbortSignal): Promise<any> {
+    return this.get<any>("/api/market/overview", undefined, signal);
+  }
+
   async getInstrumentSpecification(
     symbol: string,
     signal?: AbortSignal,
