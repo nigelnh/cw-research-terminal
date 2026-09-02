@@ -1,7 +1,11 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { MarketQuote } from "@/domain/models";
-import type { DisplayState, RowProvenance } from "@/domain/temporal";
+import {
+  quoteTimestamp,
+  type DisplayState,
+  type RowProvenance,
+} from "@/domain/temporal";
 import { backendClient } from "@/data/backend/backend_client";
 import { mapRawSnapshotToQuote } from "@/data/backend/mappers/map_snapshot";
 import { useResearchMarket } from "@/data/use_research_market";
@@ -30,6 +34,16 @@ interface UseDashboardDataResult {
   meta: DashboardMeta;
   isLoading: boolean;
   isError: boolean;
+  refetch: () => unknown;
+}
+
+export function isQuoteTimestampEligible(
+  stamp: string | null,
+  now = Date.now(),
+): boolean {
+  if (!stamp) return false;
+  const age = now - new Date(stamp).getTime();
+  return Number.isFinite(age) && age >= 0 && age <= 86400_000;
 }
 
 const EMPTY_META: DashboardMeta = {
@@ -82,18 +96,26 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
 
     // Live wins only while the session is active AND we actually have a fresh tick.
     const liveUsable =
-      marketSessionActive && !!live && live.lastPrice != null;
+      marketSessionActive &&
+      !!live &&
+      live.lastPrice != null &&
+      isQuoteTimestampEligible(quoteTimestamp(live));
 
     if (liveUsable && live) {
       return {
         symbol: sym,
         quote: live,
         provenance: {
-          quote: { state: "LIVE", source: "LIVE_FEED", asOf: null, sessionDate: null },
+          quote: {
+            state: "LIVE",
+            source: "LIVE_FEED",
+            asOf: quoteTimestamp(live),
+            sessionDate: null,
+          },
           book: { state: "LIVE", source: "LIVE_FEED" },
         },
         displayState: "LIVE",
-        analytics: null,
+        analytics: fb?.analytics ?? null,
         trackedRealtime: true,
       };
     }
@@ -122,5 +144,11 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
       }
     : EMPTY_META;
 
-  return { getRow, meta, isLoading: query.isLoading, isError: query.isError };
+  return {
+    getRow,
+    meta,
+    isLoading: query.isLoading,
+    isError: query.isError,
+    refetch: query.refetch,
+  };
 }

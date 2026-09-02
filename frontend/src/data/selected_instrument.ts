@@ -1,4 +1,8 @@
-import type { CoveredWarrant, MarketQuote, WatchlistItem } from "@/domain/models";
+import type {
+  CoveredWarrant,
+  MarketQuote,
+  WatchlistItem,
+} from "@/domain/models";
 import type { InstrumentSpec } from "@/data/instruments/use_instrument_specs";
 
 /**
@@ -17,7 +21,8 @@ export interface SelectedInstrumentView {
   maturityDate?: string | null;
   lastTradingDate?: string | null;
   dataQuality?: "COMPLETE" | "PARTIAL" | null;
-  metadataVerification?: "VERIFIED_CURRENT" | "CONFLICTING" | "STALE" | "UNVERIFIED" | null;
+  metadataVerification?:
+    "VERIFIED_CURRENT" | "CONFLICTING" | "STALE" | "UNVERIFIED" | null;
   quote?: MarketQuote;
   cw?: CoveredWarrant;
 }
@@ -33,7 +38,7 @@ export function deriveSelectedInstrument(
     universeCw?: CoveredWarrant | null;
     quote?: MarketQuote;
     cw?: CoveredWarrant;
-  }
+  },
 ): SelectedInstrumentView | null {
   if (!symbol) return null;
   const sym = symbol.trim().toUpperCase();
@@ -43,17 +48,30 @@ export function deriveSelectedInstrument(
   // store. The watchlist item contributes ONLY identity (symbol / type), never frozen terms.
   const meta = instrumentSpec ?? universeCw ?? null;
   const declaredType =
-    (instrumentSpec?.instrumentType as SelectedInstrumentView["instrumentType"] | undefined) ??
-    (watchlistItem?.instrumentType as SelectedInstrumentView["instrumentType"] | undefined) ??
+    (instrumentSpec?.instrumentType as
+      SelectedInstrumentView["instrumentType"] | undefined) ??
+    (watchlistItem?.instrumentType as
+      SelectedInstrumentView["instrumentType"] | undefined) ??
+    quote?.instrumentType ??
     (universeCw ? "CW" : undefined);
   const instrumentType: SelectedInstrumentView["instrumentType"] =
-    declaredType ?? (looksLikeCw(sym) ? "CW" : "STOCK");
+    declaredType ??
+    (["VNINDEX", "VN30", "HNXINDEX", "HNX30", "UPCOM", "UPCOMINDEX"].includes(
+      sym,
+    )
+      ? "INDEX"
+      : looksLikeCw(sym)
+        ? "CW"
+        : "STOCK");
 
   return {
     symbol: sym,
     instrumentType,
     underlyingSymbol:
-      meta?.underlyingSymbol ?? watchlistItem?.underlyingSymbol ?? cw?.underlyingSymbol ?? null,
+      meta?.underlyingSymbol ??
+      watchlistItem?.underlyingSymbol ??
+      cw?.underlyingSymbol ??
+      null,
     issuer: meta?.issuer ?? cw?.issuer ?? null,
     strikePrice: meta?.strikePrice ?? cw?.strikePrice ?? null,
     exerciseRatio: meta?.exerciseRatio ?? cw?.exerciseRatio ?? null,

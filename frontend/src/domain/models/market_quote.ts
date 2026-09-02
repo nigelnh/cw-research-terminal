@@ -5,7 +5,8 @@
 
 export interface MarketQuote {
   symbol: string;
-  
+  instrumentType?: "STOCK" | "CW" | "INDEX";
+
   // Realtime Prices
   lastPrice: number | null;
   referencePrice: number | null;
