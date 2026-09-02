@@ -17,10 +17,7 @@ function readLayout(): TableLayout {
       window.localStorage.getItem(STORAGE_KEY) || "null",
     );
     return {
-      columns: completeOrder(
-        defaults.columns,
-        Array.isArray(saved?.columns) ? saved.columns : [],
-      ),
+      columns: columnOrder(Array.isArray(saved?.columns) ? saved.columns : []),
       rows: Array.isArray(saved?.rows)
         ? ([
             ...new Set(
@@ -47,6 +44,16 @@ export function completeOrder<T extends string>(
       ...available,
     ]),
   ];
+}
+
+/** Add the new amount beside trade price while preserving saved custom orders. */
+export function columnOrder(preferred: readonly string[]): QuoteColumnKey[] {
+  const columns = completeOrder(defaults.columns, preferred);
+  if (!preferred.includes("tradingValue")) {
+    columns.splice(columns.indexOf("tradingValue"), 1);
+    columns.splice(columns.indexOf("last") + 1, 0, "tradingValue");
+  }
+  return columns;
 }
 export function moveItem<T>(items: readonly T[], from: T, to: T): T[] {
   const start = items.indexOf(from),

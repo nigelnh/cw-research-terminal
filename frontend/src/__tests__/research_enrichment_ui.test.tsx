@@ -120,7 +120,7 @@ describe("NewsFeed — unified research feed", () => {
   });
 });
 
-describe("InstrumentPanel — CORP EVENTS wired to /api/research/corporate-actions", () => {
+describe("InstrumentPanel — CORPORATE EVENTS wired to /api/research/corporate-actions", () => {
   beforeEach(() => {
     (globalThis as any).window = (globalThis as any).window || {};
     (globalThis as any).window.localStorage = {
@@ -168,10 +168,15 @@ describe("InstrumentPanel — CORP EVENTS wired to /api/research/corporate-actio
         },
       ],
     );
-    expect(html).toContain("CORP EVENTS");
+    expect(html).toContain("CORPORATE EVENTS");
     expect(html).toContain("CASH DIV");
     expect(html).toContain("2026-07-10");
     expect(html).toContain("VND/sh");
+    expect(html).toContain('aria-label="Corporate events"');
+    expect(html).toContain(">PE<");
+    expect(html).toContain(">PB<");
+    expect(html).not.toContain("PE · PB");
+    expect(html).not.toContain("fundamentals: pending data provider");
     // no Vietnamese unit label
     expect(html).not.toContain("đ/sh");
     // the "not yet wired" placeholder is gone

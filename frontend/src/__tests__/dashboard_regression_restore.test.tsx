@@ -67,7 +67,7 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     expect(html).toContain("VOLUME");
     expect(html).toContain("STRIKE");
     expect(html).toContain("RATIO");
-    expect(html).toContain("IV BID");
+    expect(html).toContain("IV_BID");
 
     // redundant CW-only columns were merged away
     expect(html).not.toContain("UND.PRC");

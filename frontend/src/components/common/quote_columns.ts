@@ -15,21 +15,26 @@ export const QUOTE_COLUMNS = [
   { key: "ceiling", label: "CEIL" },
   { key: "floor", label: "FLOOR" },
   { key: "ref", label: "REF" },
-  { key: "ivBid", label: "IV BID" },
-  { key: "bid", label: "BID" },
-  { key: "ivTrade", label: "IV TRD" },
-  { key: "last", label: "TRD" },
+  { key: "ivBid", label: "IV_BID" },
+  { key: "bid", label: "BID_PRC" },
+  { key: "ivTrade", label: "IV_TRD" },
+  { key: "last", label: "TRD_PRC" },
+  { key: "tradingValue", label: "TRD_AMT" },
   { key: "change", label: "+/-" },
   { key: "chgPct", label: "%CHG" },
-  { key: "ivAsk", label: "IV ASK" },
-  { key: "ask", label: "ASK" },
+  { key: "ivAsk", label: "IV_ASK" },
+  { key: "ask", label: "ASK_PRC" },
   { key: "vol", label: "VOLUME" },
   { key: "strike", label: "STRIKE" },
   { key: "ratio", label: "RATIO" },
-  { key: "lastTradingDate", label: "LAST TRADING DATE" },
+  { key: "lastTradingDate", label: "LAST_TRD_DATE" },
   { key: "dte", label: "DTE" },
 ] as const;
 export type QuoteColumnKey = (typeof QUOTE_COLUMNS)[number]["key"];
+export const QUOTE_COLUMN_HINTS: Partial<Record<QuoteColumnKey, string>> = {
+  tradingValue: "Session traded value (VND)",
+  lastTradingDate: "Last trading date (YYYY-MM-DD)",
+};
 export interface QuoteTableValues {
   symbol: string;
   ref: number | null;
@@ -38,6 +43,7 @@ export interface QuoteTableValues {
   bid: number | null;
   ask: number | null;
   last: number | null;
+  tradingValue: number | null;
   chgPct: number | null;
   vol: number | null;
   strike: number | null;
@@ -97,6 +103,8 @@ export function quoteCell(
       return fmtChg(row.chgPct);
     case "vol":
       return { text: fmtVol(row.vol), color: muted };
+    case "tradingValue":
+      return { text: fmtPrice(row.tradingValue), color: muted };
     case "strike":
       return { text: fmtPrice(row.strike), color: "var(--t-60)" };
     case "ratio":
