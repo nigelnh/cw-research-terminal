@@ -3,20 +3,10 @@ import { renderMarkup } from "./test_fixtures/render_markup";
 import { NewsFeed } from "../features/news_feed/news_feed";
 import { InstrumentPanel } from "../features/warrant_info/instrument_panel";
 import { queryKeys } from "../data/query/query_keys";
-import {
-  createDefaultWatchlist,
-  defaultWatchlistStorage,
-} from "../domain/models/watchlist";
+import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
 
-const FEED_KEY = queryKeys.research.feed({
-  symbol: null,
-  source: null,
-  contentType: null,
-  eventClass: null,
-  q: null,
-  lang: "vi",
-});
+const FEED_KEY = queryKeys.research.feed({ symbol: null, source: null, contentType: null, eventClass: null, q: null, lang: "vi" });
 
 /** useInfiniteQuery cache shape. English-first fields default from the raw `title`. */
 function feedPages(items: any[], next_before: string | null = null) {
@@ -28,14 +18,7 @@ function feedPages(items: any[], next_before: string | null = null) {
     ...it,
   }));
   return {
-    pages: [
-      {
-        items: withEn,
-        count: withEn.length,
-        has_more: next_before != null,
-        next_before,
-      },
-    ],
+    pages: [{ items: withEn, count: withEn.length, has_more: next_before != null, next_before }],
     pageParams: [undefined],
   };
 }
@@ -71,35 +54,28 @@ describe("NewsFeed — unified research feed", () => {
         ]),
       },
     ]);
-    expect(html).toContain("Date");
-    expect(html).toContain("Headline");
-    expect(html).toContain(">Source<");
+    expect(html).toContain("DATE");
+    expect(html).toContain("HEADLINE");
+    expect(html).toContain(">SOURCE<");
     expect(html).toContain("HPG: Board resolution on 2025 dividend");
-    expect(html).toContain("Disclosure");
-    expect(html).toContain("Event");
+    expect(html).toContain("DISCLOSURE");
+    expect(html).toContain("EVENT");
     // Vietnamese category label is not in the collapsed table
     expect(html).not.toContain("Tin Tổ chức niêm yết");
     // causal restraint is stated, never "caused"
-    expect(html).toContain("Official disclosures and company events");
+    expect(html).toContain("not causation");
     expect(html).not.toMatch(/caused (the |a )?price/i);
   });
 
   it("truthful empty state when nothing has been ingested — not an error", () => {
-    const html = renderMarkup(<NewsFeed />, [
-      { queryKey: [...FEED_KEY], data: feedPages([]) },
-    ]);
-    expect(html).toContain("No matching news or events");
+    const html = renderMarkup(<NewsFeed />, [{ queryKey: [...FEED_KEY], data: feedPages([]) }]);
+    expect(html).toContain("No items ingested yet");
     expect(html).not.toContain("Could not load");
   });
 
-  it("a typed symbol stays a text query until an explicit symbol filter is chosen", () => {
+  it("a symbol filter narrows the subtitle and the feed query", () => {
     const key = queryKeys.research.feed({
-      symbol: null,
-      source: null,
-      contentType: null,
-      eventClass: null,
-      q: "VPB",
-      lang: "vi",
+      symbol: "VPB", source: null, contentType: null, eventClass: null, q: null, lang: "vi",
     });
     const html = renderMarkup(<NewsFeed filter="VPB" />, [
       {
@@ -119,41 +95,28 @@ describe("NewsFeed — unified research feed", () => {
         ]),
       },
     ]);
-    expect(html).toContain('value="VPB"');
+    expect(html).toContain("feed for VPB");
     expect(html).toContain("VPB: capital raise");
   });
 
-  it("empty results expose a clear-filters recovery action", () => {
-    const html = renderMarkup(<NewsFeed />, [
-      { queryKey: [...FEED_KEY], data: feedPages([]) },
-    ]);
-    expect(html).toContain("Clear filters");
-    expect(html).not.toContain("not yet wired");
+  it("uses the Research-registry typography scale (mono 11.5, weight-500 headers) — not a miniature", () => {
+    const html = renderMarkup(<NewsFeed />, [{ queryKey: [...FEED_KEY], data: feedPages([]) }]);
+    // same table treatment as research_universe.tsx
+    expect(html).toContain('class="mono grid-lined" style="width:100%;border-collapse:collapse;font-size:11.5px"');
+    // headers match grid_table HEAD_STYLE (5px 8px padding, weight 500, --t-50), not 9.5px/--t-46
+    expect(html).toContain("padding:5px 8px");
+    expect(html).toContain("font-weight:500");
+    expect(html).not.toContain("font-size:9.5px");
   });
 
   it("shows a LOAD OLDER control when more pages exist (never the whole corpus at once)", () => {
     const html = renderMarkup(<NewsFeed />, [
-      {
-        queryKey: [...FEED_KEY],
-        data: feedPages(
-          [
-            {
-              id: "news_1",
-              title: "x",
-              summary: null,
-              category: null,
-              symbol: "HPG",
-              published_at: "2026-08-01",
-              source_url: null,
-              source: "HOSE",
-              content_type: "exchange_disclosure",
-            },
-          ],
-          "2026-07-31T00:00:00Z",
-        ),
-      },
+      { queryKey: [...FEED_KEY], data: feedPages([
+        { id: "news_1", title: "x", summary: null, category: null, symbol: "HPG",
+          published_at: "2026-08-01", source_url: null, source: "HOSE", content_type: "exchange_disclosure" },
+      ], "2026-07-31T00:00:00Z") },
     ]);
-    expect(html).toContain("Load older");
+    expect(html).toContain("LOAD OLDER");
   });
 });
 
@@ -162,18 +125,10 @@ describe("InstrumentPanel — CORP EVENTS wired to /api/research/corporate-actio
     (globalThis as any).window = (globalThis as any).window || {};
     (globalThis as any).window.localStorage = {
       _s: {} as Record<string, string>,
-      getItem(k: string) {
-        return this._s[k] ?? null;
-      },
-      setItem(k: string, v: string) {
-        this._s[k] = String(v);
-      },
-      removeItem(k: string) {
-        delete this._s[k];
-      },
-      clear() {
-        this._s = {};
-      },
+      getItem(k: string) { return this._s[k] ?? null; },
+      setItem(k: string, v: string) { this._s[k] = String(v); },
+      removeItem(k: string) { delete this._s[k]; },
+      clear() { this._s = {}; },
     };
     const fresh = createDefaultWatchlist();
     defaultWatchlistStorage.saveWatchlist(fresh);
@@ -184,12 +139,7 @@ describe("InstrumentPanel — CORP EVENTS wired to /api/research/corporate-actio
 
   it("renders real corporate-action rows on the QUANT tab", () => {
     const html = renderMarkup(
-      <InstrumentPanel
-        instrument={stock}
-        marketSessionActive={false}
-        onClose={vi.fn()}
-        initialTab="quant"
-      />,
+      <InstrumentPanel instrument={stock} marketSessionActive={false} onClose={vi.fn()} initialTab="quant" />,
       [
         {
           queryKey: [...queryKeys.research.corporateActions("HPG")],
@@ -218,10 +168,10 @@ describe("InstrumentPanel — CORP EVENTS wired to /api/research/corporate-actio
         },
       ],
     );
-    expect(html).toContain("Company events");
-    expect(html).toContain("cash dividend");
+    expect(html).toContain("CORP EVENTS");
+    expect(html).toContain("CASH DIV");
     expect(html).toContain("2026-07-10");
-    expect(html).toContain("VND/share");
+    expect(html).toContain("VND/sh");
     // no Vietnamese unit label
     expect(html).not.toContain("đ/sh");
     // the "not yet wired" placeholder is gone

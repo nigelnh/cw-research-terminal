@@ -35,11 +35,7 @@ import {
   type LineData,
   type Time,
 } from "lightweight-charts";
-import type {
-  HistoricalBar,
-  UnderlyingClosePoint,
-  MarketQuote,
-} from "@/domain/models";
+import type { HistoricalBar, UnderlyingClosePoint, MarketQuote } from "@/domain/models";
 import type {
   ChartInterval,
   ChartRange,
@@ -76,7 +72,6 @@ const VOL_DOWN = "rgba(239, 68, 68, 0.4)";
 interface Props {
   symbol: string;
   isCW?: boolean;
-  instrumentType?: "CW" | "STOCK" | "INDEX";
   underlyingSymbol?: string | null;
   bars: HistoricalBar[];
   underlyingBars?: (HistoricalBar | UnderlyingClosePoint)[] | null;
@@ -94,13 +89,11 @@ interface Props {
 export function TradingChart({
   symbol,
   isCW = false,
-  instrumentType,
   underlyingSymbol,
   bars,
   underlyingBars,
   liveQuote,
   underlyingLiveQuote,
-  range,
   interval = "1D",
   mode = "CW",
   overlays,
@@ -115,9 +108,7 @@ export function TradingChart({
   const bothUndLineRef = useRef<ISeriesApi<"Line"> | null>(null);
   const relativeCwSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const relativeUndSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const overlaySeriesMapRef = useRef<Map<string, ISeriesApi<"Line">>>(
-    new Map(),
-  );
+  const overlaySeriesMapRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
 
   // Stable primitive key for the overlay set (the prop is often a fresh Set each render).
   const overlayList = useMemo(() => Array.from(overlays ?? []), [overlays]);
@@ -132,21 +123,9 @@ export function TradingChart({
     if (!underlyingBars || underlyingBars.length === 0) return [];
     const normalizedUnd: HistoricalBar[] = underlyingBars.map((b) => {
       if ("open" in b) return b as HistoricalBar;
-      return {
-        symbol: b.symbol,
-        date: b.date,
-        open: b.close,
-        high: b.close,
-        low: b.close,
-        close: b.close,
-        volume: 0,
-      };
+      return { symbol: b.symbol, date: b.date, open: b.close, high: b.close, low: b.close, close: b.close, volume: 0 };
     });
-    return mergeCompletedBarsWithLiveQuote(
-      normalizedUnd,
-      underlyingLiveQuote,
-      interval,
-    );
+    return mergeCompletedBarsWithLiveQuote(normalizedUnd, underlyingLiveQuote, interval);
   }, [underlyingBars, underlyingLiveQuote, interval]);
 
   // Fresh-every-render mirrors so the build effect (keyed on a coarse signature) can
@@ -158,31 +137,23 @@ export function TradingChart({
 
   // Rebuild trigger: structural identity + bar COUNT. A within-bucket live tick keeps
   // the count, so it does NOT rebuild (effect B updates it in place).
-  const buildSig = `${range ?? "auto"}|${symbol}|${isCW ? 1 : 0}|${mode}|${effectiveCwBars.length}|${effectiveUndBars.length}`;
+  const buildSig = `${symbol}|${isCW ? 1 : 0}|${mode}|${effectiveCwBars.length}|${effectiveUndBars.length}`;
 
   const latestBar = useMemo(() => {
     const target = mode === "UNDERLYING" ? effectiveUndBars : effectiveCwBars;
     return target.length > 0 ? target[target.length - 1] : null;
   }, [mode, effectiveCwBars, effectiveUndBars]);
 
-  const [hoveredReadout, setHoveredReadout] = useState<OHLCVReadout | null>(
-    null,
-  );
+  const [hoveredReadout, setHoveredReadout] = useState<OHLCVReadout | null>(null);
   const isHovering = hoveredReadout !== null;
 
   const activeReadout = useMemo<OHLCVReadout | null>(() => {
     if (hoveredReadout) return hoveredReadout;
     if (!latestBar) return null;
-    const displaySym =
-      mode === "UNDERLYING" ? underlyingSymbol || symbol : symbol;
+    const displaySym = mode === "UNDERLYING" ? underlyingSymbol || symbol : symbol;
     const chg =
-      latestBar.open !== null && latestBar.close !== null
-        ? latestBar.close - latestBar.open
-        : null;
-    const chgPct =
-      chg !== null && latestBar.open && latestBar.open > 0
-        ? chg / latestBar.open
-        : null;
+      latestBar.open !== null && latestBar.close !== null ? latestBar.close - latestBar.open : null;
+    const chgPct = chg !== null && latestBar.open && latestBar.open > 0 ? chg / latestBar.open : null;
     return {
       symbol: displaySym,
       interval,
@@ -199,9 +170,7 @@ export function TradingChart({
 
   const formatVnd = (val: number | null | undefined): string => {
     if (val === null || val === undefined || isNaN(val)) return "—";
-    return val.toLocaleString("en-US", {
-      maximumFractionDigits: instrumentType === "INDEX" ? 2 : 0,
-    });
+    return val.toLocaleString("en-US", { maximumFractionDigits: 1 });
   };
   const formatVol = (val: number | null | undefined): string => {
     if (val === null || val === undefined || isNaN(val)) return "—";
@@ -230,55 +199,32 @@ export function TradingChart({
       return Math.floor(Date.parse(`${dateStr}T00:00:00Z`) / 1000) as Time;
     }
     const isoStr = dateStr.includes("T") ? dateStr : dateStr.replace(" ", "T");
-    const parsed = Date.parse(
-      isoStr.endsWith("Z") || isoStr.includes("+") ? isoStr : `${isoStr}Z`,
-    );
+    const parsed = Date.parse(isoStr.endsWith("Z") || isoStr.includes("+") ? isoStr : `${isoStr}Z`);
     if (!isNaN(parsed)) return Math.floor(parsed / 1000) as Time;
     const fallback = new Date(dateStr).getTime();
     return (isNaN(fallback) ? 0 : Math.floor(fallback / 1000)) as Time;
   }, []);
 
-  const prepareSeriesData = useCallback(
-    <T extends { time: Time }>(items: T[]): T[] => {
-      const map = new Map<number, T>();
-      for (const item of items) {
-        const t = Number(item.time) || 0;
-        if (t > 0) map.set(t, item);
-      }
-      return Array.from(map.values()).sort(
-        (a, b) => (Number(a.time) || 0) - (Number(b.time) || 0),
-      );
-    },
-    [],
-  );
+  const prepareSeriesData = useCallback(<T extends { time: Time }>(items: T[]): T[] => {
+    const map = new Map<number, T>();
+    for (const item of items) {
+      const t = Number(item.time) || 0;
+      if (t > 0) map.set(t, item);
+    }
+    return Array.from(map.values()).sort((a, b) => (Number(a.time) || 0) - (Number(b.time) || 0));
+  }, []);
 
   const candleFrom = useCallback(
     (src: HistoricalBar[]) => {
       const candles: CandlestickData[] = [];
       const volume: HistogramData[] = [];
       for (const b of src) {
-        if (
-          b.open === null ||
-          b.high === null ||
-          b.low === null ||
-          b.close === null
-        )
-          continue;
+        if (b.open === null || b.high === null || b.low === null || b.close === null) continue;
         const time = toChartTime(b.date);
         if (Number(time) <= 0) continue;
-        candles.push({
-          time,
-          open: b.open,
-          high: b.high,
-          low: b.low,
-          close: b.close,
-        });
+        candles.push({ time, open: b.open, high: b.high, low: b.low, close: b.close });
         if (b.volume !== null && b.volume >= 0) {
-          volume.push({
-            time,
-            value: b.volume,
-            color: b.close >= b.open ? VOL_UP : VOL_DOWN,
-          });
+          volume.push({ time, value: b.volume, color: b.close >= b.open ? VOL_UP : VOL_DOWN });
         }
       }
       return {
@@ -322,18 +268,8 @@ export function TradingChart({
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: {
-          color: "rgba(212, 232, 250, 0.4)",
-          width: 1,
-          style: 3,
-          labelBackgroundColor: "#1e293b",
-        },
-        horzLine: {
-          color: "rgba(212, 232, 250, 0.4)",
-          width: 1,
-          style: 3,
-          labelBackgroundColor: "#1e293b",
-        },
+        vertLine: { color: "rgba(212, 232, 250, 0.4)", width: 1, style: 3, labelBackgroundColor: "#1e293b" },
+        horzLine: { color: "rgba(212, 232, 250, 0.4)", width: 1, style: 3, labelBackgroundColor: "#1e293b" },
       },
       rightPriceScale: {
         borderColor: "rgba(255, 255, 255, 0.08)",
@@ -342,48 +278,23 @@ export function TradingChart({
       timeScale: {
         borderColor: "rgba(255, 255, 255, 0.08)",
         timeVisible:
-          interval === "1m" ||
-          interval === "5m" ||
-          interval === "15m" ||
-          interval === "30m" ||
-          interval === "1h",
+          interval === "1m" || interval === "5m" || interval === "15m" || interval === "30m" || interval === "1h",
         secondsVisible: false,
         barSpacing: BAR_SPACING,
         minBarSpacing: MIN_BAR_SPACING,
         rightOffset: RIGHT_OFFSET,
       },
-      handleScroll: {
-        mouseWheel: true,
-        pressedMouseMove: true,
-        horzTouchDrag: true,
-        vertTouchDrag: false,
-      },
-      handleScale: {
-        axisPressedMouseMove: true,
-        mouseWheel: true,
-        pinch: true,
-      },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
     });
     chartInstanceRef.current = chart;
 
-    const vndPriceFormat = {
-      type: "price" as const,
-      precision: instrumentType === "INDEX" ? 2 : 0,
-      minMove: instrumentType === "INDEX" ? 0.01 : 1,
-    };
+    const vndPriceFormat = { type: "price" as const, precision: 0, minMove: 1 };
     let framedLen = 0;
 
     if (mode === "RELATIVE") {
-      const pctFormat = {
-        type: "custom" as const,
-        formatter: (p: number) => `${p.toFixed(1)}%`,
-      };
-      const cwLine = chart.addSeries(LineSeries, {
-        color: "#60a5fa",
-        lineWidth: 2,
-        title: symbol,
-        priceFormat: pctFormat,
-      });
+      const pctFormat = { type: "custom" as const, formatter: (p: number) => `${p.toFixed(1)}%` };
+      const cwLine = chart.addSeries(LineSeries, { color: "#60a5fa", lineWidth: 2, title: symbol, priceFormat: pctFormat });
       const undLine = chart.addSeries(LineSeries, {
         color: "#f59e0b",
         lineWidth: 2,
@@ -427,9 +338,7 @@ export function TradingChart({
           priceScaleId: "undScale",
           title: underlyingSymbol || "Underlying",
         });
-        chart
-          .priceScale("undScale")
-          .applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 } });
+        chart.priceScale("undScale").applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 } });
         undLine.setData(
           prepareSeriesData(
             undBars
@@ -443,9 +352,7 @@ export function TradingChart({
           priceFormat: { type: "volume" },
           priceScaleId: "volScale",
         });
-        chart
-          .priceScale("volScale")
-          .applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+        chart.priceScale("volScale").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
         volumeSeries.setData(volume);
         volumeSeriesRef.current = volumeSeries;
       }
@@ -461,51 +368,16 @@ export function TradingChart({
         });
       }
 
-      const overlaySpecs: {
-        id: TechnicalOverlay;
-        color: string;
-        title: string;
-        calc: (b: HistoricalBar[]) => { time: string; value: number }[];
-      }[] = [
-        {
-          id: "EMA20",
-          color: "#38bdf8",
-          title: "EMA 20",
-          calc: (b) => calculateEMA(b, 20),
-        },
-        {
-          id: "EMA50",
-          color: "#fb923c",
-          title: "EMA 50",
-          calc: (b) => calculateEMA(b, 50),
-        },
-        {
-          id: "EMA200",
-          color: "#c084fc",
-          title: "EMA 200",
-          calc: (b) => calculateEMA(b, 200),
-        },
-        {
-          id: "VWAP",
-          color: "#2dd4bf",
-          title: "VWAP",
-          calc: (b) => calculateVWAP(b),
-        },
+      const overlaySpecs: { id: TechnicalOverlay; color: string; title: string; calc: (b: HistoricalBar[]) => { time: string; value: number }[] }[] = [
+        { id: "EMA20", color: "#38bdf8", title: "EMA 20", calc: (b) => calculateEMA(b, 20) },
+        { id: "EMA50", color: "#fb923c", title: "EMA 50", calc: (b) => calculateEMA(b, 50) },
+        { id: "EMA200", color: "#c084fc", title: "EMA 200", calc: (b) => calculateEMA(b, 200) },
+        { id: "VWAP", color: "#2dd4bf", title: "VWAP", calc: (b) => calculateVWAP(b) },
       ];
       for (const spec of overlaySpecs) {
         if (!overlayList.includes(spec.id)) continue;
-        const s = chart.addSeries(LineSeries, {
-          color: spec.color,
-          lineWidth: 1,
-          title: spec.title,
-        });
-        s.setData(
-          prepareSeriesData(
-            spec
-              .calc(src)
-              .map((p) => ({ time: toChartTime(p.time), value: p.value })),
-          ),
-        );
+        const s = chart.addSeries(LineSeries, { color: spec.color, lineWidth: 1, title: spec.title });
+        s.setData(prepareSeriesData(spec.calc(src).map((p) => ({ time: toChartTime(p.time), value: p.value }))));
         overlaySeriesMapRef.current.set(spec.id, s);
       }
     }
@@ -514,7 +386,7 @@ export function TradingChart({
     // price scale), then frame the last N bars for professional density + a
     // recent-scoped autoscale.
     chart.timeScale().fitContent();
-    if (!range && framedLen > INITIAL_VISIBLE_BARS) {
+    if (framedLen > INITIAL_VISIBLE_BARS) {
       chart.timeScale().setVisibleLogicalRange({
         from: framedLen - INITIAL_VISIBLE_BARS - 0.5,
         to: framedLen - 1 + RIGHT_OFFSET,
@@ -523,13 +395,7 @@ export function TradingChart({
 
     chart.subscribeCrosshairMove((param) => {
       const activeSeries = candleSeriesRef.current;
-      if (
-        !param ||
-        !param.time ||
-        !param.seriesData ||
-        !activeSeries ||
-        !param.seriesData.has(activeSeries)
-      ) {
+      if (!param || !param.time || !param.seriesData || !activeSeries || !param.seriesData.has(activeSeries)) {
         setHoveredReadout(null);
         return;
       }
@@ -553,10 +419,7 @@ export function TradingChart({
 
     const resizeObserver = new ResizeObserver((entries) => {
       if (entries.length > 0 && chartInstanceRef.current) {
-        chartInstanceRef.current.applyOptions({
-          width: entries[0].contentRect.width,
-          height,
-        });
+        chartInstanceRef.current.applyOptions({ width: entries[0].contentRect.width, height });
       }
     });
     resizeObserver.observe(chartContainerRef.current);
@@ -569,15 +432,7 @@ export function TradingChart({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    buildSig,
-    height,
-    interval,
-    referencePrice,
-    overlayKey,
-    toChartTime,
-    instrumentType,
-  ]);
+  }, [buildSig, height, interval, referencePrice, overlayKey, toChartTime]);
 
   // ------------------------------------------------------------------ Live-tick effect
   // Apply a within-bucket live update to the last bar only. No rebuild, no viewport
@@ -588,46 +443,26 @@ export function TradingChart({
     if (!s) return;
     const src = mode === "UNDERLYING" ? effectiveUndBars : effectiveCwBars;
     const b = src[src.length - 1];
-    if (
-      !b ||
-      b.open === null ||
-      b.high === null ||
-      b.low === null ||
-      b.close === null
-    )
-      return;
+    if (!b || b.open === null || b.high === null || b.low === null || b.close === null) return;
     const time = toChartTime(b.date);
     if (Number(time) <= 0) return;
     s.update({ time, open: b.open, high: b.high, low: b.low, close: b.close });
     const v = volumeSeriesRef.current;
     if (v && b.volume !== null && b.volume >= 0) {
-      v.update({
-        time,
-        value: b.volume,
-        color: b.close >= b.open ? VOL_UP : VOL_DOWN,
-      });
+      v.update({ time, value: b.volume, color: b.close >= b.open ? VOL_UP : VOL_DOWN });
     }
   }, [effectiveCwBars, effectiveUndBars, mode, toChartTime]);
 
-  const handleResetZoom = () =>
-    chartInstanceRef.current?.timeScale().fitContent();
+  const handleResetZoom = () => chartInstanceRef.current?.timeScale().fitContent();
 
   const hasData =
     mode === "UNDERLYING"
       ? effectiveUndBars.length > 0
       : effectiveCwBars.length > 0 ||
-        (mode === "RELATIVE" &&
-          (effectiveCwBars.length > 0 || effectiveUndBars.length > 0));
+        (mode === "RELATIVE" && (effectiveCwBars.length > 0 || effectiveUndBars.length > 0));
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "8px",
-        width: "100%",
-      }}
-    >
+    <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
       <div
         style={{
           display: "flex",
@@ -641,26 +476,13 @@ export function TradingChart({
           lineHeight: "1.4",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "12px",
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span
-              style={{ fontWeight: 600, color: "var(--foreground)" }}
-              className="tnum"
-            >
+            <span style={{ fontWeight: 600, color: "var(--foreground)" }} className="tnum">
               {activeReadout ? activeReadout.symbol : symbol}
             </span>
             <span style={{ color: "var(--subtle-foreground)" }}>·</span>
-            <span
-              className="tnum"
-              style={{ color: "var(--primary)", fontWeight: 500 }}
-            >
+            <span className="tnum" style={{ color: "var(--primary)", fontWeight: 500 }}>
               {interval}
             </span>
             {activeReadout && (
@@ -668,97 +490,51 @@ export function TradingChart({
                 <span style={{ color: "var(--subtle-foreground)" }}>·</span>
                 <span
                   className="tnum"
-                  style={{
-                    color: isHovering
-                      ? "var(--flat)"
-                      : "var(--subtle-foreground)",
-                  }}
+                  style={{ color: isHovering ? "var(--flat)" : "var(--subtle-foreground)" }}
                 >
-                  {isHovering ? "HOVER" : "LAST"}{" "}
-                  {formatBarDate(activeReadout.timestamp)}
+                  {isHovering ? "HOVER" : "LAST"} {formatBarDate(activeReadout.timestamp)}
                 </span>
               </>
             )}
           </div>
 
           {activeReadout && activeReadout.close !== null && (
-            <div
-              style={{ display: "flex", alignItems: "center", gap: "6px" }}
-              className="tnum"
-            >
-              <span
-                style={{
-                  fontWeight: 600,
-                  fontSize: "12px",
-                  color: "var(--foreground)",
-                }}
-              >
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }} className="tnum">
+              <span style={{ fontWeight: 600, fontSize: "12px", color: "var(--foreground)" }}>
                 {formatVnd(activeReadout.close)}
               </span>
-              {activeReadout.change !== null &&
-                activeReadout.changePercent !== null && (
-                  <span
-                    title="Bar change: close − open"
-                    style={{
-                      color:
-                        activeReadout.change > 0
-                          ? "var(--up)"
-                          : activeReadout.change < 0
-                            ? "var(--down)"
-                            : "var(--subtle-foreground)",
-                    }}
-                  >
-                    {activeReadout.change > 0 ? "+" : ""}
-                    {formatVnd(activeReadout.change)} (
-                    {activeReadout.changePercent > 0 ? "+" : ""}
-                    {(activeReadout.changePercent * 100).toFixed(2)}%)
-                  </span>
-                )}
+              {activeReadout.change !== null && activeReadout.changePercent !== null && (
+                <span
+                  title="Bar change: close − open"
+                  style={{
+                    color:
+                      activeReadout.change > 0
+                        ? "var(--up)"
+                        : activeReadout.change < 0
+                        ? "var(--down)"
+                        : "var(--subtle-foreground)",
+                  }}
+                >
+                  {activeReadout.change > 0 ? "+" : ""}
+                  {formatVnd(activeReadout.change)} (
+                  {activeReadout.changePercent > 0 ? "+" : ""}
+                  {(activeReadout.changePercent * 100).toFixed(2)}%)
+                </span>
+              )}
             </div>
           )}
 
           {activeReadout && activeReadout.open !== null && (
             <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                color: "var(--muted-foreground)",
-                fontSize: "10.5px",
-              }}
+              style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--muted-foreground)", fontSize: "10.5px" }}
               className="tnum"
             >
-              <span>
-                O{" "}
-                <strong style={{ color: "var(--foreground)" }}>
-                  {formatVnd(activeReadout.open)}
-                </strong>
-              </span>
-              <span>
-                H{" "}
-                <strong style={{ color: "var(--foreground)" }}>
-                  {formatVnd(activeReadout.high)}
-                </strong>
-              </span>
-              <span>
-                L{" "}
-                <strong style={{ color: "var(--foreground)" }}>
-                  {formatVnd(activeReadout.low)}
-                </strong>
-              </span>
-              <span>
-                C{" "}
-                <strong style={{ color: "var(--foreground)" }}>
-                  {formatVnd(activeReadout.close)}
-                </strong>
-              </span>
+              <span>O <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.open)}</strong></span>
+              <span>H <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.high)}</strong></span>
+              <span>L <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.low)}</strong></span>
+              <span>C <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.close)}</strong></span>
               {activeReadout.volume !== null && activeReadout.volume > 0 && (
-                <span>
-                  V{" "}
-                  <strong style={{ color: "var(--foreground)" }}>
-                    {formatVol(activeReadout.volume)}
-                  </strong>
-                </span>
+                <span>V <strong style={{ color: "var(--foreground)" }}>{formatVol(activeReadout.volume)}</strong></span>
               )}
             </div>
           )}
@@ -814,15 +590,10 @@ export function TradingChart({
               textAlign: "center",
             }}
           >
-            <span>
-              No historical trade candles available for this interval.
-            </span>
+            <span>No historical trade candles available for this interval.</span>
             {isCW && (
-              <span
-                style={{ fontSize: "11px", color: "var(--muted-foreground)" }}
-              >
-                Covered Warrants without matching trades do not generate fake
-                candles.
+              <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>
+                Covered Warrants without matching trades do not generate fake candles.
               </span>
             )}
           </div>
@@ -843,26 +614,12 @@ export function TradingChart({
         >
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <span
-                style={{
-                  width: "8px",
-                  height: "2px",
-                  backgroundColor: "#60a5fa",
-                }}
-              />
+              <span style={{ width: "8px", height: "2px", backgroundColor: "#60a5fa" }} />
               <strong style={{ color: "#60a5fa" }}>{symbol}</strong>
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <span
-                style={{
-                  width: "8px",
-                  height: "2px",
-                  backgroundColor: "#f59e0b",
-                }}
-              />
-              <strong style={{ color: "#f59e0b" }}>
-                {underlyingSymbol || "Underlying"}
-              </strong>
+              <span style={{ width: "8px", height: "2px", backgroundColor: "#f59e0b" }} />
+              <strong style={{ color: "#f59e0b" }}>{underlyingSymbol || "Underlying"}</strong>
             </span>
           </div>
           <span>NORMALIZED PERFORMANCE (Base = 100)</span>

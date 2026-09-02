@@ -1,15 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { renderMarkup } from "./test_fixtures/render_markup";
 import { PersonalDashboard } from "../features/watchlist/personal_dashboard";
-import {
-  createDefaultWatchlist,
-  defaultWatchlistStorage,
-} from "../domain/models/watchlist";
+import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
-import {
-  mapRawSnapshotToCoveredWarrant,
-  mapRawSnapshotToQuote,
-} from "../data/backend/mappers/map_snapshot";
+import { mapRawSnapshotToCoveredWarrant, mapRawSnapshotToQuote } from "../data/backend/mappers/map_snapshot";
 import { applyRawPatchToQuote } from "../data/backend/mappers/map_patch";
 
 class MemoryStorage {
@@ -39,7 +33,6 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     mockStorage = new MemoryStorage();
     (globalThis as any).window = (globalThis as any).window || {};
     (globalThis as any).window.localStorage = mockStorage;
-    mockStorage.setItem("cw:watchlist:full-columns", "true");
 
     const fresh = createDefaultWatchlist();
     defaultWatchlistStorage.saveWatchlist(fresh);
@@ -69,7 +62,7 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     expect(html).toContain("REF");
     expect(html).toContain("BID");
     expect(html).toContain("ASK");
-    expect(html).toContain("LAST");
+    expect(html).toContain("TRD");
     expect(html).toContain("CHG%");
     expect(html).toContain("VOLUME");
     expect(html).toContain("STRIKE");
@@ -85,9 +78,9 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     const rawNoRatio = {
       Symbol: "CHPG2541",
       Under_Symbol: "HPG",
-      Traded: 0.3,
+      Traded: 0.30,
       Bid1_Prc: 0.29,
-      Ask1_Prc: 0.3,
+      Ask1_Prc: 0.30,
     };
     const mappedCw = mapRawSnapshotToCoveredWarrant(rawNoRatio);
     expect(mappedCw.exerciseRatio).toBeNull();
@@ -97,7 +90,7 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     const rawPatch = {
       Symbol: "CHPG2541",
       Bid1_Prc: 0.29, // 290 VND
-      Ask1_Prc: 0.3, // 300 VND
+      Ask1_Prc: 0.30, // 300 VND
       Bid1_Qty: 100,
       Ask1_Qty: 100,
     };

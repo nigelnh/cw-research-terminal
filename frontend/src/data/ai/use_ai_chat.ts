@@ -42,28 +42,20 @@ export type AiErrorCode =
 
 const AI_ERROR_FALLBACK_MESSAGE: Record<AiErrorCode, string> = {
   AI_DISABLED: "The AI research assistant is turned off on this server.",
-  AI_BUDGET_EXCEEDED:
-    "The AI assistant has reached its daily usage limit. Try again tomorrow.",
+  AI_BUDGET_EXCEEDED: "The AI assistant has reached its daily usage limit. Try again tomorrow.",
   RATE_LIMITED: "The AI assistant is busy right now. Please retry in a moment.",
-  MODEL_UNAVAILABLE:
-    "The AI model is temporarily unavailable. Please try again shortly.",
-  UPSTREAM_AUTH_ERROR:
-    "The AI service is unavailable (provider authentication).",
+  MODEL_UNAVAILABLE: "The AI model is temporarily unavailable. Please try again shortly.",
+  UPSTREAM_AUTH_ERROR: "The AI service is unavailable (provider authentication).",
   UPSTREAM_TIMEOUT: "The AI response timed out. Please try again.",
-  UPSTREAM_RATE_LIMIT:
-    "The AI provider is rate-limiting requests. Please retry in a moment.",
+  UPSTREAM_RATE_LIMIT: "The AI provider is rate-limiting requests. Please retry in a moment.",
   UPSTREAM_ERROR: "The AI service returned an error. Please try again.",
   INVALID_REQUEST: "That request could not be processed.",
   STREAM_INTERRUPTED: "The AI response was interrupted. Please try again.",
   NETWORK_ERROR: "Could not reach the AI service. Please try again.",
-  INTERNAL_ERROR:
-    "An unexpected error occurred while generating the AI response.",
+  INTERNAL_ERROR: "An unexpected error occurred while generating the AI response.",
 };
 
-function messageForAiError(
-  code: string | null | undefined,
-  serverMessage?: string,
-): string {
+function messageForAiError(code: string | null | undefined, serverMessage?: string): string {
   if (serverMessage && serverMessage.trim()) return serverMessage.trim();
   if (code && code in AI_ERROR_FALLBACK_MESSAGE) {
     return AI_ERROR_FALLBACK_MESSAGE[code as AiErrorCode];
@@ -126,8 +118,8 @@ export interface ResearchContextEnvelope {
   marketSessionActive?: boolean;
   quoteDisplayEligible?: boolean;
   /** Step 13C temporal context. */
-  dataState?: string; // LIVE | LAST_SESSION | MIXED | UNAVAILABLE
-  quoteAsOf?: string | null; // ISO instant / session date the selected quote is from
+  dataState?: string;               // LIVE | LAST_SESSION | MIXED | UNAVAILABLE
+  quoteAsOf?: string | null;        // ISO instant / session date the selected quote is from
   latestCompletedSession?: string | null;
   calendarConfidence?: string | null;
 }
@@ -141,374 +133,412 @@ export const CHAT_STORAGE_KEY = COPILOT_STORAGE_KEY_V2;
  */
 export function normalizePlainResponse(text: string): string {
   if (!text) return "";
-  return (
-    text
-      // Strip markdown bold markers **text** -> text
-      .replace(/\*\*([^*]+)\*\*/g, "$1")
-      // Strip markdown bold markers __text__ -> text
-      .replace(/__([^_]+)__/g, "$1")
-      // Strip markdown header hashes # Header -> Header
-      .replace(/^#{1,6}\s+/gm, "")
-      // Strip bullet markers at line start: "- " or "* " -> ""
-      .replace(/^[\*\-]\s+/gm, "")
-      .trim()
-  );
-}
-
-interface ChatRequest {
-  conversationId: string;
-  assistantId: string;
-  messages: ChatMessage[];
-  context: ResearchContextEnvelope | null;
+  return text
+    // Strip markdown bold markers **text** -> text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    // Strip markdown bold markers __text__ -> text
+    .replace(/__([^_]+)__/g, "$1")
+    // Strip markdown header hashes # Header -> Header
+    .replace(/^#{1,6}\s+/gm, "")
+    // Strip bullet markers at line start: "- " or "* " -> ""
+    .replace(/^[\*\-]\s+/gm, "")
+    .trim();
 }
 
 export function useAiChat(apiEndpoint: string = DEFAULT_AI_CHAT_ENDPOINT) {
-  const [store, setStore] = useState<CopilotHistoryStore>(() =>
-    loadCopilotHistory(),
-  );
-  const storeRef = useRef(store);
+  const [store, setStore] = useState<CopilotHistoryStore>(() => loadCopilotHistory());
+  const [hasHydrated, setHasHydrated] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [activity, setActivity] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [stopped, setStopped] = useState(false);
-  const [retryRequest, setRetryRequest] = useState<ChatRequest | null>(null);
-  const running = useRef<{
-    request: ChatRequest;
-    controller: AbortController;
-  } | null>(null);
-  const update = useCallback(
-    (fn: (s: CopilotHistoryStore) => CopilotHistoryStore, persist = true) => {
-      const next = fn(storeRef.current);
-      storeRef.current = next;
-      setStore(next);
-      if (persist) saveCopilotHistory(next);
-    },
-    [],
-  );
-  const activeConversation =
-    store.conversations.find((c) => c.id === store.activeConversationId) ??
-    store.conversations[0];
-  const messages: ChatMessage[] = activeConversation?.messages ?? [];
-  const conversations = useMemo(
-    () => [...store.conversations].sort((a, b) => b.updatedAt - a.updatedAt),
-    [store.conversations],
-  );
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Invalidating the run before abort prevents a late chunk/finally from altering a new turn.
-  const cancel = useCallback((allowRetry: boolean) => {
-    const run = running.current;
-    running.current = null;
-    run?.controller.abort();
-    setIsLoading(false);
-    setActivity(null);
-    setError(null);
-    setStopped(allowRetry && !!run);
-    setRetryRequest(allowRetry && run ? run.request : null);
-    saveCopilotHistory(storeRef.current);
+  // Synchronous hydration flag
+  useEffect(() => {
+    setHasHydrated(true);
   }, []);
-  const stop = useCallback(() => cancel(true), [cancel]);
-  useEffect(
-    () => () => {
-      running.current?.controller.abort();
-      running.current = null;
-    },
-    [],
-  );
 
+  // Compute active conversation
+  const activeConversation = useMemo(() => {
+    if (!store.activeConversationId) {
+      return store.conversations[0] || null;
+    }
+    return store.conversations.find((c) => c.id === store.activeConversationId) || store.conversations[0] || null;
+  }, [store]);
+
+  // Messages of the active conversation
+  const messages: ChatMessage[] = useMemo(() => {
+    return activeConversation ? activeConversation.messages : [];
+  }, [activeConversation]);
+
+  // Conversations sorted by updatedAt descending
+  const conversations = useMemo(() => {
+    return [...store.conversations].sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [store.conversations]);
+
+  /**
+   * Starts a brand new conversation without removing previous conversations in history.
+   */
   const startNewConversation = useCallback(() => {
-    cancel(false);
-    update((prev) => {
-      const active = prev.conversations.find(
-        (c) => c.id === prev.activeConversationId,
-      );
-      if (active?.messages.length === 0) return prev;
-      const fresh = createEmptyConversation();
-      return {
-        version: 2,
-        activeConversationId: fresh.id,
-        conversations: [fresh, ...prev.conversations],
-      };
-    });
-  }, [cancel, update]);
-  const selectConversation = useCallback(
-    (id: string) => {
-      cancel(false);
-      update((prev) =>
-        prev.conversations.some((c) => c.id === id)
-          ? { ...prev, activeConversationId: id }
-          : prev,
-      );
-    },
-    [cancel, update],
-  );
-  const deleteConversation = useCallback(
-    (id: string) => {
-      if (storeRef.current.activeConversationId === id) cancel(false);
-      update((prev) => {
-        const remaining = prev.conversations.filter((c) => c.id !== id);
-        if (!remaining.length) remaining.push(createEmptyConversation());
-        return {
-          ...prev,
-          conversations: remaining,
-          activeConversationId:
-            prev.activeConversationId === id
-              ? remaining[0].id
-              : prev.activeConversationId,
-        };
-      });
-    },
-    [cancel, update],
-  );
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setIsLoading(false);
+    setError(null);
 
-  const execute = useCallback(
-    async (request: ChatRequest) => {
-      if (running.current) return;
-      const run = { request, controller: new AbortController() };
-      running.current = run;
-      setIsLoading(true);
-      setStopped(false);
-      setError(null);
-      setActivity(null);
-      setRetryRequest(null);
-      const patchAssistant = (
-        fn: (m: StoredChatMessage) => StoredChatMessage,
-      ) => {
-        if (running.current !== run) return;
-        update(
-          (prev) => ({
-            ...prev,
-            conversations: prev.conversations.map((c) =>
-              c.id !== request.conversationId
-                ? c
-                : {
-                    ...c,
-                    updatedAt: Date.now(),
-                    messages: c.messages.map((m) =>
-                      m.id === request.assistantId ? fn(m) : m,
-                    ),
-                  },
-            ),
-          }),
-          false,
-        );
+    const newConv = createEmptyConversation();
+    setStore((prev) => {
+      // If current active conversation is already empty with no messages, reuse it
+      const currentActive = prev.conversations.find((c) => c.id === prev.activeConversationId);
+      if (currentActive && currentActive.messages.length === 0) {
+        return prev;
+      }
+
+      const nextStore: CopilotHistoryStore = {
+        version: 2,
+        activeConversationId: newConv.id,
+        conversations: [newConv, ...prev.conversations],
       };
-      try {
-        const response = await fetch(apiEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: request.messages,
-            context: request.context,
-            stream: true,
-          }),
-          signal: run.controller.signal,
-        });
-        if (running.current !== run) return;
-        if (!response.ok) {
-          const code =
-            response.headers.get("X-AI-Error-Code") ??
-            (response.status === 429
-              ? "RATE_LIMITED"
-              : response.status === 503
-                ? "AI_DISABLED"
-                : null);
-          const data = await response.json().catch(() => ({}));
-          throw new Error(messageForAiError(code, data.detail));
-        }
-        const reader = response.body?.getReader();
-        if (!reader)
-          throw new Error("Streaming is not supported by the browser.");
-        const decoder = new TextDecoder();
-        let buffer = "";
-        const frame = (line: string) => {
-          if (running.current !== run || !line.trim().startsWith("data:"))
-            return;
-          const raw = line.trim().slice(5).trim();
-          if (!raw || raw === "[DONE]") return;
-          let data;
-          try {
-            data = JSON.parse(raw);
-          } catch {
-            return;
-          }
-          if (data.error)
-            throw new Error(messageForAiError(data.code, data.error));
-          if (
-            (data.type === "status" || data.type === "activity") &&
-            data.label
-          )
-            setActivity(data.label);
-          if (data.type === "tool_complete") {
-            const step: TraceStep = {
-              tool: data.tool,
-              display_name: data.display_name,
-              context: data.context,
-              result_summary: data.result_summary,
-              duration_ms: data.duration_ms,
-              ok: data.ok !== false,
-            };
-            patchAssistant((m) => ({
-              ...m,
-              trace: [...(m.trace ?? []), step],
-            }));
-          }
-          if (data.content)
-            patchAssistant((m) => ({
-              ...m,
-              content: m.content + data.content,
-            }));
-        };
-        try {
-          while (running.current === run) {
-            const { done, value } = await reader.read();
-            if (running.current !== run) break;
-            buffer += done
-              ? decoder.decode()
-              : decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-            lines.forEach(frame);
-            if (done) {
-              frame(buffer);
-              break;
-            }
-          }
-        } finally {
-          void reader.cancel().catch(() => {});
-          reader.releaseLock();
-        }
-      } catch (err) {
-        if (running.current !== run || run.controller.signal.aborted) return;
-        setError(
-          err instanceof TypeError
-            ? AI_ERROR_FALLBACK_MESSAGE.NETWORK_ERROR
-            : err instanceof Error
-              ? err.message
-              : "An unexpected error occurred.",
-        );
-        setRetryRequest(request);
-        // Preserve partial output, but omit an empty failed placeholder from history.
-        update((prev) => ({
-          ...prev,
-          conversations: prev.conversations.map((c) =>
-            c.id !== request.conversationId
-              ? c
-              : {
-                  ...c,
-                  messages: c.messages.filter(
-                    (m) =>
-                      m.id !== request.assistantId ||
-                      !!m.content ||
-                      !!m.trace?.length,
-                  ),
-                },
-          ),
-        }));
-      } finally {
-        if (running.current === run) {
-          running.current = null;
-          setIsLoading(false);
-          setActivity(null);
-          saveCopilotHistory(storeRef.current);
+      saveCopilotHistory(nextStore);
+      return nextStore;
+    });
+  }, []);
+
+  /**
+   * Switches to an existing conversation from history without re-sending AI requests.
+   */
+  const selectConversation = useCallback((convId: string) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setIsLoading(false);
+    setError(null);
+
+    setStore((prev) => {
+      if (prev.activeConversationId === convId) return prev;
+      const target = prev.conversations.find((c) => c.id === convId);
+      if (!target) return prev;
+
+      const nextStore: CopilotHistoryStore = {
+        ...prev,
+        activeConversationId: convId,
+      };
+      saveCopilotHistory(nextStore);
+      return nextStore;
+    });
+  }, []);
+
+  /**
+   * Deletes a specific conversation from history.
+   */
+  const deleteConversation = useCallback((convId: string) => {
+    setStore((prev) => {
+      const filtered = prev.conversations.filter((c) => c.id !== convId);
+      let nextActiveId = prev.activeConversationId;
+
+      if (prev.activeConversationId === convId) {
+        if (filtered.length > 0) {
+          nextActiveId = filtered[0].id;
+        } else {
+          const fresh = createEmptyConversation();
+          filtered.push(fresh);
+          nextActiveId = fresh.id;
         }
       }
-    },
-    [apiEndpoint, update],
-  );
 
+      const nextStore: CopilotHistoryStore = {
+        version: 2,
+        activeConversationId: nextActiveId,
+        conversations: filtered,
+      };
+      saveCopilotHistory(nextStore);
+      return nextStore;
+    });
+  }, []);
+
+  /**
+   * Resets/clears active conversation messages and restarts.
+   */
+  const clearMessages = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setError(null);
+    setIsLoading(false);
+    startNewConversation();
+  }, [startNewConversation]);
+
+  /**
+   * Sends user message to AI and streams response into the active conversation.
+   */
   const sendMessage = useCallback(
-    async (input: string, context?: ResearchContextEnvelope) => {
-      const text = input.trim();
-      if (!text || running.current) return;
-      const current = storeRef.current;
-      const conversation =
-        current.conversations.find(
-          (c) => c.id === current.activeConversationId,
-        ) ?? createEmptyConversation();
-      const user: StoredChatMessage = {
-        id: generateId("msg"),
+    async (userInput: string, context?: ResearchContextEnvelope) => {
+      const trimmed = userInput.trim();
+      if (!trimmed || isLoading) return;
+
+      setError(null);
+      const userMsgId = generateId("msg");
+      const userMsg: StoredChatMessage = {
+        id: userMsgId,
         role: "user",
-        content: text,
+        content: trimmed,
         createdAt: Date.now(),
       };
-      const assistant: StoredChatMessage = {
-        id: generateId("msg"),
+
+      const assistantMsgId = generateId("msg");
+      const assistantPlaceholder: StoredChatMessage = {
+        id: assistantMsgId,
         role: "assistant",
         content: "",
         createdAt: Date.now(),
       };
-      const request: ChatRequest = {
-        conversationId: conversation.id,
-        assistantId: assistant.id,
-        messages: [...conversation.messages, user],
-        context: context ? JSON.parse(JSON.stringify(context)) : null,
-      };
-      update((prev) => ({
-        version: 2,
-        activeConversationId: conversation.id,
-        conversations: [
-          {
-            ...conversation,
-            title: conversation.messages.length
-              ? conversation.title
-              : generateConversationTitle(text),
-            updatedAt: Date.now(),
-            messages: [...conversation.messages, user, assistant],
+
+      // Target conversation ID
+      let targetConvId = store.activeConversationId;
+      if (!targetConvId || !store.conversations.some((c) => c.id === targetConvId)) {
+        const fresh = createEmptyConversation();
+        targetConvId = fresh.id;
+      }
+
+      // Update store with user message immediately (and generate title if first message)
+      setStore((prev) => {
+        let convs = [...prev.conversations];
+        let convIndex = convs.findIndex((c) => c.id === targetConvId);
+
+        if (convIndex === -1) {
+          const fresh = createEmptyConversation();
+          fresh.id = targetConvId!;
+          convs.unshift(fresh);
+          convIndex = 0;
+        }
+
+        const conv = convs[convIndex];
+        const isFirstMessage = conv.messages.length === 0;
+        const newTitle = isFirstMessage ? generateConversationTitle(trimmed) : conv.title;
+        const updatedMsgs = [...conv.messages, userMsg, assistantPlaceholder];
+
+        convs[convIndex] = {
+          ...conv,
+          title: newTitle,
+          updatedAt: Date.now(),
+          messages: updatedMsgs,
+        };
+
+        const nextStore: CopilotHistoryStore = {
+          version: 2,
+          activeConversationId: targetConvId,
+          conversations: convs,
+        };
+        // Persist user message immediately
+        saveCopilotHistory(nextStore);
+        return nextStore;
+      });
+
+      setIsLoading(true);
+      abortControllerRef.current = new AbortController();
+
+      try {
+        const outboundMessages = [
+          ...(activeConversation?.messages || []),
+          { role: "user", content: trimmed },
+        ];
+
+        const response = await fetch(apiEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
           },
-          ...prev.conversations.filter((c) => c.id !== conversation.id),
-        ],
-      }));
-      await execute(request);
+          body: JSON.stringify({
+            messages: outboundMessages,
+            context: context || null,
+            stream: true,
+          }),
+          signal: abortControllerRef.current.signal,
+        });
+
+        if (!response.ok) {
+          // Prefer the backend's own classification; fall back to the HTTP status for
+          // errors raised by upstream middleware (e.g. the shared rate limiter's 429).
+          const code =
+            response.headers.get("X-AI-Error-Code") ||
+            (response.status === 429
+              ? "RATE_LIMITED"
+              : response.status === 503
+                ? "AI_DISABLED"
+                : response.status === 502
+                  ? "UPSTREAM_ERROR"
+                  : null);
+          const errData = await response.json().catch(() => ({} as { detail?: string }));
+          console.warn(`AI request failed [${code ?? "HTTP_" + response.status}] (HTTP ${response.status})`);
+          throw new Error(messageForAiError(code, errData?.detail));
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error("Streaming is not supported by the browser.");
+        }
+
+        const decoder = new TextDecoder();
+        let accumulatedText = "";
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine.startsWith("data: ")) continue;
+
+            const jsonStr = trimmedLine.slice(6).trim();
+            if (!jsonStr || jsonStr === "[DONE]") continue;
+
+            try {
+              const data = JSON.parse(jsonStr);
+              if (data.error) {
+                if (data.code) {
+                  console.warn(`AI stream failed [${data.code}]`);
+                }
+                setError(messageForAiError(data.code, data.error));
+                continue;
+              }
+              // --- research activity trace (sanitised; no reasoning/payloads) ---
+              if (data.type === "status" && data.label) {
+                setActivity(data.label);
+              }
+              if (data.type === "activity" && data.label) {
+                // legacy frame — keep working
+                setActivity(data.label);
+              }
+              if (data.type === "tool_complete") {
+                const step: TraceStep = {
+                  tool: data.tool,
+                  display_name: data.display_name,
+                  context: data.context,
+                  result_summary: data.result_summary,
+                  duration_ms: data.duration_ms,
+                  ok: data.ok !== false,
+                };
+                setStore((prev) => {
+                  const convs = [...prev.conversations];
+                  const cIdx = convs.findIndex((c) => c.id === targetConvId);
+                  if (cIdx === -1) return prev;
+                  const conv = convs[cIdx];
+                  const msgs = [...conv.messages];
+                  const aIdx = msgs.findIndex((m) => m.id === assistantMsgId);
+                  if (aIdx === -1) return prev;
+                  const prevTrace = msgs[aIdx].trace ?? [];
+                  msgs[aIdx] = { ...msgs[aIdx], trace: [...prevTrace, step] };
+                  convs[cIdx] = { ...conv, messages: msgs };
+                  return { ...prev, conversations: convs };
+                });
+              }
+              if (data.content) {
+                accumulatedText += data.content;
+                setStore((prev) => {
+                  const convs = [...prev.conversations];
+                  const cIdx = convs.findIndex((c) => c.id === targetConvId);
+                  if (cIdx !== -1) {
+                    const conv = convs[cIdx];
+                    const msgs = [...conv.messages];
+                    const aIdx = msgs.findIndex((m) => m.id === assistantMsgId);
+                    if (aIdx !== -1) {
+                      msgs[aIdx] = { ...msgs[aIdx], content: accumulatedText };
+                    }
+                    convs[cIdx] = { ...conv, messages: msgs };
+                    return { ...prev, conversations: convs };
+                  }
+                  return prev;
+                });
+              }
+            } catch (err) {
+              // Non-fatal: individual chunk decode anomaly should not kill the full stream
+              console.warn("Failed to parse AI SSE chunk:", jsonStr, err);
+            }
+          }
+        }
+
+        // Persist the completed assistant message. Content is kept as raw Markdown —
+        // the panel renders it (react-markdown). Only guard against a totally empty turn.
+        setStore((prev) => {
+          const convs = [...prev.conversations];
+          const cIdx = convs.findIndex((c) => c.id === targetConvId);
+          if (cIdx !== -1) {
+            const conv = convs[cIdx];
+            const msgs = [...conv.messages];
+            const aIdx = msgs.findIndex((m) => m.id === assistantMsgId);
+            if (aIdx !== -1) {
+              msgs[aIdx] = {
+                ...msgs[aIdx],
+                content: accumulatedText,
+              };
+            }
+            convs[cIdx] = {
+              ...conv,
+              updatedAt: Date.now(),
+              messages: msgs,
+            };
+            const nextStore = { ...prev, conversations: convs };
+            saveCopilotHistory(nextStore);
+            return nextStore;
+          }
+          return prev;
+        });
+      } catch (err: any) {
+        if (err.name === "AbortError") {
+          return;
+        }
+        // A thrown TypeError here is the browser failing to reach the backend at all
+        // (DNS, CORS preflight, offline) - distinct from a classified backend error.
+        const isTransport = err instanceof TypeError;
+        if (isTransport) {
+          console.warn("AI request failed [NETWORK_ERROR]", err?.message);
+        }
+        const errorMsg = isTransport
+          ? AI_ERROR_FALLBACK_MESSAGE.NETWORK_ERROR
+          : err.message || "An unexpected error occurred.";
+        setError(errorMsg);
+
+        // Remove empty assistant placeholder if failed before receiving content
+        setStore((prev) => {
+          const convs = [...prev.conversations];
+          const cIdx = convs.findIndex((c) => c.id === targetConvId);
+          if (cIdx !== -1) {
+            const conv = convs[cIdx];
+            const msgs = conv.messages.filter((m) => m.id !== assistantMsgId || (m.content && m.content.trim().length > 0));
+            convs[cIdx] = { ...conv, messages: msgs };
+            const nextStore = { ...prev, conversations: convs };
+            saveCopilotHistory(nextStore);
+            return nextStore;
+          }
+          return prev;
+        });
+      } finally {
+        setIsLoading(false);
+        setActivity(null);
+        abortControllerRef.current = null;
+      }
     },
-    [execute, update],
+    [store, activeConversation, isLoading, apiEndpoint]
   );
-  const retry = useCallback(async () => {
-    if (
-      !retryRequest ||
-      running.current ||
-      retryRequest.conversationId !== storeRef.current.activeConversationId
-    )
-      return;
-    const placeholder: StoredChatMessage = {
-      id: retryRequest.assistantId,
-      role: "assistant",
-      content: "",
-      createdAt: Date.now(),
-    };
-    update((prev) => ({
-      ...prev,
-      conversations: prev.conversations.map((c) =>
-        c.id !== retryRequest.conversationId
-          ? c
-          : {
-              ...c,
-              messages: [
-                ...c.messages.filter((m) => m.id !== retryRequest.assistantId),
-                placeholder,
-              ],
-            },
-      ),
-    }));
-    await execute(retryRequest);
-  }, [retryRequest, execute, update]);
 
   return {
     messages,
     conversations,
     activeConversationId: store.activeConversationId,
-    activeConversationTitle: activeConversation?.title ?? "New conversation",
+    activeConversationTitle: activeConversation?.title || "New conversation",
     isLoading,
     activity,
     error,
-    hasHydrated: true,
+    hasHydrated,
     sendMessage,
     startNewConversation,
     selectConversation,
     deleteConversation,
-    clearMessages: startNewConversation,
-    stop,
-    retry,
-    stopped,
-    canRetry: !!retryRequest && !isLoading,
+    clearMessages,
   };
 }

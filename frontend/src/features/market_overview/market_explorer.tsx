@@ -7,15 +7,8 @@ import { AiChatProvider } from "@/data/ai/ai_chat_provider";
 import { AiAnchor } from "@/features/ai_assistant/ai_anchor";
 import { InstrumentPanel } from "@/features/warrant_info/instrument_panel";
 import { useWatchlist } from "@/data/watchlist";
-import {
-  useResearchMarket,
-  useQuote,
-  useCoveredWarrant,
-} from "@/data/use_research_market";
-import {
-  useSearchParam,
-  useNullableSearchParam,
-} from "@/data/url/use_url_state";
+import { useResearchMarket, useQuote, useCoveredWarrant } from "@/data/use_research_market";
+import { useSearchParam, useNullableSearchParam } from "@/data/url/use_url_state";
 import { deriveSelectedInstrument } from "@/data/selected_instrument";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import { useDashboardData } from "@/data/query/use_dashboard_data";
@@ -27,16 +20,12 @@ type Tab = "dashboard" | "research" | "news";
 export function MarketExplorer() {
   const [tabParam, setTabParam] = useSearchParam("tab", "dashboard");
   const activeTab: Tab =
-    tabParam === "research"
-      ? "research"
-      : tabParam === "news"
-        ? "news"
-        : "dashboard";
+    tabParam === "research" ? "research" : tabParam === "news" ? "news" : "dashboard";
   const [selectedSymbol, setSelectedSymbol] = useNullableSearchParam("symbol");
   const [filter, setFilter] = useSearchParam("q", "");
 
   const { items } = useWatchlist();
-  const { getSpec, specs } = useInstrumentSpecs();
+  const { getSpec } = useInstrumentSpecs();
   const {
     quotes,
     connectionState,
@@ -45,24 +34,13 @@ export function MarketExplorer() {
     marketSessionActive,
     dataMode,
   } = useResearchMarket();
-  const dashSymbols = useMemo(
-    () => [
-      ...new Set([
-        ...items.map((i) => i.symbol),
-        ...(selectedSymbol ? [selectedSymbol] : []),
-      ]),
-    ],
-    [items, selectedSymbol],
-  );
+  const dashSymbols = useMemo(() => items.map((i) => i.symbol), [items]);
   const { getRow: getDashRow, meta: dashMeta } = useDashboardData(dashSymbols);
 
   const selectedQuote = useQuote(selectedSymbol);
   const selectedCw = useCoveredWarrant(selectedSymbol);
   const watchlistItem = useMemo(
-    () =>
-      items.find(
-        (i) => i.symbol.toUpperCase() === (selectedSymbol ?? "").toUpperCase(),
-      ) ?? null,
+    () => items.find((i) => i.symbol.toUpperCase() === (selectedSymbol ?? "").toUpperCase()) ?? null,
     [items, selectedSymbol],
   );
   const selectedSpec = getSpec(selectedSymbol);
@@ -77,28 +55,13 @@ export function MarketExplorer() {
     [selectedSymbol, selectedSpec, watchlistItem, selectedQuote, selectedCw],
   );
 
-  const selectedDashRow = selected?.symbol
-    ? getDashRow(selected.symbol)
-    : undefined;
+  const selectedDashRow = selected?.symbol ? getDashRow(selected.symbol) : undefined;
 
   const contextEnvelope = useMemo<ResearchContextEnvelope>(() => {
     let selectedContext = null;
     if (selected) {
-      const qv = selectedDashRow?.quote ?? selected.quote;
+      const qv = selected.quote;
       const cw = selected.cw;
-      const analytics =
-        selectedDashRow?.displayState === "LIVE"
-          ? cw
-          : selectedDashRow?.analytics;
-      const available =
-        selected.metadataVerification !== "CONFLICTING" &&
-        (selectedDashRow?.displayState === "LIVE"
-          ? cw?.quantAvailable !== false
-          : selectedDashRow?.analytics?.isAvailable === true);
-      const quant = (key: string): number | null => {
-        const value = (analytics as Record<string, unknown> | undefined)?.[key];
-        return available && typeof value === "number" ? value : null;
-      };
       const lastPrice = qv?.lastPrice ?? cw?.quote?.lastPrice;
       const bidPrice = qv?.bidPrice ?? cw?.quote?.bidPrice;
       const askPrice = qv?.askPrice ?? cw?.quote?.askPrice;
@@ -106,13 +69,8 @@ export function MarketExplorer() {
       const volume = qv?.totalVolume ?? cw?.quote?.totalVolume;
       const underlyingPrice =
         cw?.underlyingPrice ??
-        (selected.underlyingSymbol
-          ? (quotes.get(selected.underlyingSymbol)?.lastPrice ?? null)
-          : null);
-      const { abs: spread, pct: spreadPercent } = computeSpread(
-        bidPrice,
-        askPrice,
-      );
+        (selected.underlyingSymbol ? quotes.get(selected.underlyingSymbol)?.lastPrice ?? null : null);
+      const { abs: spread, pct: spreadPercent } = computeSpread(bidPrice, askPrice);
 
       selectedContext = {
         symbol: selected.symbol,
@@ -131,16 +89,13 @@ export function MarketExplorer() {
         spread,
         spreadPercent,
         volume: volume ?? null,
-        ivBid: quant("ivBid"),
-        ivTrade: quant("ivTrade"),
-        ivAsk: quant("ivAsk"),
-        moneyness: quant("moneynessRatio"),
-        moneynessLabel: available
-          ? (analytics?.moneynessCategory ?? null)
-          : null,
-        contractState: analytics?.contractState ?? null,
-        quantAvailable:
-          available && (quant("ivTrade") !== null || quant("delta") !== null),
+        ivBid: cw?.ivBid ?? null,
+        ivTrade: cw?.ivTrade ?? null,
+        ivAsk: cw?.ivAsk ?? null,
+        moneyness: typeof cw?.moneynessRatio === "number" ? cw.moneynessRatio : null,
+        moneynessLabel: cw?.moneynessCategory ?? null,
+        contractState: cw?.contractState ?? null,
+        quantAvailable: typeof cw?.ivBid === "number" || typeof cw?.delta === "number",
       };
     }
 
@@ -148,18 +103,18 @@ export function MarketExplorer() {
       connectionState === "DISCONNECTED" || connectionState === "ERROR"
         ? "Backend offline"
         : connectionState === "RECONNECTING"
-          ? "Reconnecting feed"
-          : marketSession === "LUNCH_BREAK"
-            ? "Lunch break"
-            : marketSession === "CLOSED_PRE_OPEN" ||
-                marketSession === "CLOSED_POST_MARKET" ||
-                marketSession === "CLOSED_WEEKEND"
-              ? "Market closed"
-              : upstreamFeedState === "CONNECTED" || marketSessionActive
-                ? "Market open"
-                : upstreamFeedState === "CONNECTING"
-                  ? "Connecting feed"
-                  : "Feed unavailable";
+        ? "Reconnecting feed"
+        : marketSession === "LUNCH_BREAK"
+        ? "Lunch break"
+        : marketSession === "CLOSED_PRE_OPEN" ||
+          marketSession === "CLOSED_POST_MARKET" ||
+          marketSession === "CLOSED_WEEKEND"
+        ? "Market closed"
+        : upstreamFeedState === "CONNECTED" || marketSessionActive
+        ? "Market open"
+        : upstreamFeedState === "CONNECTING"
+        ? "Connecting feed"
+        : "Feed unavailable";
 
     return {
       activePage: activeTab,
@@ -170,7 +125,7 @@ export function MarketExplorer() {
       marketSession,
       marketSessionActive,
       quoteDisplayEligible: marketSessionActive,
-      dataState: selectedDashRow?.displayState ?? "UNAVAILABLE",
+      dataState: selectedDashRow?.displayState ?? (marketSessionActive ? "LIVE" : "LAST_SESSION"),
       quoteAsOf:
         selectedDashRow?.provenance?.quote?.asOf ??
         selectedDashRow?.provenance?.quote?.sessionDate ??
@@ -192,86 +147,64 @@ export function MarketExplorer() {
     dashMeta,
   ]);
 
-  const goToTab = (tab: Tab) => {
-    setFilter("", "replace");
-    setTabParam(tab, "push");
-  };
+  const goToTab = (tab: Tab) => setTabParam(tab, "push");
   const selectSymbol = (sym: string | null) => setSelectedSymbol(sym, "push");
 
   return (
     <AiChatProvider>
-      <div
-        className="workspace-shell"
-        style={{
-          height: "100dvh",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          background: "var(--bg)",
-          color: "var(--t-92)",
-        }}
-      >
-        <AppHeader
-          activeTab={activeTab}
-          onTabChange={goToTab}
-          symbols={[
-            ...new Set([
-              ...specs.keys(),
-              ...Array.from(specs.values()).flatMap((s) =>
-                s.underlyingSymbol ? [s.underlyingSymbol] : [],
-              ),
-              ...items.map((i) => i.symbol),
-              "VNINDEX",
-            ]),
-          ]}
-          onSelectSymbol={selectSymbol}
-          marketSession={marketSession}
-          connectionState={connectionState}
+    <div
+      style={{
+        height: "100vh",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--bg)",
+        color: "var(--t-92)",
+      }}
+    >
+      <AppHeader
+        activeTab={activeTab}
+        onTabChange={goToTab}
+        filter={filter}
+        onFilterChange={(v) => setFilter(v, "replace")}
+        marketSessionActive={marketSessionActive}
+      />
+
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <main style={{ flex: 1, overflow: "auto", padding: "16px 20px", minHeight: 100 }}>
+          {activeTab === "dashboard" ? (
+            <PersonalDashboard
+              onNavigateToUniverse={() => goToTab("research")}
+              selectedSymbol={selectedSymbol}
+              onSelectSymbol={selectSymbol}
+              filter={filter}
+            />
+          ) : activeTab === "news" ? (
+            <NewsFeed
+              filter={filter}
+              selectedSymbol={selectedSymbol}
+              onSelectSymbol={selectSymbol}
+            />
+          ) : (
+            <ResearchUniverse
+              onNavigateToDashboard={() => goToTab("dashboard")}
+              selectedSymbol={selectedSymbol}
+              onSelectSymbol={selectSymbol}
+              filter={filter}
+            />
+          )}
+        </main>
+
+        <InstrumentPanel
+          instrument={selected}
+          dashRow={selectedDashRow}
           marketSessionActive={marketSessionActive}
+          context={contextEnvelope}
+          onClose={() => selectSymbol(null)}
         />
-
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-          }}
-        >
-          <main className="workspace-main">
-            {activeTab === "dashboard" ? (
-              <PersonalDashboard
-                onNavigateToUniverse={() => goToTab("research")}
-                selectedSymbol={selectedSymbol}
-                onSelectSymbol={selectSymbol}
-                filter={filter}
-              />
-            ) : activeTab === "news" ? (
-              <NewsFeed
-                filter={filter}
-                selectedSymbol={selectedSymbol}
-                onSelectSymbol={selectSymbol}
-              />
-            ) : (
-              <ResearchUniverse
-                onNavigateToDashboard={() => goToTab("dashboard")}
-                selectedSymbol={selectedSymbol}
-                onSelectSymbol={selectSymbol}
-                filter={filter}
-              />
-            )}
-          </main>
-
-          <InstrumentPanel
-            instrument={selected}
-            dashRow={selectedDashRow}
-            marketSessionActive={marketSessionActive}
-            context={contextEnvelope}
-            onClose={() => selectSymbol(null)}
-          />
-        </div>
-        <AiAnchor context={contextEnvelope} />
       </div>
+      <AiAnchor context={contextEnvelope} />
+    </div>
     </AiChatProvider>
   );
 }

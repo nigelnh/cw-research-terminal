@@ -10,7 +10,7 @@ import type { Components } from "react-markdown";
  */
 
 const H_BASE: React.CSSProperties = {
-  fontFamily: "var(--font-sans)",
+  fontFamily: "var(--font-display)",
   fontWeight: 700,
   letterSpacing: "0.02em",
   color: "var(--t-92)",
@@ -19,53 +19,27 @@ const H_BASE: React.CSSProperties = {
 };
 
 const COMPONENTS: Components = {
-  h1: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 17 }} {...p} />,
-  h2: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 16 }} {...p} />,
-  h3: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 14 }} {...p} />,
-  h4: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 14 }} {...p} />,
-  h5: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 14 }} {...p} />,
-  h6: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 14 }} {...p} />,
-  p: ({ node, ...p }) => (
-    <p style={{ margin: "4px 0", lineHeight: 1.55 }} {...p} />
-  ),
+  h1: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 13 }} {...p} />,
+  h2: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 12 }} {...p} />,
+  h3: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 11.5 }} {...p} />,
+  h4: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 11 }} {...p} />,
+  h5: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 11 }} {...p} />,
+  h6: ({ node, ...p }) => <div style={{ ...H_BASE, fontSize: 11 }} {...p} />,
+  p: ({ node, ...p }) => <p style={{ margin: "4px 0", lineHeight: 1.55 }} {...p} />,
   ul: ({ node, ...p }) => (
-    <ul
-      style={{
-        margin: "4px 0",
-        paddingLeft: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-      }}
-      {...p}
-    />
+    <ul style={{ margin: "4px 0", paddingLeft: 16, display: "flex", flexDirection: "column", gap: 2 }} {...p} />
   ),
   ol: ({ node, ...p }) => (
-    <ol
-      style={{
-        margin: "4px 0",
-        paddingLeft: 18,
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-      }}
-      {...p}
-    />
+    <ol style={{ margin: "4px 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 2 }} {...p} />
   ),
   li: ({ node, ...p }) => <li style={{ lineHeight: 1.5 }} {...p} />,
-  strong: ({ node, ...p }) => (
-    <strong style={{ color: "var(--t-92)", fontWeight: 700 }} {...p} />
-  ),
+  strong: ({ node, ...p }) => <strong style={{ color: "var(--t-92)", fontWeight: 700 }} {...p} />,
   em: ({ node, ...p }) => <em style={{ color: "var(--t-70)" }} {...p} />,
   a: ({ node, ...p }) => (
     <a
       target="_blank"
       rel="noopener noreferrer"
-      style={{
-        color: "var(--accent)",
-        textDecoration: "underline",
-        textUnderlineOffset: 2,
-      }}
+      style={{ color: "var(--accent)", textDecoration: "underline", textUnderlineOffset: 2 }}
       {...p}
     />
   ),
@@ -87,14 +61,7 @@ const COMPONENTS: Components = {
         {children}
       </code>
     ) : (
-      <code
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 13,
-          color: "var(--t-85)",
-        }}
-        {...p}
-      >
+      <code style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--t-85)" }} {...p}>
         {children}
       </code>
     );
@@ -115,29 +82,16 @@ const COMPONENTS: Components = {
   ),
   blockquote: ({ node, ...p }) => (
     <blockquote
-      style={{
-        margin: "6px 0",
-        paddingLeft: 10,
-        borderLeft: "2px solid var(--border-strong)",
-        color: "var(--t-70)",
-      }}
+      style={{ margin: "6px 0", paddingLeft: 10, borderLeft: "2px solid var(--border-strong)", color: "var(--t-70)" }}
       {...p}
     />
   ),
-  hr: () => (
-    <hr
-      style={{
-        border: "none",
-        borderTop: "1px solid var(--border)",
-        margin: "10px 0",
-      }}
-    />
-  ),
+  hr: () => <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "10px 0" }} />,
   table: ({ node, ...p }) => (
     <div style={{ overflowX: "auto", margin: "6px 0" }}>
       <table
         className="mono"
-        style={{ borderCollapse: "collapse", fontSize: 13, width: "100%" }}
+        style={{ borderCollapse: "collapse", fontSize: 10.5, width: "100%" }}
         {...p}
       />
     </div>
@@ -156,31 +110,13 @@ const COMPONENTS: Components = {
     />
   ),
   td: ({ node, ...p }) => (
-    <td
-      style={{
-        padding: "3px 6px",
-        borderBottom: "1px solid var(--border-row)",
-        verticalAlign: "top",
-      }}
-      {...p}
-    />
+    <td style={{ padding: "3px 6px", borderBottom: "1px solid var(--border-row)", verticalAlign: "top" }} {...p} />
   ),
 };
 
-export const AssistantMarkdown = memo(function AssistantMarkdown({
-  children,
-}: {
-  children: string;
-}) {
+export const AssistantMarkdown = memo(function AssistantMarkdown({ children }: { children: string }) {
   return (
-    <div
-      style={{
-        color: "var(--t-85)",
-        fontSize: 14,
-        wordBreak: "break-word",
-        overflowWrap: "anywhere",
-      }}
-    >
+    <div style={{ color: "var(--t-85)", fontSize: 11.5, wordBreak: "break-word", overflowWrap: "anywhere" }}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
         {children}
       </ReactMarkdown>

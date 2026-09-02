@@ -1,16 +1,20 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useWatchlist } from "@/data/watchlist";
 import { useActiveWarrants } from "@/data/query";
-import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import {
   EMPTY_FILTER,
   RegistryFilter,
+  isFilterActive,
   rowMatchesFilter,
+  type FilterState,
 } from "@/components/common/registry_filter";
 import {
   DASH,
   DismissCell,
+  DismissHeader,
+  HiddenNote,
   PinCell,
+  PinHeader,
   SortHeader,
   dteDisplay,
   dteNumber,
@@ -18,308 +22,336 @@ import {
   fmtRatio,
   useHiddenRows,
   useSortPin,
+  type SortFields,
 } from "@/components/common/grid_table";
-import { EmptyState, Notice, UndoNotice } from "@/components/common/ui";
 
-interface Props {
+interface ResearchUniverseProps {
   onNavigateToDashboard?: () => void;
   selectedSymbol?: string | null;
   onSelectSymbol?: (symbol: string | null) => void;
   filter?: string;
 }
+
+interface RegistryRow {
+  symbol: string;
+  issuer: string | null;
+  underlying: string | null;
+  strike: number | null;
+  ratio: number | null;
+  maturity: string | null;
+  lastTradingDate: string | null;
+  dte: number | null;
+  dteText: string;
+  tracked: boolean;
+}
+
+const FIELDS: SortFields<RegistryRow> = {
+  symbol: (r) => r.symbol,
+  issuer: (r) => r.issuer,
+  und: (r) => r.underlying,
+  strike: (r) => r.strike,
+  ratio: (r) => r.ratio,
+  maturity: (r) => r.maturity,
+  dte: (r) => r.dte,
+  status: (r) => (r.tracked ? "TRACKED" : "REFERENCE"),
+};
+
+const TD: React.CSSProperties = { padding: "0 8px", textAlign: "right" };
+
+const STOCK_FIELDS: SortFields<{ symbol: string }> = { symbol: (r) => r.symbol };
+
 export function ResearchUniverse({
-  selectedSymbol,
+  selectedSymbol = null,
   onSelectSymbol,
   filter = "",
-}: Props) {
+}: ResearchUniverseProps) {
+  const setSelected = onSelectSymbol ?? (() => {});
   const { isInWatchlist, addToWatchlist } = useWatchlist();
-  const { getSpec } = useInstrumentSpecs();
-  const [query, setQuery] = useState(filter);
-  const [lifecycle, setLifecycle] = useState("ACTIVE");
-  const [filters, setFilters] = useState(EMPTY_FILTER);
-  const [note, setNote] = useState<string | null>(null);
-  const [undo, setUndo] = useState<string | null>(null);
-  const hidden = useHiddenRows();
-  const { instruments, isLoading, isError, refetch } = useActiveWarrants({
-    status: "ALL",
-  });
-  const all = instruments.map((cw) => {
-    const spec = getSpec(cw.symbol);
-    const maturity = spec?.maturityDate ?? cw.maturityDate;
-    return {
-      symbol: cw.symbol,
-      issuer: spec?.issuer ?? cw.issuer,
-      underlying: spec?.underlyingSymbol ?? cw.underlyingSymbol,
-      strike: spec?.strikePrice ?? cw.strikePrice,
-      ratio: spec?.exerciseRatio ?? cw.exerciseRatio,
-      maturity,
-      lastTradingDate: spec?.lastTradingDate ?? cw.lastTradingDate,
-      dte: dteNumber(null, maturity),
-      status:
-        spec?.status ??
-        cw.status ??
-        ((dteNumber(null, maturity) ?? 0) < 0 ? "EXPIRED" : "ACTIVE"),
-      verification:
-        spec?.metadataVerification ?? cw.metadataVerification ?? "UNVERIFIED",
-      tracked: isInWatchlist(cw.symbol),
-    };
-  });
-  const term = query.trim().toUpperCase();
-  const underlyingOptions = [
-    ...new Set(all.map((c) => c.underlying).filter((v): v is string => !!v)),
-  ].sort();
-  const issuerOptions = [
-    ...new Set(all.map((c) => c.issuer).filter((v): v is string => !!v)),
-  ].sort();
-  const rows = all.filter(
-    (r) =>
-      (lifecycle === "ALL" || r.status === lifecycle) &&
-      (!term ||
-        [r.symbol, r.underlying, r.issuer].some((v) =>
-          v?.toUpperCase().includes(term),
-        )) &&
-      !hidden.isHidden(r.symbol) &&
-      rowMatchesFilter(filters, r),
-  );
-  const grid = useSortPin(rows, {
-    symbol: (r) => r.symbol,
-    issuer: (r) => r.issuer,
-    underlying: (r) => r.underlying,
-    strike: (r) => r.strike,
-    ratio: (r) => r.ratio,
-    maturity: (r) => r.maturity,
-    dte: (r) => r.dte,
-  });
-  const add = (symbol: string, underlying?: string | null) => {
-    const res = addToWatchlist({
-      symbol,
-      instrumentType: underlying ? "CW" : "STOCK",
-      underlyingSymbol: underlying,
+  const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
+  const hiddenRows = useHiddenRows();
+  const stockHidden = useHiddenRows();
+  const addCw = (r: RegistryRow) =>
+    addToWatchlist({
+      symbol: r.symbol,
+      instrumentType: "CW",
+      underlyingSymbol: r.underlying,
+      issuer: r.issuer,
+      strikePrice: r.strike,
+      exerciseRatio: r.ratio,
+      maturityDate: r.maturity,
+      lastTradingDate: r.lastTradingDate,
     });
-    setNote(
-      res.success
-        ? `${symbol} added to your watchlist`
-        : (res.reason ?? "Could not add this instrument"),
-    );
-  };
+
+  const term = filter.trim().toUpperCase().replace(/^\//, "").trim();
+  const browseAll = term.length > 0 || isFilterActive(filterState);
+
+  const { instruments, isLoading, isError } = useActiveWarrants({
+    status: browseAll ? "ALL" : "ACTIVE",
+  });
+
+  const activeCount = useMemo(
+    () => instruments.filter((cw) => (cw as { status?: string }).status !== "EXPIRED").length,
+    [instruments],
+  );
+
+  const rows: RegistryRow[] = useMemo(
+    () =>
+      instruments
+        .map((cw) => {
+          const lastTradingDate = cw.lastTradingDate ?? null;
+          const maturity = cw.maturityDate ?? null;
+          return {
+            symbol: cw.symbol,
+            issuer: cw.issuer ?? null,
+            underlying: cw.underlyingSymbol ?? null,
+            strike: cw.strikePrice ?? null,
+            ratio: typeof cw.exerciseRatio === "number" ? cw.exerciseRatio : null,
+            maturity,
+            lastTradingDate,
+            dte: dteNumber(lastTradingDate, maturity),
+            dteText: dteDisplay(lastTradingDate, maturity),
+            tracked: isInWatchlist(cw.symbol),
+          };
+        })
+        .filter((r) => {
+          if (term) {
+            const hit =
+              r.symbol.toUpperCase().includes(term) ||
+              (r.underlying ?? "").toUpperCase().includes(term) ||
+              (r.issuer ?? "").toUpperCase().includes(term);
+            if (!hit) return false;
+          }
+          if (hiddenRows.isHidden(r.symbol)) return false;
+          return rowMatchesFilter(filterState, {
+            underlying: r.underlying,
+            issuer: r.issuer,
+            lastTradingDate: r.lastTradingDate,
+          });
+        }),
+    [instruments, term, filterState, isInWatchlist, hiddenRows],
+  );
+
+  const underlyingOptions = useMemo(
+    () => [...new Set(instruments.map((c) => c.underlyingSymbol).filter((v): v is string => !!v))].sort(),
+    [instruments],
+  );
+  const issuerOptions = useMemo(
+    () => [...new Set(instruments.map((c) => c.issuer).filter((v): v is string => !!v))].sort(),
+    [instruments],
+  );
+
+  const grid = useSortPin(rows, FIELDS);
+
+  // STOCKS column — the distinct underlyings backing the discovered CWs.
+  const stockRows = useMemo(
+    () =>
+      underlyingOptions
+        .filter((s) => !stockHidden.isHidden(s))
+        .filter((s) => !term || s.toUpperCase().includes(term))
+        .map((symbol) => ({ symbol })),
+    [underlyingOptions, stockHidden, term],
+  );
+  const stockGrid = useSortPin(stockRows, STOCK_FIELDS);
+
   return (
-    <section aria-label="Research registry">
-      <div className="section-toolbar">
-        <div>
-          <h1 className="section-title">Research</h1>
-          <p className="section-subtitle">
-            Discover covered warrants and inspect their contract terms.
-          </p>
-        </div>
-        <div className="actions">
-          <input
-            aria-label="Search registry"
-            placeholder="Symbol, underlying or issuer…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <select
-            aria-label="Lifecycle"
-            value={lifecycle}
-            onChange={(e) => setLifecycle(e.target.value)}
-          >
-            <option value="ACTIVE">Active warrants</option>
-            <option value="ALL">All warrants</option>
-            <option value="EXPIRED">Expired warrants</option>
-          </select>
-          <RegistryFilter
-            underlyingOptions={underlyingOptions}
-            issuerOptions={issuerOptions}
-            value={filters}
-            onChange={setFilters}
-          />
-        </div>
-      </div>
-      {note && (
-        <Notice
-          action={
-            <button className="btn btn-link" onClick={() => setNote(null)}>
-              Dismiss
-            </button>
-          }
-        >
-          {note}
-        </Notice>
-      )}
-      <div className="registry-summary">
-        <span>
-          {rows.length} warrants
-          {hidden.count ? ` · ${hidden.count} hidden` : ""}
+    <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 12,
+          marginBottom: 3,
+          position: "relative",
+        }}
+      >
+        <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
+          Registry
         </span>
-        {hidden.count > 0 && (
-          <button className="btn btn-link" onClick={hidden.reset}>
-            Show hidden
-          </button>
-        )}
-        <span className="muted">
-          Verification is independent of lifecycle and watchlist membership.
+        <span style={{ fontSize: 10.5, color: "var(--t-42)", fontStyle: "italic" }}>
+          “{browseAll ? "browsing the full discovered registry" : "verified terms only"}”
         </span>
+        <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
+        <RegistryFilter
+          underlyingOptions={underlyingOptions}
+          issuerOptions={issuerOptions}
+          value={filterState}
+          onChange={setFilterState}
+        />
       </div>
-      {isLoading ? (
-        <EmptyState title="Loading research registry…" />
-      ) : isError ? (
-        <EmptyState
-          title="Could not load the registry"
-          action={
-            <button className="btn" onClick={() => void refetch()}>
-              Retry
-            </button>
-          }
-        />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          title="No instruments match"
-          action={
-            <button
-              className="btn"
-              onClick={() => {
-                setQuery("");
-                setFilters(EMPTY_FILTER);
-                setLifecycle("ALL");
-                hidden.reset();
-              }}
-            >
-              Clear filters
-            </button>
-          }
-        />
-      ) : (
-        <div className="table-scroll">
-          <table className="data-table">
+      <p style={{ fontSize: 11, color: "var(--t-46)", marginBottom: 14 }}>
+        {browseAll
+          ? `${rows.length} match${rows.length === 1 ? "" : "es"}`
+          : `${activeCount} verified · type in the header bar to filter across ~530 discovered`}
+      </p>
+
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
+            COVERED WARRANTS
+          </div>
+          <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
-              <tr>
-                {[
-                  ["symbol", "SYMBOL"],
-                  ["issuer", "ISSUER"],
-                  ["underlying", "UNDERLYING"],
-                  ["strike", "STRIKE"],
-                  ["ratio", "RATIO"],
-                  ["maturity", "MATURITY"],
-                  ["dte", "DTE"],
-                ].map(([key, label]) => (
-                  <SortHeader
-                    key={key}
-                    label={label}
-                    align={
-                      ["symbol", "issuer", "underlying"].includes(key)
-                        ? "left"
-                        : "right"
-                    }
-                    mark={grid.sortMark(key)}
-                    onClick={() => grid.toggleSort(key)}
-                  />
-                ))}
-                <th>Lifecycle</th>
-                <th>Verification</th>
-                <th>Watchlist</th>
-                <th aria-label="Pin" />
-                <th aria-label="Actions" />
+              <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
+                <PinHeader />
+                <SortHeader label="SYMBOL" align="left" mark={grid.sortMark("symbol")} onClick={() => grid.toggleSort("symbol")} />
+                <SortHeader label="ISSUER" align="left" mark={grid.sortMark("issuer")} onClick={() => grid.toggleSort("issuer")} />
+                <SortHeader label="UNDERLYING" align="left" mark={grid.sortMark("und")} onClick={() => grid.toggleSort("und")} />
+                <SortHeader label="STRIKE" mark={grid.sortMark("strike")} onClick={() => grid.toggleSort("strike")} />
+                <SortHeader label="RATIO" mark={grid.sortMark("ratio")} onClick={() => grid.toggleSort("ratio")} />
+                <SortHeader label="MATURITY" mark={grid.sortMark("maturity")} onClick={() => grid.toggleSort("maturity")} />
+                <SortHeader label="DTE" mark={grid.sortMark("dte")} onClick={() => grid.toggleSort("dte")} />
+                <SortHeader label="STATUS" mark={grid.sortMark("status")} onClick={() => grid.toggleSort("status")} />
+                <th style={{ width: 20, padding: "5px 4px" }} aria-hidden />
+                <DismissHeader />
               </tr>
             </thead>
             <tbody>
-              {grid.ordered.map((r) => (
-                <tr
-                  key={r.symbol}
-                  tabIndex={0}
-                  className={r.symbol === selectedSymbol ? "is-selected" : ""}
-                  aria-selected={r.symbol === selectedSymbol}
-                  onClick={() => onSelectSymbol?.(r.symbol)}
-                  onKeyDown={(e) => {
-                    if (
-                      e.target === e.currentTarget &&
-                      (e.key === "Enter" || e.key === " ")
-                    ) {
-                      e.preventDefault();
-                      onSelectSymbol?.(r.symbol);
-                    }
-                  }}
-                >
-                  <td className="symbol-cell">{r.symbol}</td>
-                  <td style={{ textAlign: "left" }}>{r.issuer ?? DASH}</td>
-                  <td style={{ textAlign: "left" }}>{r.underlying ?? DASH}</td>
-                  <td>{fmtPrice(r.strike)}</td>
-                  <td>{fmtRatio(r.ratio)}</td>
-                  <td>{r.maturity || DASH}</td>
-                  <td title="Calendar days to maturity, today in ICT">
-                    {dteDisplay(null, r.maturity)}
+              {isLoading ? (
+                <tr>
+                  <td colSpan={11} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
+                    Loading research registry…
                   </td>
-                  <td>
-                    <span className="badge">{r.status.toLowerCase()}</span>
-                  </td>
-                  <td>
-                    <span
-                      className={`badge ${r.verification === "VERIFIED_CURRENT" ? "badge-accent" : "badge-warning"}`}
-                    >
-                      {r.verification === "VERIFIED_CURRENT"
-                        ? "Verified"
-                        : r.verification === "CONFLICTING"
-                          ? "Conflicting terms"
-                          : r.verification.toLowerCase()}
-                    </span>
-                  </td>
-                  <td>
-                    {r.tracked ? (
-                      <span className="badge badge-accent">Watching</span>
-                    ) : (
-                      <button
-                        className="btn"
-                        aria-label={`Add ${r.symbol} to watchlist`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          add(r.symbol, r.underlying);
-                        }}
-                      >
-                        + Watch
-                      </button>
-                    )}
-                  </td>
-                  <PinCell
-                    symbol={r.symbol}
-                    fill={grid.pinFill(r.symbol)}
-                    onToggle={grid.togglePin}
-                  />
-                  <DismissCell
-                    symbol={r.symbol}
-                    onDismiss={(s) => {
-                      hidden.hide(s);
-                      setUndo(s);
-                    }}
-                  />
                 </tr>
-              ))}
+              ) : isError ? (
+                <tr>
+                  <td colSpan={11} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--down)" }}>
+                    Could not load the research registry. Retry shortly.
+                  </td>
+                </tr>
+              ) : grid.ordered.length === 0 ? (
+                <tr>
+                  <td colSpan={11} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
+                    No instruments match.
+                  </td>
+                </tr>
+              ) : (
+                grid.ordered.map((r) => {
+                  const selected = selectedSymbol === r.symbol;
+                  return (
+                    <tr
+                      key={r.symbol}
+                      tabIndex={0}
+                      onClick={() => setSelected(r.symbol)}
+                      onKeyDown={(e) => e.key === "Enter" && setSelected(r.symbol)}
+                      style={{
+                        cursor: "pointer",
+                        height: 27,
+                        background: selected ? "var(--panel-3)" : "transparent",
+                        borderBottom: "1px solid var(--border-row)",
+                      }}
+                    >
+                      <PinCell symbol={r.symbol} fill={grid.pinFill(r.symbol)} onToggle={grid.togglePin} />
+                      <td style={{ padding: "0 8px", color: "var(--accent)" }}>{r.symbol}</td>
+                      <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.issuer ?? DASH}</td>
+                      <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.underlying ?? DASH}</td>
+                      <td style={{ ...TD, color: "var(--t-80)" }}>{fmtPrice(r.strike)}</td>
+                      <td style={{ ...TD, color: "var(--t-50)" }}>{fmtRatio(r.ratio)}</td>
+                      <td style={{ ...TD, color: "var(--t-50)" }}>{r.maturity ?? DASH}</td>
+                      <td style={{ ...TD, color: "var(--t-46)" }}>{r.dteText}</td>
+                      <td style={{ ...TD, color: r.tracked ? "var(--accent)" : "var(--t-46)" }}>
+                        {r.tracked ? "TRACKED" : "REFERENCE"}
+                      </td>
+                      <AddCell symbol={r.symbol} tracked={r.tracked} onAdd={() => addCw(r)} />
+                      <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
-      )}
-      <div className="underlying-list">
-        <span className="muted">Underlying equities</span>
-        {underlyingOptions
-          .filter((s) => !term || s.includes(term))
-          .map((symbol) => (
-            <button
-              className="btn"
-              key={symbol}
-              onClick={() => onSelectSymbol?.(symbol)}
-            >
-              {symbol}
-            </button>
-          ))}
+
+        <div style={{ width: 220, flexShrink: 0 }}>
+          <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
+            STOCKS
+            <HiddenNote count={stockHidden.count} onReset={stockHidden.reset} />
+          </div>
+          <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
+                <PinHeader />
+                <SortHeader label="SYMBOL" align="left" mark={stockGrid.sortMark("symbol")} onClick={() => stockGrid.toggleSort("symbol")} />
+                <th style={{ width: 20, padding: "5px 4px" }} aria-hidden />
+                <DismissHeader />
+              </tr>
+            </thead>
+            <tbody>
+              {stockGrid.ordered.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ padding: "24px 0", textAlign: "center", fontSize: 11, color: "var(--t-46)" }}>
+                    —
+                  </td>
+                </tr>
+              ) : (
+                stockGrid.ordered.map((s) => {
+                  const selected = selectedSymbol === s.symbol;
+                  return (
+                    <tr
+                      key={s.symbol}
+                      tabIndex={0}
+                      onClick={() => setSelected(s.symbol)}
+                      onKeyDown={(e) => e.key === "Enter" && setSelected(s.symbol)}
+                      style={{
+                        cursor: "pointer",
+                        height: 27,
+                        background: selected ? "var(--panel-3)" : "transparent",
+                        borderBottom: "1px solid var(--border-row)",
+                      }}
+                    >
+                      <PinCell symbol={s.symbol} fill={stockGrid.pinFill(s.symbol)} onToggle={stockGrid.togglePin} />
+                      <td style={{ padding: "0 8px", color: "var(--accent)" }}>{s.symbol}</td>
+                      <AddCell
+                        symbol={s.symbol}
+                        tracked={isInWatchlist(s.symbol)}
+                        onAdd={() => addToWatchlist({ symbol: s.symbol, instrumentType: "STOCK" })}
+                      />
+                      <DismissCell symbol={s.symbol} onDismiss={stockHidden.hide} />
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-      {undo && (
-        <UndoNotice
-          text={`${undo} hidden from this view`}
-          undo={() => {
-            hidden.restore(undo);
-            setUndo(null);
-          }}
-          dismiss={() => setUndo(null)}
-        />
-      )}
-    </section>
+    </div>
+  );
+}
+
+/** Trailing "+" cell — adds the row's symbol to the watchlist. */
+function AddCell({
+  symbol,
+  tracked,
+  onAdd,
+}: {
+  symbol: string;
+  tracked: boolean;
+  onAdd: () => void;
+}) {
+  return (
+    <td style={{ padding: "0 6px", textAlign: "center", width: 20 }}>
+      <button
+        type="button"
+        disabled={tracked}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAdd();
+        }}
+        title={tracked ? `${symbol} is on your watchlist` : `Add ${symbol} to watchlist`}
+        aria-label={tracked ? `${symbol} already on watchlist` : `Add ${symbol} to watchlist`}
+        className="focus-ring"
+        style={{
+          background: "none",
+          border: "none",
+          cursor: tracked ? "default" : "pointer",
+          padding: 2,
+          lineHeight: 1,
+          fontSize: 12,
+          color: tracked ? "var(--t-40)" : "var(--accent)",
+        }}
+      >
+        +
+      </button>
+    </td>
   );
 }
