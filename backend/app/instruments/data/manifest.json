@@ -1,12 +1,12 @@
 {
-  "snapshot_updated_at": "2026-08-29T11:54:00+07:00",
-  "total_instruments": 533,
-  "verified_active_count": 14,
+  "snapshot_updated_at": "2026-09-02T04:21:21.333931+00:00",
+  "total_instruments": 539,
+  "verified_active_count": 29,
   "verified_expired_count": 3,
-  "unknown_lifecycle_count": 516,
-  "metadata_complete_count": 17,
-  "metadata_partial_count": 516,
-  "provenance_description": "Canonical cached metadata snapshot. Symbol discovery via VNDirect public dchart search; quant-critical contract terms for VERIFIED_CURRENT / CONFLICTING symbols reconciled manually against public market-data aggregators (Vietstock, 24hMoney) with auditable source URLs recorded in each record's provenance block.",
-  "verified_current_metadata_count": 5,
+  "unknown_lifecycle_count": 507,
+  "metadata_complete_count": 32,
+  "metadata_partial_count": 507,
+  "provenance_description": "Canonical cached registry. The 27-CW demo set was checked against VNDIRECT current listed derivatives and 24HMoney on 2026-09-02; source records and rounding tolerances are retained in demo_universe_evidence_20260902.json. Other records retain their existing provenance and verification grades.",
+  "verified_current_metadata_count": 31,
   "conflicting_metadata_count": 1
 }

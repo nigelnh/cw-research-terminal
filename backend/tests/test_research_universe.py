@@ -6,6 +6,11 @@ universe is the curated verified set only.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+DEFAULTS = json.loads((Path(__file__).parents[1] / "app/instruments/data/default_research_universe.json").read_text())["items"]
+DEFAULT_CWS = {i["symbol"] for i in DEFAULTS if i["instrument_type"] == "CW"}
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -23,9 +28,9 @@ client = TestClient(app)
 async def test_only_provenanced_warrants_are_active():
     await instrument_registry.initialize(current_date="2026-08-29")
     active = await instrument_registry.search(active_only=True)
-    assert {a.symbol for a in active} == {"CHPG2602", "CVPB2615", "CTCB2601"}
+    assert {a.symbol for a in active} == DEFAULT_CWS | {"CHPG2602", "CTCB2601"}
     verified = await instrument_registry.search(active_only=True, verified_only=True)
-    assert {v.symbol for v in verified} == {"CHPG2602", "CVPB2615"}
+    assert {v.symbol for v in verified} == DEFAULT_CWS | {"CHPG2602"}
 
 
 @pytest.mark.asyncio
@@ -46,12 +51,12 @@ def test_search_discovers_registry_symbols_under_status_all():
     assert "CFPT2601" in syms
 
 
-def test_active_default_returns_three():
+def test_active_registry_includes_reviewed_demo_universe():
     r = client.get("/api/instruments")
     assert r.status_code == 200
     data = r.json()
-    assert data["active_count"] == 3
-    assert data["total"] == 3
+    assert data["active_count"] == len(DEFAULT_CWS | {"CHPG2602", "CTCB2601"})
+    assert data["total"] == len(DEFAULT_CWS | {"CHPG2602", "CTCB2601"})
 
 
 def test_default_universe_endpoint_is_curated_and_verified():
@@ -62,9 +67,20 @@ def test_default_universe_endpoint_is_curated_and_verified():
     assert "CTCB2601" not in syms  # the CONFLICTING warrant is not in the default demo
     cw_items = [i for i in items if i["instrument_type"] == "CW"]
     assert cw_items and all(i["metadata_verification"] == "VERIFIED_CURRENT" for i in cw_items)
-    assert {"HPG", "VPB", "VNINDEX"}.issubset(set(syms))  # underlyings + index present
+    assert {"HPG", "FPT", "VPB"}.issubset(set(syms))
+    assert len(items) == 30 and len(cw_items) == 27
+    assert "VNINDEX" not in syms
+    assert all(i["last_trading_date"] > "2026-09-02" for i in cw_items)
 
 
 def test_unknown_symbol_rejected():
     r = client.get("/api/instruments/NOTREAL9")
     assert r.status_code == 404
+
+
+def test_default_universe_excludes_warrants_past_last_trading_day(monkeypatch):
+    from app.instruments.providers import canonical_provider
+    monkeypatch.setattr(canonical_provider, "get_vietnam_today", lambda: "2027-07-01")
+    r = client.get("/api/instruments/default-universe")
+    assert r.status_code == 200
+    assert {i["symbol"] for i in r.json()["items"]} == {"HPG", "FPT", "VPB"}

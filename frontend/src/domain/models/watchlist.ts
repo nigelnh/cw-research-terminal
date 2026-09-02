@@ -37,38 +37,98 @@ export const WATCHLIST_STORAGE_KEY_V1 = "cw-research-watchlist:v1";
 export const WATCHLIST_STORAGE_KEY_V2 = "cw-research-watchlist:v2";
 export const WATCHLIST_STORAGE_KEY_V3 = "cw-research-watchlist:v3";
 export const WATCHLIST_STORAGE_KEY_V4 = "cw-research-watchlist:v4";
+export const WATCHLIST_STORAGE_KEY_V5 = "cw-research-watchlist:v5";
 // v3: items store IDENTITY + PREFERENCE only (contract terms resolved live from the
 //     registry).
 // v4: default demo universe changed to the curated VERIFIED_CURRENT set - CTCB2601
 //     (CONFLICTING) and NVL (no history) are no longer seeded. A user who never touched
 //     the old default is re-seeded; a customized watchlist migrates unchanged.
-export const CURRENT_WATCHLIST_SCHEMA_VERSION = 4;
+// v5: 30 active real instruments; only untouched earlier defaults are re-seeded.
+export const CURRENT_WATCHLIST_SCHEMA_VERSION = 5;
 
 /**
  * PRIMARY UI UNIVERSE - mirrors the backend GET /api/instruments/default-universe.
- * Curated: verified covered warrants + their underlyings + the index.
+ * Reviewed 2026-09-02: 3 stocks and 27 active CWs with cross-checked terms.
  */
 export const PRIMARY_UI_UNIVERSE = [
-  "CHPG2602",
-  "CVPB2615",
   "HPG",
+  "CHPG2617",
+  "CHPG2618",
+  "CHPG2625",
+  "CHPG2626",
+  "CHPG2627",
+  "CHPG2628",
+  "CHPG2629",
+  "CHPG2630",
+  "CHPG2632",
+  "FPT",
+  "CFPT2616",
+  "CFPT2617",
+  "CFPT2621",
+  "CFPT2622",
+  "CFPT2623",
+  "CFPT2624",
+  "CFPT2626",
+  "CFPT2627",
+  "CFPT2628",
   "VPB",
-  "VNINDEX",
+  "CVPB2611",
+  "CVPB2613",
+  "CVPB2615",
+  "CVPB2616",
+  "CVPB2617",
+  "CVPB2618",
+  "CVPB2621",
+  "CVPB2622",
+  "CVPB2623"
 ] as const;
 
 /** The old (pre-v4) default set - used to detect an untouched watchlist during migration. */
 export const LEGACY_DEFAULT_SYMBOLS = ["HPG", "NVL", "VHM", "CTCB2601", "CVPB2615"];
+const PREVIOUS_DEMO_SYMBOLS = ["CHPG2602", "CVPB2615", "HPG", "VPB", "VNINDEX"];
+function isPreviousDemo(items: any[]): boolean {
+  // Early demo seeds used both zero and wall-clock addedAt values.
+  return items.length === PREVIOUS_DEMO_SYMBOLS.length &&
+    PREVIOUS_DEMO_SYMBOLS.every(symbol => items.some(item => String(item?.symbol).toUpperCase() === symbol)) &&
+    items.every(item => !item?.notes);
+}
+
 
 export const DEFAULT_PRIMARY_WATCHLIST_ITEMS: WatchlistItem[] = [
-  { symbol: "CHPG2602", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
-  { symbol: "CVPB2615", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
   { symbol: "HPG", instrumentType: "STOCK", addedAt: 0 },
+  { symbol: "CHPG2617", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
+  { symbol: "CHPG2618", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
+  { symbol: "CHPG2625", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
+  { symbol: "CHPG2626", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
+  { symbol: "CHPG2627", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
+  { symbol: "CHPG2628", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
+  { symbol: "CHPG2629", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
+  { symbol: "CHPG2630", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
+  { symbol: "CHPG2632", instrumentType: "CW", underlyingSymbol: "HPG", addedAt: 0 },
+  { symbol: "FPT", instrumentType: "STOCK", addedAt: 0 },
+  { symbol: "CFPT2616", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 0 },
+  { symbol: "CFPT2617", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 0 },
+  { symbol: "CFPT2621", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 0 },
+  { symbol: "CFPT2622", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 0 },
+  { symbol: "CFPT2623", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 0 },
+  { symbol: "CFPT2624", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 0 },
+  { symbol: "CFPT2626", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 0 },
+  { symbol: "CFPT2627", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 0 },
+  { symbol: "CFPT2628", instrumentType: "CW", underlyingSymbol: "FPT", addedAt: 0 },
   { symbol: "VPB", instrumentType: "STOCK", addedAt: 0 },
-  { symbol: "VNINDEX", instrumentType: "INDEX", addedAt: 0 },
+  { symbol: "CVPB2611", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
+  { symbol: "CVPB2613", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
+  { symbol: "CVPB2615", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
+  { symbol: "CVPB2616", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
+  { symbol: "CVPB2617", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
+  { symbol: "CVPB2618", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
+  { symbol: "CVPB2621", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
+  { symbol: "CVPB2622", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
+  { symbol: "CVPB2623", instrumentType: "CW", underlyingSymbol: "VPB", addedAt: 0 },
 ];
 
 /**
- * Creates the canonical default research watchlist populated with the 5 primary UI universe symbols.
+ * Creates the canonical default research watchlist populated with the 30 primary UI universe symbols.
  */
 export function createDefaultWatchlist(): ResearchWatchlist {
   return {
@@ -87,7 +147,7 @@ export function createDefaultWatchlist(): ResearchWatchlist {
 export class WatchlistStorage {
   private storageKey: string;
 
-  constructor(storageKey: string = WATCHLIST_STORAGE_KEY_V4) {
+  constructor(storageKey: string = WATCHLIST_STORAGE_KEY_V5) {
     this.storageKey = storageKey;
   }
 
@@ -125,6 +185,11 @@ export class WatchlistStorage {
           const parsed = JSON.parse(rawV3);
           if (parsed && typeof parsed === "object" && Array.isArray(parsed.items) &&
               parsed.version === CURRENT_WATCHLIST_SCHEMA_VERSION) {
+            if (isPreviousDemo(parsed.items)) {
+              const refreshed = createDefaultWatchlist();
+              this.saveWatchlist(refreshed);
+              return refreshed;
+            }
             return {
               id: parsed.id || "default_personal_watchlist",
               name: parsed.name || "My Personal Research Dashboard",
@@ -144,6 +209,7 @@ export class WatchlistStorage {
       //    watchlist that still holds exactly the pre-v4 default set, untouched, is
       //    re-seeded with the new curated default (removes CTCB2601 CONFLICTING + NVL).
       const rawOlder =
+        window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V4) ||
         window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V3) ||
         window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V2) ||
         window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V1) ||
@@ -151,12 +217,14 @@ export class WatchlistStorage {
       if (rawOlder) {
         try {
           const old = JSON.parse(rawOlder);
-          if (old && typeof old === "object" && Array.isArray(old.items) && old.items.length > 0) {
+          if (old && typeof old === "object" && Array.isArray(old.items)) {
             const oldSyms = old.items.map((i: any) => String(i?.symbol || "").toUpperCase());
             const untouchedLegacyDefault =
-              oldSyms.length === LEGACY_DEFAULT_SYMBOLS.length &&
-              LEGACY_DEFAULT_SYMBOLS.every((s) => oldSyms.includes(s)) &&
-              old.items.every((i: any) => (i?.addedAt ?? 0) === 0 && !i?.notes);
+              isPreviousDemo(old.items) || (
+                oldSyms.length === LEGACY_DEFAULT_SYMBOLS.length &&
+                LEGACY_DEFAULT_SYMBOLS.every(s => oldSyms.includes(s)) &&
+                old.items.every((i: any) => (i?.addedAt ?? 0) === 0 && !i?.notes)
+              );
 
             const migrated: ResearchWatchlist = untouchedLegacyDefault
               ? createDefaultWatchlist()
@@ -169,7 +237,7 @@ export class WatchlistStorage {
                   version: CURRENT_WATCHLIST_SCHEMA_VERSION,
                 };
             this.saveWatchlist(migrated);
-            for (const k of [WATCHLIST_STORAGE_KEY_V1, WATCHLIST_STORAGE_KEY_V2, WATCHLIST_STORAGE_KEY_V3]) {
+            for (const k of [WATCHLIST_STORAGE_KEY_V1, WATCHLIST_STORAGE_KEY_V2, WATCHLIST_STORAGE_KEY_V3, WATCHLIST_STORAGE_KEY_V4]) {
               if (k !== this.storageKey) window.localStorage.removeItem(k);
             }
             return migrated;
