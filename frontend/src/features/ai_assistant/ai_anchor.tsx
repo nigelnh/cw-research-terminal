@@ -1,17 +1,37 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
-import { Orbit, Plus, History, Minus, CornerDownLeft } from "lucide-react";
+import {
+  Orbit,
+  Plus,
+  History,
+  Minus,
+  CornerDownLeft,
+  Maximize2,
+  Minimize2,
+  PanelRight,
+  Copy,
+  Square,
+  RotateCcw,
+} from "lucide-react";
 import { useAiChatContext } from "@/data/ai/ai_chat_provider";
 import type { ResearchContextEnvelope, TraceStep } from "@/data/ai/use_ai_chat";
 import { formatRelativeTime } from "@/data/ai/copilot_history_store";
+import { formatAsOf } from "@/domain/temporal";
 import { AssistantMarkdown } from "./assistant_markdown";
 
 const POS_KEY = "cw_research:ai_anchor_pos:v1";
 const DRAFT_KEY = "cw_research:ai_draft:v1";
 const ANCHOR = 34; // px, square
 const EDGE = 16; // safe viewport inset
-const PANEL_W = 380;
-const PANEL_H = 468;
+const PANEL_W = 440;
+const PANEL_H = 560;
 const DRAG_THRESHOLD = 4;
 const COMPOSER_MAX = 132; // textarea auto-grow ceiling
 const NEAR_BOTTOM_PX = 64;
@@ -39,7 +59,10 @@ interface AiAnchorProps {
 function clampToViewport(p: Pos): Pos {
   const maxX = Math.max(EDGE, window.innerWidth - ANCHOR - EDGE);
   const maxY = Math.max(EDGE, window.innerHeight - ANCHOR - EDGE);
-  return { x: Math.min(Math.max(p.x, EDGE), maxX), y: Math.min(Math.max(p.y, EDGE), maxY) };
+  return {
+    x: Math.min(Math.max(p.x, EDGE), maxX),
+    y: Math.min(Math.max(p.y, EDGE), maxY),
+  };
 }
 
 function defaultPos(): Pos {
@@ -54,7 +77,8 @@ function loadPos(): Pos {
     const raw = window.localStorage?.getItem(POS_KEY);
     if (raw) {
       const p = JSON.parse(raw);
-      if (typeof p?.x === "number" && typeof p?.y === "number") return clampToViewport(p);
+      if (typeof p?.x === "number" && typeof p?.y === "number")
+        return clampToViewport(p);
     }
   } catch {
     /* ignore */
@@ -90,7 +114,15 @@ function stepGlyph(ok: boolean): string {
   return ok ? "✓" : "!"; // ✓ / !
 }
 
-function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: string | null; running: boolean }) {
+function ResearchTrace({
+  steps,
+  live,
+  running,
+}: {
+  steps: TraceStep[];
+  live: string | null;
+  running: boolean;
+}) {
   const [open, setOpen] = useState(running);
   useEffect(() => {
     // keep it open while working; collapse once done (user can re-expand)
@@ -100,7 +132,8 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
   if (steps.length === 0 && !running) return null;
 
   const totalMs = steps.reduce((s, x) => s + (x.duration_ms ?? 0), 0);
-  const dur = totalMs < 1000 ? `${totalMs} ms` : `${(totalMs / 1000).toFixed(1)}s`;
+  const dur =
+    totalMs < 1000 ? `${totalMs} ms` : `${(totalMs / 1000).toFixed(1)}s`;
   const summary =
     steps.length > 0
       ? `Research trace · ${steps.length} tool${steps.length === 1 ? "" : "s"} · ${dur}`
@@ -110,7 +143,7 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
     <div
       className="mono"
       style={{
-        fontSize: 10,
+        fontSize: 12,
         color: "var(--t-50)",
         border: "1px solid var(--border-26)",
         borderRadius: 2,
@@ -132,26 +165,53 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
           cursor: "pointer",
           color: "var(--t-55)",
           fontFamily: "inherit",
-          fontSize: 10,
+          fontSize: 12,
         }}
       >
         {running ? "Working…" : `${open ? "▾" : "▸"} ${summary}`}
       </button>
       {(open || running) && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingTop: 2 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            paddingTop: 2,
+          }}
+        >
           {steps.map((s, i) => (
-            <div key={i} style={{ display: "flex", gap: 6, color: s.ok ? "var(--t-60)" : "var(--down)" }}>
-              <span style={{ color: s.ok ? "var(--up)" : "var(--down)", width: 8, flexShrink: 0 }}>
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                gap: 6,
+                color: s.ok ? "var(--t-60)" : "var(--down)",
+              }}
+            >
+              <span
+                style={{
+                  color: s.ok ? "var(--up)" : "var(--down)",
+                  width: 8,
+                  flexShrink: 0,
+                }}
+              >
                 {stepGlyph(s.ok)}
               </span>
               <span style={{ overflow: "hidden" }}>
                 {s.display_name}
-                {s.context ? <span style={{ color: "var(--t-42)" }}> {"·"} {s.context}</span> : null}
+                {s.context ? (
+                  <span style={{ color: "var(--t-42)" }}>
+                    {" "}
+                    {"·"} {s.context}
+                  </span>
+                ) : null}
                 {s.result_summary ? (
                   <span style={{ color: "var(--t-46)" }}>
                     {" — "}
                     {s.result_summary}
-                    {typeof s.duration_ms === "number" ? ` · ${s.duration_ms} ms` : ""}
+                    {typeof s.duration_ms === "number"
+                      ? ` · ${s.duration_ms} ms`
+                      : ""}
                   </span>
                 ) : null}
               </span>
@@ -235,6 +295,7 @@ function Composer({
     >
       <textarea
         ref={ref}
+        autoFocus
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
@@ -253,8 +314,8 @@ function Composer({
           border: "none",
           outline: "none",
           boxShadow: "none",
-          fontFamily: "var(--font-mono)",
-          fontSize: 11.5,
+          fontFamily: "var(--font-sans)",
+          fontSize: 14,
           lineHeight: 1.5,
           color: "var(--t-92)",
           maxHeight: COMPOSER_MAX,
@@ -271,7 +332,9 @@ function Composer({
           border: "none",
           cursor: disabled || !value.trim() ? "default" : "pointer",
           color: value.trim() && !disabled ? "var(--accent)" : "var(--t-42)",
-          padding: 2,
+          padding: 6,
+          minWidth: 30,
+          minHeight: 30,
           display: "flex",
           alignItems: "center",
         }}
@@ -296,15 +359,47 @@ export function AiAnchor({ context }: AiAnchorProps) {
     startNewConversation,
     selectConversation,
     setLatestContext,
+    stop,
+    retry,
+    stopped,
+    canRetry,
   } = chat;
 
-  const [pos, setPos] = useState<Pos>(() => (typeof window === "undefined" ? { x: 0, y: 0 } : loadPos()));
+  const [pos, setPos] = useState<Pos>(() =>
+    typeof window === "undefined" ? { x: 0, y: 0 } : loadPos(),
+  );
   const [open, setOpen] = useState(false);
   // Pick one empty-state phrase on mount; stays put across re-renders and messages.
-  const [emptyPhrase] = useState(() => EMPTY_PHRASES[Math.floor(Math.random() * EMPTY_PHRASES.length)]);
+  const [emptyPhrase] = useState(
+    () => EMPTY_PHRASES[Math.floor(Math.random() * EMPTY_PHRASES.length)],
+  );
+  const [layout, setLayout] = useState<"floating" | "expanded" | "docked">(
+    "floating",
+  );
+  const [copied, setCopied] = useState<string | null>(null);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const previouslyOpen = useRef(false);
+  useEffect(() => {
+    if (!open && previouslyOpen.current) anchorRef.current?.focus();
+    previouslyOpen.current = open;
+  }, [open]);
+  useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener("cw:open-assistant", show);
+    return () => window.removeEventListener("cw:open-assistant", show);
+  }, []);
+  const close = () => {
+    setOpen(false);
+  };
   const [historyOpen, setHistoryOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const dragState = useRef<{ dx: number; dy: number; ox: number; oy: number; moved: boolean } | null>(null);
+  const dragState = useRef<{
+    dx: number;
+    dy: number;
+    ox: number;
+    oy: number;
+    moved: boolean;
+  } | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
 
@@ -314,7 +409,8 @@ export function AiAnchor({ context }: AiAnchorProps) {
   }, [context, setLatestContext]);
 
   const lastMsg = messages[messages.length - 1];
-  const streaming = isLoading && (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.content);
+  const streaming =
+    isLoading && (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.content);
   const assistantRunning = isLoading && lastMsg?.role === "assistant";
 
   // keep anchor on-screen through viewport resize
@@ -334,14 +430,21 @@ export function AiAnchor({ context }: AiAnchorProps) {
   const onBodyScroll = () => {
     const el = bodyRef.current;
     if (!el) return;
-    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+    nearBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
   };
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
       (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-      dragState.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y, ox: e.clientX, oy: e.clientY, moved: false };
+      dragState.current = {
+        dx: e.clientX - pos.x,
+        dy: e.clientY - pos.y,
+        ox: e.clientX,
+        oy: e.clientY,
+        moved: false,
+      };
     },
     [pos],
   );
@@ -350,7 +453,8 @@ export function AiAnchor({ context }: AiAnchorProps) {
     const st = dragState.current;
     if (!st) return;
     if (!st.moved) {
-      if (Math.hypot(e.clientX - st.ox, e.clientY - st.oy) <= DRAG_THRESHOLD) return;
+      if (Math.hypot(e.clientX - st.ox, e.clientY - st.oy) <= DRAG_THRESHOLD)
+        return;
       st.moved = true;
       setDragging(true);
     }
@@ -394,12 +498,23 @@ export function AiAnchor({ context }: AiAnchorProps) {
 
   if (typeof document === "undefined") return null;
 
-  const dotState = error ? "var(--down)" : streaming || assistantRunning ? "var(--accent-violet)" : "var(--accent)";
+  const dotState = error
+    ? "var(--down)"
+    : streaming || assistantRunning
+      ? "var(--accent-violet)"
+      : "var(--accent)";
 
   const node = (
     <>
       {open && (
         <div
+          className={`ai-panel is-${layout}`}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              close();
+            }
+          }}
           role="dialog"
           aria-label="Research assistant conversation"
           style={{
@@ -428,11 +543,24 @@ export function AiAnchor({ context }: AiAnchorProps) {
             }}
           >
             <Orbit size={13} strokeWidth={1.6} color="var(--accent)" />
-            <span className="heading" style={{ fontSize: 11, letterSpacing: "0.04em", color: "var(--t-80)" }}>
+            <span
+              className="heading"
+              style={{
+                fontSize: 13,
+                letterSpacing: "0.04em",
+                color: "var(--t-80)",
+              }}
+            >
               RESEARCH ASSISTANT
             </span>
             <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-              <button type="button" onClick={() => startNewConversation()} title="New chat" aria-label="New chat" style={iconBtn}>
+              <button
+                type="button"
+                onClick={() => startNewConversation()}
+                title="New chat"
+                aria-label="New chat"
+                style={iconBtn}
+              >
                 <Plus size={13} strokeWidth={1.8} />
               </button>
               <button
@@ -440,16 +568,66 @@ export function AiAnchor({ context }: AiAnchorProps) {
                 onClick={() => setHistoryOpen((o) => !o)}
                 title="Chat history"
                 aria-label="Chat history"
-                style={{ ...iconBtn, color: historyOpen ? "var(--accent)" : "var(--t-50)" }}
+                style={{
+                  ...iconBtn,
+                  color: historyOpen ? "var(--accent)" : "var(--t-50)",
+                }}
               >
                 <History size={13} strokeWidth={1.8} />
               </button>
-              <button type="button" onClick={() => setOpen(false)} title="Minimize" aria-label="Minimize conversation" style={iconBtn}>
+              <button
+                type="button"
+                onClick={() =>
+                  setLayout(layout === "expanded" ? "floating" : "expanded")
+                }
+                aria-label={
+                  layout === "expanded"
+                    ? "Restore assistant size"
+                    : "Expand assistant"
+                }
+                style={iconBtn}
+              >
+                {layout === "expanded" ? (
+                  <Minimize2 size={15} />
+                ) : (
+                  <Maximize2 size={15} />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setLayout(layout === "docked" ? "floating" : "docked")
+                }
+                aria-label={
+                  layout === "docked" ? "Undock assistant" : "Dock assistant"
+                }
+                aria-pressed={layout === "docked"}
+                style={iconBtn}
+              >
+                <PanelRight size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={close}
+                title="Minimize"
+                aria-label="Minimize conversation"
+                style={iconBtn}
+              >
                 <Minus size={13} strokeWidth={1.8} />
               </button>
             </span>
           </div>
 
+          <div className="ai-context" aria-label="Assistant context">
+            <span className="badge mono">
+              {context?.selectedInstrument?.symbol ?? "General research"}
+            </span>
+            <span>
+              {context?.selectedInstrument
+                ? `${(context.dataState ?? "UNAVAILABLE").replace(/_/g, " ")} · ${formatAsOf(context.quoteAsOf)}`
+                : "Current page and watchlist"}
+            </span>
+          </div>
           {historyOpen && (
             <div
               className="mono"
@@ -462,10 +640,19 @@ export function AiAnchor({ context }: AiAnchorProps) {
               }}
             >
               {conversations.length === 0 ? (
-                <div style={{ fontSize: 11, color: "var(--t-46)", padding: "6px 0" }}>No previous conversations.</div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: "var(--t-46)",
+                    padding: "6px 0",
+                  }}
+                >
+                  No previous conversations.
+                </div>
               ) : (
                 conversations.map((c) => (
-                  <div
+                  <button
+                    type="button"
                     key={c.id}
                     onClick={() => {
                       selectConversation(c.id);
@@ -477,13 +664,30 @@ export function AiAnchor({ context }: AiAnchorProps) {
                       gap: 8,
                       padding: "4px 4px",
                       cursor: "pointer",
-                      fontSize: 10.5,
-                      color: c.id === activeConversationId ? "var(--accent)" : "var(--t-70)",
+                      border: "none",
+                      background: "transparent",
+                      width: "100%",
+                      textAlign: "left",
+                      fontSize: 13,
+                      color:
+                        c.id === activeConversationId
+                          ? "var(--accent)"
+                          : "var(--t-70)",
                     }}
                   >
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
-                    <span style={{ color: "var(--t-46)", flexShrink: 0 }}>{formatRelativeTime(c.updatedAt)}</span>
-                  </div>
+                    <span
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {c.title}
+                    </span>
+                    <span style={{ color: "var(--t-46)", flexShrink: 0 }}>
+                      {formatRelativeTime(c.updatedAt)}
+                    </span>
+                  </button>
                 ))
               )}
             </div>
@@ -507,7 +711,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
                 className="mono"
                 style={{
                   color: "var(--t-46)",
-                  fontSize: 11,
+                  fontSize: 13,
                   lineHeight: 1.55,
                   textAlign: "center",
                 }}
@@ -523,7 +727,12 @@ export function AiAnchor({ context }: AiAnchorProps) {
                   <div
                     key={m.id ?? i}
                     className="mono"
-                    style={{ whiteSpace: "pre-wrap", color: "var(--accent)", fontSize: 11.5, lineHeight: 1.5 }}
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      color: "var(--accent)",
+                      fontSize: 14,
+                      lineHeight: 1.5,
+                    }}
                   >
                     {"> "}
                     {m.content}
@@ -532,12 +741,43 @@ export function AiAnchor({ context }: AiAnchorProps) {
               }
               const running = isLast && assistantRunning;
               return (
-                <div key={m.id ?? i} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <ResearchTrace steps={m.trace ?? []} live={activity} running={running} />
+                <div
+                  key={m.id ?? i}
+                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                >
+                  <ResearchTrace
+                    steps={m.trace ?? []}
+                    live={activity}
+                    running={running}
+                  />
                   {m.content ? (
-                    <AssistantMarkdown>{m.content}</AssistantMarkdown>
+                    <>
+                      <AssistantMarkdown>{m.content}</AssistantMarkdown>
+                      <button
+                        className="btn ai-copy"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(m.content);
+                            setCopied(m.id ?? String(i));
+                          } catch {
+                            setCopied("failed");
+                          }
+                        }}
+                        aria-label="Copy response"
+                      >
+                        <Copy size={13} />
+                        {copied === (m.id ?? String(i)) ? "Copied" : "Copy"}
+                      </button>
+                    </>
                   ) : running && (m.trace?.length ?? 0) === 0 ? (
-                    <div className="mono" style={{ color: "var(--t-55)", fontStyle: "italic", fontSize: 11 }}>
+                    <div
+                      className="mono"
+                      style={{
+                        color: "var(--t-55)",
+                        fontStyle: "italic",
+                        fontSize: 11,
+                      }}
+                    >
                       {activity || "Thinking…"}
                     </div>
                   ) : null}
@@ -545,26 +785,66 @@ export function AiAnchor({ context }: AiAnchorProps) {
               );
             })}
 
-            {streaming && messages.length > 0 && messages[messages.length - 1]?.role === "user" && (
-              <div className="mono" style={{ color: "var(--t-55)", fontStyle: "italic", fontSize: 11 }}>
-                {activity || "Thinking…"}
-              </div>
-            )}
+            {streaming &&
+              messages.length > 0 &&
+              messages[messages.length - 1]?.role === "user" && (
+                <div
+                  className="mono"
+                  style={{
+                    color: "var(--t-55)",
+                    fontStyle: "italic",
+                    fontSize: 11,
+                  }}
+                >
+                  {activity || "Thinking…"}
+                </div>
+              )}
 
             {error && (
-              <div className="mono" style={{ color: "var(--down)", fontSize: 11, lineHeight: 1.5 }}>
+              <div
+                className="mono"
+                style={{ color: "var(--down)", fontSize: 13, lineHeight: 1.5 }}
+              >
                 {error}
               </div>
             )}
           </div>
 
+          {(isLoading || stopped || canRetry || copied === "failed") && (
+            <div className="ai-turn-actions" role="status">
+              {isLoading ? (
+                <button className="btn" onClick={stop}>
+                  <Square size={13} />
+                  Stop response
+                </button>
+              ) : (
+                <>
+                  {stopped && <span>Stopped · partial response saved</span>}
+                  {canRetry && (
+                    <button className="btn" onClick={() => void retry()}>
+                      <RotateCcw size={13} />
+                      Retry
+                    </button>
+                  )}
+                </>
+              )}
+              {copied === "failed" && (
+                <span>Copy unavailable. Select the response text to copy.</span>
+              )}
+            </div>
+          )}
           <Composer onSend={send} disabled={isLoading} draftKey={DRAFT_KEY} />
         </div>
       )}
 
       <button
+        ref={anchorRef}
+        className="ai-orbit"
+        data-layout={layout}
         type="button"
-        aria-label={open ? "Close research assistant" : "Open research assistant"}
+        aria-label={
+          open ? "Close research assistant" : "Open research assistant"
+        }
         aria-expanded={open}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -587,7 +867,9 @@ export function AiAnchor({ context }: AiAnchorProps) {
           zIndex: 91,
           touchAction: "none",
           outline: "none",
-          boxShadow: open ? "0 0 0 1px var(--accent)" : "0 2px 10px rgba(0,0,0,0.35)",
+          boxShadow: open
+            ? "0 0 0 1px var(--accent)"
+            : "0 2px 10px rgba(0,0,0,0.35)",
           transition: dragging ? "none" : "box-shadow 120ms ease",
         }}
       >
@@ -616,7 +898,9 @@ const iconBtn: React.CSSProperties = {
   border: "none",
   cursor: "pointer",
   color: "var(--t-50)",
-  padding: 2,
+  padding: 6,
+  minWidth: 30,
+  minHeight: 30,
   display: "flex",
   alignItems: "center",
 };

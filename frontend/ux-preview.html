@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>CW Terminal · UX fixture preview</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/dev/ux_preview.tsx"></script>
+  </body>
+</html>
+<style>
+  .fixture-banner {
+    height: 34px;
+    background: #193b40;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 0 14px;
+    font:
+      12px Inter,
+      sans-serif;
+    color: #cee8e5;
+  }
+  .fixture-banner select,
+  .fixture-banner button {
+    height: 26px;
+    min-height: 26px;
+    padding: 2px 8px;
+    font-size: 12px;
+  }
+  .fixture-banner ~ .workspace-shell {
+    height: calc(100dvh - 34px) !important;
+  }
+  @media (max-width: 600px) {
+    .fixture-banner {
+      height: 58px;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .fixture-banner strong {
+      flex-basis: 100%;
+    }
+    .fixture-banner ~ .workspace-shell {
+      height: calc(100dvh - 58px) !important;
+    }
+  }
+</style>
