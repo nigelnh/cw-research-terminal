@@ -1,4 +1,5 @@
 import { CalendarInput } from "./calendar_input";
+import { useState } from "react";
 import { FilterPopover } from "./filter_popover";
 
 /**
@@ -77,6 +78,7 @@ export function RegistryFilter({
   value: FilterState;
   onChange: (next: FilterState) => void;
 }) {
+  const [dateReset, setDateReset] = useState(0);
   const groups = [
     { title: "UNDERLYING", options: underlyingOptions, selected: value.underlyings, key: "underlyings" as const, textKey: "uText" as const, text: value.uText, placeholder: "Enter symbol", label: "Filter by underlying symbol" },
     { title: "ISSUER", options: issuerOptions, selected: value.issuers, key: "issuers" as const, textKey: "iText" as const, text: value.iText, placeholder: "Enter issuer", label: "Filter by issuer" },
@@ -118,11 +120,11 @@ export function RegistryFilter({
       <div className="filter-date-section">
         <div className="filter-date-heading">
           <span className="filter-label">LAST TRADING DATE</span>
-          <button type="button" className="filter-clear focus-ring" onClick={() => onChange(EMPTY_FILTER)}>CLEAR</button>
+          <button type="button" className="filter-clear focus-ring" onClick={() => { setDateReset(n => n + 1); onChange(EMPTY_FILTER); }}>CLEAR</button>
         </div>
         <div className="filter-dates">
-          <div><div className="filter-date-label">From Date</div><CalendarInput ariaLabel="Last trading date from" value={value.from} onChange={(iso) => onChange({ ...value, from: iso })} /></div>
-          <div><div className="filter-date-label">To Date</div><CalendarInput ariaLabel="Last trading date to" value={value.to} onChange={(iso) => onChange({ ...value, to: iso })} /></div>
+          <div><div className="filter-date-label">From Date</div><CalendarInput resetKey={dateReset} ariaLabel="Last trading date from" value={value.from} onChange={(iso) => onChange({ ...value, from: iso })} /></div>
+          <div><div className="filter-date-label">To Date</div><CalendarInput resetKey={dateReset} ariaLabel="Last trading date to" value={value.to} onChange={(iso) => onChange({ ...value, to: iso })} /></div>
         </div>
       </div>
     </FilterPopover>

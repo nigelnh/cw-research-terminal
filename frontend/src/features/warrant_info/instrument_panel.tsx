@@ -403,34 +403,21 @@ export function InstrumentPanel({
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", gap: 22, minHeight: 0 }}>
           {isCW ? (
             <>
-              <div className="mono" style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-                <MetricRow
-                  label="IV BID·TRD·ASK"
-                  color="var(--t-85)"
-                  size={11}
-                  value={`${fmtIV(pick("ivBid"))} · ${fmtIV(pick("ivTrade"))} · ${fmtIV(pick("ivAsk"))}`}
-                />
-                <MetricRow label="HV22" color="var(--t-85)" size={11} value={fmtIV(pick("historicalVolatility"))} />
-                <MetricRow
-                  label="MONEYNESS S/K"
-                  color="var(--t-85)"
-                  size={11}
-                  value={
-                    pick("moneynessRatio") !== null
-                      ? `${pick("moneynessRatio")!.toFixed(3)}${moneynessCat ? ` · ${moneynessCat}` : ""}`
-                      : DASH
-                  }
-                />
-                <MetricRow label="THEO PRICE" color="var(--t-85)" size={11} value={fmtPrice(pick("theoreticalPrice"))} />
-                <MetricRow label="DELTA" color="var(--t-85)" size={11} value={greek(pick("delta"), 4)} />
-                <MetricRow label="GAMMA" color="var(--t-85)" size={11} value={greek(pick("gamma"), 6)} />
-                <MetricRow label="THETA/DAY" color="var(--t-85)" size={11} value={greek(pick("theta"), 2)} />
-                <MetricRow
-                  label="VEGA·RHO /1%"
-                  color="var(--t-85)"
-                  size={11}
-                  value={`${greek(pick("vega"), 2)} · ${greek(pick("rho"), 2)}`}
-                />
+              <div className="mono" style={{ width: 220, flexShrink: 0, overflowY: "auto" }}>
+                <h3 className="instrument-section-heading">OPTIONS ANALYTICS</h3>
+                <MetricRow label="IV_BID" color="var(--t-85)" compact value={fmtIV(pick("ivBid"))} />
+                <MetricRow label="IV_TRD" color="var(--t-85)" compact value={fmtIV(pick("ivTrade"))} />
+                <MetricRow label="IV_ASK" color="var(--t-85)" compact value={fmtIV(pick("ivAsk"))} />
+                <MetricRow label="HV22" color="var(--t-85)" compact value={fmtIV(pick("historicalVolatility"))} />
+                <MetricRow label="MONEYNESS S/K" color="var(--t-85)" compact
+                  value={pick("moneynessRatio") !== null ? pick("moneynessRatio")!.toFixed(3) : DASH} />
+                <MetricRow label="MONEYNESS" color="var(--t-85)" compact value={moneynessCat ?? DASH} />
+                <MetricRow label="THEO_PRC" color="var(--t-85)" compact value={fmtPrice(pick("theoreticalPrice"))} />
+                <MetricRow label="DELTA" color="var(--t-85)" compact value={greek(pick("delta"), 4)} />
+                <MetricRow label="GAMMA" color="var(--t-85)" compact value={greek(pick("gamma"), 6)} />
+                <MetricRow label="THETA/DAY" color="var(--t-85)" compact value={greek(pick("theta"), 2)} />
+                <MetricRow label="VEGA /1%" color="var(--t-85)" compact value={greek(pick("vega"), 2)} />
+                <MetricRow label="RHO /1%" color="var(--t-85)" compact value={greek(pick("rho"), 2)} />
               </div>
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
                 {marketSessionActive ? (

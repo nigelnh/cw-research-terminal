@@ -64,6 +64,7 @@ function NewsFilterDropdown({
   value: NewsFilterState;
   onChange: (next: NewsFilterState) => void;
 }) {
+  const [dateReset, setDateReset] = useState(0);
   const toggleSym = (symbol: string) => {
     const current = value.symbols ?? symbolOptions;
     const next = current.includes(symbol) ? current.filter((s) => s !== symbol) : [...current, symbol];
@@ -113,11 +114,11 @@ function NewsFilterDropdown({
       <div className="filter-date-section">
         <div className="filter-date-heading">
           <span className="filter-label">PUBLISH DATE</span>
-          <button type="button" className="filter-clear focus-ring" onClick={() => onChange(EMPTY_NEWS_FILTER)}>CLEAR</button>
+          <button type="button" className="filter-clear focus-ring" onClick={() => { setDateReset(n => n + 1); onChange(EMPTY_NEWS_FILTER); }}>CLEAR</button>
         </div>
         <div className="filter-dates">
-          <div><div className="filter-date-label">From Date</div><CalendarInput ariaLabel="Publish date from" value={value.from} onChange={(iso) => onChange({ ...value, from: iso })} /></div>
-          <div><div className="filter-date-label">To Date</div><CalendarInput ariaLabel="Publish date to" value={value.to} onChange={(iso) => onChange({ ...value, to: iso })} /></div>
+          <div><div className="filter-date-label">From Date</div><CalendarInput resetKey={dateReset} ariaLabel="Publish date from" value={value.from} onChange={(iso) => onChange({ ...value, from: iso })} /></div>
+          <div><div className="filter-date-label">To Date</div><CalendarInput resetKey={dateReset} ariaLabel="Publish date to" value={value.to} onChange={(iso) => onChange({ ...value, to: iso })} /></div>
         </div>
       </div>
     </FilterPopover>
