@@ -11,6 +11,20 @@ const compact = (value: number | null | undefined) => {
   return fmtVol(value);
 };
 const tone = (n: number | null | undefined) => n == null ? "var(--t-50)" : n > 0 ? "var(--up)" : n < 0 ? "var(--down)" : "var(--flat)";
+const marketTone = (state: VolumeLeader["market_state"]) => {
+  if (state === "CEILING") return "var(--price-ceiling)";
+  if (state === "FLOOR") return "var(--price-floor)";
+  if (state === "REFERENCE") return "var(--flat)";
+  if (state === "UP") return "var(--up)";
+  if (state === "DOWN") return "var(--down)";
+  return "var(--t-50)";
+};
+
+function DirectionTriangle({ down = false, color }: { down?: boolean; color: string }) {
+  return <svg className="overview-direction-icon" aria-hidden="true" viewBox="0 0 12 12" fill={color}>
+    <path d={down ? "M1 2h10L6 11Z" : "M1 10h10L6 1Z"} />
+  </svg>;
+}
 
 function Sparkline({ values, direction }: { values: number[]; direction: number | null }) {
   if (values.length < 2) return <div className="overview-spark-empty">NO INTRADAY SERIES</div>;
@@ -32,22 +46,22 @@ function IndexCard({ item }: { item: IndexOverview }) {
     </div>
     <div className="index-card-line"><span>VOL {compact(item.volume)}</span><span>VAL {compact(item.trading_value)}</span></div>
     <div className="index-card-breadth">
-      <span style={{ color: "var(--up)" }}>↑ {number(item.advancing)} <small>({number(item.ceiling)})</small></span>
+      <span style={{ color: "var(--up)" }}><DirectionTriangle color="var(--up)" /> {number(item.advancing)} <small style={{ color: "var(--price-ceiling)" }}>({number(item.ceiling)})</small></span>
       <span style={{ color: "var(--flat)" }}>― {number(item.unchanged)}</span>
-      <span style={{ color: "var(--down)" }}>↓ {number(item.declining)} <small>({number(item.floor)})</small></span>
+      <span style={{ color: "var(--down)" }}><DirectionTriangle down color="var(--down)" /> {number(item.declining)} <small style={{ color: "var(--price-floor)" }}>({number(item.floor)})</small></span>
     </div>
   </article>;
 }
 
-function LeaderTable({ title, scope, rows }: { title: string; scope: string; rows: VolumeLeader[] }) {
+function LeaderTable({ title, rows }: { title: string; rows: VolumeLeader[] }) {
   const peak = Math.max(...rows.map(r => r.volume), 1);
   return <section className="leader-panel mono">
-    <div className="leader-title"><span className="heading">{title}</span><small title={scope}>{scope}</small></div>
+    <div className="leader-title"><span className="heading">{title}</span></div>
     <div className="leader-head"><span>SYMBOL</span><span>VOLUME</span><span>TRD_PRC</span></div>
     <div className="leader-rows">
       {rows.length === 0 ? <div className="overview-unavailable">DATA UNAVAILABLE</div> : rows.map((row, index) => <div className="leader-row" key={row.symbol}>
         <i style={{ width: `${Math.max(3, row.volume / peak * 100)}%` }} />
-        <span>{index + 1}. <b>{row.symbol}</b></span><span>{fmtVol(row.volume)}</span><span>{fmtPrice(row.price)}</span>
+        <span>{index + 1}. <b style={{ color: marketTone(row.market_state) }}>{row.symbol}</b></span><span>{fmtVol(row.volume)}</span><span style={{ color: marketTone(row.market_state) }}>{fmtPrice(row.price)}</span>
       </div>)}
     </div>
   </section>;
@@ -62,9 +76,8 @@ export function MarketOverviewStrip() {
   return <div className="market-overview-wrap">
     <div className="index-viewer">{indices.map(item => <IndexCard item={item} key={item.symbol} />)}</div>
     <div className="top-exchange-viewer">
-      <LeaderTable title="Top Stock Trading Volume" scope={data.stock_scope} rows={data.top_stock_volume} />
-      <LeaderTable title="Top CW Trading Volume" scope={data.cw_scope} rows={data.top_cw_volume} />
+      <LeaderTable title="Top Stock Trading Volume" rows={data.top_stock_volume} />
+      <LeaderTable title="Top Covered Warrants Trading Volume" rows={data.top_cw_volume} />
     </div>
-    <div className="market-overview-meta mono">{data.market_session_active ? "LIVE SESSION" : "LAST SESSION"} · {data.source} · AS OF {data.as_of ? data.as_of.slice(0, 16).replace("T", " ") : DASH}</div>
   </div>;
 }

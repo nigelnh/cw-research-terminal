@@ -22,10 +22,16 @@ class _Breadth:
         } for symbol in tickers])
 
 
+class _PriceStatistics:
+    def get_ceilingfloor(self, tickers, from_date, to_date):
+        return _Result([{"ticker": symbol, "timestamp": from_date, "ceilingValue": 110, "floorValue": 90} for symbol in tickers])
+
+
 class _Session:
     is_login = True
     def TickerList(self, ticker=None): return ["AAA", "BBB"] if ticker else ["AAA", "BBB", "CAAA2601"]
     def MarketBreadth(self): return _Breadth()
+    def PriceStatistics(self): return _PriceStatistics()
     def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
         rows = []
         for symbol in tickers:
@@ -50,6 +56,7 @@ async def test_overview_uses_snapshot_reads_without_changing_stream_subscription
     assert result["indices"][0]["change_percent"] == pytest.approx(2)
     assert result["indices"][0]["advancing"] == 10
     assert result["top_stock_volume"][0]["symbol"] == "AAA"
+    assert result["top_stock_volume"][0]["market_state"] == "UP"
     assert result["top_cw_volume"][0]["symbol"] == "CAAA2601"
     assert result["cw_scope"] == "HOSE covered warrants"
     assert result["source"] == "FIINQUANT"

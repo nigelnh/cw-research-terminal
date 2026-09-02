@@ -170,7 +170,7 @@ describe("Targeted watchlist columns", () => {
     const rows = page.getAllByRole("row");
     const stockCells = within(rows.find((row) => row.textContent?.includes("HPG"))!).getAllByRole("cell");
     const cwCells = within(rows.find((row) => row.textContent?.includes("CHPG2602"))!).getAllByRole("cell");
-    for (const key of ["STRIKE", "RATIO", "LAST_TRD_DATE", "DTE", "ISSUER"]) {
+    for (const key of ["IV_BID", "IV_TRD", "IV_ASK", "STRIKE", "RATIO", "LAST_TRD_DATE", "DTE", "ISSUER"]) {
       expect(stockCells[headers.indexOf(key) + 1].textContent).toBe("");
     }
     expect(cwCells[headers.indexOf("ISSUER") + 1].textContent).toBe("ACBS");

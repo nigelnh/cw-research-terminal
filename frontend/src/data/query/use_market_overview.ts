@@ -17,7 +17,16 @@ export interface IndexOverview {
   as_of: string | null;
   sparkline: number[];
 }
-export interface VolumeLeader { symbol: string; volume: number; price: number | null; as_of: string | null }
+export interface VolumeLeader {
+  symbol: string;
+  volume: number;
+  price: number | null;
+  reference?: number | null;
+  ceiling?: number | null;
+  floor?: number | null;
+  market_state?: "CEILING" | "FLOOR" | "REFERENCE" | "UP" | "DOWN" | "UNAVAILABLE";
+  as_of: string | null;
+}
 export interface MarketOverviewData {
   indices: IndexOverview[];
   top_stock_volume: VolumeLeader[];
