@@ -1,177 +1,69 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Maximize2, Minimize2, X } from "lucide-react";
 import type { SelectedInstrumentView } from "@/data/selected_instrument";
 import type { DashboardRow } from "@/data/query/use_dashboard_data";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
-import type { CorporateActionItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
+import { useQuote } from "@/data/use_research_market";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
+import { sliceBars } from "@/data/query/historical_bars";
+import type {
+  CWHistoryMode,
+  TechnicalOverlay,
+} from "@/domain/historical/types";
 import { TradingChart } from "@/components/common/trading_chart";
-import { DASH, fmtChg, fmtIV, fmtPrice, fmtRatio, fmtVol, dteDisplay } from "@/components/common/grid_table";
+import {
+  DASH,
+  dteDisplay,
+  fmtChg,
+  fmtIV,
+  fmtPrice,
+  fmtRatio,
+  fmtSigned,
+  fmtVol,
+} from "@/components/common/grid_table";
+import {
+  EmptyState,
+  HelpLabel,
+  Notice,
+  UndoNotice,
+  useStoredState,
+} from "@/components/common/ui";
+import { formatAsOf, quoteTimestamp, temporalLabel } from "@/domain/temporal";
 
-const VN_TZ = "Asia/Ho_Chi_Minh";
-
-interface InstrumentPanelProps {
+interface Props {
   instrument: SelectedInstrumentView | null;
   dashRow?: DashboardRow;
   marketSessionActive: boolean;
   context?: ResearchContextEnvelope;
   onClose: () => void;
-  /** Test-only: force the initial sub-tab. Production always starts on "overview". */
   initialTab?: "overview" | "quant";
 }
-
-/* ---------------------------------------------------------------- helpers */
-
-function useTick(active: boolean, ms = 1000): number {
-  const [t, setT] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const id = window.setInterval(() => setT(Date.now()), ms);
-    return () => window.clearInterval(id);
-  }, [active, ms]);
-  return t;
-}
-
-function asOfText(live: boolean, quoteAsOf: string | null | undefined, nowTick: number): string {
-  const d = live ? new Date(nowTick) : quoteAsOf ? new Date(quoteAsOf) : null;
-  if (!d || Number.isNaN(d.getTime())) return DASH;
-  const mon = new Intl.DateTimeFormat("en-US", { timeZone: VN_TZ, month: "short", day: "numeric" }).format(d);
-  const time = new Intl.DateTimeFormat("en-GB", {
-    timeZone: VN_TZ,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(d);
-  return `${mon} at ${time}`;
-}
-
-const LABEL: React.CSSProperties = { fontSize: 10, color: "var(--t-46)" };
-const MICRO: React.CSSProperties = { fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 };
-
-function MetricRow({
+function Metric({
   label,
   value,
-  color = "var(--t-92)",
-  size = 13,
-  top = false,
-  pad = "5px 0",
+  help,
+  color,
 }: {
   label: string;
   value: React.ReactNode;
+  help?: string;
   color?: string;
-  size?: number;
-  top?: boolean;
-  pad?: string;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        padding: pad,
-        ...(top ? { borderTop: "1px solid var(--border-mid)", marginTop: 4, paddingTop: 8 } : null),
-      }}
-    >
-      <span style={LABEL}>{label}</span>
-      <span style={{ fontSize: size, color }}>{value}</span>
+    <div className="metric">
+      <dt>
+        {help ? <HelpLabel description={help}>{label}</HelpLabel> : label}
+      </dt>
+      <dd className="mono" style={{ color }}>
+        {value}
+      </dd>
     </div>
   );
 }
-
-function greek(v: number | null | undefined, dp = 2): string {
-  if (typeof v !== "number" || Number.isNaN(v)) return DASH;
-  return v.toFixed(dp);
+function greek(v: number | null, dp = 4) {
+  return v === null ? DASH : v.toFixed(dp);
 }
-
-/* -------------------------------------------------- corporate-events display */
-
-const CORP_EVENT_LABELS: Record<string, string> = {
-  CASH_DIVIDEND: "CASH DIV",
-  STOCK_DIVIDEND: "STOCK DIV",
-  BONUS_ISSUE: "BONUS",
-  RIGHTS_ISSUE: "RIGHTS",
-  AGM: "AGM",
-  EGM: "EGM",
-  LISTING: "LISTING",
-  DELISTING: "DELISTING",
-  OTHER: "OTHER",
-};
-
-function corpEventLabel(t: string): string {
-  return CORP_EVENT_LABELS[t] ?? t;
-}
-
-function isoDay(v: string | null | undefined): string {
-  if (!v) return DASH;
-  return v.slice(0, 10);
-}
-
-function corpEventDesc(ev: CorporateActionItem): string {
-  if (ev.action_type === "CASH_DIVIDEND" && typeof ev.cash_amount_vnd === "number") {
-    return `${Math.round(ev.cash_amount_vnd).toLocaleString("en-US")} VND/sh`;
-  }
-  if (ev.ratio_text) return ev.ratio_text;
-  if (typeof ev.ratio_pct === "number") return `${ev.ratio_pct}%`;
-  // the raw `note` is Vietnamese — not shown as a primary UI label (LANGUAGE_POLICY.md)
-  return DASH;
-}
-
-const TS_COLS = "48px 44px 42px 50px 50px 24px";
-
-const TS_HEAD: React.CSSProperties = {
-  textAlign: "right",
-  borderRight: "1px solid var(--border-row)",
-  paddingRight: 4,
-};
-
-/**
- * TRADED LOGS panel (OVERVIEW tab). There is no live trade feed yet, so this is an
- * honest empty state — session-gated per the UX data contract. Tracked as a follow-up.
- */
-function TimeSalesPanel({ live }: { live: boolean }) {
-  return (
-    <div
-      className="mono"
-      style={{
-        width: 340,
-        flexShrink: 0,
-        height: "100%",
-        border: "1px solid var(--border)",
-        padding: "8px 12px",
-        overflowY: "auto",
-      }}
-    >
-      <div style={MICRO}>TRADED LOGS</div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: TS_COLS,
-          gap: "2px 6px",
-          fontSize: 9,
-          color: "var(--t-42)",
-          paddingBottom: 4,
-          borderBottom: "1px solid var(--border-mid)",
-        }}
-      >
-        <span style={{ borderRight: "1px solid var(--border-row)", paddingRight: 4 }}>TIME</span>
-        <span style={TS_HEAD}>TRD</span>
-        <span style={TS_HEAD}>+/-</span>
-        <span style={TS_HEAD}>CHG%</span>
-        <span style={TS_HEAD}>VOL</span>
-        <span style={{ textAlign: "right" }}>B/S</span>
-      </div>
-      <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8, lineHeight: 1.5 }}>
-        {live
-          ? "Live trade feed not yet wired — pending backend support."
-          : "Traded logs unavailable outside a live session."}
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------- panel */
-
 export function InstrumentPanel({
   instrument,
   dashRow,
@@ -179,476 +71,610 @@ export function InstrumentPanel({
   context,
   onClose,
   initialTab = "overview",
-}: InstrumentPanelProps) {
-  const { isInWatchlist, addToWatchlist, removeFromWatchlist, canAdd } = useWatchlist();
+}: Props) {
+  const { isInWatchlist, addToWatchlist, removeFromWatchlist, canAdd } =
+    useWatchlist();
+  const addCurrent = useRef(addToWatchlist);
+  addCurrent.current = addToWatchlist;
   const [tab, setTab] = useState<"overview" | "quant">(initialTab);
-  const [addNote, setAddNote] = useState<string | null>(null);
-
-  const hasInstrument = !!instrument;
+  const [note, setNote] = useState<string | null>(null);
+  const [undo, setUndo] = useState<(() => void) | null>(null);
+  const [storedHeight, setHeight] = useStoredState("cw:detail:height", 440);
+  const [expanded, setExpanded] = useState(false);
+  const [range, setRange] = useState("6M");
+  const [mode, setMode] = useState<CWHistoryMode>("CW");
+  const [overlays, setOverlays] = useState<Set<TechnicalOverlay>>(new Set());
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [chartHeight, setChartHeight] = useState(270);
+  const symbol = instrument?.symbol ?? null;
   const isCW = instrument?.instrumentType === "CW";
   const isIndex = instrument?.instrumentType === "INDEX";
-  const symbol = instrument?.symbol ?? null;
-
   useEffect(() => {
-    setTab("overview");
-    setAddNote(null);
-  }, [symbol]);
-
-  const nowTick = useTick(marketSessionActive);
-
-  // Daily bars, ~6 months of recent sessions. "1D" is the bar INTERVAL; the "6M"
-  // timeframe is the client-side window over the Postgres-first `daily_1y` dataset
-  // (same backend call as any other daily request — no extra provider traffic).
-  const bars = useHistoricalBars({
-    symbol: symbol ?? undefined,
-    timeframe: "6M",
+    setTab(initialTab);
+    setNote(null);
+    setUndo(null);
+    setMode("CW");
+  }, [symbol, initialTab]);
+  const history = useHistoricalBars({
+    symbol,
+    timeframe: "1Y",
+    interval: "1D",
+    adjusted: !isCW,
+    enabled: !!symbol,
+  });
+  const underlying = useHistoricalBars({
+    symbol: instrument?.underlyingSymbol,
+    timeframe: "1Y",
     interval: "1D",
     adjusted: true,
-    enabled: hasInstrument && !isIndex,
+    enabled:
+      !!symbol && !!instrument?.underlyingSymbol && isCW && mode !== "CW",
   });
-
-  // Corporate actions apply to the underlying company — stocks only, and only when
-  // the QUANT tab (which hosts the CORP EVENTS table) is actually open.
-  const corpActions = useCorporateActions(symbol, {
-    enabled: hasInstrument && !isCW && !isIndex && tab === "quant",
-    limit: 12,
+  const bars = useMemo(
+    () => sliceBars(history.bars, range),
+    [history.bars, range],
+  );
+  const underlyingBars = useMemo(
+    () => sliceBars(underlying.bars, range),
+    [underlying.bars, range],
+  );
+  const events = useCorporateActions(symbol, {
+    enabled: !!symbol && !isCW && !isIndex && tab === "quant",
+    limit: 30,
   });
-
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    // Measure the panel's fixed viewport, never a wrapper sized by this chart.
+    // A wrapping chart header would otherwise grow its own ResizeObserver input.
+    const measure = () => setChartHeight(Math.max(220, el.clientHeight - 170));
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    measure();
+    return () => observer.disconnect();
+  }, [symbol, tab, expanded]);
+  const underlyingQuote = useQuote(instrument?.underlyingSymbol);
   const cw = instrument?.cw;
-  const q = instrument?.quote ?? cw?.quote ?? dashRow?.quote;
-  const an = dashRow?.analytics ?? null;
-
-  const last = q?.lastPrice ?? null;
-  const ref = q?.referencePrice ?? null;
-  const pct = typeof q?.priceChangePercent === "number" ? q.priceChangePercent * 100 : null;
-  const chg = fmtChg(pct);
-  const bidAsk = `${fmtPrice(q?.bidPrice)} · ${fmtPrice(q?.askPrice)}`;
-  const chgAmtNum = last !== null && ref !== null ? last - ref : null;
-  const chgAmt =
-    chgAmtNum === null
-      ? DASH
-      : `${chgAmtNum > 0 ? "+" : chgAmtNum < 0 ? "−" : ""}${fmtPrice(Math.abs(chgAmtNum))}`;
-  const chgAmtColor =
-    chgAmtNum === null || chgAmtNum === 0
-      ? "var(--t-50)"
-      : chgAmtNum > 0
-      ? "var(--up)"
-      : "var(--down)";
-
-  const trdColor = (() => {
-    if (last === null || ref === null) return "var(--t-70)";
-    if (last > ref) return "var(--up)";
-    if (last < ref) return "var(--down)";
-    return "var(--flat)";
-  })();
-
-  const pick = (k: string): number | null => {
-    const fromCw = (cw as Record<string, unknown> | undefined)?.[k];
-    if (typeof fromCw === "number") return fromCw;
-    const fromAn = (an as Record<string, unknown> | null)?.[k];
-    if (typeof fromAn === "number") return fromAn;
-    return null;
-  };
-  const moneynessCat =
-    cw?.moneynessCategory ?? (an as { moneynessCategory?: string } | null)?.moneynessCategory ?? null;
-
+  const q = dashRow?.quote ?? instrument?.quote ?? cw?.quote;
+  const live = dashRow?.displayState === "LIVE" && marketSessionActive;
+  const an = dashRow?.analytics;
   const conflicting = instrument?.metadataVerification === "CONFLICTING";
-
-  const kindLine = !instrument
-    ? ""
-    : isCW
-    ? `COVERED WARRANT · ${instrument.issuer ?? "—"} · ${instrument.underlyingSymbol ?? "—"}`
-    : isIndex
-    ? "INDEX · HOSE"
-    : "STOCK · HOSE";
-
-  const watched = symbol ? isInWatchlist(symbol) : false;
-
-  const toggleWatch = () => {
-    if (!instrument) return;
-    setAddNote(null);
+  const withheld =
+    conflicting ||
+    (live
+      ? cw?.quantAvailable === false || !!cw?.quantUnavailableReason
+      : an?.isAvailable === false);
+  const pick = (key: string): number | null => {
+    if (withheld) return null;
+    const v = live
+      ? ((cw as unknown as Record<string, unknown> | undefined)?.[key] ??
+        an?.[key])
+      : an?.[key];
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
+  const pct =
+    typeof q?.priceChangePercent === "number"
+      ? q.priceChangePercent * 100
+      : null;
+  const change = fmtChg(pct);
+  const amount =
+    q?.lastPrice != null && q?.referencePrice != null
+      ? q.lastPrice - q.referencePrice
+      : null;
+  const stamp =
+    dashRow?.provenance.quote.asOf ??
+    dashRow?.provenance.quote.sessionDate ??
+    quoteTimestamp(q) ??
+    context?.quoteAsOf;
+  const analyticsStamp =
+    dashRow?.provenance.analytics?.asOf ??
+    dashRow?.provenance.analytics?.sessionDate ??
+    (live ? cw?.analyticsCalculatedAt : null);
+  const state = dashRow?.displayState ?? "UNAVAILABLE";
+  const height = Math.min(680, Math.max(300, Number(storedHeight) || 440));
+  const resize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const drag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId))
+      setHeight(
+        Math.min(
+          window.innerHeight - 170,
+          Math.max(300, window.innerHeight - e.clientY),
+        ),
+      );
+  };
+  if (!instrument) return null;
+  const watched = isInWatchlist(instrument.symbol);
+  const watchItem = {
+    symbol: instrument.symbol,
+    instrumentType: instrument.instrumentType,
+    underlyingSymbol: instrument.underlyingSymbol,
+  };
+  const watch = () => {
     if (watched) {
       removeFromWatchlist(instrument.symbol);
+      setUndo(() => () => {
+        const result = addCurrent.current(watchItem);
+        if (!result.success)
+          setNote(result.reason ?? "Could not restore this instrument.");
+      });
       return;
     }
-    const type = isCW ? "CW" : isIndex ? "INDEX" : "STOCK";
-    const check = canAdd({
-      symbol: instrument.symbol,
-      instrumentType: type,
-      underlyingSymbol: instrument.underlyingSymbol,
-    });
-    if (!check.allowed && check.reason) {
-      setAddNote(check.reason);
+    const check = canAdd(watchItem);
+    if (!check.allowed) {
+      setNote(check.reason ?? "This instrument cannot be added right now.");
       return;
     }
-    const res = addToWatchlist({
-      symbol: instrument.symbol,
-      instrumentType: type,
-      underlyingSymbol: instrument.underlyingSymbol,
-      issuer: instrument.issuer,
-      strikePrice: instrument.strikePrice,
-      exerciseRatio: instrument.exerciseRatio,
-      maturityDate: instrument.maturityDate,
-      lastTradingDate: instrument.lastTradingDate,
-    });
-    if (!res.success && res.reason) setAddNote(res.reason);
+    const result = addToWatchlist(watchItem);
+    setNote(
+      result.success
+        ? null
+        : (result.reason ?? "Could not add this instrument."),
+    );
   };
-
-  const tabBtn = (id: "overview" | "quant"): React.CSSProperties => ({
-    padding: "3px 10px",
-    border: "none",
-    borderRadius: 2,
-    cursor: "pointer",
-    fontFamily: "inherit",
-    fontSize: 10.5,
-    background: tab === id ? "var(--panel-tab-active)" : "transparent",
-    color: tab === id ? "var(--t-92)" : "var(--t-55)",
-  });
-
-  // No instrument selected -> render nothing. The AI assistant now lives entirely in the
-  // draggable Orbit panel; Dashboard / Research reclaim the vertical space.
-  if (!instrument) return null;
-
+  const moneyness = live ? cw?.moneynessCategory : an?.moneynessCategory;
   return (
     <section
+      className={`instrument-panel ${expanded ? "is-expanded" : ""}`}
+      aria-label={`${instrument.symbol} detail`}
       style={{
-        height: "min(460px, 58vh)",
-        flexShrink: 0,
-        borderTop: "1px solid var(--border-strong)",
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--panel)",
+        height: expanded ? undefined : `min(${height}px, calc(100dvh - 170px))`,
       }}
     >
-      {/* header */}
       <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          padding: "0 20px",
-          height: 34,
-          borderBottom: "1px solid var(--border)",
-          flexShrink: 0,
+        role="separator"
+        aria-label="Resize instrument panel"
+        aria-orientation="horizontal"
+        aria-valuemin={300}
+        aria-valuemax={680}
+        aria-valuenow={height}
+        tabIndex={0}
+        className="panel-resizer"
+        onPointerDown={resize}
+        onPointerMove={drag}
+        onPointerUp={(e) => e.currentTarget.releasePointerCapture(e.pointerId)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            setHeight(height + (e.key === "ArrowUp" ? 30 : -30));
+          }
         }}
-      >
-        {(
-          <>
-            <span className="heading" style={{ fontSize: 13, color: "var(--accent)", fontWeight: 700 }}>
-              {instrument.symbol}
-            </span>
-            <span style={{ fontSize: 11, color: "var(--t-50)" }}>{kindLine}</span>
-            <div style={{ display: "flex", gap: 2, marginLeft: 12 }}>
-              <button type="button" onClick={() => setTab("overview")} style={tabBtn("overview")}>
-                OVERVIEW
-              </button>
-              <button type="button" onClick={() => setTab("quant")} style={tabBtn("quant")}>
-                QUANT
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={toggleWatch}
-              className="focus-ring"
-              style={{
-                marginLeft: "auto",
-                padding: "3px 10px",
-                borderRadius: 2,
-                border: "1px solid var(--border-30)",
-                cursor: "pointer",
-                fontFamily: "inherit",
-                fontSize: 10.5,
-                background: "transparent",
-                color: watched ? "var(--accent)" : "var(--t-60)",
-              }}
-            >
-              {watched ? "WATCHING" : "+ WATCH"}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="focus-ring"
-              aria-label="Close instrument"
-              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--t-50)", padding: 2 }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </>
-        )}
-      </div>
-
-      {hasInstrument && addNote && (
-        <div style={{ padding: "6px 20px 0 20px", fontSize: 10.5, color: "var(--t-55)" }}>{addNote}</div>
-      )}
-
-      {/* OVERVIEW */}
-      {hasInstrument && tab === "overview" && (
-        <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", gap: 22, minHeight: 0 }}>
-          <div className="mono" style={{ width: 220, flexShrink: 0 }}>
-            <div style={{ display: "flex", flexDirection: "column", marginBottom: 10 }}>
-              <MetricRow label="REF" value={fmtPrice(ref)} color="var(--t-60)" size={11} pad="3px 0" />
-              <MetricRow label="BID · ASK" value={bidAsk} color="var(--t-70)" size={11} pad="3px 0" />
-              <MetricRow label="TRD" value={fmtPrice(last)} color={trdColor} size={11} pad="3px 0" />
-              <MetricRow label="+/-" value={chgAmt} color={chgAmtColor} size={11} pad="3px 0" />
-              <MetricRow label="CHG%" value={chg.text} color={chg.color} size={11} pad="3px 0" />
-              {!isCW && !isIndex && (
-                <>
-                  <MetricRow label="VOLUME" value={fmtVol(q?.totalVolume)} color="var(--t-60)" size={11} pad="3px 0" />
-                  <MetricRow label="FRN BUY" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
-                  <MetricRow label="FRN SELL" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
-                  <MetricRow label="FRN ROOM" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
-                </>
-              )}
-              <MetricRow
-                label="AS OF"
-                value={asOfText(marketSessionActive, context?.quoteAsOf, nowTick)}
-                color="var(--t-50)"
-                size={11}
-                pad="3px 0"
-              />
-            </div>
-            {isCW && (
-              <div style={{ borderTop: "1px solid var(--border-mid)", paddingTop: 8 }}>
-                <MetricRow label="STRIKE" value={fmtPrice(instrument!.strikePrice)} size={11} pad="3px 0" />
-                <MetricRow label="RATIO" value={fmtRatio(instrument!.exerciseRatio)} size={11} pad="3px 0" />
-                <MetricRow label="MATURITY" value={instrument!.maturityDate ?? DASH} size={11} pad="3px 0" />
-                <MetricRow
-                  label="DTE"
-                  value={dteDisplay(instrument!.lastTradingDate, instrument!.maturityDate, an?.dte)}
-                  size={11}
-                  pad="3px 0"
-                />
-              </div>
-            )}
-            {conflicting && (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: "10px 12px",
-                  border: "1px solid var(--border-30)",
-                  fontSize: 11,
-                  color: "var(--t-66)",
-                  lineHeight: 1.6,
-                }}
-              >
-                <strong style={{ color: "var(--t-90)" }}>CONFLICTING METADATA</strong> — effective
-                terms disagree across public sources. Quant withheld until reconciled.
-              </div>
-            )}
-          </div>
-
-          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", gap: 16 }}>
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                height: "100%",
-                border: "1px solid var(--border)",
-                display: "flex",
-              }}
-            >
-              {bars.isLoading || bars.isEmpty || bars.bars.length === 0 ? (
-                <div style={{ margin: "auto", fontSize: 11, color: "var(--t-42)" }}>
-                  {bars.isLoading ? "loading daily bars…" : "no daily history"}
-                </div>
-              ) : (
-                <TradingChart
-                  symbol={instrument!.symbol}
-                  isCW={isCW}
-                  bars={bars.bars}
-                  liveQuote={marketSessionActive ? q ?? null : null}
-                  interval="1D"
-                  referencePrice={ref}
-                  height={300}
-                />
-              )}
-            </div>
-            {!isIndex && <TimeSalesPanel live={marketSessionActive} />}
-          </div>
+      />
+      <div className="instrument-header">
+        <div className="instrument-identity">
+          <strong className="mono">{instrument.symbol}</strong>
+          <span>
+            {isCW
+              ? `Covered warrant · ${instrument.issuer ?? "—"} · ${instrument.underlyingSymbol ?? "—"}`
+              : isIndex
+                ? "Index · HOSE"
+                : "Equity · HOSE"}
+          </span>
         </div>
-      )}
-
-      {/* QUANT */}
-      {hasInstrument && tab === "quant" && (
-        <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", gap: 22, minHeight: 0 }}>
-          {isCW ? (
-            <>
-              <div className="mono" style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-                <MetricRow
-                  label="IV BID·TRD·ASK"
-                  color="var(--t-85)"
-                  size={11}
-                  value={`${fmtIV(pick("ivBid"))} · ${fmtIV(pick("ivTrade"))} · ${fmtIV(pick("ivAsk"))}`}
-                />
-                <MetricRow label="HV22" color="var(--t-85)" size={11} value={fmtIV(pick("historicalVolatility"))} />
-                <MetricRow
-                  label="MONEYNESS S/K"
-                  color="var(--t-85)"
-                  size={11}
-                  value={
-                    pick("moneynessRatio") !== null
-                      ? `${pick("moneynessRatio")!.toFixed(3)}${moneynessCat ? ` · ${moneynessCat}` : ""}`
-                      : DASH
-                  }
-                />
-                <MetricRow label="THEO PRICE" color="var(--t-85)" size={11} value={fmtPrice(pick("theoreticalPrice"))} />
-                <MetricRow label="DELTA" color="var(--t-85)" size={11} value={greek(pick("delta"), 4)} />
-                <MetricRow label="GAMMA" color="var(--t-85)" size={11} value={greek(pick("gamma"), 6)} />
-                <MetricRow label="THETA/DAY" color="var(--t-85)" size={11} value={greek(pick("theta"), 2)} />
-                <MetricRow
-                  label="VEGA·RHO /1%"
-                  color="var(--t-85)"
-                  size={11}
-                  value={`${greek(pick("vega"), 2)} · ${greek(pick("rho"), 2)}`}
-                />
-              </div>
-              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-                {marketSessionActive ? (
-                  <div style={{ display: "flex", gap: 8, height: "100%" }}>
-                    <div style={{ flex: 1, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <span style={{ fontSize: 10.5, color: "var(--t-42)" }}>PRICE DEPTH · live</span>
-                    </div>
-                    <div style={{ flex: 1, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <span style={{ fontSize: 10.5, color: "var(--t-42)" }}>MARKET DEPTH · live</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      height: "100%",
-                      border: "1px solid var(--border)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: 20,
-                      textAlign: "center",
-                    }}
-                  >
-                    <span style={{ fontSize: 11, color: "var(--t-42)" }}>
-                      Order book depth &amp; time-of-sale unavailable outside a live session
-                    </span>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="mono" style={{ width: 220, flexShrink: 0 }}>
-                <div style={MICRO}>FINANCIAL INDICATORS</div>
-                {isIndex ? (
-                  <div style={{ fontSize: 11, color: "var(--t-42)", padding: "8px 0" }}>
-                    No fundamentals — index.
-                  </div>
-                ) : (
-                  <>
-                    <MetricRow label="EPS" color="var(--t-85)" size={12} value={DASH} />
-                    <MetricRow label="PE · PB" color="var(--t-85)" size={12} value={`${DASH} · ${DASH}`} />
-                    <MetricRow label="ROE" color="var(--t-85)" size={12} value={DASH} top />
-                    <MetricRow label="ROA" color="var(--t-85)" size={12} value={DASH} />
-                    <MetricRow label="ROIC" color="var(--t-85)" size={12} value={DASH} />
-                    <MetricRow label="GROSS MARGIN" color="var(--t-85)" size={12} value={DASH} />
-                    <MetricRow label="NET MARGIN" color="var(--t-85)" size={12} value={DASH} />
-                  </>
-                )}
-              </div>
-              <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", gap: 16 }}>
-                <div
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    height: "100%",
-                    border: "1px solid var(--border)",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 4,
-                    padding: 8,
-                    textAlign: "center",
-                  }}
-                >
-                  <span style={{ fontSize: 11, color: "var(--t-42)" }}>
-                    revenue &amp; profit, quarterly (billion VND)
-                  </span>
-                  <span style={{ fontSize: 9, color: "var(--t-40)" }}>
-                    financial-statement data — pending data provider
-                  </span>
-                </div>
-                {!isIndex && (
-                  <div
-                    className="mono"
-                    style={{
-                      width: 340,
-                      flexShrink: 0,
-                      height: "100%",
-                      border: "1px solid var(--border)",
-                      padding: "8px 12px",
-                      overflowY: "auto",
-                    }}
-                  >
-                    <div style={MICRO}>CORP EVENTS</div>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "86px 60px 60px 1fr",
-                        gap: "4px 8px",
-                        fontSize: 9,
-                        color: "var(--t-42)",
-                        paddingBottom: 4,
-                        borderBottom: "1px solid var(--border-mid)",
-                      }}
-                    >
-                      <span>EVENT TYPE</span>
-                      <span>EX-DIV</span>
-                      <span>ISSUE</span>
-                      <span>DESC</span>
-                    </div>
-                    {corpActions.isLoading ? (
-                      <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8 }}>loading…</div>
-                    ) : corpActions.isError ? (
-                      <div style={{ fontSize: 10.5, color: "var(--down)", paddingTop: 8 }}>
-                        corporate-events feed unavailable
-                      </div>
-                    ) : corpActions.items.length === 0 ? (
-                      <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8 }}>
-                        {DASH} no corporate events on record for {symbol}
-                      </div>
-                    ) : (
-                      corpActions.items.map((ev) => (
-                        <div
-                          key={ev.id}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "86px 60px 60px 1fr",
-                            gap: "4px 8px",
-                            fontSize: 10,
-                            padding: "5px 0",
-                            borderBottom: "1px solid var(--border-row)",
-                          }}
-                        >
-                          <span style={{ color: "var(--t-80)" }}>{ev.event_label || corpEventLabel(ev.action_type)}</span>
-                          <span style={{ color: "var(--t-55)" }}>{isoDay(ev.ex_date)}</span>
-                          <span style={{ color: "var(--t-50)" }}>
-                            {isoDay(ev.record_date ?? ev.disclosure_date)}
-                          </span>
-                          <span style={{ color: "var(--t-60)" }}>{corpEventDesc(ev)}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            </>
+        <div className="segmented" role="tablist" aria-label="Instrument view">
+          <button
+            role="tab"
+            aria-selected={tab === "overview"}
+            className={`btn ${tab === "overview" ? "is-active" : ""}`}
+            onClick={() => setTab("overview")}
+          >
+            Overview
+          </button>
+          {!isIndex && (
+            <button
+              role="tab"
+              aria-selected={tab === "quant"}
+              className={`btn ${tab === "quant" ? "is-active" : ""}`}
+              onClick={() => setTab("quant")}
+            >
+              {isCW ? "Quant" : "Events"}
+            </button>
           )}
         </div>
-      )}
-
-      {hasInstrument && !isCW && !isIndex && tab === "quant" && (
-        <div style={{ padding: "0 20px 8px 20px", fontSize: 9.5, color: "var(--t-42)" }} className="mono">
-          — fundamentals: pending data provider · corp events: disclosed timing only, not causation
+        <div className="actions instrument-actions">
+          <button
+            className={`btn ${watched ? "is-active" : ""}`}
+            onClick={watch}
+            title={watched ? "Remove from watchlist" : "Add to watchlist"}
+          >
+            {watched ? "Watching" : "+ Watch"}
+          </button>
+          <button
+            className="icon-btn"
+            aria-label={expanded ? "Restore panel size" : "Expand instrument"}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+          <button
+            className="icon-btn"
+            aria-label="Close instrument"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
         </div>
+      </div>
+      {note && <Notice>{note}</Notice>}
+      <div ref={bodyRef} className="instrument-body" role="tabpanel">
+        {conflicting && (
+          <Notice error>
+            Conflicting metadata: effective contract terms disagree across
+            sources. Quant analytics are withheld until reconciled.
+          </Notice>
+        )}
+        {tab === "overview" ? (
+          <div className="overview-grid">
+            <aside className="instrument-summary">
+              <div className="primary-price">
+                <span className="eyebrow">
+                  Last price · {isIndex ? "points" : "VND"}
+                </span>
+                <strong className="mono" style={{ color: change.color }}>
+                  {fmtPrice(q?.lastPrice, instrument.instrumentType)}
+                </strong>
+                <span className="mono" style={{ color: change.color }}>
+                  {fmtSigned(amount, instrument.instrumentType)}{" "}
+                  <span className="price-percent">{change.text}</span>
+                </span>
+              </div>
+              <div className={`data-status ${live ? "live" : ""}`}>
+                {temporalLabel(state)}
+              </div>
+              <p className="as-of">{formatAsOf(stamp)}</p>
+              <dl className="metrics">
+                <Metric
+                  label="Reference"
+                  value={fmtPrice(q?.referencePrice, instrument.instrumentType)}
+                />
+                <Metric
+                  label="Bid / Ask"
+                  value={`${fmtPrice(q?.bidPrice, instrument.instrumentType)} / ${fmtPrice(q?.askPrice, instrument.instrumentType)}`}
+                />
+                <Metric label="Volume" value={fmtVol(q?.totalVolume)} />
+              </dl>
+              {isCW && (
+                <>
+                  <h3 className="eyebrow metric-section">Contract</h3>
+                  <dl className="metrics">
+                    <Metric
+                      label="Strike · VND"
+                      value={fmtPrice(instrument.strikePrice)}
+                    />
+                    <Metric
+                      label="Exercise ratio"
+                      value={fmtRatio(instrument.exerciseRatio)}
+                    />
+                    <Metric
+                      label="Last trading date"
+                      value={instrument.lastTradingDate ?? DASH}
+                    />
+                    <Metric
+                      label="Maturity"
+                      value={instrument.maturityDate ?? DASH}
+                    />
+                    <Metric
+                      label="Days to maturity"
+                      value={dteDisplay(null, instrument.maturityDate)}
+                      help="Calendar days to maturity from today in Vietnam. Last trading date is a separate tradability boundary."
+                    />
+                  </dl>
+                </>
+              )}
+            </aside>
+            <div className="chart-workspace">
+              <div className="chart-toolbar">
+                <div className="segmented" aria-label="Chart range">
+                  {["1M", "3M", "6M", "1Y"].map((r) => (
+                    <button
+                      className={`btn ${range === r ? "is-active" : ""}`}
+                      aria-pressed={range === r}
+                      key={r}
+                      onClick={() => setRange(r)}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                {isCW && (
+                  <select
+                    aria-label="Comparison mode"
+                    value={mode}
+                    onChange={(e) => setMode(e.target.value as CWHistoryMode)}
+                  >
+                    <option value="CW">Warrant</option>
+                    <option value="UNDERLYING">Underlying</option>
+                    <option value="BOTH">Both prices</option>
+                    <option value="RELATIVE">Relative returns</option>
+                  </select>
+                )}
+                <div className="overlay-controls">
+                  {(
+                    ["REF", "EMA20", "EMA50", "EMA200"] as TechnicalOverlay[]
+                  ).map((o) => (
+                    <button
+                      className={`btn ${overlays.has(o) ? "is-active" : ""}`}
+                      disabled={mode === "RELATIVE"}
+                      title={
+                        mode === "RELATIVE"
+                          ? "Price overlays are available in price comparison modes."
+                          : undefined
+                      }
+                      aria-pressed={overlays.has(o)}
+                      key={o}
+                      onClick={() =>
+                        setOverlays((prev) => {
+                          const next = new Set(prev);
+                          next.has(o) ? next.delete(o) : next.add(o);
+                          return next;
+                        })
+                      }
+                    >
+                      {o}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="chart-canvas">
+                {history.isLoading ? (
+                  <EmptyState title="Loading daily history…" />
+                ) : history.isError ? (
+                  <EmptyState
+                    title="Could not load price history"
+                    action={
+                      <button className="btn" onClick={history.refetch}>
+                        Retry
+                      </button>
+                    }
+                  />
+                ) : !bars.length ? (
+                  <EmptyState title="No daily history available" />
+                ) : isCW && mode !== "CW" && underlying.isLoading ? (
+                  <EmptyState title="Loading underlying history…" />
+                ) : isCW &&
+                  mode !== "CW" &&
+                  (underlying.isError || !underlyingBars.length) ? (
+                  <EmptyState
+                    title="Underlying history unavailable"
+                    action={
+                      <button className="btn" onClick={() => setMode("CW")}>
+                        Show warrant
+                      </button>
+                    }
+                  />
+                ) : (
+                  <TradingChart
+                    instrumentType={instrument.instrumentType}
+                    symbol={instrument.symbol}
+                    isCW={isCW}
+                    underlyingSymbol={instrument.underlyingSymbol}
+                    bars={bars}
+                    underlyingBars={mode !== "CW" ? underlyingBars : undefined}
+                    liveQuote={live ? q : null}
+                    interval="1D"
+                    range={range as "1M" | "3M" | "6M" | "1Y"}
+                    mode={mode}
+                    overlays={overlays}
+                    referencePrice={
+                      mode === "UNDERLYING"
+                        ? (underlyingQuote?.referencePrice ??
+                          underlyingBars[underlyingBars.length - 1]
+                            ?.referencePrice)
+                        : q?.referencePrice
+                    }
+                    underlyingLiveQuote={live ? underlyingQuote : null}
+                    height={chartHeight}
+                  />
+                )}
+              </div>
+              <p className="capability-note">
+                Daily history ·{" "}
+                {isCW ? "Unadjusted warrant prices" : "Adjusted prices"}. Trade
+                prints and full order-book depth are not available.
+              </p>
+            </div>
+          </div>
+        ) : isCW ? (
+          <>
+            <div className="quant-heading">
+              <span className="data-status">
+                {withheld
+                  ? "Analytics withheld"
+                  : !an && !cw?.analyticsCalculatedAt
+                    ? "Analytics unavailable"
+                    : live
+                      ? "Live analytics"
+                      : "Last available analytics"}
+              </span>
+              <span className="as-of">{formatAsOf(analyticsStamp)}</span>
+            </div>
+            {withheld && !conflicting && (
+              <Notice>
+                {an?.unavailableReason ??
+                  cw?.quantUnavailableReason ??
+                  "Analytics unavailable for this instrument."}
+              </Notice>
+            )}
+            <div className="quant-grid">
+              <div className="metric-card">
+                <h3>Volatility</h3>
+                <dl>
+                  <Metric
+                    label="IV · bid"
+                    value={fmtIV(pick("ivBid"))}
+                    help="Annualised implied volatility from the bid price."
+                  />
+                  <Metric
+                    label="IV · trade"
+                    value={fmtIV(pick("ivTrade"))}
+                    help="Annualised implied volatility from the last traded price, at the stated data time."
+                  />
+                  <Metric label="IV · ask" value={fmtIV(pick("ivAsk"))} />
+                  <Metric
+                    label="HV22"
+                    value={fmtIV(pick("historicalVolatility"))}
+                    help="Historical annualised volatility from 22 adjusted underlying trading sessions; it is not implied volatility."
+                  />
+                </dl>
+              </div>
+              <div className="metric-card">
+                <h3>Valuation</h3>
+                <dl>
+                  <Metric
+                    label="Theoretical price · VND"
+                    value={fmtPrice(pick("theoreticalPrice"))}
+                    help="Black–Scholes–Merton model value under its stated inputs. This is not a price target."
+                  />
+                  <Metric
+                    label="Moneyness · S/K"
+                    value={
+                      pick("moneynessRatio") !== null
+                        ? `${pick("moneynessRatio")!.toFixed(3)} · ${moneyness ?? DASH}`
+                        : DASH
+                    }
+                    help="Backend-canonical spot/strike ratio and classification."
+                  />
+                  <Metric
+                    label="Model DTE"
+                    value={(live ? cw?.modelDte : an?.dte) ?? DASH}
+                    help="Days to maturity at the analytics calculation time. Historical analytics retain their original model inputs."
+                  />
+                </dl>
+              </div>
+              <div className="metric-card">
+                <h3>Greeks · per warrant</h3>
+                <dl>
+                  <Metric
+                    label="Delta"
+                    value={greek(pick("delta"))}
+                    help="Change in warrant VND per +1 VND in the underlying; exercise-ratio adjusted."
+                  />
+                  <Metric
+                    label="Gamma"
+                    value={
+                      pick("gamma") === null
+                        ? DASH
+                        : pick("gamma")!.toExponential(2)
+                    }
+                  />
+                  <Metric
+                    label="Theta · VND/day"
+                    value={greek(pick("theta"), 2)}
+                    help="Time sensitivity per calendar day."
+                  />
+                  <Metric
+                    label="Vega · VND/vol point"
+                    value={greek(pick("vega"), 2)}
+                    help="Price sensitivity to +1 percentage point of annualised volatility."
+                  />
+                  <Metric
+                    label="Rho · VND/rate point"
+                    value={greek(pick("rho"), 2)}
+                  />
+                </dl>
+              </div>
+            </div>
+            <details className="model-assumptions">
+              <summary>Model assumptions & data provenance</summary>
+              <p>
+                Black–Scholes–Merton · ACT/365 · dividend yield q = 0 for
+                dividend-protected covered warrants · values scaled by the
+                effective exercise ratio.
+              </p>
+              <p>
+                Greeks volatility source:{" "}
+                {an?.greeksVolatilitySource ??
+                  cw?.greeksVolatilitySource ??
+                  "Unavailable"}
+                . Analytics as of {formatAsOf(analyticsStamp)}.
+              </p>
+              <p>
+                Current contract dates appear in Overview. Historical model
+                inputs stay tied to the analytics timestamp; missing values are
+                shown as —.
+              </p>
+            </details>
+          </>
+        ) : (
+          <div className="events-workspace">
+            <div className="section-toolbar">
+              <div>
+                <h2 className="section-title">Company events</h2>
+                <p className="section-subtitle">
+                  Disclosed timing and terms for {instrument.symbol}; timing
+                  does not establish causation.
+                </p>
+              </div>
+            </div>
+            {events.isLoading ? (
+              <EmptyState title="Loading events…" />
+            ) : events.isError ? (
+              <Notice
+                error
+                action={
+                  <button className="btn" onClick={events.refetch}>
+                    Retry
+                  </button>
+                }
+              >
+                Corporate events are unavailable.
+              </Notice>
+            ) : !events.items.length ? (
+              <EmptyState title="No corporate events on record" />
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table events-table">
+                  <thead>
+                    <tr>
+                      <th>Event</th>
+                      <th>Ex-date</th>
+                      <th>Record date</th>
+                      <th>Payment date</th>
+                      <th>Terms</th>
+                      <th>Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {events.items.map((ev) => (
+                      <tr key={ev.id}>
+                        <td>
+                          {ev.event_label ||
+                            ev.action_type.replace(/_/g, " ").toLowerCase()}
+                        </td>
+                        <td>{ev.ex_date?.slice(0, 10) ?? DASH}</td>
+                        <td>{ev.record_date?.slice(0, 10) ?? DASH}</td>
+                        <td>{ev.payment_date?.slice(0, 10) ?? DASH}</td>
+                        <td>
+                          {ev.cash_amount_vnd != null
+                            ? `${fmtPrice(ev.cash_amount_vnd)} VND/share`
+                            : (ev.ratio_text ??
+                              (ev.ratio_pct != null
+                                ? `${ev.ratio_pct}%`
+                                : DASH))}
+                        </td>
+                        <td>{ev.source}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="capability-note">
+              Financial statements and fundamental ratios are not available.
+            </p>
+          </div>
+        )}
+      </div>
+      {undo && (
+        <UndoNotice
+          text={`${instrument.symbol} removed from watchlist`}
+          undo={() => {
+            undo();
+            setUndo(null);
+          }}
+          dismiss={() => setUndo(null)}
+        />
       )}
     </section>
   );
