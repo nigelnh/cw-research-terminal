@@ -16,9 +16,14 @@ export interface SeedQuery {
  * Pass `seedQueries` to pre-populate query caches (e.g. the canonical instrument-spec map)
  * so a component that hydrates contract metadata from the backend renders deterministically.
  */
-export function renderMarkup(ui: ReactElement, seedQueries: SeedQuery[] = []): string {
+export function renderMarkup(
+  ui: ReactElement,
+  seedQueries: SeedQuery[] = [],
+): string {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: Infinity } },
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0, staleTime: Infinity },
+    },
   });
   for (const q of seedQueries) client.setQueryData(q.queryKey, q.data);
   return renderToStaticMarkup(
@@ -29,7 +34,9 @@ export function renderMarkup(ui: ReactElement, seedQueries: SeedQuery[] = []): s
 }
 
 /** Build the seed entry for `useInstrumentSpecs` from an array of partial specs. */
-export function seedInstrumentSpecs(specs: Array<Record<string, unknown>>): SeedQuery {
+export function seedInstrumentSpecs(
+  specs: Array<Record<string, unknown>>,
+): SeedQuery {
   const m = new Map<string, unknown>();
   for (const s of specs) {
     const base = {
@@ -48,5 +55,5 @@ export function seedInstrumentSpecs(specs: Array<Record<string, unknown>>): Seed
     };
     m.set(String(base.symbol).toUpperCase(), base);
   }
-  return { queryKey: ["instrument-specs", "active"], data: m };
+  return { queryKey: ["instrument-specs", "all"], data: m };
 }

@@ -22,16 +22,25 @@ export interface InstrumentSpec {
   lastTradingDate: string | null;
   status: "ACTIVE" | "EXPIRED" | "UNKNOWN" | null;
   dataQuality: "COMPLETE" | "PARTIAL" | null;
-  metadataVerification: "VERIFIED_CURRENT" | "CONFLICTING" | "STALE" | "UNVERIFIED" | null;
+  metadataVerification:
+    "VERIFIED_CURRENT" | "CONFLICTING" | "STALE" | "UNVERIFIED" | null;
 }
 
 function mapSpec(raw: any): InstrumentSpec {
-  const num = (v: any): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const num = (v: any): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
   return {
     symbol: String(raw.symbol || "").toUpperCase(),
-    instrumentType: raw.instrument_type === "CW" ? "CW" : raw.instrument_type === "INDEX" ? "INDEX" : "STOCK",
+    instrumentType:
+      raw.instrument_type === "CW"
+        ? "CW"
+        : raw.instrument_type === "INDEX"
+          ? "INDEX"
+          : "STOCK",
     issuer: raw.issuer || null,
-    underlyingSymbol: raw.underlying_symbol ? String(raw.underlying_symbol).toUpperCase() : null,
+    underlyingSymbol: raw.underlying_symbol
+      ? String(raw.underlying_symbol).toUpperCase()
+      : null,
     strikePrice: num(raw.effective_strike_price) ?? num(raw.strike_price),
     exerciseRatio: num(raw.effective_exercise_ratio) ?? num(raw.exercise_ratio),
     maturityDate: raw.maturity_date || null,
@@ -46,9 +55,15 @@ const EMPTY = new Map<string, InstrumentSpec>();
 
 export function useInstrumentSpecs() {
   const query = useQuery({
-    queryKey: ["instrument-specs", "active"],
+    queryKey: ["instrument-specs", "all"],
     queryFn: async () => {
-      const items = await backendClient.getActiveInstruments();
+      const items = await backendClient.getActiveInstruments(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "ALL",
+      );
       const m = new Map<string, InstrumentSpec>();
       for (const raw of items) {
         const s = mapSpec(raw);
@@ -65,7 +80,7 @@ export function useInstrumentSpecs() {
   const specs = query.data ?? EMPTY;
   const getSpec = useCallback(
     (symbol: string | null | undefined): InstrumentSpec | null =>
-      symbol ? specs.get(symbol.trim().toUpperCase()) ?? null : null,
+      symbol ? (specs.get(symbol.trim().toUpperCase()) ?? null) : null,
     [specs],
   );
 
