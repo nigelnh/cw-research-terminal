@@ -9,6 +9,7 @@ import {
   EMPTY_FILTER,
 } from "@/components/common/registry_filter";
 import { MARKET_COLOR, priceBandColor } from "@/components/common/grid_table";
+import { columnOrder } from "@/components/common/watchlist_layout";
 
 const fixture = vi.hoisted(() => {
   const items = [
@@ -26,6 +27,7 @@ const fixture = vi.hoisted(() => {
     bidPrice: 25,
     askPrice: 35,
     priceChangePercent: -0.25,
+    tradingValue: 1234567 as number | null,
   };
   const specs = new Map([
     [
@@ -105,6 +107,34 @@ afterEach(() => {
 });
 
 describe("Targeted watchlist columns", () => {
+  it("inserts the amount beside trade price in an older saved layout, preserving later custom placement", () => {
+    const oldOrder = ["symbol", "ref", "last", "bid", "ivBid", "ask"];
+    expect(columnOrder(oldOrder).slice(0, 7)).toEqual([
+      "symbol", "ref", "last", "tradingValue", "bid", "ivBid", "ask",
+    ]);
+    expect(columnOrder(["tradingValue", ...oldOrder]).slice(0, 7)).toEqual([
+      "tradingValue", ...oldOrder,
+    ]);
+  });
+
+  it.each([1234567, 0, null])("uses the provider's traded value in both the table and STATS: %s", (amount) => {
+    const original = fixture.quote.tradingValue;
+    fixture.quote.tradingValue = amount;
+    try {
+      const page = render(<><PersonalDashboard /><InstrumentPanel instrument={{ symbol: "CHPG2602", instrumentType: "CW", quote: fixture.quote as any }} marketSessionActive={false} onClose={() => {}} /></>);
+      const expected = amount === null ? "—" : amount.toLocaleString("en-US");
+      const header = page.getByRole("columnheader", { name: "TRD_AMT" });
+      const headers = page.getAllByRole("columnheader");
+      const cells = within(page.getByText("CHPG2602", { selector: "td" }).closest("tr")!).getAllByRole("cell");
+      expect(cells[headers.indexOf(header) + 1].textContent).toBe(expected);
+      const stats = page.getByText("STATS").parentElement!;
+      expect(within(stats).getByText("TRD_AMT").nextElementSibling?.textContent).toBe(expected);
+      expect(header.title).toContain("VND");
+    } finally {
+      fixture.quote.tradingValue = original;
+    }
+  });
+
   it("pairs each IV with its matching price and keeps the CW symbol plain", () => {
     const page = render(<PersonalDashboard />);
     expect(
@@ -117,24 +147,25 @@ describe("Targeted watchlist columns", () => {
       "CEIL",
       "FLOOR",
       "REF",
-      "IV BID",
-      "BID",
-      "IV TRD",
-      "TRD",
+      "IV_BID",
+      "BID_PRC",
+      "IV_TRD",
+      "TRD_PRC",
+      "TRD_AMT",
       "+/-",
       "%CHG",
-      "IV ASK",
-      "ASK",
+      "IV_ASK",
+      "ASK_PRC",
       "VOLUME",
       "STRIKE",
       "RATIO",
-      "LAST TRADING DATE",
+      "LAST_TRD_DATE",
       "DTE",
     ]);
     const symbol = page.getByText("CHPG2602", { selector: "td" });
     expect(symbol.textContent).toBe("CHPG2602");
     const cells = within(symbol.closest("tr")!).getAllByRole("cell");
-    expect(cells.slice(2, 13).map((c) => c.textContent)).toEqual([
+    expect(cells.slice(2, 14).map((c) => c.textContent)).toEqual([
       "320",
       "10",
       "40",
@@ -142,6 +173,7 @@ describe("Targeted watchlist columns", () => {
       "25",
       "23.0%",
       "30",
+      "1,234,567",
       "−10",
       "-25.00%",
       "25.0%",
@@ -178,18 +210,18 @@ describe("Targeted watchlist columns", () => {
     const page = render(<><PersonalDashboard /><InstrumentPanel instrument={{ symbol: "CHPG2602", instrumentType: "CW", quote: fixture.quote as any }} marketSessionActive={false} onClose={() => {}} /></>);
     const transfer = { setData: vi.fn(), effectAllowed: "", dropEffect: "" };
     const from = page.getByRole("columnheader", { name: /^REF$/ });
-    const to = page.getByRole("columnheader", { name: /^BID$/ });
+    const to = page.getByRole("columnheader", { name: /^BID_PRC$/ });
     fireEvent.dragStart(from, { dataTransfer: transfer });
     fireEvent.dragOver(to, { dataTransfer: transfer });
     fireEvent.drop(to, { dataTransfer: transfer });
     const headers = page.getAllByRole("columnheader").map(c => c.textContent);
-    expect(headers.indexOf("REF")).toBeGreaterThan(headers.indexOf("BID"));
+    expect(headers.indexOf("REF")).toBeGreaterThan(headers.indexOf("BID_PRC"));
     const cells = within(page.getByText("CHPG2602", { selector: "td" }).closest("tr")!).getAllByRole("cell");
     expect(cells[headers.indexOf("REF") + 1].textContent).toBe("40");
-    expect(cells[headers.indexOf("BID") + 1].textContent).toBe("25");
+    expect(cells[headers.indexOf("BID_PRC") + 1].textContent).toBe("25");
     const stats = page.getByText("STATS").parentElement!;
     const labels = [...stats.children].slice(1).map(row => row.firstElementChild?.textContent);
-    expect(labels.indexOf("REF")).toBeGreaterThan(labels.indexOf("BID"));
+    expect(labels.indexOf("REF")).toBeGreaterThan(labels.indexOf("BID_PRC"));
     expect(page.queryByText("AS OF")).toBeNull();
     fireEvent.keyDown(page.getByRole("columnheader", { name: /^REF$/ }), { key: "ArrowLeft", altKey: true });
     expect(page.getAllByRole("columnheader").map(c => c.textContent).indexOf("REF")).toBe(headers.indexOf("REF") - 1);

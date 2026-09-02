@@ -293,7 +293,8 @@ select:focus-visible,
 }
 .filter-check span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filter-all { margin-bottom: 0; }
-.filter-options { max-height: 144px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+/* Four scrolling options plus the fixed All option = five visible entries. */
+.filter-options { max-height: 96px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .filter-empty { display: block; padding: 5px 0; color: var(--t-46); font-size: 10.5px; }
 .filter-date-section { border-top: 1px solid var(--border); padding: 9px 12px 12px; }
 .filter-date-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
@@ -310,3 +311,37 @@ select:focus-visible,
 .filter-dates { gap: 12px; }
 .filter-dates > div { min-width: 0; }
 .filter-date-label { color: var(--t-50); font-size: 10px; margin-bottom: 4px; }
+
+.watchlist-column-label { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
+.watchlist-sort-icon { width: 1em; height: 1em; flex: none; }
+
+.instrument-section-heading {
+  margin: 0 0 8px;
+  color: var(--t-92);
+  font: 400 12px/16px var(--font-display);
+}
+/* A fixed 19px row pitch: STATS fits the chart; shorter lists retain that rhythm. */
+.instrument-metric { gap: 12px; }
+.instrument-metric > span:last-child { text-align: right; white-space: nowrap; }
+.instrument-data-panel {
+  width: 25%;
+  min-width: 320px;
+  max-width: 340px;
+  flex-shrink: 0;
+  height: 100%;
+  border: 1px solid var(--border-strong);
+  overflow: auto;
+}
+.instrument-data-panel > .instrument-section-heading { margin: 8px 10px; }
+.instrument-data-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10px; line-height: 15px; }
+.instrument-data-table th, .instrument-data-table td { padding: 5px 8px; text-align: left; vertical-align: top; }
+.instrument-data-table thead { border-block: 1px solid var(--border-mid); }
+.instrument-data-table th { color: var(--t-42); font-size: 9px; font-weight: 400; }
+.instrument-data-table th + th { border-left: 1px solid var(--border-row); }
+.instrument-data-table tbody tr + tr { border-top: 1px solid var(--border-row); }
+.instrument-data-table .instrument-data-state { padding: 8px 10px; color: var(--t-42); font-size: 10.5px; }
+.corporate-events-table .event-type-column { width: 94px; }
+.corporate-events-table .event-date-column { width: 76px; }
+.corporate-events-table :is(th, td):nth-child(2),
+.corporate-events-table :is(th, td):nth-child(3) { text-align: right; white-space: nowrap; }
+.corporate-events-table td:first-child, .corporate-events-table td:last-child { overflow-wrap: anywhere; }

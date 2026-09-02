@@ -45,7 +45,7 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     expect(html).toContain("+/-");
     expect(html).toContain("VOLUME");
     expect(html).toContain("STRIKE");
-    expect(html).toContain("IV TRD");
+    expect(html).toContain("IV_TRD");
     // redundant CW-only columns were merged away in the unified table
     expect(html).not.toContain("UND.PRC");
     expect(html).not.toContain("FRN ROOM");

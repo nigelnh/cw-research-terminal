@@ -3,7 +3,7 @@ import type { WatchlistItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
 import { useDashboardData } from "@/data/query/use_dashboard_data";
-import { QUOTE_COLUMNS, quoteCell, type QuoteColumnKey } from "@/components/common/quote_columns";
+import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, quoteCell, type QuoteColumnKey } from "@/components/common/quote_columns";
 import { completeOrder, moveGroupedRows, useWatchlistLayout } from "@/components/common/watchlist_layout";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import {
@@ -43,6 +43,7 @@ interface StockRow {
   bid: number | null;
   ask: number | null;
   last: number | null;
+  tradingValue: number | null;
   chgPct: number | null;
   vol: number | null;
   ceiling: number | null;
@@ -56,6 +57,7 @@ interface CwRow {
   bid: number | null;
   ask: number | null;
   last: number | null;
+  tradingValue: number | null;
   ref: number | null;
   ceiling: number | null;
   floor: number | null;
@@ -85,6 +87,7 @@ interface UnifiedRow {
   bid: number | null;
   ask: number | null;
   last: number | null;
+  tradingValue: number | null;
   chgPct: number | null;
   vol: number | null;
   ceiling: number | null;
@@ -108,6 +111,7 @@ const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
   bid: (r) => r.bid,
   ask: (r) => r.ask,
   last: (r) => r.last,
+  tradingValue: (r) => r.tradingValue,
   change: (r) => r.last !== null && r.ref !== null ? r.last - r.ref : null,
   lastTradingDate: (r) => r.lastTradingDate,
   chgPct: (r) => r.chgPct,
@@ -158,6 +162,7 @@ export function PersonalDashboard({
             bid: quote?.bidPrice ?? null,
             ask: quote?.askPrice ?? null,
             last: quote?.lastPrice ?? null,
+            tradingValue: quote?.tradingValue ?? null,
             chgPct: pct,
             vol: quote?.totalVolume ?? null,
             ceiling: quote?.ceilingPrice ?? null,
@@ -191,6 +196,7 @@ export function PersonalDashboard({
             bid: quote?.bidPrice ?? cw?.quote?.bidPrice ?? null,
             ask: quote?.askPrice ?? cw?.quote?.askPrice ?? null,
             last,
+            tradingValue: quote?.tradingValue ?? cw?.quote?.tradingValue ?? null,
             ref: quote?.referencePrice ?? cw?.quote?.referencePrice ?? null,
             ceiling: quote?.ceilingPrice ?? cw?.quote?.ceilingPrice ?? null,
             floor: quote?.floorPrice ?? cw?.quote?.floorPrice ?? null,
@@ -236,6 +242,7 @@ export function PersonalDashboard({
         bid: s.bid,
         ask: s.ask,
         last: s.last,
+        tradingValue: s.tradingValue,
         chgPct: s.chgPct,
         vol: s.vol,
         ceiling: s.ceiling,
@@ -258,6 +265,7 @@ export function PersonalDashboard({
         bid: c.bid,
         ask: c.ask,
         last: c.last,
+        tradingValue: c.tradingValue,
         chgPct: c.chgPct,
         vol: c.vol,
         ceiling: c.ceiling,
@@ -359,7 +367,7 @@ export function PersonalDashboard({
               {r.symbol}
               {r.conflicting && <span title="Conflicting metadata — quant withheld" style={{ marginLeft: 5, color: "var(--down)" }}>◆</span>}
             </td>
-          ) : <td key={column.key} style={{ ...TD, color: cell.color }}>{cell.text}</td>;
+          ) : <td key={column.key} title={QUOTE_COLUMN_HINTS[column.key]} style={{ ...TD, color: cell.color }}>{cell.text}</td>;
         })}
         <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
       </tr>
@@ -429,8 +437,8 @@ export function PersonalDashboard({
                   data-column={column.key}
                   className={dropTarget === column.key ? "is-drop-target" : undefined}
                   aria-sort={view.sortMark(column.key) === "▲" ? "ascending" : view.sortMark(column.key) === "▼" ? "descending" : "none"}
-                  title="Click to sort · Drag to reorder · Alt + ←/→ to move"
-                  style={{ padding: "5px 8px", textAlign: column.key === "symbol" ? "left" : "right", width: column.key === "symbol" ? symbolWidth : undefined, color: "var(--t-50)", fontWeight: 500, cursor: "grab", userSelect: "none" }}
+                  title={`${QUOTE_COLUMN_HINTS[column.key] ? `${QUOTE_COLUMN_HINTS[column.key]} · ` : ""}Click to sort · Drag to reorder · Alt + ←/→ to move`}
+                  style={{ padding: "5px 8px", textAlign: column.key === "symbol" ? "left" : "right", width: column.key === "symbol" ? symbolWidth : column.key === "lastTradingDate" ? "1%" : undefined, color: "var(--t-50)", fontWeight: 500, cursor: "grab", userSelect: "none" }}
                   onClick={() => { if (!drag.current) view.toggleSort(column.key); }}
                   onDragStart={(e) => { drag.current = { type: "column", key: column.key }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", column.key); }}
                   onDragOver={(e) => { if (drag.current?.type === "column") { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget(column.key); } }}
@@ -444,7 +452,13 @@ export function PersonalDashboard({
                       if (to) layout.moveColumn(column.key, to.key);
                     }
                   }}>
-                  {column.label}<span style={{ display: "inline-block", width: 10, fontSize: 9 }}>{view.sortMark(column.key)}</span>
+                  <span className="watchlist-column-label" style={{ flexDirection: column.key === "symbol" ? "row" : "row-reverse" }}>
+                    <span>{column.label}</span>
+                    <svg className="watchlist-sort-icon" aria-hidden="true" viewBox="0 0 12 12" fill="currentColor"
+                      style={{ visibility: view.sortMark(column.key) ? "visible" : "hidden" }}>
+                      <path d={view.sortMark(column.key) === "▼" ? "M1 2h10L6 11Z" : "M1 10h10L6 1Z"} />
+                    </svg>
+                  </span>
                 </th>
               ))}
               <DismissHeader />

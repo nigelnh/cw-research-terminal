@@ -56,7 +56,7 @@ describe("InstrumentPanel — bottom split panel", () => {
     );
     expect(html).toContain("STRIKE");
     expect(html).toContain("120,000");
-    expect(html).toContain("LAST TRADING DATE");
+    expect(html).toContain("LAST_TRD_DATE");
     expect(html).toContain("DTE");
     expect(html).not.toMatch(/>\s*\d+d\s*</); // never "24d"
   });
@@ -95,7 +95,7 @@ describe("InstrumentPanel — bottom split panel", () => {
     expect(html).toContain("STOCK · HOSE");
     expect(html).not.toContain("COVERED WARRANT");
     expect(html).not.toContain("MONEYNESS S/K");
-    expect(html).toContain("IV BID");
+    expect(html).toContain("IV_BID");
     expect(html).toContain("STRIKE");
   });
 });
