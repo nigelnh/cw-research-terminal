@@ -869,6 +869,17 @@ class FiinQuantProvider(MarketDataProvider):
                     rows.extend(records(result))
                 return rows
 
+            def fetch_price_bands(tickers: List[str], session_date: str) -> List[Dict[str, Any]]:
+                rows: List[Dict[str, Any]] = []
+                for start in range(0, len(tickers), 100):
+                    value = self._session.PriceStatistics().get_ceilingfloor(
+                        tickers=tickers[start:start + 100],
+                        from_date=session_date,
+                        to_date=session_date,
+                    )
+                    rows.extend(records(value))
+                return rows
+
             def build() -> Dict[str, Any]:
                 captured = io.StringIO()
                 with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
@@ -881,6 +892,13 @@ class FiinQuantProvider(MarketDataProvider):
                     daily = fetch_rows(sorted(set(index_symbols + stocks + clean_cws)), by="1d", period=2)
                     intraday = fetch_rows(index_symbols, by="5m", period=48)
                     breadth = records(self._session.MarketBreadth().get(tickers=index_symbols))
+                    daily_dates = [str(r.get("timestamp") or r.get("TradingDate") or "")[:10] for r in daily]
+                    session_date = max((d for d in daily_dates if d), default="")
+                    try:
+                        bands = fetch_price_bands(stocks + clean_cws, session_date) if session_date else []
+                    except Exception as exc:  # the ranking still works if this optional endpoint is not entitled
+                        logger.warning("FiinQuant price bands unavailable for overview: %s", exc)
+                        bands = []
 
                 def key(row: Dict[str, Any]) -> str:
                     return str(row.get("ticker") or row.get("Ticker") or "").upper()
@@ -902,6 +920,11 @@ class FiinQuantProvider(MarketDataProvider):
                 for row in intraday:
                     if key(row): intra_by.setdefault(key(row), []).append(row)
                 breadth_by = {str(r.get("comGroupCode") or "").upper(): r for r in breadth}
+                bands_by: Dict[str, Dict[str, Any]] = {}
+                for row in bands:
+                    symbol = key(row)
+                    if symbol and (symbol not in bands_by or stamp(row) > stamp(bands_by[symbol])):
+                        bands_by[symbol] = row
 
                 indices = []
                 for symbol in index_symbols:
@@ -931,9 +954,28 @@ class FiinQuantProvider(MarketDataProvider):
                     for symbol in universe:
                         bars = sorted(daily_by.get(symbol, []), key=stamp)
                         if not bars: continue
-                        row = bars[-1]; volume = num(row, "volume", "Volume")
+                        row = bars[-1]; previous = bars[-2] if len(bars) > 1 else {}
+                        volume = num(row, "volume", "Volume")
                         if volume is None: continue
-                        out.append({"symbol": symbol, "volume": volume, "price": num(row, "close", "Close"), "as_of": stamp(row)})
+                        price, reference = num(row, "close", "Close"), num(previous, "close", "Close")
+                        band_row = bands_by.get(symbol, {})
+                        ceiling = num(band_row, "ceilingValue")
+                        floor = num(band_row, "floorValue")
+                        def same(a: Optional[float], b: Optional[float]) -> bool:
+                            return a is not None and b is not None and abs(a - b) < 1e-6
+                        market_state = (
+                            "CEILING" if same(price, ceiling) else
+                            "FLOOR" if same(price, floor) else
+                            "REFERENCE" if same(price, reference) else
+                            "UP" if price is not None and reference is not None and price > reference else
+                            "DOWN" if price is not None and reference is not None and price < reference else
+                            "UNAVAILABLE"
+                        )
+                        out.append({
+                            "symbol": symbol, "volume": volume, "price": price,
+                            "reference": reference, "ceiling": ceiling, "floor": floor,
+                            "market_state": market_state, "as_of": stamp(row),
+                        })
                     return sorted(out, key=lambda x: x["volume"], reverse=True)[:5]
 
                 as_of = max((x["as_of"] for x in indices if x["as_of"]), default=None)

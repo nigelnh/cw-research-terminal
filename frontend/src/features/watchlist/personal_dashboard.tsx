@@ -372,7 +372,7 @@ export function PersonalDashboard({
               {r.symbol}
               {r.conflicting && <span title="Conflicting metadata — quant withheld" style={{ marginLeft: 5, color: "var(--down)" }}>◆</span>}
             </td>
-          ) : <td key={column.key} title={QUOTE_COLUMN_HINTS[column.key]} style={{ ...TD, color: cell.color }}>{r.kind === "stock" && ["strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : cell.text}</td>;
+          ) : <td key={column.key} title={QUOTE_COLUMN_HINTS[column.key]} style={{ ...TD, color: cell.color }}>{r.kind === "stock" && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : cell.text}</td>;
         })}
         <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
       </tr>
