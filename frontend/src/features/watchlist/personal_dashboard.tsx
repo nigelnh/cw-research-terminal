@@ -306,7 +306,7 @@ export function PersonalDashboard({
 
       {stockRows.length > 0 && (
         <table
-          className="mono"
+          className="mono grid-lined"
           style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, marginBottom: 10 }}
         >
           <thead>
@@ -366,7 +366,7 @@ export function PersonalDashboard({
       )}
 
       {cwRows.length > 0 && (
-        <table className="mono" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+        <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
               <PinHeader />

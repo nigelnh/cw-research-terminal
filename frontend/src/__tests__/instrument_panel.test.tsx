@@ -61,11 +61,11 @@ describe("InstrumentPanel — bottom split panel", () => {
     expect(html).not.toMatch(/>\s*\d+d\s*</); // never "24d"
   });
 
-  it("3b. OVERVIEW right pane is TIME & SALES (session-gated, honest empty state)", () => {
+  it("3b. OVERVIEW right pane is TRADED LOGS (session-gated, honest empty state)", () => {
     const closed = renderMarkup(
       <InstrumentPanel instrument={cw} marketSessionActive={false} onClose={vi.fn()} />,
     );
-    expect(closed).toContain("TIME &amp; SALES");
+    expect(closed).toContain("TRADED LOGS");
     expect(closed).toContain("unavailable outside a live session");
     expect(closed).not.toContain("PRICE HISTORY");
 
