@@ -98,6 +98,8 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  window.localStorage.clear();
+  window.dispatchEvent(new StorageEvent("storage", { key: "cw-research:table-layout:v1" }));
   cleanup();
   vi.unstubAllGlobals();
 });
@@ -126,6 +128,7 @@ describe("Targeted watchlist columns", () => {
       "VOLUME",
       "STRIKE",
       "RATIO",
+      "LAST TRADING DATE",
       "DTE",
     ]);
     const symbol = page.getByText("CHPG2602", { selector: "td" });
@@ -139,7 +142,7 @@ describe("Targeted watchlist columns", () => {
       "25",
       "23.0%",
       "30",
-      "10",
+      "−10",
       "-25.00%",
       "25.0%",
       "35",
@@ -169,6 +172,52 @@ describe("Targeted watchlist columns", () => {
     expect(page.getByText("40").style.color).toBe(MARKET_COLOR.flat);
     expect(priceBandColor(0, "reference")).toBe(MARKET_COLOR.flat);
     expect(priceBandColor(null, "reference")).toBe(MARKET_COLOR.null);
+  });
+
+  it("drags columns with their data and synchronizes STATS order", () => {
+    const page = render(<><PersonalDashboard /><InstrumentPanel instrument={{ symbol: "CHPG2602", instrumentType: "CW", quote: fixture.quote as any }} marketSessionActive={false} onClose={() => {}} /></>);
+    const transfer = { setData: vi.fn(), effectAllowed: "", dropEffect: "" };
+    const from = page.getByRole("columnheader", { name: /^REF$/ });
+    const to = page.getByRole("columnheader", { name: /^BID$/ });
+    fireEvent.dragStart(from, { dataTransfer: transfer });
+    fireEvent.dragOver(to, { dataTransfer: transfer });
+    fireEvent.drop(to, { dataTransfer: transfer });
+    const headers = page.getAllByRole("columnheader").map(c => c.textContent);
+    expect(headers.indexOf("REF")).toBeGreaterThan(headers.indexOf("BID"));
+    const cells = within(page.getByText("CHPG2602", { selector: "td" }).closest("tr")!).getAllByRole("cell");
+    expect(cells[headers.indexOf("REF") + 1].textContent).toBe("40");
+    expect(cells[headers.indexOf("BID") + 1].textContent).toBe("25");
+    const stats = page.getByText("STATS").parentElement!;
+    const labels = [...stats.children].slice(1).map(row => row.firstElementChild?.textContent);
+    expect(labels.indexOf("REF")).toBeGreaterThan(labels.indexOf("BID"));
+    expect(page.queryByText("AS OF")).toBeNull();
+    fireEvent.keyDown(page.getByRole("columnheader", { name: /^REF$/ }), { key: "ArrowLeft", altKey: true });
+    expect(page.getAllByRole("columnheader").map(c => c.textContent).indexOf("REF")).toBe(headers.indexOf("REF") - 1);
+  });
+
+  it("drags a stock with its children and prevents a CW from crossing groups", () => {
+    fixture.items.push({ symbol: "CHPG2603", instrumentType: "CW", underlyingSymbol: "HPG" });
+    try {
+      const select = vi.fn();
+      const page = render(<PersonalDashboard onSelectSymbol={select} />);
+      const row = (symbol: string) => page.getByText(symbol, { selector: "td" }).closest("tr")!;
+      const order = () => [...page.container.querySelectorAll("tbody tr")].map(r => r.getAttribute("data-symbol"));
+      const drag = (from: string, to: string) => {
+        const dataTransfer = { setData: vi.fn(), effectAllowed: "", dropEffect: "" };
+        fireEvent.dragStart(row(from), { dataTransfer });
+        fireEvent.dragOver(row(to), { dataTransfer });
+        fireEvent.drop(row(to), { dataTransfer });
+      };
+      drag("HPG", "VPB");
+      expect(order()).toEqual(["VPB", "CVPB2615", "HPG", "CHPG2602", "CHPG2603"]);
+      drag("CHPG2603", "CHPG2602");
+      expect(order()).toEqual(["VPB", "CVPB2615", "HPG", "CHPG2603", "CHPG2602"]);
+      drag("CHPG2602", "CVPB2615");
+      expect(order()).toEqual(["VPB", "CVPB2615", "HPG", "CHPG2603", "CHPG2602"]);
+      expect(select).not.toHaveBeenCalled();
+      fireEvent.click(row("CHPG2602"));
+      expect(select).toHaveBeenCalledWith("CHPG2602");
+    } finally { fixture.items.pop(); }
   });
 
   it("keeps the underlying choices available after a row is filtered out", () => {

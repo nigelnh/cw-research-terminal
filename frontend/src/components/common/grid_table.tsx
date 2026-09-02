@@ -144,6 +144,7 @@ export interface SortPinApi<T> {
   ordered: T[];
   sort: SortSpec | null;
   toggleSort: (key: string) => void;
+  clearOrder: () => void;
   sortMark: (key: string) => string;
   isPinned: (symbol: string) => boolean;
   togglePin: (symbol: string, e?: React.MouseEvent) => void;
@@ -217,7 +218,7 @@ export function useSortPin<T>(
     [pinned],
   );
 
-  return { ordered, sort, toggleSort, sortMark, isPinned, togglePin, pinFill };
+  return { ordered, sort, toggleSort, sortMark, isPinned, togglePin, pinFill, clearOrder: () => { setSort(null); setPinned([]); } };
 }
 
 /* ------------------------------------------------------------------ pieces */

@@ -110,7 +110,6 @@ export function RegistryFilter({
                     <span>{option}</span>
                   </label>
                 ))}
-                {!visible.length && <span className="filter-empty">No matches</span>}
               </div>
             </section>
           );
@@ -122,8 +121,8 @@ export function RegistryFilter({
           <button type="button" className="filter-clear focus-ring" onClick={() => onChange(EMPTY_FILTER)}>CLEAR</button>
         </div>
         <div className="filter-dates">
-          <div><div className="filter-date-label">From</div><CalendarInput ariaLabel="Last trading date from" value={value.from} onChange={(iso) => onChange({ ...value, from: iso })} /></div>
-          <div><div className="filter-date-label">To</div><CalendarInput ariaLabel="Last trading date to" value={value.to} onChange={(iso) => onChange({ ...value, to: iso })} /></div>
+          <div><div className="filter-date-label">From Date</div><CalendarInput ariaLabel="Last trading date from" value={value.from} onChange={(iso) => onChange({ ...value, from: iso })} /></div>
+          <div><div className="filter-date-label">To Date</div><CalendarInput ariaLabel="Last trading date to" value={value.to} onChange={(iso) => onChange({ ...value, to: iso })} /></div>
         </div>
       </div>
     </FilterPopover>
