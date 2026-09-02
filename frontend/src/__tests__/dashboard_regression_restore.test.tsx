@@ -63,7 +63,7 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     expect(html).toContain("BID");
     expect(html).toContain("ASK");
     expect(html).toContain("TRD");
-    expect(html).toContain("CHG%");
+    expect(html).toContain("%CHG");
     expect(html).toContain("VOLUME");
     expect(html).toContain("STRIKE");
     expect(html).toContain("RATIO");

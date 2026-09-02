@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useResearchFeed } from "@/data/query";
 import { DASH } from "@/components/common/grid_table";
 import { CalendarInput } from "@/components/common/calendar_input";
+import { FilterPopover } from "@/components/common/filter_popover";
 import type { FeedContentType, ResearchFeedItem } from "@/domain/models";
 
 interface NewsFeedProps {
@@ -53,20 +54,7 @@ function fmtTime(iso: string | null): string {
   }).format(d);
 }
 
-const F_LABEL: React.CSSProperties = { fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-50)", marginBottom: 6 };
-const F_CHECK: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  padding: "3px 0",
-  fontSize: 11,
-  cursor: "pointer",
-  color: "var(--t-80)",
-};
-/** Bounded, internally-scrolling checkbox list so a long symbol set can't grow the popover. */
-const F_SCROLL: React.CSSProperties = { maxHeight: 132, overflowY: "auto" };
-
-/** FILTER ▾ dropdown for the News feed — SYMBOL, EVENT TYPE, PUBLISH DATE. */
+/** Filter layout shared with the registry; dates never change the page width. */
 function NewsFilterDropdown({
   symbolOptions,
   value,
@@ -76,121 +64,63 @@ function NewsFilterDropdown({
   value: NewsFilterState;
   onChange: (next: NewsFilterState) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const symChecked = (s: string) => value.symbols === null || value.symbols.includes(s);
-  const toggleSym = (s: string) => {
-    const cur = value.symbols ?? symbolOptions;
-    const next = cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s];
+  const toggleSym = (symbol: string) => {
+    const current = value.symbols ?? symbolOptions;
+    const next = current.includes(symbol) ? current.filter((s) => s !== symbol) : [...current, symbol];
     onChange({ ...value, symbols: next.length === symbolOptions.length ? null : next });
   };
-  const toggleType = (t: EventType) =>
-    onChange({
-      ...value,
-      types: value.types.includes(t) ? value.types.filter((x) => x !== t) : [...value.types, t],
-    });
-
+  const toggleType = (type: EventType) => onChange({
+    ...value,
+    types: value.types.includes(type) ? value.types.filter((t) => t !== type) : [...value.types, type],
+  });
   return (
-    <div style={{ position: "relative" }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-      <button
-        type="button"
-        className="focus-ring"
-        aria-expanded={open}
-        style={{
-          padding: "4px 10px",
-          border: "1px solid var(--border-30)",
-          borderRadius: 2,
-          background: newsFilterActive(value) ? "var(--panel-active)" : "transparent",
-          color: "var(--t-75)",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          fontSize: 10.5,
-        }}
-      >
-        FILTER ▾
-      </button>
-      {open && (
-        <div style={{ position: "absolute", right: 0, top: "100%", paddingTop: 6, zIndex: 55 }}>
-          <div
-            className="mono"
-            style={{
-              background: "var(--panel-2)",
-              border: "1px solid var(--border-30)",
-              padding: 14,
-              width: 420,
-              boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
-            }}
-          >
-            <div style={{ display: "flex", gap: 20, marginBottom: 12, alignItems: "flex-start" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={F_LABEL}>SYMBOL</div>
-                <div style={F_SCROLL}>
-                  <label style={F_CHECK}>
-                    <input
-                      type="checkbox"
-                      checked={value.symbols === null}
-                      onChange={() => onChange({ ...value, symbols: value.symbols === null ? [] : null })}
-                    />
-                    All
-                  </label>
-                  {symbolOptions.map((s) => (
-                    <label key={s} style={F_CHECK}>
-                      <input type="checkbox" checked={symChecked(s)} onChange={() => toggleSym(s)} />
-                      {s}
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={F_LABEL}>EVENT TYPE</div>
-                <label style={F_CHECK}>
-                  <input
-                    type="checkbox"
-                    checked={value.types.length === ALL_EVENT_TYPES.length}
-                    onChange={() =>
-                      onChange({
-                        ...value,
-                        types:
-                          value.types.length === ALL_EVENT_TYPES.length ? [] : [...ALL_EVENT_TYPES],
-                      })
-                    }
-                  />
-                  All
-                </label>
-                {ALL_EVENT_TYPES.map((t) => (
-                  <label key={t} style={F_CHECK}>
-                    <input type="checkbox" checked={value.types.includes(t)} onChange={() => toggleType(t)} />
-                    {t}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-              <div style={F_LABEL}>PUBLISH DATE</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <CalendarInput ariaLabel="Publish date from" value={value.from} onChange={(iso) => onChange({ ...value, from: iso })} />
-                <CalendarInput ariaLabel="Publish date to" value={value.to} onChange={(iso) => onChange({ ...value, to: iso })} />
-                <button
-                  type="button"
-                  onClick={() => onChange(EMPTY_NEWS_FILTER)}
-                  style={{
-                    padding: "4px 12px",
-                    border: "none",
-                    borderRadius: 2,
-                    background: "var(--panel-active)",
-                    color: "var(--t-85)",
-                    cursor: "pointer",
-                    fontSize: 10.5,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  CLEAR
-                </button>
-              </div>
-            </div>
+    <FilterPopover active={newsFilterActive(value)} label="News filters">
+      <div className="filter-columns">
+        <section className="filter-column" aria-label="SYMBOL">
+          <div className="filter-label">SYMBOL</div>
+          <label className="filter-check filter-all">
+            <input type="checkbox" checked={value.symbols === null} aria-label="All symbols"
+              onChange={() => onChange({ ...value, symbols: value.symbols === null ? [] : null })} />
+            All
+          </label>
+          <div className="filter-options" aria-label="SYMBOL options" tabIndex={0}>
+            {symbolOptions.map((symbol) => (
+              <label className="filter-check" key={symbol}>
+                <input type="checkbox" checked={value.symbols === null || value.symbols.includes(symbol)} onChange={() => toggleSym(symbol)} />
+                <span>{symbol}</span>
+              </label>
+            ))}
+            {!symbolOptions.length && <span className="filter-empty">No symbols</span>}
           </div>
+        </section>
+        <section className="filter-column" aria-label="EVENT TYPE">
+          <div className="filter-label">EVENT TYPE</div>
+          <label className="filter-check filter-all">
+            <input type="checkbox" checked={value.types.length === ALL_EVENT_TYPES.length} aria-label="All event types"
+              onChange={() => onChange({ ...value, types: value.types.length === ALL_EVENT_TYPES.length ? [] : [...ALL_EVENT_TYPES] })} />
+            All
+          </label>
+          <div className="filter-options" aria-label="EVENT TYPE options">
+            {ALL_EVENT_TYPES.map((type) => (
+              <label className="filter-check" key={type}>
+                <input type="checkbox" checked={value.types.includes(type)} onChange={() => toggleType(type)} />
+                <span>{type}</span>
+              </label>
+            ))}
+          </div>
+        </section>
+      </div>
+      <div className="filter-date-section">
+        <div className="filter-date-heading">
+          <span className="filter-label">PUBLISH DATE</span>
+          <button type="button" className="filter-clear focus-ring" onClick={() => onChange(EMPTY_NEWS_FILTER)}>CLEAR</button>
         </div>
-      )}
-    </div>
+        <div className="filter-dates">
+          <div><div className="filter-date-label">From</div><CalendarInput ariaLabel="Publish date from" value={value.from} onChange={(iso) => onChange({ ...value, from: iso })} /></div>
+          <div><div className="filter-date-label">To</div><CalendarInput ariaLabel="Publish date to" value={value.to} onChange={(iso) => onChange({ ...value, to: iso })} /></div>
+        </div>
+      </div>
+    </FilterPopover>
   );
 }
 

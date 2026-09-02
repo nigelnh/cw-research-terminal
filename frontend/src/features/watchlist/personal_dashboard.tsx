@@ -28,6 +28,7 @@ import {
   fmtRatio,
   fmtVol,
   priceColor,
+  priceBandColor,
   useHiddenRows,
   useSortPin,
   type SortFields,
@@ -107,6 +108,8 @@ interface UnifiedRow {
 
 const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
   symbol: (r) => r.symbol,
+  ceiling: (r) => r.ceiling,
+  floor: (r) => r.floor,
   ref: (r) => r.ref,
   bid: (r) => r.bid,
   ask: (r) => r.ask,
@@ -170,7 +173,7 @@ export function PersonalDashboard({
     [items, getRow, quotes, q, hiddenRows],
   );
 
-  const cwRows: CwRow[] = useMemo(
+  const unfilteredCwRows: CwRow[] = useMemo(
     () =>
       items
         .filter(isCwItem)
@@ -208,24 +211,22 @@ export function PersonalDashboard({
           };
         })
         .filter((r) => textMatch(r.symbol, r.underlying))
-        .filter((r) => !hiddenRows.isHidden(r.symbol))
-        .filter((r) =>
-          rowMatchesFilter(filterState, {
-            underlying: r.underlying,
-            issuer: r.issuer,
-            lastTradingDate: r.lastTradingDate,
-          }),
-        ),
-    [items, getRow, quotes, warrants, getSpec, q, filterState, hiddenRows],
+        .filter((r) => !hiddenRows.isHidden(r.symbol)),
+    [items, getRow, quotes, warrants, getSpec, q, hiddenRows],
+  );
+
+  const cwRows = useMemo(
+    () => unfilteredCwRows.filter((r) => rowMatchesFilter(filterState, r)),
+    [unfilteredCwRows, filterState],
   );
 
   const underlyingOptions = useMemo(
-    () => [...new Set(cwRows.map((r) => r.underlying).filter((v): v is string => !!v))].sort(),
-    [cwRows],
+    () => [...new Set(unfilteredCwRows.map((r) => r.underlying).filter((v): v is string => !!v))].sort(),
+    [unfilteredCwRows],
   );
   const issuerOptions = useMemo(
-    () => [...new Set(cwRows.map((r) => r.issuer).filter((v): v is string => !!v))].sort(),
-    [cwRows],
+    () => [...new Set(unfilteredCwRows.map((r) => r.issuer).filter((v): v is string => !!v))].sort(),
+    [unfilteredCwRows],
   );
 
   const unifiedRows: UnifiedRow[] = useMemo(
@@ -309,7 +310,8 @@ export function PersonalDashboard({
     floor: r.floor,
   });
 
-  const renderRow = (r: UnifiedRow, isChild: boolean) => {
+  const symbolWidth = `calc(${Math.max(8, ...unifiedRows.map((r) => r.symbol.length))}ch + 24px)`;
+  const renderRow = (r: UnifiedRow) => {
     const chg = fmtChg(r.chgPct);
     const selected = selectedSymbol === r.symbol;
     const pr = priceRef(r);
@@ -328,16 +330,11 @@ export function PersonalDashboard({
         <td
           style={{
             padding: "0 8px",
-            paddingLeft: isChild ? 24 : 8,
             color: "var(--accent)",
             whiteSpace: "nowrap",
           }}
         >
-          {isChild && <span style={{ color: "var(--t-46)" }}>↳ </span>}
           {r.symbol}
-          {isChild && (
-            <span style={{ marginLeft: 6, fontSize: 9, color: "var(--t-46)" }}>CW</span>
-          )}
           {r.conflicting && (
             <span
               title="Conflicting metadata — quant withheld"
@@ -347,9 +344,12 @@ export function PersonalDashboard({
             </span>
           )}
         </td>
-        <td style={{ ...TD, color: "var(--t-60)" }}>{fmtPrice(r.ref)}</td>
+        <td style={{ ...TD, color: priceBandColor(r.ceiling, "ceiling") }}>{fmtPrice(r.ceiling)}</td>
+        <td style={{ ...TD, color: priceBandColor(r.floor, "floor") }}>{fmtPrice(r.floor)}</td>
+        <td style={{ ...TD, color: priceBandColor(r.ref, "reference") }}>{fmtPrice(r.ref)}</td>
+        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivBid)}</td>
         <td style={{ ...TD, color: priceColor(r.bid, pr) }}>{fmtPrice(r.bid)}</td>
-        <td style={{ ...TD, color: priceColor(r.ask, pr) }}>{fmtPrice(r.ask)}</td>
+        <td style={{ ...TD, color: "var(--t-85)" }}>{fmtIV(r.ivTrade)}</td>
         <td style={{ ...TD, color: priceColor(r.last, pr) }}>{fmtPrice(r.last)}</td>
         <td style={{ ...TD, color: chg.color }}>
           {r.last !== null && r.ref !== null
@@ -357,13 +357,12 @@ export function PersonalDashboard({
             : DASH}
         </td>
         <td style={{ ...TD, color: chg.color }}>{chg.text}</td>
+        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivAsk)}</td>
+        <td style={{ ...TD, color: priceColor(r.ask, pr) }}>{fmtPrice(r.ask)}</td>
         <td style={{ ...TD, color: "var(--t-50)" }}>{fmtVol(r.vol)}</td>
         <td style={{ ...TD, color: "var(--t-60)" }}>{fmtPrice(r.strike)}</td>
         <td style={{ ...TD, color: "var(--t-50)" }}>{fmtRatio(r.ratio)}</td>
         <td style={{ ...TD, color: "var(--t-46)" }}>{r.dteText}</td>
-        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivBid)}</td>
-        <td style={{ ...TD, color: "var(--t-85)" }}>{fmtIV(r.ivTrade)}</td>
-        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivAsk)}</td>
         <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
       </tr>
     );
@@ -422,40 +421,44 @@ export function PersonalDashboard({
       )}
 
       {(stockRows.length > 0 || cwRows.length > 0) && (
+        <div className="watchlist-table-scroll">
         <table
-          className="mono grid-lined"
+          className="mono grid-lined watchlist-table"
           style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}
         >
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
               <PinHeader />
-              <SortHeader label="SYMBOL" align="left" mark={view.sortMark("symbol")} onClick={() => view.toggleSort("symbol")} />
+              <SortHeader label="SYMBOL" align="left" width={symbolWidth} mark={view.sortMark("symbol")} onClick={() => view.toggleSort("symbol")} />
+              <SortHeader label="CEIL" mark={view.sortMark("ceiling")} onClick={() => view.toggleSort("ceiling")} />
+              <SortHeader label="FLOOR" mark={view.sortMark("floor")} onClick={() => view.toggleSort("floor")} />
               <SortHeader label="REF" mark={view.sortMark("ref")} onClick={() => view.toggleSort("ref")} />
+              <SortHeader label="IV BID" mark={view.sortMark("ivBid")} onClick={() => view.toggleSort("ivBid")} />
               <SortHeader label="BID" mark={view.sortMark("bid")} onClick={() => view.toggleSort("bid")} />
-              <SortHeader label="ASK" mark={view.sortMark("ask")} onClick={() => view.toggleSort("ask")} />
+              <SortHeader label="IV TRD" mark={view.sortMark("ivTrade")} onClick={() => view.toggleSort("ivTrade")} />
               <SortHeader label="TRD" mark={view.sortMark("trd")} onClick={() => view.toggleSort("trd")} />
               <PlainHeader label="+/-" />
-              <SortHeader label="CHG%" mark={view.sortMark("chg")} onClick={() => view.toggleSort("chg")} />
+              <SortHeader label="%CHG" mark={view.sortMark("chg")} onClick={() => view.toggleSort("chg")} />
+              <SortHeader label="IV ASK" mark={view.sortMark("ivAsk")} onClick={() => view.toggleSort("ivAsk")} />
+              <SortHeader label="ASK" mark={view.sortMark("ask")} onClick={() => view.toggleSort("ask")} />
               <SortHeader label="VOLUME" mark={view.sortMark("vol")} onClick={() => view.toggleSort("vol")} />
               <SortHeader label="STRIKE" mark={view.sortMark("strike")} onClick={() => view.toggleSort("strike")} />
               <SortHeader label="RATIO" mark={view.sortMark("ratio")} onClick={() => view.toggleSort("ratio")} />
               <SortHeader label="DTE" mark={view.sortMark("dte")} onClick={() => view.toggleSort("dte")} />
-              <SortHeader label="IV BID" mark={view.sortMark("ivBid")} onClick={() => view.toggleSort("ivBid")} />
-              <SortHeader label="IV TRD" mark={view.sortMark("ivTrade")} onClick={() => view.toggleSort("ivTrade")} />
-              <SortHeader label="IV ASK" mark={view.sortMark("ivAsk")} onClick={() => view.toggleSort("ivAsk")} />
               <DismissHeader />
             </tr>
           </thead>
           <tbody>
             {parents.map((p) => (
               <Fragment key={p.symbol}>
-                {renderRow(p, false)}
-                {childrenOf(p.symbol).map((c) => renderRow(c, true))}
+                {renderRow(p)}
+                {childrenOf(p.symbol).map(renderRow)}
               </Fragment>
             ))}
-            {orphanCws.map((c) => renderRow(c, false))}
+            {orphanCws.map(renderRow)}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

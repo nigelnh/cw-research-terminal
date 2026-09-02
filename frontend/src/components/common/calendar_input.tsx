@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useFixedPopover } from "./filter_popover";
 
 /**
  * Grid Terminal date picker ("Direction C"): a read-only mm/dd/yyyy field + a
@@ -39,18 +40,18 @@ export function CalendarInput({
     return { y: now.getFullYear(), m: now.getMonth() + 1 };
   });
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const calendarRef = useRef<HTMLDivElement | null>(null);
+  const position = useFixedPopover(open, boxRef, calendarRef, 202);
 
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
+    const onDoc = (e: PointerEvent) => {
       if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDoc);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDoc);
     };
   }, [open]);
 
@@ -78,19 +79,39 @@ export function CalendarInput({
   })();
 
   return (
-    <div ref={boxRef} style={{ position: "relative", flex: 1 }}>
+    <div ref={boxRef} style={{ position: "relative", flex: "1 1 0", minWidth: 0 }}
+      onKeyDown={(e) => {
+        if (open && e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(false);
+          inputRef.current?.focus({ preventScroll: true });
+        }
+      }}>
       <input
+        ref={inputRef}
         type="text"
         readOnly
         aria-label={ariaLabel}
+        aria-expanded={open}
+        aria-haspopup="dialog"
         value={isoToDisplay(value)}
         placeholder="mm/dd/yyyy"
         onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((current) => !current);
+          }
+        }}
         style={{
           width: "100%",
           background: "var(--bg)",
           border: "1px solid var(--border-26)",
-          padding: "4px 24px 4px 8px",
+          padding: "4px 38px 4px 8px",
+          minWidth: 0,
+          height: 28,
+          boxSizing: "border-box",
           fontSize: 11,
           color: "var(--t-85)",
           fontFamily: "inherit",
@@ -103,6 +124,7 @@ export function CalendarInput({
         onClick={() => setOpen((o) => !o)}
         title="Pick date"
         aria-label={`${ariaLabel} — open calendar`}
+        aria-expanded={open}
         style={{
           position: "absolute",
           right: 4,
@@ -146,16 +168,17 @@ export function CalendarInput({
       )}
       {open && (
         <div
+          ref={calendarRef}
+          role="dialog"
+          aria-label={`${ariaLabel} calendar`}
+          className="calendar-popover"
           style={{
-            position: "absolute",
-            left: 0,
-            top: "100%",
-            marginTop: 4,
+            ...position,
             zIndex: 70,
             background: "var(--panel-2)",
             border: "1px solid var(--border-30)",
             padding: 10,
-            width: 190,
+            overflowY: "auto",
             boxShadow: "0 8px 20px rgba(0,0,0,0.5)",
           }}
         >
@@ -192,7 +215,10 @@ export function CalendarInput({
                   onClick={() => {
                     onChange(toIso(ym.y, ym.m, d));
                     setOpen(false);
+                    inputRef.current?.focus({ preventScroll: true });
                   }}
+                  aria-label={toIso(ym.y, ym.m, d)}
+                  aria-pressed={d === selDay}
                   style={{
                     height: 18,
                     border: "none",

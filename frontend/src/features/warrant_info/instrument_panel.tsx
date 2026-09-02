@@ -6,7 +6,7 @@ import type { CorporateActionItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
 import { TradingChart } from "@/components/common/trading_chart";
-import { DASH, fmtChg, fmtIV, fmtPrice, fmtRatio, fmtVol, dteDisplay } from "@/components/common/grid_table";
+import { DASH, fmtChg, fmtIV, fmtPrice, fmtRatio, fmtVol, dteDisplay, priceBandColor } from "@/components/common/grid_table";
 
 const VN_TZ = "Asia/Ho_Chi_Minh";
 
@@ -157,7 +157,7 @@ function TimeSalesPanel({ live }: { live: boolean }) {
         <span style={{ borderRight: "1px solid var(--border-row)", paddingRight: 4 }}>TIME</span>
         <span style={TS_HEAD}>TRD</span>
         <span style={TS_HEAD}>+/-</span>
-        <span style={TS_HEAD}>CHG%</span>
+        <span style={TS_HEAD}>%CHG</span>
         <span style={TS_HEAD}>VOL</span>
         <span style={{ textAlign: "right" }}>B/S</span>
       </div>
@@ -388,11 +388,11 @@ export function InstrumentPanel({
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", gap: 22, minHeight: 0 }}>
           <div className="mono" style={{ width: 220, flexShrink: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", marginBottom: 10 }}>
-              <MetricRow label="REF" value={fmtPrice(ref)} color="var(--t-60)" size={11} pad="3px 0" />
+              <MetricRow label="REF" value={fmtPrice(ref)} color={priceBandColor(ref, "reference")} size={11} pad="3px 0" />
               <MetricRow label="BID · ASK" value={bidAsk} color="var(--t-70)" size={11} pad="3px 0" />
               <MetricRow label="TRD" value={fmtPrice(last)} color={trdColor} size={11} pad="3px 0" />
               <MetricRow label="+/-" value={chgAmt} color={chgAmtColor} size={11} pad="3px 0" />
-              <MetricRow label="CHG%" value={chg.text} color={chg.color} size={11} pad="3px 0" />
+              <MetricRow label="%CHG" value={chg.text} color={chg.color} size={11} pad="3px 0" />
               {!isCW && !isIndex && (
                 <>
                   <MetricRow label="VOLUME" value={fmtVol(q?.totalVolume)} color="var(--t-60)" size={11} pad="3px 0" />

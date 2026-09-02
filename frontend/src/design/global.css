@@ -220,3 +220,91 @@ select:focus-visible,
 ::selection {
   background: color-mix(in srgb, var(--accent) 25%, transparent);
 }
+
+/* Targeted table/filter refinements; retain the Grid Terminal type and palette. */
+.watchlist-table-scroll { max-width: 100%; overflow-x: auto; }
+.watchlist-table { min-width: 1100px; }
+.watchlist-table th, .watchlist-table td { white-space: nowrap; }
+.filter-anchor { margin-left: auto; }
+.filter-trigger {
+  padding: 4px 10px;
+  border: 1px solid var(--border-30);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--t-75);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10.5px;
+}
+.filter-trigger.is-active { background: var(--panel-active); }
+.filter-panel {
+  z-index: 55;
+  padding: 12px;
+  overflow-y: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--border-30);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.filter-columns, .filter-dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.filter-column { min-width: 0; }
+.filter-column:first-child { padding-right: 12px; }
+.filter-column + .filter-column {
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.filter-label {
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--t-60);
+  margin-bottom: 7px;
+}
+.filter-search {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 4px 7px;
+  margin-bottom: 5px;
+  background: var(--bg);
+  color: var(--t-85);
+  border: 1px solid var(--border-26);
+  border-radius: 0;
+  font: 11px var(--font-mono);
+}
+.filter-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  font-size: 11px;
+  color: var(--t-80);
+  cursor: pointer;
+}
+.filter-check input {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  accent-color: var(--accent);
+}
+.filter-check span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-all { margin-bottom: 3px; border-bottom: 1px solid var(--border-mid); padding-bottom: 4px; }
+.filter-options { max-height: 144px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.filter-empty { display: block; padding: 5px 0; color: var(--t-46); font-size: 10.5px; }
+.filter-date-section { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 9px; }
+.filter-date-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.filter-date-heading .filter-label { margin-bottom: 0; }
+.filter-clear {
+  padding: 3px 7px;
+  border: 1px solid var(--border-26);
+  border-radius: 2px;
+  background: var(--panel-active);
+  color: var(--t-80);
+  font: 10px var(--font-mono);
+  cursor: pointer;
+}
+.filter-dates { gap: 12px; }
+.filter-dates > div { min-width: 0; }
+.filter-date-label { color: var(--t-50); font-size: 10px; margin-bottom: 4px; }
