@@ -54,23 +54,24 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     expect(html).not.toContain("CFPT2602");
   });
 
-  it("5. Stock table renders the stock column set, never CW-only columns", () => {
+  it("5. Watchlist renders one unified table on the shared column schema", () => {
     const html = renderMarkup(<PersonalDashboard />);
-    // the CW table follows the stock table; scope to the stock table region
-    const stockRegion = html.split("UND.")[0];
 
-    expect(stockRegion).toContain("SYMBOL");
-    expect(stockRegion).toContain("REF");
-    expect(stockRegion).toContain("BID");
-    expect(stockRegion).toContain("ASK");
-    expect(stockRegion).toContain("TRD");
-    expect(stockRegion).toContain("CHG%");
-    expect(stockRegion).toContain("VOLUME");
-    expect(stockRegion).toContain("FRN BUY");
+    // one shared header row covers stock parents and CW children
+    expect(html).toContain("SYMBOL");
+    expect(html).toContain("REF");
+    expect(html).toContain("BID");
+    expect(html).toContain("ASK");
+    expect(html).toContain("TRD");
+    expect(html).toContain("CHG%");
+    expect(html).toContain("VOLUME");
+    expect(html).toContain("STRIKE");
+    expect(html).toContain("RATIO");
+    expect(html).toContain("IV BID");
 
-    expect(stockRegion).not.toContain("STRIKE");
-    expect(stockRegion).not.toContain("RATIO");
-    expect(stockRegion).not.toContain("IV BID");
+    // redundant CW-only columns were merged away
+    expect(html).not.toContain("UND.PRC");
+    expect(html).not.toContain("FRN BUY");
   });
 
   it("6. Missing exercise ratio does not default to 1:1 or 1.0", () => {

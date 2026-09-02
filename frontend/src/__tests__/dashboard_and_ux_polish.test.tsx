@@ -36,17 +36,19 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     resetWatchlistMemoryForTests(fresh);
   });
 
-  it("1. Watchlist renders two mono tables with the Grid Terminal column sets", () => {
+  it("1. Watchlist renders one unified table with the shared Grid Terminal column schema", () => {
     const html = renderMarkup(<PersonalDashboard />);
     expect(html).toContain("Watchlist");
-    // stock table — incl. the absolute-change (+/-) column between TRD and CHG%
+    // one shared schema for stock parents and CW children — incl. the absolute-change (+/-)
+    // column between TRD and CHG%
     expect(html).toContain("SYMBOL");
     expect(html).toContain("+/-");
-    expect(html).toContain("FRN ROOM");
-    // CW table
-    expect(html).toContain("UND.PRC");
+    expect(html).toContain("VOLUME");
     expect(html).toContain("STRIKE");
     expect(html).toContain("IV TRD");
+    // redundant CW-only columns were merged away in the unified table
+    expect(html).not.toContain("UND.PRC");
+    expect(html).not.toContain("FRN ROOM");
     // the market-overview index strip was removed in the v3 design
     expect(html).not.toContain("VNXALL");
     expect(html).not.toContain("HNXUPCOM");
