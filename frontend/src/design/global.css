@@ -171,6 +171,17 @@ select:focus-visible,
   background: color-mix(in srgb, var(--accent) 5%, var(--panel));
 }
 
+/* Grid Terminal — dense vertical cell rules on data tables ("Direction C"). Applied
+   via a class so consumer tables don't have to carry border-right on every <td>. */
+.grid-lined th,
+.grid-lined td {
+  border-right: 1px solid var(--border-row);
+}
+.grid-lined th:last-child,
+.grid-lined td:last-child {
+  border-right: none;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;

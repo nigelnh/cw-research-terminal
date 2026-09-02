@@ -58,15 +58,29 @@ const FIELDS: SortFields<RegistryRow> = {
 
 const TD: React.CSSProperties = { padding: "0 8px", textAlign: "right" };
 
+const STOCK_FIELDS: SortFields<{ symbol: string }> = { symbol: (r) => r.symbol };
+
 export function ResearchUniverse({
   selectedSymbol = null,
   onSelectSymbol,
   filter = "",
 }: ResearchUniverseProps) {
   const setSelected = onSelectSymbol ?? (() => {});
-  const { isInWatchlist } = useWatchlist();
+  const { isInWatchlist, addToWatchlist } = useWatchlist();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
   const hiddenRows = useHiddenRows();
+  const stockHidden = useHiddenRows();
+  const addCw = (r: RegistryRow) =>
+    addToWatchlist({
+      symbol: r.symbol,
+      instrumentType: "CW",
+      underlyingSymbol: r.underlying,
+      issuer: r.issuer,
+      strikePrice: r.strike,
+      exerciseRatio: r.ratio,
+      maturityDate: r.maturity,
+      lastTradingDate: r.lastTradingDate,
+    });
 
   const term = filter.trim().toUpperCase().replace(/^\//, "").trim();
   const browseAll = term.length > 0 || isFilterActive(filterState);
@@ -128,6 +142,17 @@ export function ResearchUniverse({
 
   const grid = useSortPin(rows, FIELDS);
 
+  // STOCKS column — the distinct underlyings backing the discovered CWs.
+  const stockRows = useMemo(
+    () =>
+      underlyingOptions
+        .filter((s) => !stockHidden.isHidden(s))
+        .filter((s) => !term || s.toUpperCase().includes(term))
+        .map((symbol) => ({ symbol })),
+    [underlyingOptions, stockHidden, term],
+  );
+  const stockGrid = useSortPin(stockRows, STOCK_FIELDS);
+
   return (
     <div>
       <div
@@ -159,74 +184,174 @@ export function ResearchUniverse({
           : `${activeCount} verified · type in the header bar to filter across ~530 discovered`}
       </p>
 
-      <table className="mono" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-        <thead>
-          <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
-            <PinHeader />
-            <SortHeader label="SYMBOL" align="left" mark={grid.sortMark("symbol")} onClick={() => grid.toggleSort("symbol")} />
-            <SortHeader label="ISSUER" align="left" mark={grid.sortMark("issuer")} onClick={() => grid.toggleSort("issuer")} />
-            <SortHeader label="UNDERLYING" align="left" mark={grid.sortMark("und")} onClick={() => grid.toggleSort("und")} />
-            <SortHeader label="STRIKE" mark={grid.sortMark("strike")} onClick={() => grid.toggleSort("strike")} />
-            <SortHeader label="RATIO" mark={grid.sortMark("ratio")} onClick={() => grid.toggleSort("ratio")} />
-            <SortHeader label="MATURITY" mark={grid.sortMark("maturity")} onClick={() => grid.toggleSort("maturity")} />
-            <SortHeader label="DTE" mark={grid.sortMark("dte")} onClick={() => grid.toggleSort("dte")} />
-            <SortHeader label="STATUS" mark={grid.sortMark("status")} onClick={() => grid.toggleSort("status")} />
-            <DismissHeader />
-          </tr>
-        </thead>
-        <tbody>
-          {isLoading ? (
-            <tr>
-              <td colSpan={10} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
-                Loading research registry…
-              </td>
-            </tr>
-          ) : isError ? (
-            <tr>
-              <td colSpan={10} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--down)" }}>
-                Could not load the research registry. Retry shortly.
-              </td>
-            </tr>
-          ) : grid.ordered.length === 0 ? (
-            <tr>
-              <td colSpan={10} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
-                No instruments match.
-              </td>
-            </tr>
-          ) : (
-            grid.ordered.map((r) => {
-              const selected = selectedSymbol === r.symbol;
-              return (
-                <tr
-                  key={r.symbol}
-                  tabIndex={0}
-                  onClick={() => setSelected(r.symbol)}
-                  onKeyDown={(e) => e.key === "Enter" && setSelected(r.symbol)}
-                  style={{
-                    cursor: "pointer",
-                    height: 27,
-                    background: selected ? "var(--panel-3)" : "transparent",
-                    borderBottom: "1px solid var(--border-row)",
-                  }}
-                >
-                  <PinCell symbol={r.symbol} fill={grid.pinFill(r.symbol)} onToggle={grid.togglePin} />
-                  <td style={{ padding: "0 8px", color: "var(--accent)" }}>{r.symbol}</td>
-                  <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.issuer ?? DASH}</td>
-                  <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.underlying ?? DASH}</td>
-                  <td style={{ ...TD, color: "var(--t-80)" }}>{fmtPrice(r.strike)}</td>
-                  <td style={{ ...TD, color: "var(--t-50)" }}>{fmtRatio(r.ratio)}</td>
-                  <td style={{ ...TD, color: "var(--t-50)" }}>{r.maturity ?? DASH}</td>
-                  <td style={{ ...TD, color: "var(--t-46)" }}>{r.dteText}</td>
-                  <td style={{ ...TD, color: r.tracked ? "var(--accent)" : "var(--t-46)" }}>
-                    {r.tracked ? "TRACKED" : "REFERENCE"}
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
+            COVERED WARRANTS
+          </div>
+          <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
+                <PinHeader />
+                <SortHeader label="SYMBOL" align="left" mark={grid.sortMark("symbol")} onClick={() => grid.toggleSort("symbol")} />
+                <SortHeader label="ISSUER" align="left" mark={grid.sortMark("issuer")} onClick={() => grid.toggleSort("issuer")} />
+                <SortHeader label="UNDERLYING" align="left" mark={grid.sortMark("und")} onClick={() => grid.toggleSort("und")} />
+                <SortHeader label="STRIKE" mark={grid.sortMark("strike")} onClick={() => grid.toggleSort("strike")} />
+                <SortHeader label="RATIO" mark={grid.sortMark("ratio")} onClick={() => grid.toggleSort("ratio")} />
+                <SortHeader label="MATURITY" mark={grid.sortMark("maturity")} onClick={() => grid.toggleSort("maturity")} />
+                <SortHeader label="DTE" mark={grid.sortMark("dte")} onClick={() => grid.toggleSort("dte")} />
+                <SortHeader label="STATUS" mark={grid.sortMark("status")} onClick={() => grid.toggleSort("status")} />
+                <th style={{ width: 20, padding: "5px 4px" }} aria-hidden />
+                <DismissHeader />
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr>
+                  <td colSpan={11} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
+                    Loading research registry…
                   </td>
-                  <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
                 </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
+              ) : isError ? (
+                <tr>
+                  <td colSpan={11} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--down)" }}>
+                    Could not load the research registry. Retry shortly.
+                  </td>
+                </tr>
+              ) : grid.ordered.length === 0 ? (
+                <tr>
+                  <td colSpan={11} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
+                    No instruments match.
+                  </td>
+                </tr>
+              ) : (
+                grid.ordered.map((r) => {
+                  const selected = selectedSymbol === r.symbol;
+                  return (
+                    <tr
+                      key={r.symbol}
+                      tabIndex={0}
+                      onClick={() => setSelected(r.symbol)}
+                      onKeyDown={(e) => e.key === "Enter" && setSelected(r.symbol)}
+                      style={{
+                        cursor: "pointer",
+                        height: 27,
+                        background: selected ? "var(--panel-3)" : "transparent",
+                        borderBottom: "1px solid var(--border-row)",
+                      }}
+                    >
+                      <PinCell symbol={r.symbol} fill={grid.pinFill(r.symbol)} onToggle={grid.togglePin} />
+                      <td style={{ padding: "0 8px", color: "var(--accent)" }}>{r.symbol}</td>
+                      <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.issuer ?? DASH}</td>
+                      <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.underlying ?? DASH}</td>
+                      <td style={{ ...TD, color: "var(--t-80)" }}>{fmtPrice(r.strike)}</td>
+                      <td style={{ ...TD, color: "var(--t-50)" }}>{fmtRatio(r.ratio)}</td>
+                      <td style={{ ...TD, color: "var(--t-50)" }}>{r.maturity ?? DASH}</td>
+                      <td style={{ ...TD, color: "var(--t-46)" }}>{r.dteText}</td>
+                      <td style={{ ...TD, color: r.tracked ? "var(--accent)" : "var(--t-46)" }}>
+                        {r.tracked ? "TRACKED" : "REFERENCE"}
+                      </td>
+                      <AddCell symbol={r.symbol} tracked={r.tracked} onAdd={() => addCw(r)} />
+                      <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ width: 220, flexShrink: 0 }}>
+          <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
+            STOCKS
+            <HiddenNote count={stockHidden.count} onReset={stockHidden.reset} />
+          </div>
+          <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
+                <PinHeader />
+                <SortHeader label="SYMBOL" align="left" mark={stockGrid.sortMark("symbol")} onClick={() => stockGrid.toggleSort("symbol")} />
+                <th style={{ width: 20, padding: "5px 4px" }} aria-hidden />
+                <DismissHeader />
+              </tr>
+            </thead>
+            <tbody>
+              {stockGrid.ordered.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ padding: "24px 0", textAlign: "center", fontSize: 11, color: "var(--t-46)" }}>
+                    —
+                  </td>
+                </tr>
+              ) : (
+                stockGrid.ordered.map((s) => {
+                  const selected = selectedSymbol === s.symbol;
+                  return (
+                    <tr
+                      key={s.symbol}
+                      tabIndex={0}
+                      onClick={() => setSelected(s.symbol)}
+                      onKeyDown={(e) => e.key === "Enter" && setSelected(s.symbol)}
+                      style={{
+                        cursor: "pointer",
+                        height: 27,
+                        background: selected ? "var(--panel-3)" : "transparent",
+                        borderBottom: "1px solid var(--border-row)",
+                      }}
+                    >
+                      <PinCell symbol={s.symbol} fill={stockGrid.pinFill(s.symbol)} onToggle={stockGrid.togglePin} />
+                      <td style={{ padding: "0 8px", color: "var(--accent)" }}>{s.symbol}</td>
+                      <AddCell
+                        symbol={s.symbol}
+                        tracked={isInWatchlist(s.symbol)}
+                        onAdd={() => addToWatchlist({ symbol: s.symbol, instrumentType: "STOCK" })}
+                      />
+                      <DismissCell symbol={s.symbol} onDismiss={stockHidden.hide} />
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
+  );
+}
+
+/** Trailing "+" cell — adds the row's symbol to the watchlist. */
+function AddCell({
+  symbol,
+  tracked,
+  onAdd,
+}: {
+  symbol: string;
+  tracked: boolean;
+  onAdd: () => void;
+}) {
+  return (
+    <td style={{ padding: "0 6px", textAlign: "center", width: 20 }}>
+      <button
+        type="button"
+        disabled={tracked}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAdd();
+        }}
+        title={tracked ? `${symbol} is on your watchlist` : `Add ${symbol} to watchlist`}
+        aria-label={tracked ? `${symbol} already on watchlist` : `Add ${symbol} to watchlist`}
+        className="focus-ring"
+        style={{
+          background: "none",
+          border: "none",
+          cursor: tracked ? "default" : "pointer",
+          padding: 2,
+          lineHeight: 1,
+          fontSize: 12,
+          color: tracked ? "var(--t-40)" : "var(--accent)",
+        }}
+      >
+        +
+      </button>
+    </td>
   );
 }
