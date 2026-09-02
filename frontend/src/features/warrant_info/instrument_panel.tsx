@@ -6,9 +6,10 @@ import type { CorporateActionItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
 import { TradingChart } from "@/components/common/trading_chart";
-import { DASH, fmtChg, fmtIV, fmtPrice, fmtRatio, fmtVol, dteDisplay, priceBandColor } from "@/components/common/grid_table";
+import { DASH, fmtIV, fmtPrice, dteDisplay } from "@/components/common/grid_table";
 
-const VN_TZ = "Asia/Ho_Chi_Minh";
+import { QUOTE_COLUMNS, quoteCell, type QuoteTableValues } from "@/components/common/quote_columns";
+import { useWatchlistLayout } from "@/components/common/watchlist_layout";
 
 interface InstrumentPanelProps {
   instrument: SelectedInstrumentView | null;
@@ -21,30 +22,6 @@ interface InstrumentPanelProps {
 }
 
 /* ---------------------------------------------------------------- helpers */
-
-function useTick(active: boolean, ms = 1000): number {
-  const [t, setT] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const id = window.setInterval(() => setT(Date.now()), ms);
-    return () => window.clearInterval(id);
-  }, [active, ms]);
-  return t;
-}
-
-function asOfText(live: boolean, quoteAsOf: string | null | undefined, nowTick: number): string {
-  const d = live ? new Date(nowTick) : quoteAsOf ? new Date(quoteAsOf) : null;
-  if (!d || Number.isNaN(d.getTime())) return DASH;
-  const mon = new Intl.DateTimeFormat("en-US", { timeZone: VN_TZ, month: "short", day: "numeric" }).format(d);
-  const time = new Intl.DateTimeFormat("en-GB", {
-    timeZone: VN_TZ,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(d);
-  return `${mon} at ${time}`;
-}
 
 const LABEL: React.CSSProperties = { fontSize: 10, color: "var(--t-46)" };
 const MICRO: React.CSSProperties = { fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 };
@@ -73,7 +50,7 @@ function MetricRow({
         ...(top ? { borderTop: "1px solid var(--border-mid)", marginTop: 4, paddingTop: 8 } : null),
       }}
     >
-      <span style={LABEL}>{label}</span>
+      <span style={{ ...LABEL, fontSize: size }}>{label}</span>
       <span style={{ fontSize: size, color }}>{value}</span>
     </div>
   );
@@ -117,7 +94,7 @@ function corpEventDesc(ev: CorporateActionItem): string {
   return DASH;
 }
 
-const TS_COLS = "48px 44px 42px 50px 50px 24px";
+const TS_COLS = "1.1fr 1fr 1fr 1.15fr 1fr 0.65fr";
 
 const TS_HEAD: React.CSSProperties = {
   textAlign: "right",
@@ -134,15 +111,17 @@ function TimeSalesPanel({ live }: { live: boolean }) {
     <div
       className="mono"
       style={{
-        width: 340,
+        width: "25%",
+        minWidth: 230,
+        maxWidth: 340,
         flexShrink: 0,
         height: "100%",
-        border: "1px solid var(--border)",
-        padding: "8px 12px",
+        border: "1px solid var(--border-strong)",
+        padding: 0,
         overflowY: "auto",
       }}
     >
-      <div style={MICRO}>TRADED LOGS</div>
+      <div style={{ ...MICRO, margin: "8px 10px" }}>TRADED LOGS</div>
       <div
         style={{
           display: "grid",
@@ -150,7 +129,8 @@ function TimeSalesPanel({ live }: { live: boolean }) {
           gap: "2px 6px",
           fontSize: 9,
           color: "var(--t-42)",
-          paddingBottom: 4,
+          padding: "5px 8px",
+          borderTop: "1px solid var(--border-mid)",
           borderBottom: "1px solid var(--border-mid)",
         }}
       >
@@ -161,7 +141,7 @@ function TimeSalesPanel({ live }: { live: boolean }) {
         <span style={TS_HEAD}>VOL</span>
         <span style={{ textAlign: "right" }}>B/S</span>
       </div>
-      <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8, lineHeight: 1.5 }}>
+      <div style={{ fontSize: 10.5, color: "var(--t-42)", padding: "8px 10px", lineHeight: 1.5 }}>
         {live
           ? "Live trade feed not yet wired — pending backend support."
           : "Traded logs unavailable outside a live session."}
@@ -176,7 +156,6 @@ export function InstrumentPanel({
   instrument,
   dashRow,
   marketSessionActive,
-  context,
   onClose,
   initialTab = "overview",
 }: InstrumentPanelProps) {
@@ -194,7 +173,7 @@ export function InstrumentPanel({
     setAddNote(null);
   }, [symbol]);
 
-  const nowTick = useTick(marketSessionActive);
+  const tableLayout = useWatchlistLayout();
 
   // Daily bars, ~6 months of recent sessions. "1D" is the bar INTERVAL; the "6M"
   // timeframe is the client-side window over the Postgres-first `daily_1y` dataset
@@ -218,30 +197,7 @@ export function InstrumentPanel({
   const q = instrument?.quote ?? cw?.quote ?? dashRow?.quote;
   const an = dashRow?.analytics ?? null;
 
-  const last = q?.lastPrice ?? null;
   const ref = q?.referencePrice ?? null;
-  const pct = typeof q?.priceChangePercent === "number" ? q.priceChangePercent * 100 : null;
-  const chg = fmtChg(pct);
-  const bidAsk = `${fmtPrice(q?.bidPrice)} · ${fmtPrice(q?.askPrice)}`;
-  const chgAmtNum = last !== null && ref !== null ? last - ref : null;
-  const chgAmt =
-    chgAmtNum === null
-      ? DASH
-      : `${chgAmtNum > 0 ? "+" : chgAmtNum < 0 ? "−" : ""}${fmtPrice(Math.abs(chgAmtNum))}`;
-  const chgAmtColor =
-    chgAmtNum === null || chgAmtNum === 0
-      ? "var(--t-50)"
-      : chgAmtNum > 0
-      ? "var(--up)"
-      : "var(--down)";
-
-  const trdColor = (() => {
-    if (last === null || ref === null) return "var(--t-70)";
-    if (last > ref) return "var(--up)";
-    if (last < ref) return "var(--down)";
-    return "var(--flat)";
-  })();
-
   const pick = (k: string): number | null => {
     const fromCw = (cw as Record<string, unknown> | undefined)?.[k];
     if (typeof fromCw === "number") return fromCw;
@@ -305,6 +261,17 @@ export function InstrumentPanel({
     color: tab === id ? "var(--t-92)" : "var(--t-55)",
   });
 
+  const stats: QuoteTableValues = {
+    symbol: instrument?.symbol ?? "", ref, ceiling: q?.ceilingPrice ?? null, floor: q?.floorPrice ?? null,
+    bid: q?.bidPrice ?? null, ask: q?.askPrice ?? null, last: q?.lastPrice ?? null,
+    chgPct: typeof q?.priceChangePercent === "number" ? q.priceChangePercent * 100 : null,
+    vol: q?.totalVolume ?? null, strike: isCW ? instrument?.strikePrice ?? null : null,
+    ratio: isCW ? instrument?.exerciseRatio ?? null : null,
+    lastTradingDate: isCW ? instrument?.lastTradingDate ?? null : null,
+    ivBid: isCW ? pick("ivBid") : null, ivTrade: isCW ? pick("ivTrade") : null, ivAsk: isCW ? pick("ivAsk") : null,
+    dteText: isCW ? dteDisplay(instrument?.lastTradingDate, instrument?.maturityDate, an?.dte) : DASH,
+  };
+
   // No instrument selected -> render nothing. The AI assistant now lives entirely in the
   // draggable Orbit panel; Dashboard / Research reclaim the vertical space.
   if (!instrument) return null;
@@ -312,7 +279,7 @@ export function InstrumentPanel({
   return (
     <section
       style={{
-        height: "min(460px, 58vh)",
+        height: "min(410px, 58vh)",
         flexShrink: 0,
         borderTop: "1px solid var(--border-strong)",
         display: "flex",
@@ -386,42 +353,13 @@ export function InstrumentPanel({
       {/* OVERVIEW */}
       {hasInstrument && tab === "overview" && (
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", gap: 22, minHeight: 0 }}>
-          <div className="mono" style={{ width: 220, flexShrink: 0 }}>
-            <div style={{ display: "flex", flexDirection: "column", marginBottom: 10 }}>
-              <MetricRow label="REF" value={fmtPrice(ref)} color={priceBandColor(ref, "reference")} size={11} pad="3px 0" />
-              <MetricRow label="BID · ASK" value={bidAsk} color="var(--t-70)" size={11} pad="3px 0" />
-              <MetricRow label="TRD" value={fmtPrice(last)} color={trdColor} size={11} pad="3px 0" />
-              <MetricRow label="+/-" value={chgAmt} color={chgAmtColor} size={11} pad="3px 0" />
-              <MetricRow label="%CHG" value={chg.text} color={chg.color} size={11} pad="3px 0" />
-              {!isCW && !isIndex && (
-                <>
-                  <MetricRow label="VOLUME" value={fmtVol(q?.totalVolume)} color="var(--t-60)" size={11} pad="3px 0" />
-                  <MetricRow label="FRN BUY" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
-                  <MetricRow label="FRN SELL" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
-                  <MetricRow label="FRN ROOM" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
-                </>
-              )}
-              <MetricRow
-                label="AS OF"
-                value={asOfText(marketSessionActive, context?.quoteAsOf, nowTick)}
-                color="var(--t-50)"
-                size={11}
-                pad="3px 0"
-              />
-            </div>
-            {isCW && (
-              <div style={{ borderTop: "1px solid var(--border-mid)", paddingTop: 8 }}>
-                <MetricRow label="STRIKE" value={fmtPrice(instrument!.strikePrice)} size={11} pad="3px 0" />
-                <MetricRow label="RATIO" value={fmtRatio(instrument!.exerciseRatio)} size={11} pad="3px 0" />
-                <MetricRow label="MATURITY" value={instrument!.maturityDate ?? DASH} size={11} pad="3px 0" />
-                <MetricRow
-                  label="DTE"
-                  value={dteDisplay(instrument!.lastTradingDate, instrument!.maturityDate, an?.dte)}
-                  size={11}
-                  pad="3px 0"
-                />
-              </div>
-            )}
+          <div className="mono" style={{ width: 220, flexShrink: 0, overflowY: "auto" }}>
+            <div style={{ ...MICRO, marginBottom: 7 }}>STATS</div>
+            {tableLayout.columns.filter(key => key !== "symbol").map(key => {
+              const column = QUOTE_COLUMNS.find(c => c.key === key)!;
+              const cell = quoteCell(stats, key);
+              return <MetricRow key={key} label={column.label} value={cell.text} color={cell.color} size={11} pad="2px 0" />;
+            })}
             {conflicting && (
               <div
                 style={{
@@ -596,7 +534,8 @@ export function InstrumentPanel({
                         gap: "4px 8px",
                         fontSize: 9,
                         color: "var(--t-42)",
-                        paddingBottom: 4,
+                        padding: "5px 8px",
+          borderTop: "1px solid var(--border-mid)",
                         borderBottom: "1px solid var(--border-mid)",
                       }}
                     >
