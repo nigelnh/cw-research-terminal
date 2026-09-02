@@ -7,21 +7,17 @@
  *   - fmtChg(): signed percent -> { text, color } using the semantic market colours
  *   - priceColor(): HOSE ceiling / floor / reference bands for BID / ASK / TRD cells
  */
-import { Pin, MoreHorizontal } from "lucide-react";
-import { Popover } from "./ui";
 import React, { useCallback, useMemo, useState } from "react";
+import { daysUntil } from "@/domain/quant_display";
 
 /* --------------------------------------------------------------- formatters */
 
 export const DASH = "—";
 
 /** Grouped integer VND price. Missing -> "—" (never 0). */
-export function fmtPrice(v: number | null | undefined, kind?: string): string {
+export function fmtPrice(v: number | null | undefined): string {
   if (v === null || v === undefined || Number.isNaN(v)) return DASH;
-  return v.toLocaleString("en-US", {
-    minimumFractionDigits: kind === "INDEX" ? 2 : 0,
-    maximumFractionDigits: kind === "INDEX" ? 2 : 0,
-  });
+  return v.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
 /** Grouped integer volume. */
@@ -42,44 +38,30 @@ export function fmtRatio(v: number | null | undefined): string {
   return `${v}:1`;
 }
 
-/** Signed absolute change. Colour is supplementary, never the only direction signal. */
-export function fmtSigned(v: number | null | undefined, kind?: string): string {
-  if (v == null || !Number.isFinite(v)) return DASH;
-  return `${v > 0 ? "+" : v < 0 ? "−" : ""}${fmtPrice(Math.abs(v), kind)}`;
-}
-
-/** Calendar days to maturity in Vietnam; historical model DTE is shown separately. */
-export function maturityDays(
-  maturity: string | null | undefined,
-  now = new Date(),
-): number | null {
-  if (!maturity || !/^\d{4}-\d{2}-\d{2}$/.test(maturity.slice(0, 10)))
-    return null;
-  const today = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-  const end = Date.parse(maturity.slice(0, 10) + "T00:00:00Z");
-  const start = Date.parse(today + "T00:00:00Z");
-  return Number.isFinite(end) ? Math.round((end - start) / 86400000) : null;
-}
-
+/**
+ * Days-to-expiry as a BARE number (no "d" suffix, per the design spec). A backend-computed
+ * DTE (analytics group) wins; otherwise count VN-calendar days to the last trading / maturity
+ * date. Past dates -> "EXP".
+ */
 export function dteDisplay(
-  _last: string | null | undefined,
-  maturity: string | null | undefined,
-  _modelDte?: number | null,
+  lastTradingDate: string | null | undefined,
+  maturityDate: string | null | undefined,
+  backendDte?: number | null,
 ): string {
-  const n = maturityDays(maturity);
-  return n === null ? DASH : n < 0 ? "EXP" : String(n);
+  if (typeof backendDte === "number") return backendDte >= 0 ? String(backendDte) : "EXP";
+  const n = daysUntil(lastTradingDate || maturityDate);
+  if (n === null) return DASH;
+  return n >= 0 ? String(n) : "EXP";
 }
+
+/** Numeric DTE for sorting. */
 export function dteNumber(
-  _last: string | null | undefined,
-  maturity: string | null | undefined,
-  _modelDte?: number | null,
+  lastTradingDate: string | null | undefined,
+  maturityDate: string | null | undefined,
+  backendDte?: number | null,
 ): number | null {
-  return maturityDays(maturity);
+  if (typeof backendDte === "number") return backendDte;
+  return daysUntil(lastTradingDate || maturityDate);
 }
 
 /* ------------------------------------------------------------------ colours */
@@ -94,15 +76,11 @@ export const MARKET_COLOR = {
 } as const;
 
 /** Signed percent (already a percent number, e.g. -0.45) -> display text + colour. */
-export function fmtChg(pct: number | null | undefined): {
-  text: string;
-  color: string;
-} {
+export function fmtChg(pct: number | null | undefined): { text: string; color: string } {
   if (pct === null || pct === undefined || Number.isNaN(pct)) {
     return { text: "—", color: "var(--t-46)" };
   }
-  const color =
-    pct > 0 ? MARKET_COLOR.up : pct < 0 ? MARKET_COLOR.down : MARKET_COLOR.flat;
+  const color = pct > 0 ? MARKET_COLOR.up : pct < 0 ? MARKET_COLOR.down : MARKET_COLOR.flat;
   return { text: `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`, color };
 }
 
@@ -128,22 +106,12 @@ export function priceColor(
   v: number | null | undefined,
   ref: number | null | undefined | PriceColorRef,
 ): string {
-  const r: PriceColorRef =
-    typeof ref === "object" && ref !== null
-      ? ref
-      : { ref: ref as number | null };
+  const r: PriceColorRef = typeof ref === "object" && ref !== null ? ref : { ref: ref as number | null };
   const refNum = r.ref;
-  if (
-    v === null ||
-    v === undefined ||
-    Number.isNaN(v) ||
-    refNum === null ||
-    refNum === undefined
-  ) {
+  if (v === null || v === undefined || Number.isNaN(v) || refNum === null || refNum === undefined) {
     return MARKET_COLOR.null;
   }
-  if (typeof r.ceiling === "number" && v >= r.ceiling)
-    return MARKET_COLOR.ceiling;
+  if (typeof r.ceiling === "number" && v >= r.ceiling) return MARKET_COLOR.ceiling;
   if (typeof r.floor === "number" && v <= r.floor) return MARKET_COLOR.floor;
   const ceiling = refNum * 1.07;
   const floor = refNum * 0.93;
@@ -161,10 +129,7 @@ export interface SortSpec {
   key: string;
   dir: SortDir;
 }
-export type SortFields<T> = Record<
-  string,
-  (row: T) => string | number | null | undefined
->;
+export type SortFields<T> = Record<string, (row: T) => string | number | null | undefined>;
 
 export interface SortPinApi<T> {
   ordered: T[];
@@ -177,9 +142,7 @@ export interface SortPinApi<T> {
 }
 
 function isNullish(v: unknown): boolean {
-  return (
-    v === null || v === undefined || (typeof v === "number" && Number.isNaN(v))
-  );
+  return v === null || v === undefined || (typeof v === "number" && Number.isNaN(v));
 }
 
 /**
@@ -190,8 +153,7 @@ function isNullish(v: unknown): boolean {
 export function useSortPin<T>(
   rows: T[],
   fields: SortFields<T>,
-  keyOf: (row: T) => string = (r) =>
-    (r as unknown as { symbol: string }).symbol,
+  keyOf: (row: T) => string = (r) => (r as unknown as { symbol: string }).symbol,
 ): SortPinApi<T> {
   const [sort, setSort] = useState<SortSpec | null>(null);
   const [pinned, setPinned] = useState<string[]>([]);
@@ -206,9 +168,7 @@ export function useSortPin<T>(
 
   const togglePin = useCallback((symbol: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    setPinned((cur) =>
-      cur.includes(symbol) ? cur.filter((s) => s !== symbol) : [...cur, symbol],
-    );
+    setPinned((cur) => (cur.includes(symbol) ? cur.filter((s) => s !== symbol) : [...cur, symbol]));
   }, []);
 
   const ordered = useMemo(() => {
@@ -239,17 +199,12 @@ export function useSortPin<T>(
   }, [rows, fields, sort, pinned, keyOf]);
 
   const sortMark = useCallback(
-    (key: string) =>
-      !sort || sort.key !== key ? "" : sort.dir === "asc" ? "▲" : "▼",
+    (key: string) => (!sort || sort.key !== key ? "" : sort.dir === "asc" ? "▲" : "▼"),
     [sort],
   );
-  const isPinned = useCallback(
-    (symbol: string) => pinned.includes(symbol),
-    [pinned],
-  );
+  const isPinned = useCallback((symbol: string) => pinned.includes(symbol), [pinned]);
   const pinFill = useCallback(
-    (symbol: string) =>
-      pinned.includes(symbol) ? "var(--accent)" : "transparent",
+    (symbol: string) => (pinned.includes(symbol) ? "var(--accent)" : "transparent"),
     [pinned],
   );
 
@@ -280,19 +235,31 @@ export function SortHeader({
   align?: "left" | "right";
   width?: number | string;
 }) {
+  // Fixed-width marker slot so the header never shifts when a sort mark appears.
+  // Right-aligned columns put it before the label, left-aligned after.
+  const slot = (
+    <span style={{ display: "inline-block", width: 10, textAlign: "center", fontSize: "9px" }}>
+      {mark}
+    </span>
+  );
   return (
     <th
-      aria-sort={
-        mark === "▲" ? "ascending" : mark === "▼" ? "descending" : "none"
-      }
-      style={{ textAlign: align, width }}
+      onClick={onClick}
+      role="columnheader"
+      aria-sort={mark === "▲" ? "ascending" : mark === "▼" ? "descending" : "none"}
+      style={{ ...HEAD_STYLE, textAlign: align, width }}
     >
-      <button type="button" className="sort-button" onClick={onClick}>
-        {label}
-        <span className="sort-mark" aria-hidden="true">
-          {mark || "↕"}
-        </span>
-      </button>
+      {align === "right" ? (
+        <>
+          {slot}
+          {label}
+        </>
+      ) : (
+        <>
+          {label}
+          {slot}
+        </>
+      )}
     </th>
   );
 }
@@ -308,9 +275,7 @@ export function PlainHeader({
   width?: number | string;
 }) {
   return (
-    <th style={{ ...HEAD_STYLE, cursor: "default", textAlign: align, width }}>
-      {label}
-    </th>
+    <th style={{ ...HEAD_STYLE, cursor: "default", textAlign: align, width }}>{label}</th>
   );
 }
 
@@ -323,22 +288,26 @@ export function PinCell({
   fill: string;
   onToggle: (symbol: string, e?: React.MouseEvent) => void;
 }) {
-  const pinned = fill !== "transparent";
   return (
-    <td className="row-control">
+    <td style={{ padding: "0 4px", textAlign: "center", width: 20 }}>
       <button
         type="button"
-        className="icon-btn"
-        title={pinned ? "Unpin" : "Pin within group"}
-        aria-pressed={pinned}
-        aria-label={pinned ? `Unpin ${symbol}` : `Pin ${symbol}`}
         onClick={(e) => onToggle(symbol, e)}
+        title={fill === "transparent" ? "Pin to top" : "Unpin"}
+        aria-label={fill === "transparent" ? `Pin ${symbol} to top` : `Unpin ${symbol}`}
+        style={{
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          padding: 2,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
       >
-        <Pin
-          size={13}
-          fill={pinned ? "var(--accent)" : "none"}
-          color={pinned ? "var(--accent)" : "var(--t-46)"}
-        />
+        <svg width="8" height="8" viewBox="0 0 10 10">
+          <circle cx="5" cy="5" r="4" fill={fill} stroke="var(--t-46)" strokeWidth="1" />
+        </svg>
       </button>
     </td>
   );
@@ -366,65 +335,41 @@ export function useHiddenRows() {
     });
   }, []);
   const reset = useCallback(() => setHidden(new Set()), []);
-  const isHidden = useCallback(
-    (symbol: string) => hidden.has(symbol.toUpperCase()),
-    [hidden],
-  );
-  const restore = useCallback(
-    (symbol: string) =>
-      setHidden((prev) => {
-        const next = new Set(prev);
-        next.delete(symbol.toUpperCase());
-        return next;
-      }),
-    [],
-  );
-  return { hidden, count: hidden.size, hide, restore, reset, isHidden };
+  const isHidden = useCallback((symbol: string) => hidden.has(symbol.toUpperCase()), [hidden]);
+  return { hidden, count: hidden.size, hide, reset, isHidden };
 }
 
 /** Trailing "×" cell — hides the row from the current view. */
 export function DismissCell({
   symbol,
   onDismiss,
-  onRemove,
 }: {
   symbol: string;
   onDismiss: (symbol: string) => void;
-  onRemove?: (symbol: string) => void;
 }) {
   return (
-    <td className="row-control">
-      <Popover
-        label={`Actions for ${symbol}`}
-        width={225}
-        className="icon-btn"
-        icon={<MoreHorizontal size={16} />}
+    <td style={{ padding: "0 6px", textAlign: "center", width: 22 }}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDismiss(symbol);
+        }}
+        title={`Hide ${symbol} from this view`}
+        aria-label={`Hide ${symbol} from this view`}
+        className="focus-ring"
+        style={{
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          padding: 2,
+          lineHeight: 1,
+          fontSize: 12,
+          color: "var(--t-42)",
+        }}
       >
-        {(close) => (
-          <div className="row-menu">
-            <button
-              className="btn"
-              onClick={() => {
-                onDismiss(symbol);
-                close();
-              }}
-            >
-              Hide from view
-            </button>
-            {onRemove && (
-              <button
-                className="btn"
-                onClick={() => {
-                  onRemove(symbol);
-                  close();
-                }}
-              >
-                Remove from watchlist
-              </button>
-            )}
-          </div>
-        )}
-      </Popover>
+        ×
+      </button>
     </td>
   );
 }
@@ -434,13 +379,7 @@ export function DismissHeader() {
 }
 
 /** "· N hidden — show all" affordance shown next to a section heading. */
-export function HiddenNote({
-  count,
-  onReset,
-}: {
-  count: number;
-  onReset: () => void;
-}) {
+export function HiddenNote({ count, onReset }: { count: number; onReset: () => void }) {
   if (count === 0) return null;
   return (
     <span style={{ fontSize: 10.5, color: "var(--t-46)" }}>
