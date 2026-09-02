@@ -1,11 +1,153 @@
 {
-  "description": "Default research/demo universe served to anonymous users and new sessions. Curated: only VERIFIED_CURRENT covered warrants plus their underlyings and the index. CTCB2601 (CONFLICTING) is deliberately excluded from the default set - it stays reachable via search as fail-closed evidence.",
-  "known_through": "2027",
+  "description": "30-symbol local demo: HPG, FPT, VPB and 9 active covered warrants per underlying. Current terms cross-checked against VNDIRECT and 24HMoney on 2026-09-02. Revalidate lifecycle/verification before seeding; no index or synthetic prices.",
+  "known_through": "2026-09-02",
   "items": [
-    { "symbol": "CHPG2602", "instrument_type": "CW", "underlying_symbol": "HPG" },
-    { "symbol": "CVPB2615", "instrument_type": "CW", "underlying_symbol": "VPB" },
-    { "symbol": "HPG", "instrument_type": "STOCK" },
-    { "symbol": "VPB", "instrument_type": "STOCK" },
-    { "symbol": "VNINDEX", "instrument_type": "INDEX" }
+    {
+      "symbol": "HPG",
+      "instrument_type": "STOCK"
+    },
+    {
+      "symbol": "CHPG2617",
+      "instrument_type": "CW",
+      "underlying_symbol": "HPG"
+    },
+    {
+      "symbol": "CHPG2618",
+      "instrument_type": "CW",
+      "underlying_symbol": "HPG"
+    },
+    {
+      "symbol": "CHPG2625",
+      "instrument_type": "CW",
+      "underlying_symbol": "HPG"
+    },
+    {
+      "symbol": "CHPG2626",
+      "instrument_type": "CW",
+      "underlying_symbol": "HPG"
+    },
+    {
+      "symbol": "CHPG2627",
+      "instrument_type": "CW",
+      "underlying_symbol": "HPG"
+    },
+    {
+      "symbol": "CHPG2628",
+      "instrument_type": "CW",
+      "underlying_symbol": "HPG"
+    },
+    {
+      "symbol": "CHPG2629",
+      "instrument_type": "CW",
+      "underlying_symbol": "HPG"
+    },
+    {
+      "symbol": "CHPG2630",
+      "instrument_type": "CW",
+      "underlying_symbol": "HPG"
+    },
+    {
+      "symbol": "CHPG2632",
+      "instrument_type": "CW",
+      "underlying_symbol": "HPG"
+    },
+    {
+      "symbol": "FPT",
+      "instrument_type": "STOCK"
+    },
+    {
+      "symbol": "CFPT2616",
+      "instrument_type": "CW",
+      "underlying_symbol": "FPT"
+    },
+    {
+      "symbol": "CFPT2617",
+      "instrument_type": "CW",
+      "underlying_symbol": "FPT"
+    },
+    {
+      "symbol": "CFPT2621",
+      "instrument_type": "CW",
+      "underlying_symbol": "FPT"
+    },
+    {
+      "symbol": "CFPT2622",
+      "instrument_type": "CW",
+      "underlying_symbol": "FPT"
+    },
+    {
+      "symbol": "CFPT2623",
+      "instrument_type": "CW",
+      "underlying_symbol": "FPT"
+    },
+    {
+      "symbol": "CFPT2624",
+      "instrument_type": "CW",
+      "underlying_symbol": "FPT"
+    },
+    {
+      "symbol": "CFPT2626",
+      "instrument_type": "CW",
+      "underlying_symbol": "FPT"
+    },
+    {
+      "symbol": "CFPT2627",
+      "instrument_type": "CW",
+      "underlying_symbol": "FPT"
+    },
+    {
+      "symbol": "CFPT2628",
+      "instrument_type": "CW",
+      "underlying_symbol": "FPT"
+    },
+    {
+      "symbol": "VPB",
+      "instrument_type": "STOCK"
+    },
+    {
+      "symbol": "CVPB2611",
+      "instrument_type": "CW",
+      "underlying_symbol": "VPB"
+    },
+    {
+      "symbol": "CVPB2613",
+      "instrument_type": "CW",
+      "underlying_symbol": "VPB"
+    },
+    {
+      "symbol": "CVPB2615",
+      "instrument_type": "CW",
+      "underlying_symbol": "VPB"
+    },
+    {
+      "symbol": "CVPB2616",
+      "instrument_type": "CW",
+      "underlying_symbol": "VPB"
+    },
+    {
+      "symbol": "CVPB2617",
+      "instrument_type": "CW",
+      "underlying_symbol": "VPB"
+    },
+    {
+      "symbol": "CVPB2618",
+      "instrument_type": "CW",
+      "underlying_symbol": "VPB"
+    },
+    {
+      "symbol": "CVPB2621",
+      "instrument_type": "CW",
+      "underlying_symbol": "VPB"
+    },
+    {
+      "symbol": "CVPB2622",
+      "instrument_type": "CW",
+      "underlying_symbol": "VPB"
+    },
+    {
+      "symbol": "CVPB2623",
+      "instrument_type": "CW",
+      "underlying_symbol": "VPB"
+    }
   ]
 }

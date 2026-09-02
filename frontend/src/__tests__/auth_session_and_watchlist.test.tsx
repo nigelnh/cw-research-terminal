@@ -1,3 +1,4 @@
+import { PRIMARY_UI_UNIVERSE } from "@/domain/models/watchlist";
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement, type ReactNode } from "react";
@@ -64,7 +65,7 @@ vi.mock("@/data/providers", () => ({
 import { AuthProvider, useAuth } from "@/data/auth";
 import { useWatchlist, resetWatchlistMemoryForTests } from "@/data/watchlist";
 import { queryKeys } from "@/data/query/query_keys";
-import { WATCHLIST_STORAGE_KEY_V4, createDefaultWatchlist } from "@/domain/models";
+import { WATCHLIST_STORAGE_KEY_V5, createDefaultWatchlist } from "@/domain/models";
 
 function serverItem(symbol: string) {
   return { symbol, instrumentType: "STOCK" };
@@ -114,11 +115,11 @@ describe("anonymous", () => {
   it("uses the localStorage watchlist and never calls the server", async () => {
     const { Wrapper } = makeWrapper();
     const { result } = await renderResolvedWatchlist(Wrapper);
-    expect(result.current.items.length).toBe(5);
+    expect(result.current.items.length).toBe(30);
     expect(getMyWatchlist).not.toHaveBeenCalled();
     // the anonymous store persists to the versioned localStorage key
     result.current.addToWatchlist({ symbol: "SSI", instrumentType: "STOCK" });
-    await waitFor(() => expect(window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V4)).toBeTruthy());
+    await waitFor(() => expect(window.localStorage.getItem(WATCHLIST_STORAGE_KEY_V5)).toBeTruthy());
   });
 
   it("SubscriptionPlanner receives the anonymous list", async () => {
@@ -160,8 +161,8 @@ describe("authenticated watchlist", () => {
     await act(async () => emitSession(A));
     await waitFor(() => expect(putMyWatchlist).toHaveBeenCalledTimes(1));
     const imported = putMyWatchlist.mock.calls[0][0] as Array<{ symbol: string }>;
-    expect(imported.map((i) => i.symbol)).toEqual(["CHPG2602", "CVPB2615", "HPG", "VPB", "VNINDEX"]);
-    await waitFor(() => expect(result.current.items.length).toBe(5));
+    expect(imported.map((i) => i.symbol)).toEqual([...PRIMARY_UI_UNIVERSE]);
+    await waitFor(() => expect(result.current.items.length).toBe(30));
   });
 
   it("non-empty server watchlist is NEVER overwritten by local data", async () => {
@@ -204,7 +205,7 @@ describe("logout + user switch + cache isolation", () => {
 
     await act(async () => emitSession(null));
     await waitFor(() => expect(result.current.source).toBe("anonymous"));
-    expect(result.current.items.length).toBe(5); // anon defaults, untouched
+    expect(result.current.items.length).toBe(30); // anon defaults, untouched
     expect(qc.getQueryData(queryKeys.me.watchlist("user-a"))).toBeUndefined(); // cleared
   });
 

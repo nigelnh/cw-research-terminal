@@ -43,7 +43,8 @@ async def test_lifecycle_truth_active_vs_expired_vs_unknown():
     #    (Step 13C). The shipped dataset has exactly three: CHPG2602 + CVPB2615 verified,
     #    CTCB2601 conflicting.
     active_symbols = [x.symbol for x in active_items]
-    assert set(active_symbols) == {"CHPG2602", "CVPB2615", "CTCB2601"}
+    assert {"CHPG2602", "CVPB2615", "CTCB2601"}.issubset(set(active_symbols))
+    assert len(active_symbols) == 29
     # A former hand-seeded "active" with no provenance is now UNKNOWN.
     assert "CFPT2602" in [x.symbol for x in unknown_items]
     assert "CMWG2602" in [x.symbol for x in unknown_items]
@@ -51,6 +52,7 @@ async def test_lifecycle_truth_active_vs_expired_vs_unknown():
         LifecycleEvidenceLevel.MANUAL_SNAPSHOT,
         LifecycleEvidenceLevel.CURRENT_PROVIDER_LIST,
         LifecycleEvidenceLevel.CURRENT_EXCHANGE_LIST,
+        LifecycleEvidenceLevel.CURRENT_BROKER_MARKET_LIST,
     )
     assert all(x.evidence_level in valid_active_evidence for x in active_items)
 
@@ -217,10 +219,10 @@ def test_rest_api_coverage_and_reconciliation_endpoints():
     # Only warrants with an auditable origin are ACTIVE (Step 13C): CHPG2602, CVPB2615,
     # CTCB2601. Metadata-verification counts are unchanged (expired verified CWs keep their
     # grade).
-    assert metrics["verified_active_symbols"] == 3
+    assert metrics["verified_active_symbols"] == 29
     assert metrics["verified_expired_symbols"] == 3
     assert metrics["unknown_lifecycle_symbols"] > 0
-    assert metrics["verified_current_metadata_symbols"] == 5
+    assert metrics["verified_current_metadata_symbols"] == 31
     assert metrics["conflicting_metadata_symbols"] == 1
 
     # 2. Reconcile endpoint
