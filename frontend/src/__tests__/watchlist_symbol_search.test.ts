@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchingSymbols, normalizeSearch, prioritizeWatchlist, type WatchlistSearchOption } from "@/features/watchlist/watchlist_symbol_search";
+import { matchingSymbols, normalizeSearch, prioritizeWatchlist, searchSuggestions, type WatchlistSearchOption } from "@/features/watchlist/watchlist_symbol_search";
 
 const options: WatchlistSearchOption[] = [
   { symbol: "HPG", kind: "stock", name: "Hoa Phat Group", exchange: "HOSE", underlying: null },
@@ -23,5 +23,17 @@ describe("watchlist symbol search hierarchy", () => {
     const result = prioritizeWatchlist(rows, matches);
     expect(result.rows.map(row => row.symbol)).toEqual(["VPB", "CVPB2615", "HPG", "CHPG2602"]);
     expect([...result.highlighted]).toEqual(["CVPB2615"]);
+  });
+
+  it("opens prefix matches in stock-first, alphabetical order", () => {
+    const mixed: WatchlistSearchOption[] = [
+      { symbol: "CBBB2601", kind: "cw", name: "BBB · SSI", exchange: "HOSE", underlying: "BBB" },
+      { symbol: "AAA", kind: "stock", name: "An Phat", exchange: "HOSE", underlying: null },
+      { symbol: "CAAA2601", kind: "cw", name: "AAA · TCBS", exchange: "HOSE", underlying: "AAA" },
+      { symbol: "AAB", kind: "stock", name: "Another Bank", exchange: "HOSE", underlying: null },
+    ];
+    expect(searchSuggestions(mixed, "a").map(option => option.symbol)).toEqual(["AAA", "AAB", "CAAA2601"]);
+    expect(searchSuggestions(mixed, "c").map(option => option.symbol)).toEqual(["CAAA2601", "CBBB2601"]);
+    expect(searchSuggestions(mixed, "")).toEqual([]);
   });
 });

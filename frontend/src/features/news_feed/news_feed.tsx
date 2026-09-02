@@ -298,7 +298,7 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
 
   return (
     <div>
-      <MarketOverviewStrip indicesOnly />
+      <MarketOverviewStrip />
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 3, flexWrap: "wrap" }}>
         <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
           News

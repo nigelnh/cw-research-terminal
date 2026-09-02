@@ -160,7 +160,7 @@ export function ResearchUniverse({
 
   return (
     <div>
-      <MarketOverviewStrip indicesOnly />
+      <MarketOverviewStrip />
       <div
         style={{
           display: "flex",
