@@ -6,7 +6,7 @@ import type { CorporateActionItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
 import { TradingChart } from "@/components/common/trading_chart";
-import { DASH, fmtChg, fmtIV, fmtPrice, fmtRatio, dteDisplay } from "@/components/common/grid_table";
+import { DASH, fmtChg, fmtIV, fmtPrice, fmtRatio, fmtVol, dteDisplay } from "@/components/common/grid_table";
 
 const VN_TZ = "Asia/Ho_Chi_Minh";
 
@@ -119,8 +119,14 @@ function corpEventDesc(ev: CorporateActionItem): string {
 
 const TS_COLS = "48px 44px 42px 50px 50px 24px";
 
+const TS_HEAD: React.CSSProperties = {
+  textAlign: "right",
+  borderRight: "1px solid var(--border-row)",
+  paddingRight: 4,
+};
+
 /**
- * TIME & SALES panel (OVERVIEW tab). There is no live trade feed yet, so this is an
+ * TRADED LOGS panel (OVERVIEW tab). There is no live trade feed yet, so this is an
  * honest empty state — session-gated per the UX data contract. Tracked as a follow-up.
  */
 function TimeSalesPanel({ live }: { live: boolean }) {
@@ -136,7 +142,7 @@ function TimeSalesPanel({ live }: { live: boolean }) {
         overflowY: "auto",
       }}
     >
-      <div style={MICRO}>TIME &amp; SALES</div>
+      <div style={MICRO}>TRADED LOGS</div>
       <div
         style={{
           display: "grid",
@@ -148,17 +154,17 @@ function TimeSalesPanel({ live }: { live: boolean }) {
           borderBottom: "1px solid var(--border-mid)",
         }}
       >
-        <span>TIME</span>
-        <span style={{ textAlign: "right" }}>TRD</span>
-        <span style={{ textAlign: "right" }}>+/-</span>
-        <span style={{ textAlign: "right" }}>CHG%</span>
-        <span style={{ textAlign: "right" }}>VOL</span>
+        <span style={{ borderRight: "1px solid var(--border-row)", paddingRight: 4 }}>TIME</span>
+        <span style={TS_HEAD}>TRD</span>
+        <span style={TS_HEAD}>+/-</span>
+        <span style={TS_HEAD}>CHG%</span>
+        <span style={TS_HEAD}>VOL</span>
         <span style={{ textAlign: "right" }}>B/S</span>
       </div>
       <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8, lineHeight: 1.5 }}>
         {live
           ? "Live trade feed not yet wired — pending backend support."
-          : "Time & sales unavailable outside a live session."}
+          : "Traded logs unavailable outside a live session."}
       </div>
     </div>
   );
@@ -217,6 +223,17 @@ export function InstrumentPanel({
   const pct = typeof q?.priceChangePercent === "number" ? q.priceChangePercent * 100 : null;
   const chg = fmtChg(pct);
   const bidAsk = `${fmtPrice(q?.bidPrice)} · ${fmtPrice(q?.askPrice)}`;
+  const chgAmtNum = last !== null && ref !== null ? last - ref : null;
+  const chgAmt =
+    chgAmtNum === null
+      ? DASH
+      : `${chgAmtNum > 0 ? "+" : chgAmtNum < 0 ? "−" : ""}${fmtPrice(Math.abs(chgAmtNum))}`;
+  const chgAmtColor =
+    chgAmtNum === null || chgAmtNum === 0
+      ? "var(--t-50)"
+      : chgAmtNum > 0
+      ? "var(--up)"
+      : "var(--down)";
 
   const trdColor = (() => {
     if (last === null || ref === null) return "var(--t-70)";
@@ -371,9 +388,19 @@ export function InstrumentPanel({
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", gap: 22, minHeight: 0 }}>
           <div className="mono" style={{ width: 220, flexShrink: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", marginBottom: 10 }}>
-              <MetricRow label="TRD" value={fmtPrice(last)} color={trdColor} size={11} pad="3px 0" />
-              <MetricRow label="CHG%" value={chg.text} color={chg.color} size={11} pad="3px 0" />
+              <MetricRow label="REF" value={fmtPrice(ref)} color="var(--t-60)" size={11} pad="3px 0" />
               <MetricRow label="BID · ASK" value={bidAsk} color="var(--t-70)" size={11} pad="3px 0" />
+              <MetricRow label="TRD" value={fmtPrice(last)} color={trdColor} size={11} pad="3px 0" />
+              <MetricRow label="+/-" value={chgAmt} color={chgAmtColor} size={11} pad="3px 0" />
+              <MetricRow label="CHG%" value={chg.text} color={chg.color} size={11} pad="3px 0" />
+              {!isCW && !isIndex && (
+                <>
+                  <MetricRow label="VOLUME" value={fmtVol(q?.totalVolume)} color="var(--t-60)" size={11} pad="3px 0" />
+                  <MetricRow label="FRN BUY" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
+                  <MetricRow label="FRN SELL" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
+                  <MetricRow label="FRN ROOM" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
+                </>
+              )}
               <MetricRow
                 label="AS OF"
                 value={asOfText(marketSessionActive, context?.quoteAsOf, nowTick)}

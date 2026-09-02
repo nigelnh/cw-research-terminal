@@ -200,7 +200,7 @@ export function AppHeader({
         className="heading"
         style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: "var(--accent)" }}
       >
-        CW-TERM
+        CW-TERMINAL
       </span>
 
       <div style={{ display: "flex", gap: 2, background: "var(--panel-2)", padding: 2, borderRadius: 3 }}>

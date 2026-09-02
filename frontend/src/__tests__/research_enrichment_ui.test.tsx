@@ -102,7 +102,7 @@ describe("NewsFeed — unified research feed", () => {
   it("uses the Research-registry typography scale (mono 11.5, weight-500 headers) — not a miniature", () => {
     const html = renderMarkup(<NewsFeed />, [{ queryKey: [...FEED_KEY], data: feedPages([]) }]);
     // same table treatment as research_universe.tsx
-    expect(html).toContain('class="mono" style="width:100%;border-collapse:collapse;font-size:11.5px"');
+    expect(html).toContain('class="mono grid-lined" style="width:100%;border-collapse:collapse;font-size:11.5px"');
     // headers match grid_table HEAD_STYLE (5px 8px padding, weight 500, --t-50), not 9.5px/--t-46
     expect(html).toContain("padding:5px 8px");
     expect(html).toContain("font-weight:500");
