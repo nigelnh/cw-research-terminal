@@ -1,10 +1,19 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { renderMarkup, seedInstrumentSpecs } from "./test_fixtures/render_markup";
+import {
+  renderMarkup,
+  seedInstrumentSpecs,
+} from "./test_fixtures/render_markup";
 import { PersonalDashboard } from "../features/watchlist/personal_dashboard";
 import { InstrumentPanel } from "../features/warrant_info/instrument_panel";
 import { AppHeader } from "../components/common/app_header";
-import { normalizePlainResponse, CHAT_STORAGE_KEY } from "../data/ai/use_ai_chat";
-import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/models/watchlist";
+import {
+  normalizePlainResponse,
+  CHAT_STORAGE_KEY,
+} from "../data/ai/use_ai_chat";
+import {
+  createDefaultWatchlist,
+  defaultWatchlistStorage,
+} from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
 
 class MemoryStorage {
@@ -30,6 +39,7 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     mockStorage = new MemoryStorage();
     (globalThis as any).window = (globalThis as any).window || {};
     (globalThis as any).window.localStorage = mockStorage;
+    mockStorage.setItem("cw:watchlist:full-columns", "true");
 
     const fresh = createDefaultWatchlist();
     defaultWatchlistStorage.saveWatchlist(fresh);
@@ -45,7 +55,7 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     expect(html).toContain("+/-");
     expect(html).toContain("VOLUME");
     expect(html).toContain("STRIKE");
-    expect(html).toContain("IV TRD");
+    expect(html).toContain("IV TRADE");
     // redundant CW-only columns were merged away in the unified table
     expect(html).not.toContain("UND.PRC");
     expect(html).not.toContain("FRN ROOM");
@@ -76,8 +86,8 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
         onClose={vi.fn()}
       />,
     );
-    expect(cwHtml).toContain("QUANT");
-    expect(cwHtml).toContain("COVERED WARRANT · SSI · VHM");
+    expect(cwHtml).toContain("Quant");
+    expect(cwHtml).toContain("Covered warrant · SSI · VHM");
 
     const stockHtml = renderMarkup(
       <InstrumentPanel
@@ -86,7 +96,7 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
         onClose={vi.fn()}
       />,
     );
-    expect(stockHtml).toContain("STOCK · HOSE");
+    expect(stockHtml).toContain("Equity · HOSE");
     expect(stockHtml).not.toContain("MONEYNESS S/K");
   });
 
@@ -94,7 +104,14 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     const wl = {
       id: "wl",
       name: "wl",
-      items: [{ symbol: "CTCB2601", instrumentType: "CW" as const, underlyingSymbol: "TCB", addedAt: 0 }],
+      items: [
+        {
+          symbol: "CTCB2601",
+          instrumentType: "CW" as const,
+          underlyingSymbol: "TCB",
+          addedAt: 0,
+        },
+      ],
       createdAt: 0,
       updatedAt: 0,
       version: 3,
@@ -115,13 +132,13 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
         },
       ]),
     ]);
-    expect(html).toContain("◆");
+    expect(html).toContain("badge-warning");
     expect(html).toContain("Conflicting metadata — quant withheld");
     // canonical registry terms still shown
     expect(html).toContain("37,000");
     expect(html).toContain("4:1");
     // each row carries a "remove from view" control (non-destructive, session-only)
-    expect(html).toContain('aria-label="Hide CTCB2601 from this view"');
+    expect(html).toContain('aria-label="Actions for CTCB2601"');
   });
 
   it("6 & 7. normalizePlainResponse (legacy helper) still strips markdown without losing math", () => {
@@ -146,8 +163,18 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
           createdAt: 1000,
           updatedAt: 2000,
           messages: [
-            { id: "m1", role: "user", content: "Check HPG volatility", createdAt: 1000 },
-            { id: "m2", role: "assistant", content: "HPG 30-day HV is 24.5%.", createdAt: 2000 },
+            {
+              id: "m1",
+              role: "user",
+              content: "Check HPG volatility",
+              createdAt: 1000,
+            },
+            {
+              id: "m2",
+              role: "assistant",
+              content: "HPG 30-day HV is 24.5%.",
+              createdAt: 2000,
+            },
           ],
         },
       ],
@@ -175,6 +202,6 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     expect(html).toContain("CW-TERM");
     expect(html).toContain("DASHBOARD");
     expect(html).toContain("RESEARCH");
-    expect(html).toContain("CLOSED");
+    expect(html).toContain("Market closed");
   });
 });
