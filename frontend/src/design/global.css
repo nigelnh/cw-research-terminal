@@ -345,3 +345,18 @@ select:focus-visible,
 .corporate-events-table :is(th, td):nth-child(2),
 .corporate-events-table :is(th, td):nth-child(3) { text-align: right; white-space: nowrap; }
 .corporate-events-table td:first-child, .corporate-events-table td:last-child { overflow-wrap: anywhere; }
+
+.ai-composer { border-top: 1px solid var(--border); padding: 8px 10px; flex-shrink: 0; background: var(--panel); max-height: 52%; overflow-y: auto; }
+.ai-composer-input { display: flex; align-items: center; gap: 8px; }
+.ai-composer textarea { flex: 1; min-width: 0; resize: none; background: transparent; border: none; outline: none; box-shadow: none; font: 11.5px/18px var(--font-mono); height: 36px; min-height: 36px; max-height: 36px; color: var(--t-92); overflow-y: auto; }
+.ai-composer-actions { display: flex; flex-direction: column; gap: 4px; }
+.ai-composer-actions button, .ai-file-chip button { display: flex; align-items: center; justify-content: center; border: none; background: none; padding: 0; color: var(--t-55); cursor: pointer; }
+.ai-composer-actions button { width: 18px; height: 16px; }
+.ai-composer button:disabled { cursor: default; opacity: 0.5; }
+.ai-file-list { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.ai-file-chip { display: flex; min-width: 0; max-width: 100%; align-items: center; gap: 5px; border: 1px solid var(--border-strong); padding: 3px 5px; font: 10px var(--font-mono); color: var(--t-75); }
+.ai-file-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-file-feedback, .ai-file-preview { font: 10px/1.5 var(--font-mono); color: var(--t-55); margin-bottom: 6px; overflow-wrap: anywhere; }
+.ai-file-feedback button { color: var(--accent); background: none; border: none; font: inherit; cursor: pointer; text-decoration: underline; }
+.ai-file-preview summary { cursor: pointer; color: var(--t-75); }
+.ai-file-preview pre { max-height: 100px; overflow: auto; white-space: pre-wrap; background: var(--bg); padding: 6px; font: inherit; }

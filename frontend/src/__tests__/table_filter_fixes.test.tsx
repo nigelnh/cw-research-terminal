@@ -281,6 +281,18 @@ function FilterHarness() {
 }
 
 describe("Filter and nested calendar interaction", () => {
+  it("clears an unfinished typed date even when no date filter was committed", () => {
+    const page = render(<FilterHarness />);
+    fireEvent.click(page.getByRole("button", { name: "FILTER ▾" }));
+    const field = page.getByRole("textbox", { name: "Last trading date from" }) as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "09" } });
+    fireEvent.blur(field);
+    expect(field.value).toBe("09");
+    fireEvent.click(page.getByRole("button", { name: "CLEAR" }));
+    expect(field.value).toBe("");
+    expect(page.queryByRole("alert")).toBeNull();
+  });
+
   it("keeps filters open through month navigation and date selection; Escape closes only the calendar first", () => {
     const page = render(<FilterHarness />);
     fireEvent.click(page.getByRole("button", { name: "FILTER ▾" }));

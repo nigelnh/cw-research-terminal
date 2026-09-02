@@ -148,14 +148,14 @@ describe("AiAnchor — unified composer inside the panel", () => {
     expect(ta.value).toBe(""); // plain enter -> submit -> field + draft cleared
   });
 
-  it("the composer textarea has no rectangular focus box (outline/box-shadow cleared inline; container handles focus)", () => {
+  it("the composer has a fixed two-line input inside the terminal focus container", () => {
     const { getByRole } = render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, {
       wrapper: Wrapper,
     });
     const panel = openPanel(getByRole);
     const ta = panel.querySelector("textarea") as HTMLTextAreaElement;
-    expect(ta.style.outline).toContain("none");
-    expect(ta.style.boxShadow).toContain("none");
+    expect(ta.getAttribute("rows")).toBe("2");
+    expect(getByRole("button", { name: "Upload files" })).toBeTruthy();
     // the composer form carries the class the terminal focus CSS targets
     expect(panel.querySelector("form.ai-composer")).not.toBeNull();
   });
