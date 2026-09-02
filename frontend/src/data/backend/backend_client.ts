@@ -207,6 +207,10 @@ export class BackendClient {
     );
   }
 
+  async getStockProfiles(symbols: string[], signal?: AbortSignal): Promise<{ items: Array<{ symbol: string; name: string | null; short_name: string | null; exchange: string | null }> }> {
+    return this.get("/api/market/stock-profiles", { symbols: symbols.join(",") }, signal);
+  }
+
   async getMarketOverview(signal?: AbortSignal): Promise<any> {
     return this.get<any>("/api/market/overview", undefined, signal);
   }

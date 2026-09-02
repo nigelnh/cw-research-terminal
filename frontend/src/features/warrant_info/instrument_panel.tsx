@@ -346,7 +346,11 @@ export function InstrumentPanel({
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", gap: 22, minHeight: 0 }}>
           <div className="mono" style={{ width: 220, flexShrink: 0, overflowY: "auto" }}>
             <h3 className="instrument-section-heading">STATS</h3>
-            {tableLayout.columns.filter(key => key !== "symbol").map(key => {
+            {tableLayout.columns.filter(key => {
+              if (key === "symbol") return false;
+              if (!isCW && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(key)) return false;
+              return !(isCW && key === "issuer");
+            }).map(key => {
               const column = QUOTE_COLUMNS.find(c => c.key === key)!;
               const cell = quoteCell(stats, key);
               return <MetricRow key={key} label={column.label} value={cell.text} color={cell.color} compact title={QUOTE_COLUMN_HINTS[key]} />;

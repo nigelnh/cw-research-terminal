@@ -24,6 +24,8 @@ import {
   useSortPin,
   type SortFields,
 } from "@/components/common/grid_table";
+import { MarketOverviewStrip } from "@/features/watchlist/market_overview_strip";
+import { useStockProfiles } from "@/data/query/use_stock_profiles";
 
 interface ResearchUniverseProps {
   onNavigateToDashboard?: () => void;
@@ -58,7 +60,8 @@ const FIELDS: SortFields<RegistryRow> = {
 
 const TD: React.CSSProperties = { padding: "0 8px", textAlign: "right" };
 
-const STOCK_FIELDS: SortFields<{ symbol: string }> = { symbol: (r) => r.symbol };
+interface StockRegistryRow { symbol: string; exchange: string | null }
+const STOCK_FIELDS: SortFields<StockRegistryRow> = { symbol: (r) => r.symbol, exchange: (r) => r.exchange };
 
 export function ResearchUniverse({
   selectedSymbol = null,
@@ -139,6 +142,8 @@ export function ResearchUniverse({
     () => [...new Set(instruments.map((c) => c.issuer).filter((v): v is string => !!v))].sort(),
     [instruments],
   );
+  const { profiles } = useStockProfiles(underlyingOptions);
+  const profilesBySymbol = useMemo(() => new Map(profiles.map(profile => [profile.symbol, profile])), [profiles]);
 
   const grid = useSortPin(rows, FIELDS);
 
@@ -148,19 +153,20 @@ export function ResearchUniverse({
       underlyingOptions
         .filter((s) => !stockHidden.isHidden(s))
         .filter((s) => !term || s.toUpperCase().includes(term))
-        .map((symbol) => ({ symbol })),
-    [underlyingOptions, stockHidden, term],
+        .map((symbol) => ({ symbol, exchange: profilesBySymbol.get(symbol)?.exchange ?? null })),
+    [underlyingOptions, stockHidden, term, profilesBySymbol],
   );
   const stockGrid = useSortPin(stockRows, STOCK_FIELDS);
 
   return (
     <div>
+      <MarketOverviewStrip indicesOnly />
       <div
         style={{
           display: "flex",
-          alignItems: "baseline",
-          gap: 12,
-          marginBottom: 3,
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 8,
           position: "relative",
         }}
       >
@@ -168,7 +174,7 @@ export function ResearchUniverse({
           Registry
         </span>
         <span style={{ fontSize: 10.5, color: "var(--t-42)", fontStyle: "italic" }}>
-          “{browseAll ? "browsing the full discovered registry" : "verified terms only"}”
+          {browseAll ? `${rows.length} match${rows.length === 1 ? "" : "es"} · filtering the discovered registry` : `${activeCount} verified · type in the header bar to filter across ~530 discovered`}
         </span>
         <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
         <RegistryFilter
@@ -178,18 +184,12 @@ export function ResearchUniverse({
           onChange={setFilterState}
         />
       </div>
-      <p style={{ fontSize: 11, color: "var(--t-46)", marginBottom: 14 }}>
-        {browseAll
-          ? `${rows.length} match${rows.length === 1 ? "" : "es"}`
-          : `${activeCount} verified · type in the header bar to filter across ~530 discovered`}
-      </p>
-
-      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="research-registry-grid">
+        <div className="research-registry-panel">
           <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
             COVERED WARRANTS
           </div>
-          <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+          <div className="registry-table-scroll"><table className="mono grid-lined registry-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
                 <PinHeader />
@@ -236,12 +236,12 @@ export function ResearchUniverse({
                       style={{
                         cursor: "pointer",
                         height: 27,
-                        background: selected ? "var(--panel-3)" : "transparent",
+                        background: selected ? "var(--panel-3)" : "var(--panel-2)",
                         borderBottom: "1px solid var(--border-row)",
                       }}
                     >
                       <PinCell symbol={r.symbol} fill={grid.pinFill(r.symbol)} onToggle={grid.togglePin} />
-                      <td style={{ padding: "0 8px", color: "var(--accent)" }}>{r.symbol}</td>
+                      <td style={{ padding: "0 8px", color: "var(--t-92)" }}>{r.symbol}</td>
                       <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.issuer ?? DASH}</td>
                       <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.underlying ?? DASH}</td>
                       <td style={{ ...TD, color: "var(--t-80)" }}>{fmtPrice(r.strike)}</td>
@@ -258,19 +258,20 @@ export function ResearchUniverse({
                 })
               )}
             </tbody>
-          </table>
+          </table></div>
         </div>
 
-        <div style={{ width: 220, flexShrink: 0 }}>
+        <div className="research-stock-panel">
           <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
             STOCKS
             <HiddenNote count={stockHidden.count} onReset={stockHidden.reset} />
           </div>
-          <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+          <div className="registry-table-scroll"><table className="mono grid-lined registry-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
                 <PinHeader />
                 <SortHeader label="SYMBOL" align="left" mark={stockGrid.sortMark("symbol")} onClick={() => stockGrid.toggleSort("symbol")} />
+                <SortHeader label="EXCHANGE" align="left" mark={stockGrid.sortMark("exchange")} onClick={() => stockGrid.toggleSort("exchange")} />
                 <th style={{ width: 20, padding: "5px 4px" }} aria-hidden />
                 <DismissHeader />
               </tr>
@@ -278,7 +279,7 @@ export function ResearchUniverse({
             <tbody>
               {stockGrid.ordered.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ padding: "24px 0", textAlign: "center", fontSize: 11, color: "var(--t-46)" }}>
+                  <td colSpan={5} style={{ padding: "24px 0", textAlign: "center", fontSize: 11, color: "var(--t-46)" }}>
                     —
                   </td>
                 </tr>
@@ -300,6 +301,7 @@ export function ResearchUniverse({
                     >
                       <PinCell symbol={s.symbol} fill={stockGrid.pinFill(s.symbol)} onToggle={stockGrid.togglePin} />
                       <td style={{ padding: "0 8px", color: "var(--accent)" }}>{s.symbol}</td>
+                      <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{s.exchange ?? DASH}</td>
                       <AddCell
                         symbol={s.symbol}
                         tracked={isInWatchlist(s.symbol)}
@@ -311,7 +313,7 @@ export function ResearchUniverse({
                 })
               )}
             </tbody>
-          </table>
+          </table></div>
         </div>
       </div>
     </div>

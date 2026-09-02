@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarketOverviewStrip } from "@/features/watchlist/market_overview_strip";
 
 vi.mock("@/data/query/use_market_overview", () => ({
@@ -20,6 +20,7 @@ vi.mock("@/data/query/use_market_overview", () => ({
     },
   }),
 }));
+afterEach(cleanup);
 
 describe("market overview strip", () => {
   it("keeps requested index order and separates the two ranking scopes", () => {
@@ -37,5 +38,12 @@ describe("market overview strip", () => {
     expect(screen.getByText("22,100").style.color).toBe("var(--down)");
     expect(document.querySelectorAll(".overview-direction-icon")).toHaveLength(8);
     expect(screen.getAllByText("(1)")[0].style.color).toBe("var(--price-ceiling)");
+  });
+
+  it("reuses only the four index cards on Research and News", () => {
+    render(<MarketOverviewStrip indicesOnly />);
+    expect(screen.getAllByRole("article")).toHaveLength(4);
+    expect(screen.queryByText("Top Stock Trading Volume")).toBeNull();
+    expect(screen.queryByText("Top Covered Warrants Trading Volume")).toBeNull();
   });
 });

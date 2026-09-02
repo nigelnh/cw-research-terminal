@@ -165,6 +165,8 @@ class FiinQuantProvider(MarketDataProvider):
         self._overview_lock = asyncio.Lock()
         self._overview_cache: Optional[Dict[str, Any]] = None
         self._overview_cache_at: float = 0.0
+        self._stock_profile_lock = asyncio.Lock()
+        self._stock_profile_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
 
     def set_event_callback(self, callback: Callable[[str, Dict[str, Any], str], None]) -> None:
         self._event_callback = callback
@@ -810,6 +812,47 @@ class FiinQuantProvider(MarketDataProvider):
                 raise HistoricalTransportError(f"Transport error fetching {sym}: {exc_str}") from exc
 
         return await asyncio.to_thread(_fetch)
+
+    async def get_stock_profiles(self, symbols: List[str]) -> List[Dict[str, Any]]:
+        """Batch BasicInfor reads, cached per symbol for a day; no new streams."""
+        symbols = sorted({s.strip().upper() for s in symbols if s.strip()})
+        if not symbols:
+            return []
+        async with self._stock_profile_lock:
+            missing = [s for s in symbols if s not in self._stock_profile_cache
+                       or time.monotonic() - self._stock_profile_cache[s][0] >= 86400]
+            if missing:
+                if not self._session or not self._is_connected:
+                    if not await self.connect():
+                        raise RuntimeError("FiinQuant stock profiles are unavailable")
+
+                def fetch():
+                    value = self._session.BasicInfor(tickers=missing).get()
+                    if hasattr(value, "get_data"):
+                        value = value.get_data()
+                    if hasattr(value, "to_dict"):
+                        value = value.to_dict(orient="records")
+                    if isinstance(value, dict):
+                        value = [value]
+                    return value if isinstance(value, list) else []
+
+                records = await asyncio.to_thread(fetch)
+                def clean(value):
+                    return value.strip() if isinstance(value, str) and value.strip() else None
+
+                by_symbol = {str(r.get("ticker", "")).strip().upper(): r
+                             for r in records if isinstance(r, dict)}
+                now = time.monotonic()
+                for symbol in missing:
+                    raw = by_symbol.get(symbol, {})
+                    exchange = clean(raw.get("exchangeCode"))
+                    self._stock_profile_cache[symbol] = (now, {
+                        "symbol": symbol,
+                        "name": clean(raw.get("organizationName")),
+                        "short_name": clean(raw.get("organizationShortName")),
+                        "exchange": exchange.upper() if exchange else None,
+                    })
+            return [dict(self._stock_profile_cache[s][1]) for s in symbols]
 
     async def get_market_overview(self, cw_symbols: List[str]) -> Dict[str, Any]:
         """Read the four index cards and HOSE volume leaders without new streams.

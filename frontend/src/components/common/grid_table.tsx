@@ -248,8 +248,10 @@ export function SortHeader({
   // Fixed-width marker slot so the header never shifts when a sort mark appears.
   // Right-aligned columns put it before the label, left-aligned after.
   const slot = (
-    <span style={{ display: "inline-block", width: 10, textAlign: "center", fontSize: "9px" }}>
-      {mark}
+    <span style={{ display: "inline-flex", width: 10, justifyContent: "center" }}>
+      <svg aria-hidden="true" className="watchlist-sort-icon" viewBox="0 0 12 12" fill="currentColor" style={{ visibility: mark ? "visible" : "hidden" }}>
+        <path d={mark === "▼" ? "M1 2h10L6 11Z" : "M1 10h10L6 1Z"} />
+      </svg>
     </span>
   );
   return (
