@@ -1,22 +1,39 @@
 import { useState } from "react";
+import { CalendarInput } from "./calendar_input";
 
 /**
  * FILTER ▾ dropdown shared by the Watchlist CW table and the Registry table.
- * Filters rows by underlying, issuer, and a last-trading-date range. Purely
- * client-side; `null` for underlyings/issuers means "all".
+ * Filters rows by underlying, issuer (free-text OR checkbox), and a last-trading-date
+ * range. Purely client-side; `null` for underlyings/issuers means "all".
  */
 
 export interface FilterState {
   underlyings: string[] | null;
   issuers: string[] | null;
+  uText: string;
+  iText: string;
   from: string;
   to: string;
 }
 
-export const EMPTY_FILTER: FilterState = { underlyings: null, issuers: null, from: "", to: "" };
+export const EMPTY_FILTER: FilterState = {
+  underlyings: null,
+  issuers: null,
+  uText: "",
+  iText: "",
+  from: "",
+  to: "",
+};
 
 export function isFilterActive(f: FilterState): boolean {
-  return f.underlyings !== null || f.issuers !== null || f.from !== "" || f.to !== "";
+  return (
+    f.underlyings !== null ||
+    f.issuers !== null ||
+    f.uText.trim() !== "" ||
+    f.iText.trim() !== "" ||
+    f.from !== "" ||
+    f.to !== ""
+  );
 }
 
 export interface FilterableRow {
@@ -26,6 +43,10 @@ export interface FilterableRow {
 }
 
 export function rowMatchesFilter(f: FilterState, row: FilterableRow): boolean {
+  const uText = f.uText.trim().toUpperCase();
+  const iText = f.iText.trim().toUpperCase();
+  if (uText && !(row.underlying ?? "").toUpperCase().includes(uText)) return false;
+  if (iText && !(row.issuer ?? "").toUpperCase().includes(iText)) return false;
   if (f.underlyings !== null) {
     if (!row.underlying || !f.underlyings.includes(row.underlying)) return false;
   }
@@ -60,13 +81,14 @@ const CHECK_ROW: React.CSSProperties = {
   cursor: "pointer",
   color: "var(--t-80)",
 };
-const DATE_INPUT: React.CSSProperties = {
-  flex: 1,
+const TEXT_INPUT: React.CSSProperties = {
+  width: "100%",
   background: "var(--bg)",
   border: "1px solid var(--border-26)",
   padding: "4px 8px",
   fontSize: 11,
   color: "var(--t-85)",
+  marginBottom: 6,
   fontFamily: "inherit",
   outline: "none",
 };
@@ -124,6 +146,14 @@ export function RegistryFilter({
           <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={LABEL}>UNDERLYING</div>
+              <input
+                type="text"
+                placeholder="Enter symbol"
+                aria-label="Filter by underlying symbol"
+                value={value.uText}
+                onChange={(e) => onChange({ ...value, uText: e.target.value })}
+                style={TEXT_INPUT}
+              />
               <label style={CHECK_ROW}>
                 <input
                   type="checkbox"
@@ -149,6 +179,14 @@ export function RegistryFilter({
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={LABEL}>ISSUER</div>
+              <input
+                type="text"
+                placeholder="Enter issuer"
+                aria-label="Filter by issuer"
+                value={value.iText}
+                onChange={(e) => onChange({ ...value, iText: e.target.value })}
+                style={TEXT_INPUT}
+              />
               <label style={CHECK_ROW}>
                 <input
                   type="checkbox"
@@ -176,19 +214,15 @@ export function RegistryFilter({
           <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10 }}>
             <div style={LABEL}>LAST TRADING DATE</div>
             <div style={{ display: "flex", gap: 8 }}>
-              <input
-                type="date"
-                aria-label="Last trading date from"
+              <CalendarInput
+                ariaLabel="Last trading date from"
                 value={value.from}
-                onChange={(e) => onChange({ ...value, from: e.target.value })}
-                style={DATE_INPUT}
+                onChange={(iso) => onChange({ ...value, from: iso })}
               />
-              <input
-                type="date"
-                aria-label="Last trading date to"
+              <CalendarInput
+                ariaLabel="Last trading date to"
                 value={value.to}
-                onChange={(e) => onChange({ ...value, to: e.target.value })}
-                style={DATE_INPUT}
+                onChange={(iso) => onChange({ ...value, to: iso })}
               />
               <button
                 type="button"
