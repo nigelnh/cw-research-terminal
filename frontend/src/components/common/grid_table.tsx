@@ -75,6 +75,15 @@ export const MARKET_COLOR = {
   floor: "var(--price-floor)",
 } as const;
 
+/** A displayed reference/limit keeps its band colour; unavailable values stay grey. */
+export function priceBandColor(
+  value: number | null | undefined,
+  band: "reference" | "ceiling" | "floor",
+): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return MARKET_COLOR.null;
+  return MARKET_COLOR[band === "reference" ? "flat" : band];
+}
+
 /** Signed percent (already a percent number, e.g. -0.45) -> display text + colour. */
 export function fmtChg(pct: number | null | undefined): { text: string; color: string } {
   if (pct === null || pct === undefined || Number.isNaN(pct)) {

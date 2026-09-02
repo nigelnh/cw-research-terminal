@@ -40,7 +40,7 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     const html = renderMarkup(<PersonalDashboard />);
     expect(html).toContain("Watchlist");
     // one shared schema for stock parents and CW children — incl. the absolute-change (+/-)
-    // column between TRD and CHG%
+    // column between TRD and %CHG
     expect(html).toContain("SYMBOL");
     expect(html).toContain("+/-");
     expect(html).toContain("VOLUME");
