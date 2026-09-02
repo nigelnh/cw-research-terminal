@@ -19,7 +19,9 @@ function Wrapper({ children }: { children: ReactNode }) {
 }
 
 function renderAnchor() {
-  return render(<AiAnchor context={{ activePage: "dashboard" }} />, { wrapper: Wrapper });
+  return render(<AiAnchor context={{ activePage: "dashboard" }} />, {
+    wrapper: Wrapper,
+  });
 }
 
 beforeEach(() => {
@@ -44,25 +46,41 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
     const btn = getByRole("button", { name: /open research assistant/i });
     expect(queryByRole("dialog")).toBeNull();
 
-    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 850, pointerId: 1 });
+    fireEvent.pointerDown(btn, {
+      button: 0,
+      clientX: 1390,
+      clientY: 850,
+      pointerId: 1,
+    });
     fireEvent.pointerUp(btn, { clientX: 1390, clientY: 850, pointerId: 1 });
 
-    const panel = getByRole("dialog", { name: /research assistant conversation/i });
+    const panel = getByRole("dialog", {
+      name: /research assistant conversation/i,
+    });
     // fixed, bounded dimensions — never grows with content
     expect(panel.style.position).toBe("fixed");
-    expect(panel.style.width).toBe("380px");
-    expect(panel.style.height).toBe("468px");
+    expect(panel.style.width).toBe("440px");
+    expect(panel.style.height).toBe("560px");
     // the composer lives INSIDE the panel now (no separate bottom REPL)
-    expect(panel.querySelector('textarea[aria-label="Ask the research assistant"]')).not.toBeNull();
+    expect(
+      panel.querySelector('textarea[aria-label="Ask the research assistant"]'),
+    ).not.toBeNull();
     expect(getByRole("button", { name: /^send$/i })).toBeTruthy();
-    expect(getByRole("button", { name: /close research assistant/i })).toBeTruthy();
+    expect(
+      getByRole("button", { name: /close research assistant/i }),
+    ).toBeTruthy();
   });
 
   it("a drag past the threshold moves the anchor, persists it, and does NOT open the panel", () => {
     const { getByRole, queryByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
 
-    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 850, pointerId: 1 });
+    fireEvent.pointerDown(btn, {
+      button: 0,
+      clientX: 1390,
+      clientY: 850,
+      pointerId: 1,
+    });
     fireEvent.pointerMove(btn, { clientX: 900, clientY: 400, pointerId: 1 });
     fireEvent.pointerUp(btn, { clientX: 900, clientY: 400, pointerId: 1 });
 
@@ -76,7 +94,12 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
   it("clamps a drag that would leave the viewport", () => {
     const { getByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
-    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 850, pointerId: 1 });
+    fireEvent.pointerDown(btn, {
+      button: 0,
+      clientX: 1390,
+      clientY: 850,
+      pointerId: 1,
+    });
     fireEvent.pointerMove(btn, { clientX: 5000, clientY: 5000, pointerId: 1 });
     fireEvent.pointerUp(btn, { clientX: 5000, clientY: 5000, pointerId: 1 });
     // clamped to maxX = 1440-34-16 = 1390, maxY = 900-34-16 = 850
@@ -108,7 +131,9 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
 
   it("the anchor button carries no rectangular focus outline (terminal focus language)", () => {
     const { getByRole } = renderAnchor();
-    const btn = getByRole("button", { name: /open research assistant/i }) as HTMLElement;
+    const btn = getByRole("button", {
+      name: /open research assistant/i,
+    }) as HTMLElement;
     expect(btn.style.outline).toContain("none");
     expect(btn.className).not.toContain("focus-ring");
   });
@@ -116,9 +141,16 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
 
 function openPanel(getByRole: any) {
   const btn = getByRole("button", { name: /open research assistant/i });
-  fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 850, pointerId: 1 });
+  fireEvent.pointerDown(btn, {
+    button: 0,
+    clientX: 1390,
+    clientY: 850,
+    pointerId: 1,
+  });
   fireEvent.pointerUp(btn, { clientX: 1390, clientY: 850, pointerId: 1 });
-  return getByRole("dialog", { name: /research assistant conversation/i }) as HTMLElement;
+  return getByRole("dialog", {
+    name: /research assistant conversation/i,
+  }) as HTMLElement;
 }
 
 describe("AiAnchor — unified composer inside the panel", () => {
@@ -134,9 +166,14 @@ describe("AiAnchor — unified composer inside the panel", () => {
   });
 
   it("Enter submits (clears the field), Shift+Enter does not", () => {
-    const { getByRole } = render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, {
-      wrapper: Wrapper,
-    });
+    const { getByRole } = render(
+      <AiAnchor
+        context={{ activePage: "dashboard" } as ResearchContextEnvelope}
+      />,
+      {
+        wrapper: Wrapper,
+      },
+    );
     const panel = openPanel(getByRole);
     const ta = panel.querySelector("textarea") as HTMLTextAreaElement;
 
@@ -149,9 +186,14 @@ describe("AiAnchor — unified composer inside the panel", () => {
   });
 
   it("the composer textarea has no rectangular focus box (outline/box-shadow cleared inline; container handles focus)", () => {
-    const { getByRole } = render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, {
-      wrapper: Wrapper,
-    });
+    const { getByRole } = render(
+      <AiAnchor
+        context={{ activePage: "dashboard" } as ResearchContextEnvelope}
+      />,
+      {
+        wrapper: Wrapper,
+      },
+    );
     const panel = openPanel(getByRole);
     const ta = panel.querySelector("textarea") as HTMLTextAreaElement;
     expect(ta.style.outline).toContain("none");
@@ -162,27 +204,38 @@ describe("AiAnchor — unified composer inside the panel", () => {
 
   it("preserves a typed draft across close / reopen via localStorage", () => {
     const { getByRole, queryByRole } = render(
-      <AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />,
+      <AiAnchor
+        context={{ activePage: "dashboard" } as ResearchContextEnvelope}
+      />,
       { wrapper: Wrapper },
     );
     let panel = openPanel(getByRole);
     fireEvent.change(panel.querySelector("textarea") as HTMLTextAreaElement, {
       target: { value: "half-written question" },
     });
-    expect(window.localStorage.getItem("cw_research:ai_draft:v1")).toBe("half-written question");
+    expect(window.localStorage.getItem("cw_research:ai_draft:v1")).toBe(
+      "half-written question",
+    );
 
     // close
     fireEvent.click(getByRole("button", { name: /minimize conversation/i }));
     expect(queryByRole("dialog")).toBeNull();
     // reopen -> draft restored
     panel = openPanel(getByRole);
-    expect((panel.querySelector("textarea") as HTMLTextAreaElement).value).toBe("half-written question");
+    expect((panel.querySelector("textarea") as HTMLTextAreaElement).value).toBe(
+      "half-written question",
+    );
   });
 
   it("never bundles or references OpenRouter API keys", () => {
-    const { getByRole } = render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, {
-      wrapper: Wrapper,
-    });
+    const { getByRole } = render(
+      <AiAnchor
+        context={{ activePage: "dashboard" } as ResearchContextEnvelope}
+      />,
+      {
+        wrapper: Wrapper,
+      },
+    );
     const panel = openPanel(getByRole);
     const html = panel.outerHTML;
     expect(html).not.toContain("OPENROUTER_API_KEY");
@@ -192,15 +245,25 @@ describe("AiAnchor — unified composer inside the panel", () => {
   it("accepts the canonical research-context envelope without throwing", () => {
     const ctx: ResearchContextEnvelope = {
       activePage: "dashboard",
-      selectedInstrument: { symbol: "CVPB2615", instrumentType: "CW", underlyingSymbol: "VPB", strikePrice: 28500, ivBid: 0.21 },
+      selectedInstrument: {
+        symbol: "CVPB2615",
+        instrumentType: "CW",
+        underlyingSymbol: "VPB",
+        strikePrice: 28500,
+        ivBid: 0.21,
+      },
       watchlist: ["CVPB2615", "CHPG2602"],
       marketSession: "CLOSED_POST_MARKET",
       marketSessionActive: false,
       dataState: "LAST_SESSION",
     } as ResearchContextEnvelope;
-    const { getByRole } = render(<AiAnchor context={ctx} />, { wrapper: Wrapper });
+    const { getByRole } = render(<AiAnchor context={ctx} />, {
+      wrapper: Wrapper,
+    });
     const panel = openPanel(getByRole);
-    expect(panel.querySelector('textarea[aria-label="Ask the research assistant"]')).not.toBeNull();
+    expect(
+      panel.querySelector('textarea[aria-label="Ask the research assistant"]'),
+    ).not.toBeNull();
   });
 });
 
@@ -210,7 +273,9 @@ function seedConversation(messages: any[]) {
     JSON.stringify({
       version: 2,
       activeConversationId: "c1",
-      conversations: [{ id: "c1", title: "t", createdAt: 1, updatedAt: 2, messages }],
+      conversations: [
+        { id: "c1", title: "t", createdAt: 1, updatedAt: 2, messages },
+      ],
     }),
   );
 }
@@ -223,12 +288,18 @@ describe("AiAnchor — Markdown rendering + research trace", () => {
         id: "a",
         role: "assistant",
         createdAt: 2,
-        content: "### Quant context\n\n- **IV:** 34.2%\n- **HV (22D):** 28.7%\n\nUse `get_quant`.",
+        content:
+          "### Quant context\n\n- **IV:** 34.2%\n- **HV (22D):** 28.7%\n\nUse `get_quant`.",
       },
     ]);
-    const { getByRole } = render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, {
-      wrapper: Wrapper,
-    });
+    const { getByRole } = render(
+      <AiAnchor
+        context={{ activePage: "dashboard" } as ResearchContextEnvelope}
+      />,
+      {
+        wrapper: Wrapper,
+      },
+    );
     const panel = openPanel(getByRole);
     expect(panel.querySelector("strong")?.textContent).toContain("IV:");
     expect(panel.querySelectorAll("li").length).toBe(2);
@@ -248,14 +319,33 @@ describe("AiAnchor — Markdown rendering + research trace", () => {
         createdAt: 2,
         content: "Per the HOSE filing on 2026-07-30…",
         trace: [
-          { tool: "get_news", display_name: "Searching disclosures", context: "HOSE · HPG · recent", result_summary: "12 records found", duration_ms: 184, ok: true },
-          { tool: "get_history", display_name: "Loading market history", context: "HPG · daily", result_summary: "248 bars loaded", duration_ms: 40, ok: true },
+          {
+            tool: "get_news",
+            display_name: "Searching disclosures",
+            context: "HOSE · HPG · recent",
+            result_summary: "12 records found",
+            duration_ms: 184,
+            ok: true,
+          },
+          {
+            tool: "get_history",
+            display_name: "Loading market history",
+            context: "HPG · daily",
+            result_summary: "248 bars loaded",
+            duration_ms: 40,
+            ok: true,
+          },
         ],
       },
     ]);
-    const { getByRole } = render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, {
-      wrapper: Wrapper,
-    });
+    const { getByRole } = render(
+      <AiAnchor
+        context={{ activePage: "dashboard" } as ResearchContextEnvelope}
+      />,
+      {
+        wrapper: Wrapper,
+      },
+    );
     const panel = openPanel(getByRole);
     const text = panel.textContent || "";
     expect(text).toContain("Research trace · 2 tools");
