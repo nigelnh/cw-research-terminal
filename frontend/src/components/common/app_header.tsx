@@ -20,11 +20,14 @@ interface AppHeaderProps {
 
 const VN_TZ = "Asia/Ho_Chi_Minh";
 
-/** "Aug 29, 2026 · 10:15 ICT" in Vietnam local time. */
-function useVietnamClock(): string {
+/**
+ * "Aug 29, 2026 · 21:43:07 ICT" in Vietnam local time. Its own component + interval so
+ * the once-per-second tick re-renders only this span, not the whole header.
+ */
+function HeaderClock() {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 15_000);
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
   const d = new Date(now);
@@ -38,9 +41,10 @@ function useVietnamClock(): string {
     timeZone: VN_TZ,
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
     hour12: false,
   }).format(d);
-  return `${date} · ${time} ICT`;
+  return <span className="mono">{`${date} · ${time} ICT`}</span>;
 }
 
 const TAB_BASE: React.CSSProperties = {
@@ -181,8 +185,6 @@ export function AppHeader({
   onFilterChange,
   marketSessionActive,
 }: AppHeaderProps) {
-  const clock = useVietnamClock();
-
   return (
     <header
       style={{
@@ -252,7 +254,7 @@ export function AppHeader({
           color: "var(--t-66)",
         }}
       >
-        <span className="mono">{clock}</span>
+        <HeaderClock />
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span
             style={{

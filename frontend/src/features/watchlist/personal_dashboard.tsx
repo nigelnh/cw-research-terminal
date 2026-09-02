@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { WatchlistItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
@@ -54,16 +54,12 @@ interface StockRow {
   vol: number | null;
   ceiling: number | null;
   floor: number | null;
-  forBuy: number | null;
-  forSell: number | null;
-  room: number | null;
 }
 
 interface CwRow {
   symbol: string;
   underlying: string | null;
   issuer: string | null;
-  undPrice: number | null;
   bid: number | null;
   ask: number | null;
   last: number | null;
@@ -82,7 +78,34 @@ interface CwRow {
   conflicting: boolean;
 }
 
-const STOCK_FIELDS: SortFields<StockRow> = {
+/**
+ * One row in the unified watchlist table. Stock/index rows are parents; CW rows
+ * are children grouped under the parent whose symbol matches `underlying`. Every
+ * row uses the same column schema — CW-only fields are null on stocks and vice versa.
+ */
+interface UnifiedRow {
+  symbol: string;
+  kind: "stock" | "cw";
+  underlying: string | null;
+  ref: number | null;
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  chgPct: number | null;
+  vol: number | null;
+  ceiling: number | null;
+  floor: number | null;
+  strike: number | null;
+  ratio: number | null;
+  dteText: string;
+  dte: number | null;
+  ivBid: number | null;
+  ivTrade: number | null;
+  ivAsk: number | null;
+  conflicting: boolean;
+}
+
+const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
   symbol: (r) => r.symbol,
   ref: (r) => r.ref,
   bid: (r) => r.bid,
@@ -90,19 +113,6 @@ const STOCK_FIELDS: SortFields<StockRow> = {
   trd: (r) => r.last,
   chg: (r) => r.chgPct,
   vol: (r) => r.vol,
-  forBuy: (r) => r.forBuy,
-  forSell: (r) => r.forSell,
-  room: (r) => r.room,
-};
-
-const CW_FIELDS: SortFields<CwRow> = {
-  symbol: (r) => r.symbol,
-  und: (r) => r.underlying,
-  undPrice: (r) => r.undPrice,
-  bid: (r) => r.bid,
-  ask: (r) => r.ask,
-  trd: (r) => r.last,
-  chg: (r) => r.chgPct,
   strike: (r) => r.strike,
   ratio: (r) => r.ratio,
   dte: (r) => r.dte,
@@ -120,7 +130,7 @@ export function PersonalDashboard({
   onSelectSymbol,
   filter = "",
 }: PersonalDashboardProps) {
-  const { items, plan } = useWatchlist();
+  const { items } = useWatchlist();
   const { quotes, warrants, marketSessionActive } = useResearchMarket();
   const { getSpec } = useInstrumentSpecs();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
@@ -153,9 +163,6 @@ export function PersonalDashboard({
             vol: quote?.totalVolume ?? null,
             ceiling: quote?.ceilingPrice ?? null,
             floor: quote?.floorPrice ?? null,
-            forBuy: quote?.foreignBuy ?? null,
-            forSell: quote?.foreignSell ?? null,
-            room: quote?.foreignRoom ?? null,
           };
         })
         .filter((r) => textMatch(r.symbol))
@@ -174,11 +181,6 @@ export function PersonalDashboard({
           const fb = row?.analytics ?? null;
           const spec = getSpec(item.symbol);
           const underlying = spec?.underlyingSymbol || item.underlyingSymbol || cw?.underlyingSymbol || null;
-          const undPrice =
-            cw?.underlyingPrice ??
-            (underlying
-              ? getRow(underlying)?.quote?.lastPrice ?? quotes.get(underlying)?.lastPrice ?? null
-              : null);
           const last = quote?.lastPrice ?? cw?.quote?.lastPrice ?? null;
           const pctRaw = quote?.priceChangePercent ?? cw?.quote?.priceChangePercent ?? null;
           const lastTradingDate = spec?.lastTradingDate ?? null;
@@ -187,7 +189,6 @@ export function PersonalDashboard({
             symbol: item.symbol,
             underlying,
             issuer: spec?.issuer ?? null,
-            undPrice,
             bid: quote?.bidPrice ?? cw?.quote?.bidPrice ?? null,
             ask: quote?.askPrice ?? cw?.quote?.askPrice ?? null,
             last,
@@ -227,8 +228,67 @@ export function PersonalDashboard({
     [cwRows],
   );
 
-  const stocks = useSortPin(stockRows, STOCK_FIELDS);
-  const cws = useSortPin(cwRows, CW_FIELDS);
+  const unifiedRows: UnifiedRow[] = useMemo(
+    () => [
+      ...stockRows.map((s): UnifiedRow => ({
+        symbol: s.symbol,
+        kind: "stock",
+        underlying: null,
+        ref: s.ref,
+        bid: s.bid,
+        ask: s.ask,
+        last: s.last,
+        chgPct: s.chgPct,
+        vol: s.vol,
+        ceiling: s.ceiling,
+        floor: s.floor,
+        strike: null,
+        ratio: null,
+        dteText: DASH,
+        dte: null,
+        ivBid: null,
+        ivTrade: null,
+        ivAsk: null,
+        conflicting: false,
+      })),
+      ...cwRows.map((c): UnifiedRow => ({
+        symbol: c.symbol,
+        kind: "cw",
+        underlying: c.underlying,
+        ref: c.ref,
+        bid: c.bid,
+        ask: c.ask,
+        last: c.last,
+        chgPct: c.chgPct,
+        vol: null,
+        ceiling: c.ceiling,
+        floor: c.floor,
+        strike: c.strike,
+        ratio: c.ratio,
+        dteText: c.dteText,
+        dte: c.dte,
+        ivBid: c.ivBid,
+        ivTrade: c.ivTrade,
+        ivAsk: c.ivAsk,
+        conflicting: c.conflicting,
+      })),
+    ],
+    [stockRows, cwRows],
+  );
+
+  const view = useSortPin(unifiedRows, UNIFIED_FIELDS);
+
+  const stockSyms = useMemo(
+    () => new Set(stockRows.map((r) => r.symbol.toUpperCase())),
+    [stockRows],
+  );
+  const parents = view.ordered.filter((r) => r.kind === "stock");
+  const orderedCws = view.ordered.filter((r) => r.kind === "cw");
+  const childrenOf = (sym: string) =>
+    orderedCws.filter((c) => (c.underlying ?? "").toUpperCase() === sym.toUpperCase());
+  const orphanCws = orderedCws.filter(
+    (c) => !c.underlying || !stockSyms.has(c.underlying.toUpperCase()),
+  );
 
   const sessionNote =
     meta.marketSessionActive || marketSessionActive
@@ -249,6 +309,66 @@ export function PersonalDashboard({
     floor: r.floor,
   });
 
+  const renderRow = (r: UnifiedRow, isChild: boolean) => {
+    const chg = fmtChg(r.chgPct);
+    const selected = selectedSymbol === r.symbol;
+    const pr = priceRef(r);
+    return (
+      <tr
+        key={r.symbol}
+        onClick={() => setSelected(r.symbol)}
+        style={{
+          cursor: "pointer",
+          height: 26,
+          background: selected ? "var(--panel-3)" : "transparent",
+          borderBottom: ROW_BORDER,
+        }}
+      >
+        <PinCell symbol={r.symbol} fill={view.pinFill(r.symbol)} onToggle={view.togglePin} />
+        <td
+          style={{
+            padding: "0 8px",
+            paddingLeft: isChild ? 24 : 8,
+            color: "var(--accent)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {isChild && <span style={{ color: "var(--t-46)" }}>↳ </span>}
+          {r.symbol}
+          {isChild && (
+            <span style={{ marginLeft: 6, fontSize: 9, color: "var(--t-46)" }}>CW</span>
+          )}
+          {r.conflicting && (
+            <span
+              title="Conflicting metadata — quant withheld"
+              style={{ marginLeft: 5, color: "var(--down)" }}
+            >
+              ◆
+            </span>
+          )}
+        </td>
+        <td style={{ ...TD, color: "var(--t-60)" }}>{fmtPrice(r.ref)}</td>
+        <td style={{ ...TD, color: priceColor(r.bid, pr) }}>{fmtPrice(r.bid)}</td>
+        <td style={{ ...TD, color: priceColor(r.ask, pr) }}>{fmtPrice(r.ask)}</td>
+        <td style={{ ...TD, color: priceColor(r.last, pr) }}>{fmtPrice(r.last)}</td>
+        <td style={{ ...TD, color: chg.color }}>
+          {r.last !== null && r.ref !== null
+            ? Math.abs(r.last - r.ref).toLocaleString("en-US", { maximumFractionDigits: 2 })
+            : DASH}
+        </td>
+        <td style={{ ...TD, color: chg.color }}>{chg.text}</td>
+        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtVol(r.vol)}</td>
+        <td style={{ ...TD, color: "var(--t-60)" }}>{fmtPrice(r.strike)}</td>
+        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtRatio(r.ratio)}</td>
+        <td style={{ ...TD, color: "var(--t-46)" }}>{r.dteText}</td>
+        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivBid)}</td>
+        <td style={{ ...TD, color: "var(--t-85)" }}>{fmtIV(r.ivTrade)}</td>
+        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivAsk)}</td>
+        <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
+      </tr>
+    );
+  };
+
   return (
     <div>
       <div
@@ -265,9 +385,6 @@ export function PersonalDashboard({
         </span>
         <span style={{ fontSize: 10.5, color: "var(--t-42)", fontStyle: "italic" }}>
           “{sessionNote}”
-        </span>
-        <span className="mono" style={{ fontSize: 10.5, color: "var(--t-46)" }}>
-          {plan.symbolCount} / {plan.capacity ?? 33}
         </span>
         <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
         <RegistryFilter
@@ -304,131 +421,39 @@ export function PersonalDashboard({
         </p>
       )}
 
-      {stockRows.length > 0 && (
+      {(stockRows.length > 0 || cwRows.length > 0) && (
         <table
           className="mono grid-lined"
-          style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, marginBottom: 10 }}
+          style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}
         >
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
               <PinHeader />
-              <SortHeader label="SYMBOL" align="left" mark={stocks.sortMark("symbol")} onClick={() => stocks.toggleSort("symbol")} />
-              <SortHeader label="REF" mark={stocks.sortMark("ref")} onClick={() => stocks.toggleSort("ref")} />
-              <SortHeader label="BID" mark={stocks.sortMark("bid")} onClick={() => stocks.toggleSort("bid")} />
-              <SortHeader label="ASK" mark={stocks.sortMark("ask")} onClick={() => stocks.toggleSort("ask")} />
-              <SortHeader label="TRD" mark={stocks.sortMark("trd")} onClick={() => stocks.toggleSort("trd")} />
+              <SortHeader label="SYMBOL" align="left" mark={view.sortMark("symbol")} onClick={() => view.toggleSort("symbol")} />
+              <SortHeader label="REF" mark={view.sortMark("ref")} onClick={() => view.toggleSort("ref")} />
+              <SortHeader label="BID" mark={view.sortMark("bid")} onClick={() => view.toggleSort("bid")} />
+              <SortHeader label="ASK" mark={view.sortMark("ask")} onClick={() => view.toggleSort("ask")} />
+              <SortHeader label="TRD" mark={view.sortMark("trd")} onClick={() => view.toggleSort("trd")} />
               <PlainHeader label="+/-" />
-              <SortHeader label="CHG%" mark={stocks.sortMark("chg")} onClick={() => stocks.toggleSort("chg")} />
-              <SortHeader label="VOLUME" mark={stocks.sortMark("vol")} onClick={() => stocks.toggleSort("vol")} />
-              <SortHeader label="FRN BUY" mark={stocks.sortMark("forBuy")} onClick={() => stocks.toggleSort("forBuy")} />
-              <SortHeader label="FRN SELL" mark={stocks.sortMark("forSell")} onClick={() => stocks.toggleSort("forSell")} />
-              <SortHeader label="FRN ROOM" mark={stocks.sortMark("room")} onClick={() => stocks.toggleSort("room")} />
+              <SortHeader label="CHG%" mark={view.sortMark("chg")} onClick={() => view.toggleSort("chg")} />
+              <SortHeader label="VOLUME" mark={view.sortMark("vol")} onClick={() => view.toggleSort("vol")} />
+              <SortHeader label="STRIKE" mark={view.sortMark("strike")} onClick={() => view.toggleSort("strike")} />
+              <SortHeader label="RATIO" mark={view.sortMark("ratio")} onClick={() => view.toggleSort("ratio")} />
+              <SortHeader label="DTE" mark={view.sortMark("dte")} onClick={() => view.toggleSort("dte")} />
+              <SortHeader label="IV BID" mark={view.sortMark("ivBid")} onClick={() => view.toggleSort("ivBid")} />
+              <SortHeader label="IV TRD" mark={view.sortMark("ivTrade")} onClick={() => view.toggleSort("ivTrade")} />
+              <SortHeader label="IV ASK" mark={view.sortMark("ivAsk")} onClick={() => view.toggleSort("ivAsk")} />
               <DismissHeader />
             </tr>
           </thead>
           <tbody>
-            {stocks.ordered.map((r) => {
-              const chg = fmtChg(r.chgPct);
-              const selected = selectedSymbol === r.symbol;
-              return (
-                <tr
-                  key={r.symbol}
-                  onClick={() => setSelected(r.symbol)}
-                  style={{
-                    cursor: "pointer",
-                    height: 26,
-                    background: selected ? "var(--panel-3)" : "transparent",
-                    borderBottom: ROW_BORDER,
-                  }}
-                >
-                  <PinCell symbol={r.symbol} fill={stocks.pinFill(r.symbol)} onToggle={stocks.togglePin} />
-                  <td style={{ padding: "0 8px", color: "var(--accent)" }}>{r.symbol}</td>
-                  <td style={{ ...TD, color: "var(--t-60)" }}>{fmtPrice(r.ref)}</td>
-                  <td style={{ ...TD, color: priceColor(r.bid, priceRef(r)) }}>{fmtPrice(r.bid)}</td>
-                  <td style={{ ...TD, color: priceColor(r.ask, priceRef(r)) }}>{fmtPrice(r.ask)}</td>
-                  <td style={{ ...TD, color: priceColor(r.last, priceRef(r)) }}>{fmtPrice(r.last)}</td>
-                  <td style={{ ...TD, color: chg.color }}>
-                    {r.last !== null && r.ref !== null
-                      ? Math.abs(r.last - r.ref).toLocaleString("en-US", { maximumFractionDigits: 2 })
-                      : DASH}
-                  </td>
-                  <td style={{ ...TD, color: chg.color }}>{chg.text}</td>
-                  <td style={{ ...TD, color: "var(--t-50)" }}>{fmtVol(r.vol)}</td>
-                  <td style={{ ...TD, color: "var(--t-60)" }}>{fmtVol(r.forBuy)}</td>
-                  <td style={{ ...TD, color: "var(--t-60)" }}>{fmtVol(r.forSell)}</td>
-                  <td style={{ ...TD, color: "var(--t-50)" }}>{fmtVol(r.room)}</td>
-                  <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-
-      {cwRows.length > 0 && (
-        <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-          <thead>
-            <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
-              <PinHeader />
-              <SortHeader label="SYMBOL" align="left" mark={cws.sortMark("symbol")} onClick={() => cws.toggleSort("symbol")} />
-              <SortHeader label="UND." align="left" mark={cws.sortMark("und")} onClick={() => cws.toggleSort("und")} />
-              <SortHeader label="UND.PRC" mark={cws.sortMark("undPrice")} onClick={() => cws.toggleSort("undPrice")} />
-              <SortHeader label="BID" mark={cws.sortMark("bid")} onClick={() => cws.toggleSort("bid")} />
-              <SortHeader label="ASK" mark={cws.sortMark("ask")} onClick={() => cws.toggleSort("ask")} />
-              <SortHeader label="TRD" mark={cws.sortMark("trd")} onClick={() => cws.toggleSort("trd")} />
-              <SortHeader label="CHG%" mark={cws.sortMark("chg")} onClick={() => cws.toggleSort("chg")} />
-              <SortHeader label="STRIKE" mark={cws.sortMark("strike")} onClick={() => cws.toggleSort("strike")} />
-              <SortHeader label="RATIO" mark={cws.sortMark("ratio")} onClick={() => cws.toggleSort("ratio")} />
-              <SortHeader label="DTE" mark={cws.sortMark("dte")} onClick={() => cws.toggleSort("dte")} />
-              <SortHeader label="IV BID" mark={cws.sortMark("ivBid")} onClick={() => cws.toggleSort("ivBid")} />
-              <SortHeader label="IV TRD" mark={cws.sortMark("ivTrade")} onClick={() => cws.toggleSort("ivTrade")} />
-              <SortHeader label="IV ASK" mark={cws.sortMark("ivAsk")} onClick={() => cws.toggleSort("ivAsk")} />
-              <DismissHeader />
-            </tr>
-          </thead>
-          <tbody>
-            {cws.ordered.map((r) => {
-              const chg = fmtChg(r.chgPct);
-              const selected = selectedSymbol === r.symbol;
-              return (
-                <tr
-                  key={r.symbol}
-                  onClick={() => setSelected(r.symbol)}
-                  style={{
-                    cursor: "pointer",
-                    height: 26,
-                    background: selected ? "var(--panel-3)" : "transparent",
-                    borderBottom: ROW_BORDER,
-                  }}
-                >
-                  <PinCell symbol={r.symbol} fill={cws.pinFill(r.symbol)} onToggle={cws.togglePin} />
-                  <td style={{ padding: "0 8px", color: "var(--accent)", whiteSpace: "nowrap" }}>
-                    {r.symbol}
-                    {r.conflicting && (
-                      <span
-                        title="Conflicting metadata — quant withheld"
-                        style={{ marginLeft: 5, color: "var(--down)" }}
-                      >
-                        ◆
-                      </span>
-                    )}
-                  </td>
-                  <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.underlying ?? DASH}</td>
-                  <td style={{ ...TD, color: "var(--t-60)" }}>{fmtPrice(r.undPrice)}</td>
-                  <td style={{ ...TD, color: priceColor(r.bid, priceRef(r)) }}>{fmtPrice(r.bid)}</td>
-                  <td style={{ ...TD, color: priceColor(r.ask, priceRef(r)) }}>{fmtPrice(r.ask)}</td>
-                  <td style={{ ...TD, color: priceColor(r.last, priceRef(r)) }}>{fmtPrice(r.last)}</td>
-                  <td style={{ ...TD, color: chg.color }}>{chg.text}</td>
-                  <td style={{ ...TD, color: "var(--t-60)" }}>{fmtPrice(r.strike)}</td>
-                  <td style={{ ...TD, color: "var(--t-50)" }}>{fmtRatio(r.ratio)}</td>
-                  <td style={{ ...TD, color: "var(--t-46)" }}>{r.dteText}</td>
-                  <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivBid)}</td>
-                  <td style={{ ...TD, color: "var(--t-85)" }}>{fmtIV(r.ivTrade)}</td>
-                  <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivAsk)}</td>
-                  <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
-                </tr>
-              );
-            })}
+            {parents.map((p) => (
+              <Fragment key={p.symbol}>
+                {renderRow(p, false)}
+                {childrenOf(p.symbol).map((c) => renderRow(c, true))}
+              </Fragment>
+            ))}
+            {orphanCws.map((c) => renderRow(c, false))}
           </tbody>
         </table>
       )}

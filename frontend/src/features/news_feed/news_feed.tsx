@@ -63,6 +63,8 @@ const F_CHECK: React.CSSProperties = {
   cursor: "pointer",
   color: "var(--t-80)",
 };
+/** Bounded, internally-scrolling checkbox list so a long symbol set can't grow the popover. */
+const F_SCROLL: React.CSSProperties = { maxHeight: 132, overflowY: "auto" };
 
 /** FILTER ▾ dropdown for the News feed — SYMBOL, EVENT TYPE, PUBLISH DATE. */
 function NewsFilterDropdown({
@@ -118,23 +120,25 @@ function NewsFilterDropdown({
               boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
             }}
           >
-            <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 20, marginBottom: 12, alignItems: "flex-start" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={F_LABEL}>SYMBOL</div>
-                <label style={F_CHECK}>
-                  <input
-                    type="checkbox"
-                    checked={value.symbols === null}
-                    onChange={() => onChange({ ...value, symbols: value.symbols === null ? [] : null })}
-                  />
-                  All
-                </label>
-                {symbolOptions.map((s) => (
-                  <label key={s} style={F_CHECK}>
-                    <input type="checkbox" checked={symChecked(s)} onChange={() => toggleSym(s)} />
-                    {s}
+                <div style={F_SCROLL}>
+                  <label style={F_CHECK}>
+                    <input
+                      type="checkbox"
+                      checked={value.symbols === null}
+                      onChange={() => onChange({ ...value, symbols: value.symbols === null ? [] : null })}
+                    />
+                    All
                   </label>
-                ))}
+                  {symbolOptions.map((s) => (
+                    <label key={s} style={F_CHECK}>
+                      <input type="checkbox" checked={symChecked(s)} onChange={() => toggleSym(s)} />
+                      {s}
+                    </label>
+                  ))}
+                </div>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={F_LABEL}>EVENT TYPE</div>
