@@ -5,6 +5,12 @@ import {
   normalizeTransportPrice,
   instrumentTypeOf,
 } from "./map_snapshot";
+import { mergeRealtimePulses } from "./realtime_pulse";
+
+export interface PatchApplyOptions {
+  /** False while establishing a baseline after initial connect/reconnect/session rollover. */
+  emitPulses?: boolean;
+}
 
 /**
  * Applies an incremental gateway market-data patch onto a MarketQuote model.
@@ -14,6 +20,7 @@ export function applyRawPatchToQuote(
   symbol: string,
   patch: any,
   sourceTs?: number | null,
+  options: PatchApplyOptions = {},
 ): MarketQuote {
   const base: MarketQuote = existing || {
     symbol,
@@ -82,7 +89,8 @@ export function applyRawPatchToQuote(
   if (patch.Total_Vol !== undefined) q.totalVolume = patch.Total_Vol;
   if (patch.Trading_Val !== undefined)
     q.tradingValue = price(patch.Trading_Val);
-  if (patch.Change !== undefined) q.priceChange = price(patch.Change);
+  const rawChange = patch.change !== undefined ? patch.change : patch.Change;
+  if (rawChange !== undefined) q.priceChange = price(rawChange);
   if (patch.ChangePercent !== undefined)
     q.priceChangePercent = patch.ChangePercent;
 
@@ -91,6 +99,42 @@ export function applyRawPatchToQuote(
     q.exchangeTimestamp = Number(patch.ExchangeTime);
   if (patch._ts_source !== undefined)
     q.sourceTimestamp = Number(patch._ts_source);
+
+  const touched: string[] = [];
+  const fieldByWireKey: Record<string, string> = {
+    Traded: "lastPrice",
+    Open_Prc: "openPrice",
+    High_Prc: "highPrice",
+    Low_Prc: "lowPrice",
+    Avg_Prc: "averagePrice",
+    Bid1_Prc: "bidPrice",
+    Bid1_Qty: "bidQuantity",
+    Ask1_Prc: "askPrice",
+    Ask1_Qty: "askQuantity",
+    Bid2_Prc: "bid2Price",
+    Bid2_Qty: "bid2Quantity",
+    Ask2_Prc: "ask2Price",
+    Ask2_Qty: "ask2Quantity",
+    Bid3_Prc: "bid3Price",
+    Bid3_Qty: "bid3Quantity",
+    Ask3_Prc: "ask3Price",
+    Ask3_Qty: "ask3Quantity",
+    Traded_Qty: "tradedQuantity",
+    Total_Vol: "totalVolume",
+    Trading_Val: "tradingValue",
+    ChangePercent: "priceChangePercent",
+  };
+  for (const [wire, field] of Object.entries(fieldByWireKey)) {
+    if (patch[wire] !== undefined) touched.push(field);
+  }
+  if (rawChange !== undefined) touched.push("priceChange");
+  q.realtimePulses = mergeRealtimePulses(
+    base.realtimePulses,
+    base as unknown as Record<string, number | null | undefined>,
+    q as unknown as Record<string, number | null | undefined>,
+    touched,
+    options.emitPulses !== false,
+  );
 
   return q;
 }
@@ -102,12 +146,14 @@ export function applyRawPatchToQuote(
 export function applyRawPatchToCoveredWarrant(
   existing: CoveredWarrant,
   patch: any,
+  options: PatchApplyOptions = {},
 ): CoveredWarrant {
   const q = applyRawPatchToQuote(
     existing.quote,
     existing.symbol,
     patch,
     existing.quote.sourceTimestamp,
+    options,
   );
 
   // Volatilities
@@ -129,7 +175,7 @@ export function applyRawPatchToCoveredWarrant(
       ? normalizeTransportPriceToRawVnd(patch.Under_Prc)
       : existing.underlyingPrice;
 
-  return {
+  const updated = {
     ...existing,
     underlyingPrice,
     quote: q,
@@ -137,4 +183,18 @@ export function applyRawPatchToCoveredWarrant(
     ivTrade,
     ivBid,
   };
+  const touched = [
+    ...(patch.Vol1 !== undefined ? ["ivAsk"] : []),
+    ...(patch.Vol2 !== undefined ? ["ivTrade"] : []),
+    ...(patch.Vol3 !== undefined ? ["ivBid"] : []),
+    ...(patch.Under_Prc !== undefined ? ["underlyingPrice"] : []),
+  ];
+  updated.realtimePulses = mergeRealtimePulses(
+    existing.realtimePulses,
+    existing as unknown as Record<string, number | null | undefined>,
+    updated as unknown as Record<string, number | null | undefined>,
+    touched,
+    options.emitPulses !== false,
+  );
+  return updated;
 }

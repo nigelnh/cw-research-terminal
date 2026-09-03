@@ -1,7 +1,7 @@
 import type { MarketQuote, CoveredWarrant } from "@/domain/models";
 
 export type GatewayConnectionState = "CONNECTING" | "CONNECTED" | "DISCONNECTED" | "RECONNECTING" | "ERROR";
-export type UpstreamFeedState = "UNKNOWN" | "CONNECTING" | "CONNECTED" | "DISCONNECTED" | "ERROR";
+export type UpstreamFeedState = "UNKNOWN" | "CONNECTING" | "CONNECTED" | "RECONNECTING" | "STALE" | "DISCONNECTED" | "ERROR";
 
 export type ConnectionState = GatewayConnectionState;
 

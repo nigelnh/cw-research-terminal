@@ -65,7 +65,7 @@ const EMPTY_META: DashboardMeta = {
  * query refetches when `marketSessionActive` flips).
  */
 export function useDashboardData(symbols: string[]): UseDashboardDataResult {
-  const { quotes, marketSessionActive } = useResearchMarket();
+  const { quotes, marketSessionActive, isRealtimeTracked } = useResearchMarket();
   const qc = useQueryClient();
 
   const sortedKey = [...new Set(symbols.map((s) => s.toUpperCase()))].sort();
@@ -116,7 +116,7 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
         },
         displayState: "LIVE",
         analytics: fb?.analytics ?? null,
-        trackedRealtime: true,
+        trackedRealtime: isRealtimeTracked(sym),
       };
     }
 

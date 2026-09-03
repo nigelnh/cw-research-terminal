@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from "react";
-import type { WatchlistItem } from "@/domain/models";
+import type { RealtimePulseMap, WatchlistItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
 import { useDashboardData } from "@/data/query/use_dashboard_data";
-import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, quoteCell, type QuoteColumnKey } from "@/components/common/quote_columns";
+import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, QUOTE_COLUMN_PULSE_FIELD, quoteCell, type QuoteColumnKey } from "@/components/common/quote_columns";
 import { completeOrder, moveGroupedRows, useWatchlistLayout } from "@/components/common/watchlist_layout";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import { MarketOverviewStrip } from "./market_overview_strip";
@@ -28,6 +28,7 @@ import {
   useSortPin,
   type SortFields,
 } from "@/components/common/grid_table";
+import { RealtimeValue } from "@/components/common/realtime_value";
 
 interface PersonalDashboardProps {
   onNavigateToUniverse?: () => void;
@@ -47,10 +48,13 @@ interface StockRow {
   ask: number | null;
   last: number | null;
   tradingValue: number | null;
+  change: number | null;
   chgPct: number | null;
   vol: number | null;
   ceiling: number | null;
   floor: number | null;
+  pulses?: RealtimePulseMap;
+  trackedRealtime: boolean;
 }
 
 interface CwRow {
@@ -61,6 +65,7 @@ interface CwRow {
   ask: number | null;
   last: number | null;
   tradingValue: number | null;
+  change: number | null;
   ref: number | null;
   ceiling: number | null;
   floor: number | null;
@@ -75,6 +80,8 @@ interface CwRow {
   ivTrade: number | null;
   ivAsk: number | null;
   conflicting: boolean;
+  pulses?: RealtimePulseMap;
+  trackedRealtime: boolean;
 }
 
 /**
@@ -92,6 +99,7 @@ interface UnifiedRow {
   ask: number | null;
   last: number | null;
   tradingValue: number | null;
+  change: number | null;
   chgPct: number | null;
   vol: number | null;
   ceiling: number | null;
@@ -105,6 +113,8 @@ interface UnifiedRow {
   ivTrade: number | null;
   ivAsk: number | null;
   conflicting: boolean;
+  pulses?: RealtimePulseMap;
+  trackedRealtime: boolean;
 }
 
 const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
@@ -117,7 +127,7 @@ const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
   ask: (r) => r.ask,
   last: (r) => r.last,
   tradingValue: (r) => r.tradingValue,
-  change: (r) => r.last !== null && r.ref !== null ? r.last - r.ref : null,
+  change: (r) => r.change,
   lastTradingDate: (r) => r.lastTradingDate,
   chgPct: (r) => r.chgPct,
   vol: (r) => r.vol,
@@ -139,7 +149,7 @@ export function PersonalDashboard({
   filter = "",
 }: PersonalDashboardProps) {
   const { items } = useWatchlist();
-  const { quotes, warrants } = useResearchMarket();
+  const { quotes, warrants, isRealtimeTracked } = useResearchMarket();
   const { getSpec } = useInstrumentSpecs();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
   const [symbolSearch, setSymbolSearch] = useState("");
@@ -175,15 +185,18 @@ export function PersonalDashboard({
             ask: quote?.askPrice ?? null,
             last: quote?.lastPrice ?? null,
             tradingValue: quote?.tradingValue ?? null,
+            change: quote?.priceChange ?? null,
             chgPct: pct,
             vol: quote?.totalVolume ?? null,
             ceiling: quote?.ceilingPrice ?? null,
             floor: quote?.floorPrice ?? null,
+            pulses: quote?.realtimePulses,
+            trackedRealtime: row?.trackedRealtime ?? isRealtimeTracked(item.symbol),
           };
         })
         .filter((r) => textMatch(r.symbol))
         .filter((r) => !hiddenRows.isHidden(r.symbol)),
-    [items, getRow, quotes, q, hiddenRows],
+    [items, getRow, quotes, q, hiddenRows, isRealtimeTracked],
   );
 
   const unfilteredCwRows: CwRow[] = useMemo(
@@ -209,6 +222,7 @@ export function PersonalDashboard({
             ask: quote?.askPrice ?? cw?.quote?.askPrice ?? null,
             last,
             tradingValue: quote?.tradingValue ?? cw?.quote?.tradingValue ?? null,
+            change: quote?.priceChange ?? cw?.quote?.priceChange ?? null,
             ref: quote?.referencePrice ?? cw?.quote?.referencePrice ?? null,
             ceiling: quote?.ceilingPrice ?? cw?.quote?.ceilingPrice ?? null,
             floor: quote?.floorPrice ?? cw?.quote?.floorPrice ?? null,
@@ -223,11 +237,16 @@ export function PersonalDashboard({
             ivTrade: cw?.ivTrade ?? fb?.ivTrade ?? null,
             ivAsk: cw?.ivAsk ?? fb?.ivAsk ?? null,
             conflicting: spec?.metadataVerification === "CONFLICTING",
+            pulses: {
+              ...(quote?.realtimePulses ?? cw?.quote?.realtimePulses ?? {}),
+              ...(cw?.realtimePulses ?? {}),
+            },
+            trackedRealtime: row?.trackedRealtime ?? isRealtimeTracked(item.symbol),
           };
         })
         .filter((r) => textMatch(r.symbol, r.underlying))
         .filter((r) => !hiddenRows.isHidden(r.symbol)),
-    [items, getRow, quotes, warrants, getSpec, q, hiddenRows],
+    [items, getRow, quotes, warrants, getSpec, q, hiddenRows, isRealtimeTracked],
   );
 
   const cwRows = useMemo(
@@ -256,6 +275,7 @@ export function PersonalDashboard({
         ask: s.ask,
         last: s.last,
         tradingValue: s.tradingValue,
+        change: s.change,
         chgPct: s.chgPct,
         vol: s.vol,
         ceiling: s.ceiling,
@@ -269,6 +289,8 @@ export function PersonalDashboard({
         ivTrade: null,
         ivAsk: null,
         conflicting: false,
+        pulses: s.pulses,
+        trackedRealtime: s.trackedRealtime,
       })),
       ...cwRows.map((c): UnifiedRow => ({
         symbol: c.symbol,
@@ -280,6 +302,7 @@ export function PersonalDashboard({
         ask: c.ask,
         last: c.last,
         tradingValue: c.tradingValue,
+        change: c.change,
         chgPct: c.chgPct,
         vol: c.vol,
         ceiling: c.ceiling,
@@ -293,6 +316,8 @@ export function PersonalDashboard({
         ivTrade: c.ivTrade,
         ivAsk: c.ivAsk,
         conflicting: c.conflicting,
+        pulses: c.pulses,
+        trackedRealtime: c.trackedRealtime,
       })),
     ],
     [stockRows, cwRows],
@@ -378,11 +403,21 @@ export function PersonalDashboard({
         {columns.map(column => {
           const cell = quoteCell(r, column.key);
           return column.key === "symbol" ? (
-            <td key={column.key} style={{ padding: "0 8px", paddingLeft: r.kind === "cw" ? "calc(8px + 1ch)" : 8, color: r.kind === "cw" ? "var(--t-92)" : "var(--accent)", whiteSpace: "nowrap" }}>
+            <td key={column.key} title={r.trackedRealtime ? undefined : "Not tracked in the fixed realtime universe"} style={{ padding: "0 8px", paddingLeft: r.kind === "cw" ? "calc(8px + 1ch)" : 8, color: r.kind === "cw" ? "var(--t-92)" : "var(--accent)", whiteSpace: "nowrap" }}>
               {r.symbol}
               {r.conflicting && <span title="Conflicting metadata — quant withheld" style={{ marginLeft: 5, color: "var(--down)" }}>◆</span>}
+              {!r.trackedRealtime && <span className="untracked-realtime-mark" aria-label="Not tracked realtime" />}
             </td>
-          ) : <td key={column.key} title={QUOTE_COLUMN_HINTS[column.key]} style={{ ...TD, color: cell.color }}>{r.kind === "stock" && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : cell.text}</td>;
+          ) : <td key={column.key} title={QUOTE_COLUMN_HINTS[column.key]} style={{ ...TD, color: cell.color }}>
+            {r.kind === "stock" && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : (
+              <RealtimeValue
+                pulse={r.pulses?.[QUOTE_COLUMN_PULSE_FIELD[column.key] ?? ""]}
+                style={{ color: cell.color }}
+              >
+                {cell.text}
+              </RealtimeValue>
+            )}
+          </td>;
         })}
         <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
       </tr>
