@@ -95,7 +95,7 @@ class RedisMarketStateStore(MarketStateStore):
                     socket_timeout=2.0,
                 )
             except Exception as e:
-                logger.warning(f"Failed to create Redis client for URL {self._redis_url}: {e}")
+                logger.warning("Failed to create Redis warm-cache client: %s", e)
                 self._mark_disconnected()
                 return
 
@@ -103,7 +103,9 @@ class RedisMarketStateStore(MarketStateStore):
         try:
             await self._client.ping()
             self._mark_connected()
-            logger.info(f"Connected to Redis Warm Market State Cache ({self._redis_url})")
+            # Connection URLs commonly embed credentials. Never put the configured
+            # endpoint in application logs, even at info level.
+            logger.info("Connected to Redis Warm Market State Cache.")
         except (RedisError, OSError, Exception) as ping_err:
             logger.warning(f"Redis warm cache unavailable on startup ({ping_err}). Running in LIVE_WITHOUT_WARM_CACHE mode.")
             self._mark_disconnected()
