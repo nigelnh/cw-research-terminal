@@ -75,7 +75,7 @@ describe("NewsFeed — unified research feed", () => {
 
   it("a symbol filter narrows the subtitle and the feed query", () => {
     const key = queryKeys.research.feed({
-      symbol: "VPB", source: null, contentType: null, eventClass: null, q: null, lang: "vi",
+      symbol: null, source: null, contentType: null, eventClass: null, q: "VPB", lang: "vi",
     });
     const html = renderMarkup(<NewsFeed filter="VPB" />, [
       {
@@ -95,7 +95,7 @@ describe("NewsFeed — unified research feed", () => {
         ]),
       },
     ]);
-    expect(html).toContain("feed for VPB");
+    expect(html).toContain("search · “VPB”");
     expect(html).toContain("VPB: capital raise");
   });
 

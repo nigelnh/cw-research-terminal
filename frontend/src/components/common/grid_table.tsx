@@ -238,40 +238,37 @@ export function SortHeader({
   onClick,
   align = "right",
   width,
+  onKeyDown,
+  style,
+  ...props
 }: {
   label: string;
   mark: string;
   onClick: () => void;
   align?: "left" | "right";
   width?: number | string;
-}) {
-  // Fixed-width marker slot so the header never shifts when a sort mark appears.
-  // Right-aligned columns put it before the label, left-aligned after.
-  const slot = (
-    <span style={{ display: "inline-flex", width: 10, justifyContent: "center" }}>
-      <svg aria-hidden="true" className="watchlist-sort-icon" viewBox="0 0 12 12" fill="currentColor" style={{ visibility: mark ? "visible" : "hidden" }}>
-        <path d={mark === "▼" ? "M1 2h10L6 11Z" : "M1 10h10L6 1Z"} />
-      </svg>
-    </span>
-  );
+} & Omit<React.ThHTMLAttributes<HTMLTableCellElement>, "align" | "width" | "onClick">) {
   return (
     <th
+      {...props}
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!event.defaultPrevented && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault(); onClick();
+        }
+      }}
       role="columnheader"
       aria-sort={mark === "▲" ? "ascending" : mark === "▼" ? "descending" : "none"}
-      style={{ ...HEAD_STYLE, textAlign: align, width }}
+      style={{ ...HEAD_STYLE, textAlign: align, width, ...style }}
     >
-      {align === "right" ? (
-        <>
-          {slot}
-          {label}
-        </>
-      ) : (
-        <>
-          {label}
-          {slot}
-        </>
-      )}
+      <span className="watchlist-column-label" style={{ flexDirection: align === "right" ? "row-reverse" : "row" }}>
+        <span>{label}</span>
+        <svg aria-hidden="true" className="watchlist-sort-icon" viewBox="0 0 12 12" fill="currentColor" style={{ visibility: mark ? "visible" : "hidden" }}>
+          <path d={mark === "▼" ? "M1 2h10L6 11Z" : "M1 10h10L6 1Z"} />
+        </svg>
+      </span>
     </th>
   );
 }

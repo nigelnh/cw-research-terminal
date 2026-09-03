@@ -277,7 +277,6 @@ select:focus-visible,
 .watchlist-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .watchlist-table th, .watchlist-table td { white-space: nowrap; }
 .watchlist-search { position: relative; width: 236px; flex: none; z-index: 46; }
-.watchlist-search + .filter-anchor { margin-left: 0; }
 .watchlist-search-control { height: 24px; display: flex; align-items: center; border: 1px solid var(--border-30); border-radius: 2px; background: transparent; color: var(--t-55); }
 .watchlist-search-control:focus-within { outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 1px; }
 .watchlist-search-control > svg { width: 13px; height: 13px; margin-left: 7px; flex: none; }
@@ -296,6 +295,8 @@ select:focus-visible,
 .research-registry-panel, .research-stock-panel { min-width: 0; }
 .registry-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--border-strong); }
 .registry-table th, .registry-table td { white-space: nowrap; }
+.registry-table .is-drop-target, .registry-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.registry-row.is-search-match { box-shadow: inset 2px 0 var(--accent); }
 .filter-anchor { margin-left: auto; }
 .filter-trigger {
   height: 24px;

@@ -7,14 +7,12 @@ import type { FeedContentType, ResearchFeedItem } from "@/domain/models";
 import { MarketOverviewStrip } from "@/features/watchlist/market_overview_strip";
 
 interface NewsFeedProps {
-  /** Shared header filter (`?q=`). A bare token that looks like a ticker filters by
-   *  symbol; anything else is a free-text search. */
+  /** Committed header query (`?q=`), searched against symbols and news text in SQL. */
   filter?: string;
   selectedSymbol?: string | null;
   onSelectSymbol?: (symbol: string | null) => void;
 }
 
-const TICKER_RE = /^[A-Z][A-Z0-9]{1,11}$/;
 const VN_TZ = "Asia/Ho_Chi_Minh";
 
 type EventType = "DISCLOSURE" | "EVENT";
@@ -247,14 +245,13 @@ function FeedRow({
 
 export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }: NewsFeedProps) {
   const term = filter.trim().replace(/^\//, "").trim();
-  const looksLikeTicker = TICKER_RE.test(term.toUpperCase());
-  const headerSymbol = looksLikeTicker ? term.toUpperCase() : undefined;
-  const query = looksLikeTicker ? undefined : term || undefined;
+  const query = term || undefined;
 
   const [nf, setNf] = useState<NewsFilterState>(EMPTY_NEWS_FILTER);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const symbol = headerSymbol ?? selectedSymbol ?? undefined;
+  // A global text search spans the feed even when an instrument panel is open.
+  const symbol = query ? undefined : selectedSymbol ?? undefined;
 
   // EVENT TYPE maps to the server content_type only when exactly one is selected —
   // keeps the cursor pagination working; SYMBOL + date are filtered client-side.
