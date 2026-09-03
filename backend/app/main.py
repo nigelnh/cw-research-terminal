@@ -16,6 +16,7 @@ from app.security import (
 )
 from app.security.rate_limiter import rate_limiter
 from app.ai.ai_router import ai_router
+from app.ai.attachment_router import attachment_router
 from app.market_data.market_router import market_router
 from app.market_data.market_websocket import ws_router
 from app.market_data.market_subscription_manager import subscription_manager
@@ -272,6 +273,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts()
 
 # Mount Routers
 app.include_router(ai_router)
+app.include_router(attachment_router)
 app.include_router(market_router)
 app.include_router(instruments_router)
 app.include_router(quant_router)

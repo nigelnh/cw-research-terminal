@@ -344,3 +344,24 @@ def headline_en(
     # honest fallback: category classification only, no invented translation
     cat = category_en(category)
     return (f"{cat} — {sym}" if sym else cat, False)
+
+
+def headline_search_label(title_column, category_column):
+    """SQL expression of the same ordered classification rules used for presentation.
+
+    Searching is performed before LIMIT; no Python corpus scan or translation request.
+    """
+    from sqlalchemy import and_, case, func
+    low = func.lower(title_column)
+    rules = [
+        (and_(*(low.contains(marker, autoescape=True) for marker in markers)), label)
+        for markers, label in [*_TITLE_RULES, *_WEAK_TITLE_RULES]
+    ]
+    fallback = case(_CATEGORY_EN, value=category_column, else_=_CATEGORY_FALLBACK)
+    return case(*rules, else_=fallback)
+
+
+def event_search_label(class_column, type_column):
+    from sqlalchemy import case
+    fallback = case(_EVENT_CLASS_LABELS, value=class_column, else_="Company event")
+    return case(_EVENT_TYPE_LABELS, value=type_column, else_=fallback)

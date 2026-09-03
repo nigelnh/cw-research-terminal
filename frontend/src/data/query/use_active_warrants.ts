@@ -29,5 +29,6 @@ export function useActiveWarrants(filter?: {
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,
+    refetch: query.refetch,
   };
 }

@@ -48,7 +48,7 @@ def policy_table() -> tuple[RoutePolicy, ...]:
         # ---- Tier E: AI - very strict, fail-closed (spends real money) ----
         RoutePolicy(
             tier="ai",
-            pattern=_p(r"^/api/ai/chat/?$"),
+            pattern=_p(r"^/api/ai/(?:chat|files/extract)/?$"),
             methods=frozenset({"POST"}),
             key_scope="ip",
             fail_closed=True,

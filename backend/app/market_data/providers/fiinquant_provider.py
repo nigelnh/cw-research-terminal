@@ -162,6 +162,11 @@ class FiinQuantProvider(MarketDataProvider):
         self._historical_last_status: str = "HEALTHY"
         self._historical_last_error: Optional[str] = None
         self._historical_consecutive_auth_errors: int = 0
+        self._overview_lock = asyncio.Lock()
+        self._overview_cache: Optional[Dict[str, Any]] = None
+        self._overview_cache_at: float = 0.0
+        self._stock_profile_lock = asyncio.Lock()
+        self._stock_profile_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
 
     def set_event_callback(self, callback: Callable[[str, Dict[str, Any], str], None]) -> None:
         self._event_callback = callback
@@ -808,3 +813,229 @@ class FiinQuantProvider(MarketDataProvider):
 
         return await asyncio.to_thread(_fetch)
 
+    async def get_stock_profiles(self, symbols: List[str]) -> List[Dict[str, Any]]:
+        """Batch BasicInfor reads, cached per symbol for a day; no new streams."""
+        symbols = sorted({s.strip().upper() for s in symbols if s.strip()})
+        if not symbols:
+            return []
+        async with self._stock_profile_lock:
+            missing = [s for s in symbols if s not in self._stock_profile_cache
+                       or time.monotonic() - self._stock_profile_cache[s][0] >= 86400]
+            if missing:
+                if not self._session or not self._is_connected:
+                    if not await self.connect():
+                        raise RuntimeError("FiinQuant stock profiles are unavailable")
+
+                def fetch():
+                    value = self._session.BasicInfor(tickers=missing).get()
+                    if hasattr(value, "get_data"):
+                        value = value.get_data()
+                    if hasattr(value, "to_dict"):
+                        value = value.to_dict(orient="records")
+                    if isinstance(value, dict):
+                        value = [value]
+                    return value if isinstance(value, list) else []
+
+                records = await asyncio.to_thread(fetch)
+                def clean(value):
+                    return value.strip() if isinstance(value, str) and value.strip() else None
+
+                by_symbol = {str(r.get("ticker", "")).strip().upper(): r
+                             for r in records if isinstance(r, dict)}
+                now = time.monotonic()
+                for symbol in missing:
+                    raw = by_symbol.get(symbol, {})
+                    exchange = clean(raw.get("exchangeCode"))
+                    self._stock_profile_cache[symbol] = (now, {
+                        "symbol": symbol,
+                        "name": clean(raw.get("organizationName")),
+                        "short_name": clean(raw.get("organizationShortName")),
+                        "exchange": exchange.upper() if exchange else None,
+                    })
+            return [dict(self._stock_profile_cache[s][1]) for s in symbols]
+
+    async def get_market_overview(self, cw_symbols: List[str]) -> Dict[str, Any]:
+        """Read the four index cards and HOSE volume leaders without new streams.
+
+        This uses the documented ``realtime=False`` snapshot path and MarketBreadth, so
+        the 33-symbol SignalR subscription budget remains exclusively available to the
+        user's watchlist. Results are cached for 60 seconds in-session and five minutes
+        outside the live session.
+        """
+        ttl = 60.0 if self._market_is_active() else 300.0
+        if self._overview_cache and time.monotonic() - self._overview_cache_at < ttl:
+            return self._overview_cache
+        async with self._overview_lock:
+            if self._overview_cache and time.monotonic() - self._overview_cache_at < ttl:
+                return self._overview_cache
+            if not self._session or not self._is_connected:
+                if not await self.connect():
+                    raise RuntimeError("FiinQuant market overview is unavailable")
+
+            index_symbols = ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"]
+
+            def records(value: Any) -> List[Dict[str, Any]]:
+                if value is None:
+                    return []
+                if hasattr(value, "get_data"):
+                    value = value.get_data()
+                if hasattr(value, "to_dict"):
+                    try:
+                        return value.to_dict(orient="records")
+                    except TypeError:
+                        value = value.to_dict()
+                if isinstance(value, list):
+                    return [dict(x) for x in value if isinstance(x, dict)]
+                return [dict(value)] if isinstance(value, dict) else []
+
+            def ticker_list(group: Optional[str] = None) -> List[str]:
+                value = self._session.TickerList(ticker=group) if group else self._session.TickerList()
+                if isinstance(value, str):
+                    value = [value]
+                try:
+                    return sorted({str(x).strip().upper() for x in value if str(x).strip()})
+                except TypeError:
+                    return []
+
+            def fetch_rows(tickers: List[str], *, by: str, period: int) -> List[Dict[str, Any]]:
+                rows: List[Dict[str, Any]] = []
+                for start in range(0, len(tickers), 100):
+                    result = self._session.Fetch_Trading_Data(
+                        realtime=False,
+                        tickers=tickers[start:start + 100],
+                        fields=["close", "volume", "value"],
+                        adjusted=False,
+                        by=by,
+                        period=period,
+                        lasted=True,
+                    )
+                    rows.extend(records(result))
+                return rows
+
+            def fetch_price_bands(tickers: List[str], session_date: str) -> List[Dict[str, Any]]:
+                rows: List[Dict[str, Any]] = []
+                for start in range(0, len(tickers), 100):
+                    value = self._session.PriceStatistics().get_ceilingfloor(
+                        tickers=tickers[start:start + 100],
+                        from_date=session_date,
+                        to_date=session_date,
+                    )
+                    rows.extend(records(value))
+                return rows
+
+            def build() -> Dict[str, Any]:
+                captured = io.StringIO()
+                with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+                    stocks = ticker_list("VNINDEX")
+                    all_symbols = ticker_list()
+                    listed_cws = [s for s in all_symbols if len(s) == 8 and s.startswith("C")]
+                    # Current vendor ticker master is the broad source. The verified registry
+                    # remains a truthful fallback for plans that do not expose CW master data.
+                    clean_cws = listed_cws or sorted({s.strip().upper() for s in cw_symbols if s.strip()})
+                    daily = fetch_rows(sorted(set(index_symbols + stocks + clean_cws)), by="1d", period=2)
+                    intraday = fetch_rows(index_symbols, by="5m", period=48)
+                    breadth = records(self._session.MarketBreadth().get(tickers=index_symbols))
+                    daily_dates = [str(r.get("timestamp") or r.get("TradingDate") or "")[:10] for r in daily]
+                    session_date = max((d for d in daily_dates if d), default="")
+                    try:
+                        bands = fetch_price_bands(stocks + clean_cws, session_date) if session_date else []
+                    except Exception as exc:  # the ranking still works if this optional endpoint is not entitled
+                        logger.warning("FiinQuant price bands unavailable for overview: %s", exc)
+                        bands = []
+
+                def key(row: Dict[str, Any]) -> str:
+                    return str(row.get("ticker") or row.get("Ticker") or "").upper()
+                def stamp(row: Dict[str, Any]) -> str:
+                    return str(row.get("timestamp") or row.get("TradingDate") or row.get("tradingDate") or "")
+                def num(row: Dict[str, Any], *names: str) -> Optional[float]:
+                    for name in names:
+                        value = row.get(name)
+                        try:
+                            return float(value) if value is not None else None
+                        except (TypeError, ValueError):
+                            pass
+                    return None
+
+                daily_by: Dict[str, List[Dict[str, Any]]] = {}
+                for row in daily:
+                    if key(row): daily_by.setdefault(key(row), []).append(row)
+                intra_by: Dict[str, List[Dict[str, Any]]] = {}
+                for row in intraday:
+                    if key(row): intra_by.setdefault(key(row), []).append(row)
+                breadth_by = {str(r.get("comGroupCode") or "").upper(): r for r in breadth}
+                bands_by: Dict[str, Dict[str, Any]] = {}
+                for row in bands:
+                    symbol = key(row)
+                    if symbol and (symbol not in bands_by or stamp(row) > stamp(bands_by[symbol])):
+                        bands_by[symbol] = row
+
+                indices = []
+                for symbol in index_symbols:
+                    bars = sorted(daily_by.get(symbol, []), key=stamp)
+                    latest = bars[-1] if bars else {}
+                    previous = bars[-2] if len(bars) > 1 else {}
+                    intraday_bars = sorted(intra_by.get(symbol, []), key=stamp)
+                    if intraday_bars:
+                        latest_day = stamp(intraday_bars[-1])[:10]
+                        intraday_bars = [x for x in intraday_bars if stamp(x)[:10] == latest_day]
+                    current = intraday_bars[-1] if intraday_bars else latest
+                    close, reference = num(current, "close", "Close"), num(previous, "close", "Close")
+                    change = close - reference if close is not None and reference is not None else None
+                    pct = change / reference * 100 if change is not None and reference else None
+                    b = breadth_by.get(symbol, {})
+                    indices.append({
+                        "symbol": symbol, "value": close, "change": change, "change_percent": pct,
+                        "volume": num(latest, "volume", "Volume"), "trading_value": num(latest, "value", "Value"),
+                        "advancing": num(b, "totalStockUpPrice"), "ceiling": num(b, "totalStockOverCeiling"),
+                        "unchanged": num(b, "totalStockNoChangePrice"), "declining": num(b, "totalStockDownPrice"),
+                        "floor": num(b, "totalStockUnderFloor"), "as_of": stamp(current) or stamp(b),
+                        "sparkline": [num(x, "close", "Close") for x in intraday_bars if num(x, "close", "Close") is not None],
+                    })
+
+                def leaders(universe: List[str]) -> List[Dict[str, Any]]:
+                    out = []
+                    for symbol in universe:
+                        bars = sorted(daily_by.get(symbol, []), key=stamp)
+                        if not bars: continue
+                        row = bars[-1]; previous = bars[-2] if len(bars) > 1 else {}
+                        volume = num(row, "volume", "Volume")
+                        if volume is None: continue
+                        price, reference = num(row, "close", "Close"), num(previous, "close", "Close")
+                        band_row = bands_by.get(symbol, {})
+                        ceiling = num(band_row, "ceilingValue")
+                        floor = num(band_row, "floorValue")
+                        def same(a: Optional[float], b: Optional[float]) -> bool:
+                            return a is not None and b is not None and abs(a - b) < 1e-6
+                        market_state = (
+                            "CEILING" if same(price, ceiling) else
+                            "FLOOR" if same(price, floor) else
+                            "REFERENCE" if same(price, reference) else
+                            "UP" if price is not None and reference is not None and price > reference else
+                            "DOWN" if price is not None and reference is not None and price < reference else
+                            "UNAVAILABLE"
+                        )
+                        out.append({
+                            "symbol": symbol, "volume": volume, "price": price,
+                            "reference": reference, "ceiling": ceiling, "floor": floor,
+                            "market_state": market_state, "as_of": stamp(row),
+                        })
+                    return sorted(out, key=lambda x: x["volume"], reverse=True)[:5]
+
+                as_of = max((x["as_of"] for x in indices if x["as_of"]), default=None)
+                return {
+                    "indices": indices,
+                    "top_stock_volume": leaders(stocks),
+                    "top_cw_volume": leaders(clean_cws),
+                    "as_of": as_of,
+                    "market_session_active": self._market_is_active(),
+                    "stock_scope": "HOSE (VNINDEX constituents)",
+                    "cw_scope": "HOSE covered warrants" if listed_cws else "verified active CW registry",
+                    "source": "FIINQUANT",
+                }
+
+            try:
+                result = await asyncio.to_thread(build)
+            finally:
+                self._tame_sdk_side_effects()
+            self._overview_cache, self._overview_cache_at = result, time.monotonic()
+            return result

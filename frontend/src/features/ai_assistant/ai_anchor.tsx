@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Orbit, Plus, History, Minus, CornerDownLeft } from "lucide-react";
+import { Orbit, Plus, History, Minus, CornerDownLeft, AtSign, X } from "lucide-react";
 import { useAiChatContext } from "@/data/ai/ai_chat_provider";
 import type { ResearchContextEnvelope, TraceStep } from "@/data/ai/use_ai_chat";
 import { formatRelativeTime } from "@/data/ai/copilot_history_store";
 import { AssistantMarkdown } from "./assistant_markdown";
+import { ATTACHMENT_ACCEPT, useFileAttachments } from "@/data/ai/use_file_attachments";
 
 const POS_KEY = "cw_research:ai_anchor_pos:v1";
 const DRAFT_KEY = "cw_research:ai_draft:v1";
@@ -13,7 +14,6 @@ const EDGE = 16; // safe viewport inset
 const PANEL_W = 380;
 const PANEL_H = 468;
 const DRAG_THRESHOLD = 4;
-const COMPOSER_MAX = 132; // textarea auto-grow ceiling
 const NEAR_BOTTOM_PX = 64;
 
 /** Short, friendly empty-state prompts. One is picked per panel mount (see below). */
@@ -174,10 +174,12 @@ function Composer({
   onSend,
   disabled,
   draftKey,
+  attachments,
 }: {
   onSend: (text: string) => void;
   disabled: boolean;
   draftKey: string;
+  attachments: ReturnType<typeof useFileAttachments>;
 }) {
   const [value, setValue] = useState<string>(() => {
     try {
@@ -186,14 +188,8 @@ function Composer({
       return "";
     }
   });
-  const ref = useRef<HTMLTextAreaElement | null>(null);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX)}px`;
-  }, [value]);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const [fileNotice, setFileNotice] = useState(false);
 
   useEffect(() => {
     try {
@@ -206,7 +202,9 @@ function Composer({
 
   const submit = () => {
     const text = value.trim();
-    if (!text || disabled) return;
+    if (!text || disabled || attachments.reading) return;
+    if (attachments.files.length) { setFileNotice(true); return; }
+    setFileNotice(false);
     setValue("");
     try {
       window.localStorage?.removeItem(draftKey);
@@ -217,67 +215,68 @@ function Composer({
   };
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        submit();
-      }}
-      className="ai-composer"
-      style={{
-        borderTop: "1px solid var(--border)",
-        padding: "8px 10px",
-        display: "flex",
-        alignItems: "flex-end",
-        gap: 8,
-        flexShrink: 0,
-        background: "var(--panel)",
-      }}
-    >
-      <textarea
-        ref={ref}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-        rows={1}
-        placeholder="Ask about pricing, Greeks, contract terms, disclosures or events…"
-        aria-label="Ask the research assistant"
-        style={{
-          flex: 1,
-          resize: "none",
-          background: "transparent",
-          border: "none",
-          outline: "none",
-          boxShadow: "none",
-          fontFamily: "var(--font-mono)",
-          fontSize: 11.5,
-          lineHeight: 1.5,
-          color: "var(--t-92)",
-          maxHeight: COMPOSER_MAX,
-          overflowY: "auto",
-        }}
-      />
-      <button
-        type="submit"
-        disabled={disabled || !value.trim()}
-        aria-label="Send"
-        title="Send (Enter). Shift+Enter for a new line."
-        style={{
-          background: "none",
-          border: "none",
-          cursor: disabled || !value.trim() ? "default" : "pointer",
-          color: value.trim() && !disabled ? "var(--accent)" : "var(--t-42)",
-          padding: 2,
-          display: "flex",
-          alignItems: "center",
-        }}
-      >
-        <CornerDownLeft size={14} strokeWidth={1.8} />
-      </button>
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }} className="ai-composer">
+      {attachments.files.length > 0 && (
+        <div className="ai-file-list">
+          {attachments.files.map(file => (
+            <div key={file.name} className="ai-file-chip">
+              <span title={file.name}>{file.name}</span>
+              <button type="button" aria-label={`Remove ${file.name}`} onClick={() => attachments.remove(file.name)} disabled={disabled}>
+                <X size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {attachments.reading && <div role="status" className="ai-file-feedback">Reading files…</div>}
+      {attachments.error && (
+        <div role="alert" className="ai-file-feedback" style={{ color: "var(--down)" }}>
+          {attachments.error} {attachments.files.length > 0 && <button type="button" onClick={attachments.retry}>Retry reading</button>}
+        </div>
+      )}
+      {attachments.previews.map(file => (
+        <details key={file.name} className="ai-file-preview">
+          <summary>Preview {file.name} · {file.characters.toLocaleString()} characters</summary>
+          {file.warnings.map(warning => <p key={warning}>{warning}</p>)}
+          <pre>{file.sections.map(section => `[${section.location}] ${section.text}`).join("\n").slice(0, 6000)}</pre>
+          {file.characters > 6000 && <p>Preview shows the first 6,000 characters.</p>}
+        </details>
+      ))}
+      {attachments.files.length > 0 && !attachments.reading && (
+        <div role={fileNotice ? "status" : undefined} className="ai-file-feedback">
+          File preview only. Sending file content to AI awaits approval.
+        </div>
+      )}
+      <div className="ai-composer-input">
+        <textarea
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); }
+          }}
+          rows={2}
+          placeholder="Ask about pricing, Greeks, contract terms, disclosures or events…"
+          aria-label="Ask the research assistant"
+        />
+        <div className="ai-composer-actions">
+          <input ref={fileInput} type="file" multiple accept={ATTACHMENT_ACCEPT} style={{ display: "none" }}
+            aria-label="Upload research files"
+            onChange={(e) => {
+              const selected = Array.from(e.target.files || []);
+              if (selected.length) attachments.add(selected);
+              e.target.value = "";
+            }} />
+          <button type="button" aria-label="Upload files" title="Upload up to 2 files · 20 MB total · PDF, text, CSV, XLSX, DOCX"
+            disabled={disabled || attachments.reading} onClick={() => fileInput.current?.click()}>
+            <AtSign size={14} strokeWidth={1.8} />
+          </button>
+          <button type="submit" disabled={disabled || attachments.reading || !value.trim()}
+            aria-label="Send" title="Send (Enter). Shift+Enter for a new line."
+            style={{ color: value.trim() && !disabled ? "var(--accent)" : "var(--t-42)" }}>
+            <CornerDownLeft size={14} strokeWidth={1.8} />
+          </button>
+        </div>
+      </div>
     </form>
   );
 }
@@ -297,6 +296,8 @@ export function AiAnchor({ context }: AiAnchorProps) {
     selectConversation,
     setLatestContext,
   } = chat;
+
+  const attachments = useFileAttachments(activeConversationId);
 
   const [pos, setPos] = useState<Pos>(() => (typeof window === "undefined" ? { x: 0, y: 0 } : loadPos()));
   const [open, setOpen] = useState(false);
@@ -504,13 +505,8 @@ export function AiAnchor({ context }: AiAnchorProps) {
           >
             {messages.length === 0 && !streaming && (
               <div
-                className="mono"
-                style={{
-                  color: "var(--t-46)",
-                  fontSize: 11,
-                  lineHeight: 1.55,
-                  textAlign: "center",
-                }}
+                className="heading ai-empty-prompt"
+                style={{ color: "var(--t-46)", fontSize: 11, letterSpacing: "0.04em", textAlign: "center", margin: "auto" }}
               >
                 {emptyPhrase}
               </div>
@@ -558,7 +554,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
             )}
           </div>
 
-          <Composer onSend={send} disabled={isLoading} draftKey={DRAFT_KEY} />
+          <Composer key={activeConversationId} onSend={send} disabled={isLoading} draftKey={DRAFT_KEY} attachments={attachments} />
         </div>
       )}
 

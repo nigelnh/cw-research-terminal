@@ -83,8 +83,8 @@ async def get_default_universe():
     """The curated default research/demo universe (Step 13C).
 
     Anonymous users and new sessions seed their dashboard from this list instead of a
-    hardcoded frontend constant. Every CW here is VERIFIED_CURRENT; the list also carries
-    the underlyings and the index so the demo can show real underlying relationships and
+    hardcoded frontend constant. Every CW here is active and VERIFIED_CURRENT; the list also carries
+    its three stock underlyings so the demo can show real underlying relationships and
     quant analytics. Each item is re-resolved against the live registry so a symbol whose
     verification later regresses is dropped rather than shown stale.
     """
@@ -92,11 +92,13 @@ async def get_default_universe():
     from pathlib import Path
 
     from app.instruments.instrument_schemas import MetadataVerificationStatus
+    from app.instruments.providers.canonical_provider import get_vietnam_today
 
     raw = json.loads((Path(__file__).parent / "data" / "default_research_universe.json").read_text())
     if not instrument_registry._is_initialized:
         await instrument_registry.initialize()
 
+    today = get_vietnam_today()
     resolved: list[dict] = []
     for item in raw.get("items", []):
         sym = str(item.get("symbol", "")).strip().upper()
@@ -105,8 +107,11 @@ async def get_default_universe():
         entry = {"symbol": sym, "instrument_type": item.get("instrument_type", "STOCK")}
         if entry["instrument_type"] == "CW":
             spec = await instrument_registry.get_instrument(sym)
-            if spec is None or spec.metadata_verification != MetadataVerificationStatus.VERIFIED_CURRENT:
-                continue  # drop a CW that no longer verifies
+            if (spec is None
+                or spec.status != InstrumentLifecycleStatus.ACTIVE
+                or spec.metadata_verification != MetadataVerificationStatus.VERIFIED_CURRENT
+                or (spec.last_trading_date and spec.last_trading_date < today)):
+                continue  # Do not seed expired, stopped-trading or unverified contracts.
             entry.update(
                 underlying_symbol=spec.underlying_symbol,
                 issuer=spec.issuer,

@@ -36,12 +36,14 @@ export interface ResearchFeedItem {
   id: string;
   symbol: string | null;
   published_at: string | null;
+  display_date?: string | null;
+  date_kind?: string;
   /** English-first display fields (docs/design/LANGUAGE_POLICY.md). */
   title_en: string;
   /** false = a category/verb classification, not a rendered translation — see original. */
   title_en_exact: boolean;
   category_en: string;
-  /** original Vietnamese, verbatim — provenance, shown in the expanded detail only. */
+  /** original Vietnamese, verbatim — provenance, shown inline when it differs. */
   title: string;
   summary: string | null;
   category: string | null;
@@ -56,10 +58,15 @@ export interface ResearchFeedResponse {
   count: number;
   has_more: boolean;
   next_before: string | null;
+  next_cursor?: string | null;
 }
 
 export interface ResearchFeedQuery {
   symbol?: string;
+  symbols?: string[];
+  date_from?: string;
+  date_to?: string;
+  cursor?: string;
   source?: string;
   content_type?: FeedContentType;
   category?: string;

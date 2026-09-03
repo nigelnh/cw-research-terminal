@@ -45,8 +45,8 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     expect(html).toContain("Watchlist");
     expect(html).toContain("HPG");
     expect(html).toContain("VPB");
-    expect(html).toContain("VNINDEX");
-    expect(html).toContain("CHPG2602");
+    expect(html).not.toContain("VNINDEX");
+    expect(html).toContain("CHPG2625");
     expect(html).toContain("CVPB2615");
 
     // No fabricated warrants in the default universe.
@@ -63,11 +63,11 @@ describe("Targeted Frontend Regression Restore & Reconciliation", () => {
     expect(html).toContain("BID");
     expect(html).toContain("ASK");
     expect(html).toContain("TRD");
-    expect(html).toContain("CHG%");
+    expect(html).toContain("%CHG");
     expect(html).toContain("VOLUME");
     expect(html).toContain("STRIKE");
     expect(html).toContain("RATIO");
-    expect(html).toContain("IV BID");
+    expect(html).toContain("IV_BID");
 
     // redundant CW-only columns were merged away
     expect(html).not.toContain("UND.PRC");

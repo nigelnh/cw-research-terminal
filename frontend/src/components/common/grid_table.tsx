@@ -75,6 +75,15 @@ export const MARKET_COLOR = {
   floor: "var(--price-floor)",
 } as const;
 
+/** A displayed reference/limit keeps its band colour; unavailable values stay grey. */
+export function priceBandColor(
+  value: number | null | undefined,
+  band: "reference" | "ceiling" | "floor",
+): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return MARKET_COLOR.null;
+  return MARKET_COLOR[band === "reference" ? "flat" : band];
+}
+
 /** Signed percent (already a percent number, e.g. -0.45) -> display text + colour. */
 export function fmtChg(pct: number | null | undefined): { text: string; color: string } {
   if (pct === null || pct === undefined || Number.isNaN(pct)) {
@@ -135,6 +144,7 @@ export interface SortPinApi<T> {
   ordered: T[];
   sort: SortSpec | null;
   toggleSort: (key: string) => void;
+  clearOrder: () => void;
   sortMark: (key: string) => string;
   isPinned: (symbol: string) => boolean;
   togglePin: (symbol: string, e?: React.MouseEvent) => void;
@@ -208,7 +218,7 @@ export function useSortPin<T>(
     [pinned],
   );
 
-  return { ordered, sort, toggleSort, sortMark, isPinned, togglePin, pinFill };
+  return { ordered, sort, toggleSort, sortMark, isPinned, togglePin, pinFill, clearOrder: () => { setSort(null); setPinned([]); } };
 }
 
 /* ------------------------------------------------------------------ pieces */
@@ -228,38 +238,37 @@ export function SortHeader({
   onClick,
   align = "right",
   width,
+  onKeyDown,
+  style,
+  ...props
 }: {
   label: string;
   mark: string;
   onClick: () => void;
   align?: "left" | "right";
   width?: number | string;
-}) {
-  // Fixed-width marker slot so the header never shifts when a sort mark appears.
-  // Right-aligned columns put it before the label, left-aligned after.
-  const slot = (
-    <span style={{ display: "inline-block", width: 10, textAlign: "center", fontSize: "9px" }}>
-      {mark}
-    </span>
-  );
+} & Omit<React.ThHTMLAttributes<HTMLTableCellElement>, "align" | "width" | "onClick">) {
   return (
     <th
+      {...props}
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!event.defaultPrevented && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault(); onClick();
+        }
+      }}
       role="columnheader"
       aria-sort={mark === "▲" ? "ascending" : mark === "▼" ? "descending" : "none"}
-      style={{ ...HEAD_STYLE, textAlign: align, width }}
+      style={{ ...HEAD_STYLE, textAlign: align, width, ...style }}
     >
-      {align === "right" ? (
-        <>
-          {slot}
-          {label}
-        </>
-      ) : (
-        <>
-          {label}
-          {slot}
-        </>
-      )}
+      <span className="watchlist-column-label" style={{ flexDirection: align === "right" ? "row-reverse" : "row" }}>
+        <span>{label}</span>
+        <svg aria-hidden="true" className="watchlist-sort-icon" viewBox="0 0 12 12" fill="currentColor" style={{ visibility: mark ? "visible" : "hidden" }}>
+          <path d={mark === "▼" ? "M1 2h10L6 11Z" : "M1 10h10L6 1Z"} />
+        </svg>
+      </span>
     </th>
   );
 }

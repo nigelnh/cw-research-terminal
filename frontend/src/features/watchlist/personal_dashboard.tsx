@@ -1,10 +1,14 @@
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { WatchlistItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
 import { useDashboardData } from "@/data/query/use_dashboard_data";
-import { asOfLabel } from "@/domain/temporal";
+import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, quoteCell, type QuoteColumnKey } from "@/components/common/quote_columns";
+import { completeOrder, moveGroupedRows, useWatchlistLayout } from "@/components/common/watchlist_layout";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
+import { MarketOverviewStrip } from "./market_overview_strip";
+import { WatchlistSymbolSearch, matchingSymbols, prioritizeWatchlist, type WatchlistSearchOption } from "./watchlist_symbol_search";
+import { useStockProfiles } from "@/data/query/use_stock_profiles";
 import {
   EMPTY_FILTER,
   RegistryFilter,
@@ -18,16 +22,8 @@ import {
   HiddenNote,
   PinCell,
   PinHeader,
-  PlainHeader,
-  SortHeader,
   dteDisplay,
   dteNumber,
-  fmtChg,
-  fmtIV,
-  fmtPrice,
-  fmtRatio,
-  fmtVol,
-  priceColor,
   useHiddenRows,
   useSortPin,
   type SortFields,
@@ -50,6 +46,7 @@ interface StockRow {
   bid: number | null;
   ask: number | null;
   last: number | null;
+  tradingValue: number | null;
   chgPct: number | null;
   vol: number | null;
   ceiling: number | null;
@@ -63,10 +60,12 @@ interface CwRow {
   bid: number | null;
   ask: number | null;
   last: number | null;
+  tradingValue: number | null;
   ref: number | null;
   ceiling: number | null;
   floor: number | null;
   chgPct: number | null;
+  vol: number | null;
   strike: number | null;
   ratio: number | null;
   dte: number | null;
@@ -86,11 +85,13 @@ interface CwRow {
 interface UnifiedRow {
   symbol: string;
   kind: "stock" | "cw";
+  issuer: string | null;
   underlying: string | null;
   ref: number | null;
   bid: number | null;
   ask: number | null;
   last: number | null;
+  tradingValue: number | null;
   chgPct: number | null;
   vol: number | null;
   ceiling: number | null;
@@ -98,6 +99,7 @@ interface UnifiedRow {
   strike: number | null;
   ratio: number | null;
   dteText: string;
+  lastTradingDate: string | null;
   dte: number | null;
   ivBid: number | null;
   ivTrade: number | null;
@@ -107,11 +109,17 @@ interface UnifiedRow {
 
 const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
   symbol: (r) => r.symbol,
+  issuer: (r) => r.issuer,
+  ceiling: (r) => r.ceiling,
+  floor: (r) => r.floor,
   ref: (r) => r.ref,
   bid: (r) => r.bid,
   ask: (r) => r.ask,
-  trd: (r) => r.last,
-  chg: (r) => r.chgPct,
+  last: (r) => r.last,
+  tradingValue: (r) => r.tradingValue,
+  change: (r) => r.last !== null && r.ref !== null ? r.last - r.ref : null,
+  lastTradingDate: (r) => r.lastTradingDate,
+  chgPct: (r) => r.chgPct,
   vol: (r) => r.vol,
   strike: (r) => r.strike,
   ratio: (r) => r.ratio,
@@ -131,13 +139,20 @@ export function PersonalDashboard({
   filter = "",
 }: PersonalDashboardProps) {
   const { items } = useWatchlist();
-  const { quotes, warrants, marketSessionActive } = useResearchMarket();
+  const { quotes, warrants } = useResearchMarket();
   const { getSpec } = useInstrumentSpecs();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
+  const [symbolSearch, setSymbolSearch] = useState("");
   const hiddenRows = useHiddenRows();
 
   const allSymbols = useMemo(() => items.map((i) => i.symbol), [items]);
-  const { getRow, meta } = useDashboardData(allSymbols);
+  const { getRow } = useDashboardData(allSymbols);
+  const profileSymbols = useMemo(() => [...new Set(items.map(item => {
+    if (!isCwItem(item)) return item.symbol;
+    return getSpec(item.symbol)?.underlyingSymbol || item.underlyingSymbol || "";
+  }).filter(Boolean))], [items, getSpec]);
+  const { profiles } = useStockProfiles(profileSymbols);
+  const profilesBySymbol = useMemo(() => new Map(profiles.map(profile => [profile.symbol, profile])), [profiles]);
 
   const setSelected = onSelectSymbol ?? (() => {});
   const q = filter.trim().toUpperCase().replace(/^\//, "").trim();
@@ -159,6 +174,7 @@ export function PersonalDashboard({
             bid: quote?.bidPrice ?? null,
             ask: quote?.askPrice ?? null,
             last: quote?.lastPrice ?? null,
+            tradingValue: quote?.tradingValue ?? null,
             chgPct: pct,
             vol: quote?.totalVolume ?? null,
             ceiling: quote?.ceilingPrice ?? null,
@@ -170,7 +186,7 @@ export function PersonalDashboard({
     [items, getRow, quotes, q, hiddenRows],
   );
 
-  const cwRows: CwRow[] = useMemo(
+  const unfilteredCwRows: CwRow[] = useMemo(
     () =>
       items
         .filter(isCwItem)
@@ -192,10 +208,12 @@ export function PersonalDashboard({
             bid: quote?.bidPrice ?? cw?.quote?.bidPrice ?? null,
             ask: quote?.askPrice ?? cw?.quote?.askPrice ?? null,
             last,
+            tradingValue: quote?.tradingValue ?? cw?.quote?.tradingValue ?? null,
             ref: quote?.referencePrice ?? cw?.quote?.referencePrice ?? null,
             ceiling: quote?.ceilingPrice ?? cw?.quote?.ceilingPrice ?? null,
             floor: quote?.floorPrice ?? cw?.quote?.floorPrice ?? null,
             chgPct: typeof pctRaw === "number" ? pctRaw * 100 : null,
+            vol: quote?.totalVolume ?? cw?.quote?.totalVolume ?? null,
             strike: spec?.strikePrice ?? null,
             ratio: typeof spec?.exerciseRatio === "number" ? spec.exerciseRatio : null,
             dte: dteNumber(lastTradingDate, maturityDate, fb?.dte),
@@ -208,24 +226,22 @@ export function PersonalDashboard({
           };
         })
         .filter((r) => textMatch(r.symbol, r.underlying))
-        .filter((r) => !hiddenRows.isHidden(r.symbol))
-        .filter((r) =>
-          rowMatchesFilter(filterState, {
-            underlying: r.underlying,
-            issuer: r.issuer,
-            lastTradingDate: r.lastTradingDate,
-          }),
-        ),
-    [items, getRow, quotes, warrants, getSpec, q, filterState, hiddenRows],
+        .filter((r) => !hiddenRows.isHidden(r.symbol)),
+    [items, getRow, quotes, warrants, getSpec, q, hiddenRows],
+  );
+
+  const cwRows = useMemo(
+    () => unfilteredCwRows.filter((r) => rowMatchesFilter(filterState, r)),
+    [unfilteredCwRows, filterState],
   );
 
   const underlyingOptions = useMemo(
-    () => [...new Set(cwRows.map((r) => r.underlying).filter((v): v is string => !!v))].sort(),
-    [cwRows],
+    () => [...new Set(unfilteredCwRows.map((r) => r.underlying).filter((v): v is string => !!v))].sort(),
+    [unfilteredCwRows],
   );
   const issuerOptions = useMemo(
-    () => [...new Set(cwRows.map((r) => r.issuer).filter((v): v is string => !!v))].sort(),
-    [cwRows],
+    () => [...new Set(unfilteredCwRows.map((r) => r.issuer).filter((v): v is string => !!v))].sort(),
+    [unfilteredCwRows],
   );
 
   const unifiedRows: UnifiedRow[] = useMemo(
@@ -233,11 +249,13 @@ export function PersonalDashboard({
       ...stockRows.map((s): UnifiedRow => ({
         symbol: s.symbol,
         kind: "stock",
+        issuer: null,
         underlying: null,
         ref: s.ref,
         bid: s.bid,
         ask: s.ask,
         last: s.last,
+        tradingValue: s.tradingValue,
         chgPct: s.chgPct,
         vol: s.vol,
         ceiling: s.ceiling,
@@ -245,6 +263,7 @@ export function PersonalDashboard({
         strike: null,
         ratio: null,
         dteText: DASH,
+        lastTradingDate: null,
         dte: null,
         ivBid: null,
         ivTrade: null,
@@ -254,18 +273,21 @@ export function PersonalDashboard({
       ...cwRows.map((c): UnifiedRow => ({
         symbol: c.symbol,
         kind: "cw",
+        issuer: c.issuer,
         underlying: c.underlying,
         ref: c.ref,
         bid: c.bid,
         ask: c.ask,
         last: c.last,
+        tradingValue: c.tradingValue,
         chgPct: c.chgPct,
-        vol: null,
+        vol: c.vol,
         ceiling: c.ceiling,
         floor: c.floor,
         strike: c.strike,
         ratio: c.ratio,
         dteText: c.dteText,
+        lastTradingDate: c.lastTradingDate,
         dte: c.dte,
         ivBid: c.ivBid,
         ivTrade: c.ivTrade,
@@ -276,94 +298,92 @@ export function PersonalDashboard({
     [stockRows, cwRows],
   );
 
-  const view = useSortPin(unifiedRows, UNIFIED_FIELDS);
+  const layout = useWatchlistLayout();
+  const manuallyOrdered = useMemo(() => {
+    const order = completeOrder(unifiedRows.map(r => r.symbol), layout.rows);
+    return order.map(symbol => unifiedRows.find(r => r.symbol === symbol)!);
+  }, [unifiedRows, layout.rows]);
+  const view = useSortPin(manuallyOrdered, UNIFIED_FIELDS);
+  const drag = useRef<{ type: "column"; key: QuoteColumnKey } | { type: "row"; key: string } | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const columns = layout.columns.map(key => QUOTE_COLUMNS.find(c => c.key === key)!);
+  const endDrag = () => { drag.current = null; setDropTarget(null); };
+  const moveRow = (from: string, to: string) => {
+    const next = moveGroupedRows(view.ordered, from, to);
+    if (!next) return;
+    // Preserve hidden/filtered identities when saving a visible reorder.
+    layout.setRows([...next, ...completeOrder(items.map(i => i.symbol), layout.rows).filter(s => !next.includes(s))]);
+    view.clearOrder();
+  };
 
-  const stockSyms = useMemo(
-    () => new Set(stockRows.map((r) => r.symbol.toUpperCase())),
-    [stockRows],
-  );
-  const parents = view.ordered.filter((r) => r.kind === "stock");
-  const orderedCws = view.ordered.filter((r) => r.kind === "cw");
-  const childrenOf = (sym: string) =>
-    orderedCws.filter((c) => (c.underlying ?? "").toUpperCase() === sym.toUpperCase());
-  const orphanCws = orderedCws.filter(
-    (c) => !c.underlying || !stockSyms.has(c.underlying.toUpperCase()),
-  );
+  const searchOptions = useMemo<WatchlistSearchOption[]>(() => view.ordered.map(row => {
+    const profile = profilesBySymbol.get(row.kind === "stock" ? row.symbol : row.underlying ?? "");
+    return {
+      symbol: row.symbol,
+      kind: row.kind,
+      name: row.kind === "stock" ? (profile?.name || profile?.short_name || "") : `${row.underlying ?? ""}${row.issuer ? ` · ${row.issuer}` : ""}`,
+      exchange: row.kind === "stock" ? profile?.exchange ?? null : "HOSE",
+      underlying: row.underlying,
+    };
+  }), [view.ordered, profilesBySymbol]);
+  const searchMatches = useMemo(() => matchingSymbols(searchOptions, symbolSearch), [searchOptions, symbolSearch]);
+  const searched = useMemo(() => prioritizeWatchlist(view.ordered, searchMatches), [view.ordered, searchMatches]);
 
-  const sessionNote =
-    meta.marketSessionActive || marketSessionActive
-      ? "live session"
-      : meta.latestCompletedSession
-      ? `market closed — showing ${
-          asOfLabel({
-            state: "LAST_SESSION",
-            source: "EOD",
-            sessionDate: meta.latestCompletedSession,
-          }) || "last session"
-        } close`
-      : "market closed";
-
-  const priceRef = (r: { ref: number | null; ceiling: number | null; floor: number | null }) => ({
-    ref: r.ref,
-    ceiling: r.ceiling,
-    floor: r.floor,
-  });
-
-  const renderRow = (r: UnifiedRow, isChild: boolean) => {
-    const chg = fmtChg(r.chgPct);
+  const symbolWidth = `calc(${Math.max(8, ...unifiedRows.map((r) => r.symbol.length + (r.kind === "cw" ? 1 : 0)))}ch + 24px)`;
+  const renderRow = (r: UnifiedRow) => {
     const selected = selectedSymbol === r.symbol;
-    const pr = priceRef(r);
     return (
       <tr
         key={r.symbol}
-        onClick={() => setSelected(r.symbol)}
+        data-symbol={r.symbol}
+        className={`watchlist-row${r.kind === "cw" ? " watchlist-cw" : ""}${dropTarget === r.symbol ? " is-drop-target" : ""}${searched.highlighted.has(r.symbol) ? " is-search-match" : ""}${selected ? " is-selected" : ""}`}
+        tabIndex={0}
+        draggable
+        title="Drag to reorder; Alt + ↑/↓ to move"
+        onDragStart={(e) => {
+          if ((e.target as HTMLElement).closest("button")) { e.preventDefault(); return; }
+          drag.current = { type: "row", key: r.symbol };
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", r.symbol);
+        }}
+        onDragOver={(e) => {
+          if (drag.current?.type !== "row" || !moveGroupedRows(view.ordered, drag.current.key, r.symbol)) return;
+          e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget(r.symbol);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (drag.current?.type === "row") moveRow(drag.current.key, r.symbol);
+          endDrag();
+        }}
+        onDragEnd={endDrag}
+        onClick={() => { if (!drag.current) setSelected(r.symbol); }}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter") { e.preventDefault(); setSelected(r.symbol); }
+          if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+            e.preventDefault();
+            const peers = view.ordered.filter(other => other.kind === r.kind && (r.kind === "stock" || other.underlying === r.underlying));
+            const to = peers[peers.findIndex(other => other.symbol === r.symbol) + (e.key === "ArrowUp" ? -1 : 1)];
+            if (to) moveRow(r.symbol, to.symbol);
+          }
+        }}
         style={{
           cursor: "pointer",
           height: 26,
-          background: selected ? "var(--panel-3)" : "transparent",
+          background: selected || searched.highlighted.has(r.symbol) ? "var(--panel-3)" : r.kind === "cw" ? "var(--panel-2)" : "var(--bg)",
           borderBottom: ROW_BORDER,
         }}
       >
         <PinCell symbol={r.symbol} fill={view.pinFill(r.symbol)} onToggle={view.togglePin} />
-        <td
-          style={{
-            padding: "0 8px",
-            paddingLeft: isChild ? 24 : 8,
-            color: "var(--accent)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {isChild && <span style={{ color: "var(--t-46)" }}>↳ </span>}
-          {r.symbol}
-          {isChild && (
-            <span style={{ marginLeft: 6, fontSize: 9, color: "var(--t-46)" }}>CW</span>
-          )}
-          {r.conflicting && (
-            <span
-              title="Conflicting metadata — quant withheld"
-              style={{ marginLeft: 5, color: "var(--down)" }}
-            >
-              ◆
-            </span>
-          )}
-        </td>
-        <td style={{ ...TD, color: "var(--t-60)" }}>{fmtPrice(r.ref)}</td>
-        <td style={{ ...TD, color: priceColor(r.bid, pr) }}>{fmtPrice(r.bid)}</td>
-        <td style={{ ...TD, color: priceColor(r.ask, pr) }}>{fmtPrice(r.ask)}</td>
-        <td style={{ ...TD, color: priceColor(r.last, pr) }}>{fmtPrice(r.last)}</td>
-        <td style={{ ...TD, color: chg.color }}>
-          {r.last !== null && r.ref !== null
-            ? Math.abs(r.last - r.ref).toLocaleString("en-US", { maximumFractionDigits: 2 })
-            : DASH}
-        </td>
-        <td style={{ ...TD, color: chg.color }}>{chg.text}</td>
-        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtVol(r.vol)}</td>
-        <td style={{ ...TD, color: "var(--t-60)" }}>{fmtPrice(r.strike)}</td>
-        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtRatio(r.ratio)}</td>
-        <td style={{ ...TD, color: "var(--t-46)" }}>{r.dteText}</td>
-        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivBid)}</td>
-        <td style={{ ...TD, color: "var(--t-85)" }}>{fmtIV(r.ivTrade)}</td>
-        <td style={{ ...TD, color: "var(--t-50)" }}>{fmtIV(r.ivAsk)}</td>
+        {columns.map(column => {
+          const cell = quoteCell(r, column.key);
+          return column.key === "symbol" ? (
+            <td key={column.key} style={{ padding: "0 8px", paddingLeft: r.kind === "cw" ? "calc(8px + 1ch)" : 8, color: r.kind === "cw" ? "var(--t-92)" : "var(--accent)", whiteSpace: "nowrap" }}>
+              {r.symbol}
+              {r.conflicting && <span title="Conflicting metadata — quant withheld" style={{ marginLeft: 5, color: "var(--down)" }}>◆</span>}
+            </td>
+          ) : <td key={column.key} title={QUOTE_COLUMN_HINTS[column.key]} style={{ ...TD, color: cell.color }}>{r.kind === "stock" && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : cell.text}</td>;
+        })}
         <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
       </tr>
     );
@@ -371,21 +391,20 @@ export function PersonalDashboard({
 
   return (
     <div>
+      <MarketOverviewStrip />
       <div
         style={{
           display: "flex",
-          alignItems: "baseline",
-          gap: 12,
-          marginBottom: 14,
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 8,
           position: "relative",
         }}
       >
         <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
           Watchlist
         </span>
-        <span style={{ fontSize: 10.5, color: "var(--t-42)", fontStyle: "italic" }}>
-          “{sessionNote}”
-        </span>
+        <WatchlistSymbolSearch options={searchOptions} value={symbolSearch} onSubmit={setSymbolSearch} />
         <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
         <RegistryFilter
           underlyingOptions={underlyingOptions}
@@ -422,40 +441,51 @@ export function PersonalDashboard({
       )}
 
       {(stockRows.length > 0 || cwRows.length > 0) && (
+        <div className="watchlist-table-scroll">
         <table
-          className="mono grid-lined"
+          className="mono grid-lined watchlist-table"
           style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}
         >
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
               <PinHeader />
-              <SortHeader label="SYMBOL" align="left" mark={view.sortMark("symbol")} onClick={() => view.toggleSort("symbol")} />
-              <SortHeader label="REF" mark={view.sortMark("ref")} onClick={() => view.toggleSort("ref")} />
-              <SortHeader label="BID" mark={view.sortMark("bid")} onClick={() => view.toggleSort("bid")} />
-              <SortHeader label="ASK" mark={view.sortMark("ask")} onClick={() => view.toggleSort("ask")} />
-              <SortHeader label="TRD" mark={view.sortMark("trd")} onClick={() => view.toggleSort("trd")} />
-              <PlainHeader label="+/-" />
-              <SortHeader label="CHG%" mark={view.sortMark("chg")} onClick={() => view.toggleSort("chg")} />
-              <SortHeader label="VOLUME" mark={view.sortMark("vol")} onClick={() => view.toggleSort("vol")} />
-              <SortHeader label="STRIKE" mark={view.sortMark("strike")} onClick={() => view.toggleSort("strike")} />
-              <SortHeader label="RATIO" mark={view.sortMark("ratio")} onClick={() => view.toggleSort("ratio")} />
-              <SortHeader label="DTE" mark={view.sortMark("dte")} onClick={() => view.toggleSort("dte")} />
-              <SortHeader label="IV BID" mark={view.sortMark("ivBid")} onClick={() => view.toggleSort("ivBid")} />
-              <SortHeader label="IV TRD" mark={view.sortMark("ivTrade")} onClick={() => view.toggleSort("ivTrade")} />
-              <SortHeader label="IV ASK" mark={view.sortMark("ivAsk")} onClick={() => view.toggleSort("ivAsk")} />
+              {columns.map((column, index) => (
+                <th key={column.key} draggable tabIndex={0}
+                  data-column={column.key}
+                  className={dropTarget === column.key ? "is-drop-target" : undefined}
+                  aria-sort={view.sortMark(column.key) === "▲" ? "ascending" : view.sortMark(column.key) === "▼" ? "descending" : "none"}
+                  title={`${QUOTE_COLUMN_HINTS[column.key] ? `${QUOTE_COLUMN_HINTS[column.key]} · ` : ""}Click to sort · Drag to reorder · Alt + ←/→ to move`}
+                  style={{ padding: "5px 8px", textAlign: column.key === "symbol" ? "left" : "right", width: column.key === "symbol" ? symbolWidth : column.key === "lastTradingDate" ? "1%" : undefined, color: "var(--t-50)", fontWeight: 500, cursor: "grab", userSelect: "none" }}
+                  onClick={() => { if (!drag.current) view.toggleSort(column.key); }}
+                  onDragStart={(e) => { drag.current = { type: "column", key: column.key }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", column.key); }}
+                  onDragOver={(e) => { if (drag.current?.type === "column") { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget(column.key); } }}
+                  onDrop={(e) => { e.preventDefault(); if (drag.current?.type === "column") layout.moveColumn(drag.current.key, column.key); endDrag(); }}
+                  onDragEnd={endDrag}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); view.toggleSort(column.key); }
+                    if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+                      e.preventDefault();
+                      const to = columns[index + (e.key === "ArrowLeft" ? -1 : 1)];
+                      if (to) layout.moveColumn(column.key, to.key);
+                    }
+                  }}>
+                  <span className="watchlist-column-label" style={{ flexDirection: column.key === "symbol" ? "row" : "row-reverse" }}>
+                    <span>{column.label}</span>
+                    <svg className="watchlist-sort-icon" aria-hidden="true" viewBox="0 0 12 12" fill="currentColor"
+                      style={{ visibility: view.sortMark(column.key) ? "visible" : "hidden" }}>
+                      <path d={view.sortMark(column.key) === "▼" ? "M1 2h10L6 11Z" : "M1 10h10L6 1Z"} />
+                    </svg>
+                  </span>
+                </th>
+              ))}
               <DismissHeader />
             </tr>
           </thead>
           <tbody>
-            {parents.map((p) => (
-              <Fragment key={p.symbol}>
-                {renderRow(p, false)}
-                {childrenOf(p.symbol).map((c) => renderRow(c, true))}
-              </Fragment>
-            ))}
-            {orphanCws.map((c) => renderRow(c, false))}
+            {searched.rows.map(renderRow)}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

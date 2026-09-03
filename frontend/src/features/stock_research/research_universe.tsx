@@ -1,29 +1,12 @@
 import { useMemo, useState } from "react";
 import { useWatchlist } from "@/data/watchlist";
 import { useActiveWarrants } from "@/data/query";
-import {
-  EMPTY_FILTER,
-  RegistryFilter,
-  isFilterActive,
-  rowMatchesFilter,
-  type FilterState,
-} from "@/components/common/registry_filter";
-import {
-  DASH,
-  DismissCell,
-  DismissHeader,
-  HiddenNote,
-  PinCell,
-  PinHeader,
-  SortHeader,
-  dteDisplay,
-  dteNumber,
-  fmtPrice,
-  fmtRatio,
-  useHiddenRows,
-  useSortPin,
-  type SortFields,
-} from "@/components/common/grid_table";
+import { EMPTY_FILTER, RegistryFilter, rowMatchesFilter, type FilterState } from "@/components/common/registry_filter";
+import { DASH, DismissCell, HiddenNote, dteDisplay, dteNumber, fmtPrice, fmtRatio, useHiddenRows } from "@/components/common/grid_table";
+import { MarketOverviewStrip } from "@/features/watchlist/market_overview_strip";
+import { useStockProfiles } from "@/data/query/use_stock_profiles";
+import { WatchlistSymbolSearch, matchingSymbols, type WatchlistSearchOption } from "@/features/watchlist/watchlist_symbol_search";
+import { ResearchTable, type ResearchColumn } from "./research_table";
 
 interface ResearchUniverseProps {
   onNavigateToDashboard?: () => void;
@@ -31,7 +14,6 @@ interface ResearchUniverseProps {
   onSelectSymbol?: (symbol: string | null) => void;
   filter?: string;
 }
-
 interface RegistryRow {
   symbol: string;
   issuer: string | null;
@@ -44,278 +26,93 @@ interface RegistryRow {
   dteText: string;
   tracked: boolean;
 }
+interface StockRegistryRow { symbol: string; exchange: string | null }
 
-const FIELDS: SortFields<RegistryRow> = {
-  symbol: (r) => r.symbol,
-  issuer: (r) => r.issuer,
-  und: (r) => r.underlying,
-  strike: (r) => r.strike,
-  ratio: (r) => r.ratio,
-  maturity: (r) => r.maturity,
-  dte: (r) => r.dte,
-  status: (r) => (r.tracked ? "TRACKED" : "REFERENCE"),
-};
+const CW_COLUMNS: ResearchColumn<RegistryRow>[] = [
+  { key: "symbol", label: "SYMBOL", align: "left", value: r => r.symbol, render: r => r.symbol, color: "var(--t-92)" },
+  { key: "issuer", label: "ISSUER", align: "left", value: r => r.issuer, render: r => r.issuer ?? DASH },
+  { key: "und", label: "UNDERLYING", align: "left", value: r => r.underlying, render: r => r.underlying ?? DASH },
+  { key: "strike", label: "STRIKE", value: r => r.strike, render: r => fmtPrice(r.strike), color: "var(--t-80)" },
+  { key: "ratio", label: "RATIO", value: r => r.ratio, render: r => fmtRatio(r.ratio), color: "var(--t-50)" },
+  { key: "lastTradingDate", label: "LAST_TRD_DATE", value: r => r.lastTradingDate, render: r => r.lastTradingDate ?? DASH, color: "var(--t-50)" },
+  { key: "maturity", label: "MATURITY", value: r => r.maturity, render: r => r.maturity ?? DASH, color: "var(--t-50)" },
+  { key: "dte", label: "DTE", value: r => r.dte, render: r => r.dteText, color: "var(--t-46)" },
+  { key: "status", label: "STATUS", value: r => r.tracked ? "TRACKED" : "REFERENCE", render: r => r.tracked ? "TRACKED" : "REFERENCE", color: r => r.tracked ? "var(--accent)" : "var(--t-46)" },
+];
+const STOCK_COLUMNS: ResearchColumn<StockRegistryRow>[] = [
+  { key: "symbol", label: "SYMBOL", align: "left", value: r => r.symbol, render: r => r.symbol, color: "var(--accent)" },
+  { key: "exchange", label: "EXCHANGE", align: "left", value: r => r.exchange, render: r => r.exchange ?? DASH },
+];
 
-const TD: React.CSSProperties = { padding: "0 8px", textAlign: "right" };
-
-const STOCK_FIELDS: SortFields<{ symbol: string }> = { symbol: (r) => r.symbol };
-
-export function ResearchUniverse({
-  selectedSymbol = null,
-  onSelectSymbol,
-  filter = "",
-}: ResearchUniverseProps) {
+export function ResearchUniverse({ selectedSymbol = null, onSelectSymbol, filter = "" }: ResearchUniverseProps) {
   const setSelected = onSelectSymbol ?? (() => {});
   const { isInWatchlist, addToWatchlist } = useWatchlist();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
+  const [symbolSearch, setSymbolSearch] = useState("");
   const hiddenRows = useHiddenRows();
   const stockHidden = useHiddenRows();
-  const addCw = (r: RegistryRow) =>
-    addToWatchlist({
-      symbol: r.symbol,
-      instrumentType: "CW",
-      underlyingSymbol: r.underlying,
-      issuer: r.issuer,
-      strikePrice: r.strike,
-      exerciseRatio: r.ratio,
-      maturityDate: r.maturity,
-      lastTradingDate: r.lastTradingDate,
-    });
-
   const term = filter.trim().toUpperCase().replace(/^\//, "").trim();
-  const browseAll = term.length > 0 || isFilterActive(filterState);
-
-  const { instruments, isLoading, isError } = useActiveWarrants({
-    status: browseAll ? "ALL" : "ACTIVE",
+  const active = useActiveWarrants({ status: "ACTIVE" });
+  // Metadata only: suggestions can find discovered symbols without adding quote subscriptions.
+  const discovered = useActiveWarrants({ status: "ALL" });
+  // Search never swaps the visible ACTIVE registry for the much larger discovered corpus.
+  const { instruments, isLoading, isError } = active;
+  const searchable = discovered.instruments.length ? discovered.instruments : active.instruments;
+  const underlyingOptions = useMemo(() => [...new Set(searchable.map(c => c.underlyingSymbol).filter((v): v is string => !!v))].sort(), [searchable]);
+  const issuerOptions = useMemo(() => [...new Set(searchable.map(c => c.issuer).filter((v): v is string => !!v))].sort(), [searchable]);
+  const { profiles } = useStockProfiles(underlyingOptions);
+  const profilesBySymbol = useMemo(() => new Map(profiles.map(profile => [profile.symbol, profile])), [profiles]);
+  const searchOptions = useMemo<WatchlistSearchOption[]>(() => [
+    ...underlyingOptions.map(symbol => ({ symbol, kind: "stock" as const, name: profilesBySymbol.get(symbol)?.name || profilesBySymbol.get(symbol)?.short_name || "", exchange: profilesBySymbol.get(symbol)?.exchange ?? null, underlying: null })),
+    ...searchable.map(cw => ({ symbol: cw.symbol, kind: "cw" as const, name: `${cw.underlyingSymbol ?? ""}${cw.issuer ? ` · ${cw.issuer}` : ""}`, exchange: "HOSE", underlying: cw.underlyingSymbol ?? null })),
+  ], [underlyingOptions, profilesBySymbol, searchable]);
+  const matches = useMemo(() => matchingSymbols(searchOptions, symbolSearch), [searchOptions, symbolSearch]);
+  const rows = useMemo<RegistryRow[]>(() => instruments.map(cw => {
+    const lastTradingDate = cw.lastTradingDate ?? null;
+    const maturity = cw.maturityDate ?? null;
+    return {
+      symbol: cw.symbol, issuer: cw.issuer ?? null, underlying: cw.underlyingSymbol ?? null,
+      strike: cw.strikePrice ?? null, ratio: typeof cw.exerciseRatio === "number" ? cw.exerciseRatio : null,
+      maturity, lastTradingDate, dte: dteNumber(lastTradingDate, maturity), dteText: dteDisplay(lastTradingDate, maturity), tracked: isInWatchlist(cw.symbol),
+    };
+  }).filter(row => {
+    if (term && ![row.symbol, row.underlying, row.issuer].some(value => value?.toUpperCase().includes(term))) return false;
+    return !hiddenRows.isHidden(row.symbol) && rowMatchesFilter(filterState, row);
+  }), [instruments, term, filterState, hiddenRows, isInWatchlist]);
+  const stockRows = useMemo(() => [...new Set(instruments.map(cw => cw.underlyingSymbol).filter((s): s is string => !!s))].sort()
+    .filter(symbol => !stockHidden.isHidden(symbol))
+    .filter(symbol => !term || symbol.includes(term) || profilesBySymbol.get(symbol)?.name?.toUpperCase().includes(term))
+    .map(symbol => ({ symbol, exchange: profilesBySymbol.get(symbol)?.exchange ?? null })), [instruments, stockHidden, term, profilesBySymbol]);
+  const addCw = (row: RegistryRow) => addToWatchlist({
+    symbol: row.symbol, instrumentType: "CW", underlyingSymbol: row.underlying, issuer: row.issuer,
+    strikePrice: row.strike, exerciseRatio: row.ratio, maturityDate: row.maturity, lastTradingDate: row.lastTradingDate,
   });
 
-  const activeCount = useMemo(
-    () => instruments.filter((cw) => (cw as { status?: string }).status !== "EXPIRED").length,
-    [instruments],
-  );
-
-  const rows: RegistryRow[] = useMemo(
-    () =>
-      instruments
-        .map((cw) => {
-          const lastTradingDate = cw.lastTradingDate ?? null;
-          const maturity = cw.maturityDate ?? null;
-          return {
-            symbol: cw.symbol,
-            issuer: cw.issuer ?? null,
-            underlying: cw.underlyingSymbol ?? null,
-            strike: cw.strikePrice ?? null,
-            ratio: typeof cw.exerciseRatio === "number" ? cw.exerciseRatio : null,
-            maturity,
-            lastTradingDate,
-            dte: dteNumber(lastTradingDate, maturity),
-            dteText: dteDisplay(lastTradingDate, maturity),
-            tracked: isInWatchlist(cw.symbol),
-          };
-        })
-        .filter((r) => {
-          if (term) {
-            const hit =
-              r.symbol.toUpperCase().includes(term) ||
-              (r.underlying ?? "").toUpperCase().includes(term) ||
-              (r.issuer ?? "").toUpperCase().includes(term);
-            if (!hit) return false;
-          }
-          if (hiddenRows.isHidden(r.symbol)) return false;
-          return rowMatchesFilter(filterState, {
-            underlying: r.underlying,
-            issuer: r.issuer,
-            lastTradingDate: r.lastTradingDate,
-          });
-        }),
-    [instruments, term, filterState, isInWatchlist, hiddenRows],
-  );
-
-  const underlyingOptions = useMemo(
-    () => [...new Set(instruments.map((c) => c.underlyingSymbol).filter((v): v is string => !!v))].sort(),
-    [instruments],
-  );
-  const issuerOptions = useMemo(
-    () => [...new Set(instruments.map((c) => c.issuer).filter((v): v is string => !!v))].sort(),
-    [instruments],
-  );
-
-  const grid = useSortPin(rows, FIELDS);
-
-  // STOCKS column — the distinct underlyings backing the discovered CWs.
-  const stockRows = useMemo(
-    () =>
-      underlyingOptions
-        .filter((s) => !stockHidden.isHidden(s))
-        .filter((s) => !term || s.toUpperCase().includes(term))
-        .map((symbol) => ({ symbol })),
-    [underlyingOptions, stockHidden, term],
-  );
-  const stockGrid = useSortPin(stockRows, STOCK_FIELDS);
-
-  return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "baseline",
-          gap: 12,
-          marginBottom: 3,
-          position: "relative",
-        }}
-      >
-        <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
-          Registry
-        </span>
-        <span style={{ fontSize: 10.5, color: "var(--t-42)", fontStyle: "italic" }}>
-          “{browseAll ? "browsing the full discovered registry" : "verified terms only"}”
-        </span>
-        <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
-        <RegistryFilter
-          underlyingOptions={underlyingOptions}
-          issuerOptions={issuerOptions}
-          value={filterState}
-          onChange={setFilterState}
-        />
+  return <div>
+    <MarketOverviewStrip />
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, position: "relative" }}>
+      <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>Registry</span>
+      <WatchlistSymbolSearch scope="research" options={searchOptions} value={symbolSearch} onSubmit={setSymbolSearch} />
+      <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
+      <RegistryFilter underlyingOptions={underlyingOptions} issuerOptions={issuerOptions} value={filterState} onChange={setFilterState} />
+    </div>
+    <div className="research-registry-grid">
+      <div className="research-registry-panel">
+        <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>COVERED WARRANTS</div>
+        <ResearchTable id="warrants" label="Covered warrants" rows={rows} columns={CW_COLUMNS} selectedSymbol={selectedSymbol}
+          matches={matches} onSelect={setSelected} isLoading={isLoading} isError={isError}
+          actions={row => <><AddCell symbol={row.symbol} tracked={row.tracked} onAdd={() => addCw(row)} /><DismissCell symbol={row.symbol} onDismiss={hiddenRows.hide} /></>} />
       </div>
-      <p style={{ fontSize: 11, color: "var(--t-46)", marginBottom: 14 }}>
-        {browseAll
-          ? `${rows.length} match${rows.length === 1 ? "" : "es"}`
-          : `${activeCount} verified · type in the header bar to filter across ~530 discovered`}
-      </p>
-
-      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
-            COVERED WARRANTS
-          </div>
-          <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
-                <PinHeader />
-                <SortHeader label="SYMBOL" align="left" mark={grid.sortMark("symbol")} onClick={() => grid.toggleSort("symbol")} />
-                <SortHeader label="ISSUER" align="left" mark={grid.sortMark("issuer")} onClick={() => grid.toggleSort("issuer")} />
-                <SortHeader label="UNDERLYING" align="left" mark={grid.sortMark("und")} onClick={() => grid.toggleSort("und")} />
-                <SortHeader label="STRIKE" mark={grid.sortMark("strike")} onClick={() => grid.toggleSort("strike")} />
-                <SortHeader label="RATIO" mark={grid.sortMark("ratio")} onClick={() => grid.toggleSort("ratio")} />
-                <SortHeader label="MATURITY" mark={grid.sortMark("maturity")} onClick={() => grid.toggleSort("maturity")} />
-                <SortHeader label="DTE" mark={grid.sortMark("dte")} onClick={() => grid.toggleSort("dte")} />
-                <SortHeader label="STATUS" mark={grid.sortMark("status")} onClick={() => grid.toggleSort("status")} />
-                <th style={{ width: 20, padding: "5px 4px" }} aria-hidden />
-                <DismissHeader />
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr>
-                  <td colSpan={11} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
-                    Loading research registry…
-                  </td>
-                </tr>
-              ) : isError ? (
-                <tr>
-                  <td colSpan={11} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--down)" }}>
-                    Could not load the research registry. Retry shortly.
-                  </td>
-                </tr>
-              ) : grid.ordered.length === 0 ? (
-                <tr>
-                  <td colSpan={11} style={{ padding: "56px 0", textAlign: "center", fontSize: 12, color: "var(--t-46)" }}>
-                    No instruments match.
-                  </td>
-                </tr>
-              ) : (
-                grid.ordered.map((r) => {
-                  const selected = selectedSymbol === r.symbol;
-                  return (
-                    <tr
-                      key={r.symbol}
-                      tabIndex={0}
-                      onClick={() => setSelected(r.symbol)}
-                      onKeyDown={(e) => e.key === "Enter" && setSelected(r.symbol)}
-                      style={{
-                        cursor: "pointer",
-                        height: 27,
-                        background: selected ? "var(--panel-3)" : "transparent",
-                        borderBottom: "1px solid var(--border-row)",
-                      }}
-                    >
-                      <PinCell symbol={r.symbol} fill={grid.pinFill(r.symbol)} onToggle={grid.togglePin} />
-                      <td style={{ padding: "0 8px", color: "var(--accent)" }}>{r.symbol}</td>
-                      <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.issuer ?? DASH}</td>
-                      <td style={{ padding: "0 8px", color: "var(--t-60)" }}>{r.underlying ?? DASH}</td>
-                      <td style={{ ...TD, color: "var(--t-80)" }}>{fmtPrice(r.strike)}</td>
-                      <td style={{ ...TD, color: "var(--t-50)" }}>{fmtRatio(r.ratio)}</td>
-                      <td style={{ ...TD, color: "var(--t-50)" }}>{r.maturity ?? DASH}</td>
-                      <td style={{ ...TD, color: "var(--t-46)" }}>{r.dteText}</td>
-                      <td style={{ ...TD, color: r.tracked ? "var(--accent)" : "var(--t-46)" }}>
-                        {r.tracked ? "TRACKED" : "REFERENCE"}
-                      </td>
-                      <AddCell symbol={r.symbol} tracked={r.tracked} onAdd={() => addCw(r)} />
-                      <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+      <div className="research-stock-panel">
+        <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
+          STOCKS <HiddenNote count={stockHidden.count} onReset={stockHidden.reset} />
         </div>
-
-        <div style={{ width: 220, flexShrink: 0 }}>
-          <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
-            STOCKS
-            <HiddenNote count={stockHidden.count} onReset={stockHidden.reset} />
-          </div>
-          <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
-                <PinHeader />
-                <SortHeader label="SYMBOL" align="left" mark={stockGrid.sortMark("symbol")} onClick={() => stockGrid.toggleSort("symbol")} />
-                <th style={{ width: 20, padding: "5px 4px" }} aria-hidden />
-                <DismissHeader />
-              </tr>
-            </thead>
-            <tbody>
-              {stockGrid.ordered.length === 0 ? (
-                <tr>
-                  <td colSpan={4} style={{ padding: "24px 0", textAlign: "center", fontSize: 11, color: "var(--t-46)" }}>
-                    —
-                  </td>
-                </tr>
-              ) : (
-                stockGrid.ordered.map((s) => {
-                  const selected = selectedSymbol === s.symbol;
-                  return (
-                    <tr
-                      key={s.symbol}
-                      tabIndex={0}
-                      onClick={() => setSelected(s.symbol)}
-                      onKeyDown={(e) => e.key === "Enter" && setSelected(s.symbol)}
-                      style={{
-                        cursor: "pointer",
-                        height: 27,
-                        background: selected ? "var(--panel-3)" : "transparent",
-                        borderBottom: "1px solid var(--border-row)",
-                      }}
-                    >
-                      <PinCell symbol={s.symbol} fill={stockGrid.pinFill(s.symbol)} onToggle={stockGrid.togglePin} />
-                      <td style={{ padding: "0 8px", color: "var(--accent)" }}>{s.symbol}</td>
-                      <AddCell
-                        symbol={s.symbol}
-                        tracked={isInWatchlist(s.symbol)}
-                        onAdd={() => addToWatchlist({ symbol: s.symbol, instrumentType: "STOCK" })}
-                      />
-                      <DismissCell symbol={s.symbol} onDismiss={stockHidden.hide} />
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+        <ResearchTable id="stocks" label="Stocks" rows={stockRows} columns={STOCK_COLUMNS} selectedSymbol={selectedSymbol}
+          matches={matches} onSelect={setSelected} isLoading={isLoading} isError={isError}
+          actions={row => <><AddCell symbol={row.symbol} tracked={isInWatchlist(row.symbol)} onAdd={() => addToWatchlist({ symbol: row.symbol, instrumentType: "STOCK" })} /><DismissCell symbol={row.symbol} onDismiss={stockHidden.hide} /></>} />
       </div>
     </div>
-  );
+  </div>;
 }
 
 /** Trailing "+" cell — adds the row's symbol to the watchlist. */

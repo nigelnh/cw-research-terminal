@@ -5,6 +5,8 @@ import type { MarketQuote } from "./market_quote";
  */
 export interface CoveredWarrant {
   symbol: string;
+  status?: string | null;
+  metadataVerification?: string | null;
   issuer: string | null;
 
   // Underlying Relationship
@@ -29,6 +31,11 @@ export interface CoveredWarrant {
   ivBid: number | null;
 
   // Real-time Quantitative Greeks & Valuation
+  analyticsCalculatedAt?: string | null;
+  modelDte?: number | null;
+  modelRiskFreeRate?: number | null;
+  greeksVolatilitySource?: string | null;
+  quantAvailable?: boolean;
   theoreticalPrice?: number | null;
   modelPriceAtIvMid?: number | null;
   theoreticalVolatility?: number | null;
@@ -58,7 +65,7 @@ export interface CoveredWarrant {
 export interface CoveredWarrantSnapshot extends CoveredWarrant {
   daysToMaturity: number | null;
   timeToMaturity: number | null;
-  moneyness: number | null;     // canonical S/K from the backend
-  spread: number | null;        // ask - bid (see domain/quant_display.ts)
+  moneyness: number | null; // canonical S/K from the backend
+  spread: number | null; // ask - bid (see domain/quant_display.ts)
   spreadPercent: number | null; // 100 * (ask - bid) / mid  (see domain/quant_display.ts)
 }

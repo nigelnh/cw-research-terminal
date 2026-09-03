@@ -3,7 +3,7 @@
  * Powered by TradingView Lightweight Charts (lightweight-charts)
  *
  * - Canvas OHLCV candlesticks + synchronized volume sub-pane
- * - Interactive crosshair with a synchronized OHLCV header readout (LAST vs HOVER)
+ * - Interactive crosshair with a synchronized OHLCV header readout
  * - Horizontal reference-price level, technical overlays, CW modes (BOTH / RELATIVE)
  * - Incremental live-quote updates (CurrentBarBuilder)
  *
@@ -145,7 +145,6 @@ export function TradingChart({
   }, [mode, effectiveCwBars, effectiveUndBars]);
 
   const [hoveredReadout, setHoveredReadout] = useState<OHLCVReadout | null>(null);
-  const isHovering = hoveredReadout !== null;
 
   const activeReadout = useMemo<OHLCVReadout | null>(() => {
     if (hoveredReadout) return hoveredReadout;
@@ -178,18 +177,6 @@ export function TradingChart({
     if (val >= 1_000) return `${(val / 1_000).toFixed(1)}k`;
     return val.toLocaleString("en-US");
   };
-  const formatBarDate = (ts: string | null | undefined): string => {
-    if (!ts) return "—";
-    const s = String(ts);
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-    const n = Number(s);
-    if (Number.isFinite(n)) {
-      const d = new Date(n > 1e11 ? n : n * 1000);
-      if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-    }
-    return s;
-  };
-
   const toChartTime = useCallback((dateStr: string): Time => {
     if (!dateStr) return 0 as Time;
     if (typeof dateStr === "number") {
@@ -410,7 +397,7 @@ export function TradingChart({
           high: data.high,
           low: data.low,
           close: data.close,
-          volume: null,
+          volume: volumeSeriesRef.current ? ((param.seriesData.get(volumeSeriesRef.current) as HistogramData | undefined)?.value ?? null) : null,
           change: chg,
           changePercent: data.open > 0 ? chg / data.open : 0,
         });
@@ -485,24 +472,17 @@ export function TradingChart({
             <span className="tnum" style={{ color: "var(--primary)", fontWeight: 500 }}>
               {interval}
             </span>
-            {activeReadout && (
-              <>
-                <span style={{ color: "var(--subtle-foreground)" }}>·</span>
-                <span
-                  className="tnum"
-                  style={{ color: isHovering ? "var(--flat)" : "var(--subtle-foreground)" }}
-                >
-                  {isHovering ? "HOVER" : "LAST"} {formatBarDate(activeReadout.timestamp)}
-                </span>
-              </>
-            )}
           </div>
 
-          {activeReadout && activeReadout.close !== null && (
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }} className="tnum">
-              <span style={{ fontWeight: 600, fontSize: "12px", color: "var(--foreground)" }}>
-                {formatVnd(activeReadout.close)}
-              </span>
+          {activeReadout && activeReadout.open !== null && (
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--muted-foreground)", fontSize: "10.5px" }}
+              className="tnum"
+            >
+              <span>O <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.open)}</strong></span>
+              <span>H <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.high)}</strong></span>
+              <span>L <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.low)}</strong></span>
+              <span>C <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.close)}</strong></span>
               {activeReadout.change !== null && activeReadout.changePercent !== null && (
                 <span
                   title="Bar change: close − open"
@@ -521,19 +501,8 @@ export function TradingChart({
                   {(activeReadout.changePercent * 100).toFixed(2)}%)
                 </span>
               )}
-            </div>
-          )}
 
-          {activeReadout && activeReadout.open !== null && (
-            <div
-              style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--muted-foreground)", fontSize: "10.5px" }}
-              className="tnum"
-            >
-              <span>O <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.open)}</strong></span>
-              <span>H <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.high)}</strong></span>
-              <span>L <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.low)}</strong></span>
-              <span>C <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.close)}</strong></span>
-              {activeReadout.volume !== null && activeReadout.volume > 0 && (
+              {activeReadout.volume !== null && (
                 <span>V <strong style={{ color: "var(--foreground)" }}>{formatVol(activeReadout.volume)}</strong></span>
               )}
             </div>

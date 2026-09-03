@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useFixedPopover } from "./filter_popover";
 
 /**
- * Grid Terminal date picker ("Direction C"): a read-only mm/dd/yyyy field + a
+ * Grid Terminal date picker: an editable mm/dd/yyyy field + a
  * calendar popover (‹ MONTH YYYY ›, a 6-week day grid). Replaces the browser's
  * native date input so every filter reads the same in the terminal.
  *
@@ -22,16 +23,38 @@ function toIso(y: number, m: number, d: number): string {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
+export function maskDateInput(text: string): string {
+  const digits = text.replace(/\D/g, "").slice(0, 8);
+  return [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean).join("/");
+}
+
+function displayToIso(text: string): string | null {
+  if (!text) return "";
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text);
+  if (!match) return null;
+  const [, mm, dd, yyyy] = match;
+  const y = Number(yyyy), m = Number(mm), d = Number(dd);
+  const date = new Date(y, m - 1, d);
+  return y >= 1900 && date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d
+    ? toIso(y, m, d) : null;
+}
+
 export function CalendarInput({
   value,
   onChange,
   ariaLabel,
+  resetKey,
 }: {
   value: string;
   onChange: (isoOrEmpty: string) => void;
   ariaLabel: string;
+  resetKey?: number;
 }) {
   const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(() => isoToDisplay(value));
+  const [invalid, setInvalid] = useState(false);
+  const errorId = useId();
+  useEffect(() => { setDraft(isoToDisplay(value)); setInvalid(false); }, [value, resetKey]);
   const [ym, setYm] = useState<{ y: number; m: number }>(() => {
     const m = /^(\d{4})-(\d{2})-/.exec(value);
     if (m) return { y: Number(m[1]), m: Number(m[2]) };
@@ -39,18 +62,18 @@ export function CalendarInput({
     return { y: now.getFullYear(), m: now.getMonth() + 1 };
   });
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const calendarRef = useRef<HTMLDivElement | null>(null);
+  const position = useFixedPopover(open, boxRef, calendarRef, 202);
 
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
+    const onDoc = (e: PointerEvent) => {
       if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDoc);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDoc);
     };
   }, [open]);
 
@@ -78,31 +101,82 @@ export function CalendarInput({
   })();
 
   return (
-    <div ref={boxRef} style={{ position: "relative", flex: 1 }}>
+    <div ref={boxRef} style={{ position: "relative", flex: "1 1 0", minWidth: 0 }}
+      onKeyDown={(e) => {
+        if (open && e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(false);
+          inputRef.current?.focus({ preventScroll: true });
+        }
+      }}>
       <input
+        ref={inputRef}
         type="text"
-        readOnly
         aria-label={ariaLabel}
-        value={isoToDisplay(value)}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? errorId : undefined}
+        inputMode="numeric"
+        maxLength={10}
+        value={draft}
         placeholder="mm/dd/yyyy"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(false)}
+        onChange={(e) => {
+          const input = e.target;
+          const digitsBeforeCaret = input.value.slice(0, input.selectionStart ?? input.value.length).replace(/\D/g, "").length;
+          const next = maskDateInput(input.value);
+          setDraft(next);
+          setInvalid(false);
+          const iso = displayToIso(next);
+          if (iso !== null) onChange(iso);
+          // Preserve the editing position when the mask inserts/removes a slash.
+          const caret = Math.min(next.length, digitsBeforeCaret + (digitsBeforeCaret > 2 ? 1 : 0) + (digitsBeforeCaret > 4 ? 1 : 0));
+          requestAnimationFrame(() => input.setSelectionRange(caret, caret));
+        }}
+        onBlur={() => setInvalid(displayToIso(draft) === null)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const iso = displayToIso(draft);
+            setInvalid(iso === null);
+            if (iso !== null) onChange(iso);
+          }
+          if ((e.key === "Backspace" || e.key === "Delete") && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) {
+            const caret = e.currentTarget.selectionStart ?? 0;
+            const adjacent = e.key === "Backspace" ? caret - 1 : caret;
+            if (draft[adjacent] === "/") {
+              e.preventDefault();
+              const nextCaret = e.key === "Backspace" ? caret - 1 : caret + 1;
+              e.currentTarget.setSelectionRange(nextCaret, nextCaret);
+            }
+          }
+        }}
         style={{
           width: "100%",
           background: "var(--bg)",
           border: "1px solid var(--border-26)",
-          padding: "4px 24px 4px 8px",
+          padding: "4px 38px 4px 8px",
+          minWidth: 0,
+          height: 28,
+          boxSizing: "border-box",
           fontSize: 11,
           color: "var(--t-85)",
           fontFamily: "inherit",
           outline: "none",
-          cursor: "pointer",
+          cursor: "text",
         }}
       />
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          const iso = displayToIso(draft) || value;
+          if (iso) setYm({ y: Number(iso.slice(0, 4)), m: Number(iso.slice(5, 7)) });
+          setOpen((o) => !o);
+        }}
         title="Pick date"
         aria-label={`${ariaLabel} — open calendar`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
         style={{
           position: "absolute",
           right: 4,
@@ -121,10 +195,10 @@ export function CalendarInput({
           <path d="M3 10h18M8 3v4M16 3v4" />
         </svg>
       </button>
-      {value && (
+      {draft && (
         <button
           type="button"
-          onClick={() => onChange("")}
+          onClick={() => { setDraft(""); setInvalid(false); onChange(""); inputRef.current?.focus({ preventScroll: true }); }}
           title="Clear date"
           aria-label={`${ariaLabel} — clear`}
           style={{
@@ -144,18 +218,20 @@ export function CalendarInput({
           ×
         </button>
       )}
+      {invalid && <span id={errorId} role="alert" style={{ display: "block", fontSize: 10, color: "var(--down)", marginTop: 4 }}>Enter a valid date: mm/dd/yyyy.</span>}
       {open && (
         <div
+          ref={calendarRef}
+          role="dialog"
+          aria-label={`${ariaLabel} calendar`}
+          className="calendar-popover"
           style={{
-            position: "absolute",
-            left: 0,
-            top: "100%",
-            marginTop: 4,
+            ...position,
             zIndex: 70,
             background: "var(--panel-2)",
             border: "1px solid var(--border-30)",
             padding: 10,
-            width: 190,
+            overflowY: "auto",
             boxShadow: "0 8px 20px rgba(0,0,0,0.5)",
           }}
         >
@@ -191,8 +267,13 @@ export function CalendarInput({
                   type="button"
                   onClick={() => {
                     onChange(toIso(ym.y, ym.m, d));
+                    setDraft(isoToDisplay(toIso(ym.y, ym.m, d)));
+                    setInvalid(false);
                     setOpen(false);
+                    inputRef.current?.focus({ preventScroll: true });
                   }}
+                  aria-label={toIso(ym.y, ym.m, d)}
+                  aria-pressed={d === selDay}
                   style={{
                     height: 18,
                     border: "none",

@@ -732,20 +732,28 @@
   },
   {
     "symbol": "CFPT2617",
-    "issuer": "KIS",
+    "issuer": "KISVN",
     "underlying_symbol": "FPT",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 85678.0,
+    "exercise_ratio": 16.0,
+    "maturity_date": "2026-12-28",
+    "last_trading_date": "2026-12-24",
+    "listed_volume": 4000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:43.775498+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CFPT2617~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CFPT2617. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CFPT2619",
@@ -766,37 +774,53 @@
   },
   {
     "symbol": "CFPT2621",
-    "issuer": "HSC",
+    "issuer": "HCM",
     "underlying_symbol": "FPT",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 70500.0,
+    "exercise_ratio": 6.0,
+    "maturity_date": "2026-12-16",
+    "last_trading_date": "2026-12-14",
+    "listed_volume": 10000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:43.775490+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CFPT2621~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CFPT2621. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CFPT2623",
     "issuer": "VND",
     "underlying_symbol": "FPT",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 70100.0,
+    "exercise_ratio": 12.0,
+    "maturity_date": "2026-12-30",
+    "last_trading_date": "2026-12-28",
+    "listed_volume": 10000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:43.775486+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CFPT2623~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CFPT2623. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CFPT2625",
@@ -817,37 +841,53 @@
   },
   {
     "symbol": "CFPT2626",
-    "issuer": "UNKNOWN",
+    "issuer": "SSV",
     "underlying_symbol": "FPT",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 74500.0,
+    "exercise_ratio": 10.0,
+    "maturity_date": "2027-04-02",
+    "last_trading_date": "2027-03-31",
+    "listed_volume": 2200000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:43.775474+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CFPT2626~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CFPT2626. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CFPT2628",
-    "issuer": "UNKNOWN",
+    "issuer": "KAFI",
     "underlying_symbol": "FPT",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 75800.0,
+    "exercise_ratio": 10.0,
+    "maturity_date": "2027-06-30",
+    "last_trading_date": "2027-06-28",
+    "listed_volume": 2000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:43.775455+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CFPT2628~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CFPT2628. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CHPG2401",
@@ -1779,23 +1819,28 @@
   },
   {
     "symbol": "CHPG2618",
-    "issuer": "KIS",
+    "issuer": "KISVN",
     "underlying_symbol": "HPG",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 28888.0,
+    "exercise_ratio": 4.0,
+    "maturity_date": "2026-12-28",
+    "last_trading_date": "2026-12-24",
+    "listed_volume": 4000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "status": "UNKNOWN",
-    "data_quality": "PARTIAL",
-    "evidence_level": "SEARCH_ONLY",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:20:33.336031+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CHPG2618~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CHPG2618. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CHPG2620",
@@ -1892,106 +1937,151 @@
     "symbol": "CHPG2625",
     "issuer": "ACBS",
     "underlying_symbol": "HPG",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 25000.0,
+    "exercise_ratio": 2.0,
+    "maturity_date": "2027-02-17",
+    "last_trading_date": "2027-02-15",
+    "listed_volume": 18000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:42.722968+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CHPG2625~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CHPG2625. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CHPG2626",
-    "issuer": "HSC",
+    "issuer": "HCM",
     "underlying_symbol": "HPG",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 23000.0,
+    "exercise_ratio": 2.0,
+    "maturity_date": "2026-12-16",
+    "last_trading_date": "2026-12-14",
+    "listed_volume": 12000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "status": "UNKNOWN",
-    "data_quality": "PARTIAL",
-    "evidence_level": "SEARCH_ONLY",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:20:33.336008+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CHPG2626~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CHPG2626. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CHPG2627",
-    "issuer": "HSC",
+    "issuer": "HCM",
     "underlying_symbol": "HPG",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 23500.0,
+    "exercise_ratio": 2.0,
+    "maturity_date": "2027-03-16",
+    "last_trading_date": "2027-03-12",
+    "listed_volume": 10000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:42.722964+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CHPG2627~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CHPG2627. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CHPG2628",
     "issuer": "VND",
     "underlying_symbol": "HPG",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 24600.0,
+    "exercise_ratio": 2.0,
+    "maturity_date": "2027-06-30",
+    "last_trading_date": "2027-06-28",
+    "listed_volume": 10000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:42.722960+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CHPG2628~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CHPG2628. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CHPG2629",
     "issuer": "MBS",
     "underlying_symbol": "HPG",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 25000.0,
+    "exercise_ratio": 3.0,
+    "maturity_date": "2027-04-05",
+    "last_trading_date": "2027-04-01",
+    "listed_volume": 5000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:42.722957+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CHPG2629~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CHPG2629. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CHPG2630",
-    "issuer": "UNKNOWN",
+    "issuer": "KBSV",
     "underlying_symbol": "HPG",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 25300.0,
+    "exercise_ratio": 3.0,
+    "maturity_date": "2027-05-06",
+    "last_trading_date": "2027-05-04",
+    "listed_volume": 6000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:42.722949+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CHPG2630~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CHPG2630. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CHPG2631",
@@ -8360,23 +8450,28 @@
   },
   {
     "symbol": "CVPB2611",
-    "issuer": "UNKNOWN",
+    "issuer": "MSVN",
     "underlying_symbol": "VPB",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 28400.0,
+    "exercise_ratio": 4.0,
+    "maturity_date": "2027-03-29",
+    "last_trading_date": "2027-03-25",
+    "listed_volume": 8000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "status": "UNKNOWN",
-    "data_quality": "PARTIAL",
-    "evidence_level": "SEARCH_ONLY",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:20:42.636048+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CVPB2611~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CVPB2611. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CVPB2612",
@@ -8397,20 +8492,28 @@
   },
   {
     "symbol": "CVPB2613",
-    "issuer": "KIS",
+    "issuer": "KISVN",
     "underlying_symbol": "VPB",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 32888.0,
+    "exercise_ratio": 5.0,
+    "maturity_date": "2026-11-30",
+    "last_trading_date": "2026-11-26",
+    "listed_volume": 3000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:56.818069+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CVPB2613~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CVPB2613. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CVPB2614",
@@ -8438,93 +8541,99 @@
     "underlying_symbol": "VPB",
     "strike_price": 28500.0,
     "exercise_ratio": 2.0,
-    "initial_strike_price": 28500.0,
-    "initial_exercise_ratio": 2.0,
-    "effective_strike_price": 28500.0,
-    "effective_exercise_ratio": 2.0,
-    "is_adjusted": false,
-    "terms_effective_date": "2026-07-06",
-    "adjustment_reference": null,
     "maturity_date": "2027-02-17",
     "last_trading_date": "2027-02-15",
     "listed_volume": 18000000,
-    "issue_price": 2400.0,
+    "issue_price": null,
     "instrument_type": "CW",
-    "status": "ACTIVE",
-    "evidence_level": "MANUAL_SNAPSHOT",
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
     "metadata_verification": "VERIFIED_CURRENT",
-    "metadata_source": "PUBLIC_AGGREGATOR_RECONCILED",
-    "metadata_retrieved_at": "2026-08-29T11:54:00+07:00",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
     "provenance": {
-      "initial_terms_source": {
-        "source_type": "PUBLIC_MARKET_DATA_AGGREGATOR",
-        "source_url": "https://finance.vietstock.vn/chung-khoan-phai-sinh/CVPB2615/cw-tong-quan.htm",
-        "source_document_id": "VIETSTOCK-CW-CVPB2615",
-        "source_published_at": "2026-07-06",
-        "retrieved_at": "2026-08-29T11:54:00+07:00",
-        "notes": "ACBS / VPB call / European / cash. Strike 28,500 VND; exercise ratio 2:1 (vietstock: initial AND adjusted 2:1 - unchanged); issued 2026-06-17, listed 2026-07-06, first trading 2026-07-08, last trading 2027-02-15, maturity 2027-02-17; listed volume 18,000,000; issue price 2,400 VND."
-      },
       "effective_terms_source": {
-        "source_type": "PUBLIC_MARKET_DATA_AGGREGATOR",
-        "source_url": "https://24hmoney.vn/covered-warrant/CVPB2615",
-        "source_document_id": "24HMONEY-CW-CVPB2615",
-        "source_published_at": "2026-08-28",
-        "retrieved_at": "2026-08-29T11:54:00+07:00",
-        "notes": "Independent cross-check: identical issuer/underlying/strike/ratio/dates. Breakeven 30.12 = 28.50 + 0.81 x 2 confirms ratio 2:1. VPB's only 2026 corporate action (5% cash dividend, ex-date 2026-05-15) predates the warrant's 2026-06-17 issue, so as-issued terms are the effective terms."
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CVPB2615~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CVPB2615. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
       },
       "reconciliation_mode": "MANUAL_RECONCILED"
     }
   },
   {
     "symbol": "CVPB2616",
-    "issuer": "HSC",
+    "issuer": "HCM",
     "underlying_symbol": "VPB",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 25000.0,
+    "exercise_ratio": 2.0,
+    "maturity_date": "2026-12-16",
+    "last_trading_date": "2026-12-14",
+    "listed_volume": 12000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:56.818052+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CVPB2616~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CVPB2616. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CVPB2617",
-    "issuer": "HSC",
+    "issuer": "HCM",
     "underlying_symbol": "VPB",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 25500.0,
+    "exercise_ratio": 3.0,
+    "maturity_date": "2027-03-16",
+    "last_trading_date": "2027-03-12",
+    "listed_volume": 12000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:56.818045+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CVPB2617~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CVPB2617. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CVPB2618",
     "issuer": "VND",
     "underlying_symbol": "VPB",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 27200.0,
+    "exercise_ratio": 2.0,
+    "maturity_date": "2027-04-29",
+    "last_trading_date": "2027-04-27",
+    "listed_volume": 10000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:56.818037+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CVPB2618~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CVPB2618. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CVPB2619",
@@ -8565,54 +8674,78 @@
   },
   {
     "symbol": "CVPB2621",
-    "issuer": "UNKNOWN",
+    "issuer": "SSV",
     "underlying_symbol": "VPB",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 28000.0,
+    "exercise_ratio": 4.0,
+    "maturity_date": "2027-04-02",
+    "last_trading_date": "2027-03-31",
+    "listed_volume": 3500000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:56.818017+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CVPB2621~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CVPB2621. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CVPB2622",
-    "issuer": "UNKNOWN",
+    "issuer": "KAFI",
     "underlying_symbol": "VPB",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 25400.0,
+    "exercise_ratio": 4.0,
+    "maturity_date": "2027-06-30",
+    "last_trading_date": "2027-06-28",
+    "listed_volume": 4000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:56.818001+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CVPB2622~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CVPB2622. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CVPB2623",
-    "issuer": "UNKNOWN",
+    "issuer": "KAFI",
     "underlying_symbol": "VPB",
-    "strike_price": null,
-    "exercise_ratio": null,
-    "maturity_date": null,
-    "last_trading_date": null,
-    "listed_volume": null,
+    "strike_price": 28600.0,
+    "exercise_ratio": 4.0,
+    "maturity_date": "2027-06-30",
+    "last_trading_date": "2027-06-28",
+    "listed_volume": 2000000,
     "issue_price": null,
     "instrument_type": "CW",
-    "metadata_source": "BROKER_DCHART_DISCOVERY",
-    "metadata_retrieved_at": "2026-08-25T10:14:56.817967+07:00",
-    "metadata_verification": "UNVERIFIED",
-    "is_adjusted": false,
-    "provenance": null
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CVPB2623~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CVPB2623. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   },
   {
     "symbol": "CVRE2407",
@@ -9123,5 +9256,155 @@
     "metadata_verification": "UNVERIFIED",
     "is_adjusted": false,
     "provenance": null
+  },
+  {
+    "symbol": "CHPG2617",
+    "issuer": "MSVN",
+    "underlying_symbol": "HPG",
+    "strike_price": 25400.0,
+    "exercise_ratio": 4.0,
+    "maturity_date": "2027-03-29",
+    "last_trading_date": "2027-03-25",
+    "listed_volume": 8000000,
+    "issue_price": null,
+    "instrument_type": "CW",
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CHPG2617~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CHPG2617. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
+  },
+  {
+    "symbol": "CHPG2632",
+    "issuer": "SSV",
+    "underlying_symbol": "HPG",
+    "strike_price": 25000.0,
+    "exercise_ratio": 4.0,
+    "maturity_date": "2027-04-02",
+    "last_trading_date": "2027-03-31",
+    "listed_volume": 4000000,
+    "issue_price": null,
+    "instrument_type": "CW",
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CHPG2632~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CHPG2632. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
+  },
+  {
+    "symbol": "CFPT2616",
+    "issuer": "KISVN",
+    "underlying_symbol": "FPT",
+    "strike_price": 82456.0,
+    "exercise_ratio": 16.0,
+    "maturity_date": "2026-10-28",
+    "last_trading_date": "2026-10-26",
+    "listed_volume": 3000000,
+    "issue_price": null,
+    "instrument_type": "CW",
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CFPT2616~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CFPT2616. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
+  },
+  {
+    "symbol": "CFPT2622",
+    "issuer": "HCM",
+    "underlying_symbol": "FPT",
+    "strike_price": 72000.0,
+    "exercise_ratio": 8.0,
+    "maturity_date": "2027-03-16",
+    "last_trading_date": "2027-03-12",
+    "listed_volume": 10000000,
+    "issue_price": null,
+    "instrument_type": "CW",
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CFPT2622~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CFPT2622. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
+  },
+  {
+    "symbol": "CFPT2624",
+    "issuer": "VND",
+    "underlying_symbol": "FPT",
+    "strike_price": 77000.0,
+    "exercise_ratio": 12.0,
+    "maturity_date": "2027-06-30",
+    "last_trading_date": "2027-06-28",
+    "listed_volume": 10000000,
+    "issue_price": null,
+    "instrument_type": "CW",
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CFPT2624~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CFPT2624. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
+  },
+  {
+    "symbol": "CFPT2627",
+    "issuer": "KAFI",
+    "underlying_symbol": "FPT",
+    "strike_price": 68700.0,
+    "exercise_ratio": 10.0,
+    "maturity_date": "2027-06-30",
+    "last_trading_date": "2027-06-28",
+    "listed_volume": 4000000,
+    "issue_price": null,
+    "instrument_type": "CW",
+    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+    "metadata_verification": "VERIFIED_CURRENT",
+    "metadata_source": "VNDIRECT_DERIVATIVES_CROSS_CHECKED_24HMONEY",
+    "metadata_retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+    "provenance": {
+      "effective_terms_source": {
+        "source_type": "CURRENT_BROKER_TERMS",
+        "source_url": "https://api-finfo.vndirect.com.vn/v4/derivatives?q=code:CFPT2627~locale:VN&size=1",
+        "retrieved_at": "2026-09-02T04:21:21.333931+00:00",
+        "notes": "Current listed instrument checked against VNDIRECT stocks and https://24hmoney.vn/covered-warrant/CFPT2627. Underlying, last trading date, maturity and ratio agree; secondary displayed strike agrees within its 0.01 thousand-VND rounding. Full-precision VNDIRECT strike retained. Initial issue terms are not inferred."
+      },
+      "reconciliation_mode": "MANUAL_RECONCILED"
+    }
   }
 ]
