@@ -19,6 +19,7 @@ Invariant under test:
 """
 
 import asyncio
+import json
 import logging
 import sys
 import threading
@@ -89,6 +90,13 @@ class _FakeTransport:
         self.connection_checker = _FakeConnectionStateChecker(ping_fn)
         self.manually_closing = False
         self.reconnection_handler = object()  # non-None: SDK auto-reconnect "enabled"
+        self.on_message = self._parse_message
+
+    @staticmethod
+    def _parse_message(_app, raw_message: str) -> None:
+        for frame in raw_message.split("\x1e"):
+            if frame:
+                json.loads(frame)
 
     def start(self) -> None:
         self.connection_checker.start()
@@ -110,6 +118,9 @@ class _FakeHub:
 class _FakeStream:
     instances: list = []
     start_should_raise = False
+    start_failures_remaining = 0
+    synchronous_closes_remaining = 0
+    synchronous_frame_errors_remaining = 0
 
     def __init__(self, tickers, callback, kind: str) -> None:
         self.tickers = list(tickers)
@@ -133,7 +144,9 @@ class _FakeStream:
         logging.getLogger("SignalRCoreClient").debug("Sending message <PingMessage>")
 
     def start(self) -> None:
-        if _FakeStream.start_should_raise:
+        if _FakeStream.start_should_raise or _FakeStream.start_failures_remaining > 0:
+            if _FakeStream.start_failures_remaining > 0:
+                _FakeStream.start_failures_remaining -= 1
             raise RuntimeError("simulated SDK stream start failure")
         # SDK global logging hijack on construction/start:
         root = logging.getLogger()
@@ -142,9 +155,20 @@ class _FakeStream:
         self.custom_handler = CustomHandler()
         root.addHandler(self.custom_handler)
 
-        self.hub_connection = _FakeHub(self._send_ping)
+        self.hub_connection = self._build_connection()
         self.hub_connection.transport.start()
         self.connected = True
+        if _FakeStream.synchronous_closes_remaining > 0:
+            _FakeStream.synchronous_closes_remaining -= 1
+            self.connected = False
+            self.hub_connection.trigger_close()
+        if _FakeStream.synchronous_frame_errors_remaining > 0:
+            _FakeStream.synchronous_frame_errors_remaining -= 1
+            self.hub_connection.transport.on_message(None, "{invalid-json}\x1e")
+
+    def _build_connection(self):
+        self.hub_connection = _FakeHub(self._send_ping)
+        return self.hub_connection
 
     def stop(self) -> None:
         # Reproduce the SDK bug: teardown only happens while self.connected is True.
@@ -218,6 +242,7 @@ def _make_provider(monkeypatch, *, session_factory=None):
         return _FakeSession()
 
     monkeypatch.setattr(p, "_create_session", _factory)
+    monkeypatch.setattr(p, "_signalrcore_version", lambda: "0.9.71")
     # Lifecycle tests assert the in-session fast-reconnect path; pin it so they are
     # deterministic regardless of wall-clock. Off-session pacing is covered separately
     # in test_fiinquant_reconnect_pacing.py.
@@ -229,6 +254,9 @@ def _make_provider(monkeypatch, *, session_factory=None):
 def _reset_fakes():
     _FakeStream.instances.clear()
     _FakeStream.start_should_raise = False
+    _FakeStream.start_failures_remaining = 0
+    _FakeStream.synchronous_closes_remaining = 0
+    _FakeStream.synchronous_frame_errors_remaining = 0
     _FakeSession.created = 0
     root = logging.getLogger()
     _baseline = list(root.handlers)
@@ -476,12 +504,17 @@ async def test_T11_unexpected_disconnect_triggers_single_provider_reconnect_and_
 
     # Reconnect worker runs: retires old streams, starts fresh streams with current symbols
     assert await _wait_until(lambda: p._trade_stream is not None and p._trade_stream is not first_trade)
-    assert await _wait_until(lambda: count_signalr_ping_threads() == len(p._owned_streams))
+    assert await _wait_until(
+        lambda: len(p._owned_streams) == 2 and count_signalr_ping_threads() == 2
+    )
     assert count_signalr_ping_threads() == 2
     assert p._stream_restart_count >= 2
 
     # Invariant: Existing authenticated session was reused (no unnecessary login churn)
     assert _FakeSession.created == 1
+    p._on_trade_raw({"Ticker": "HPG", "Close": 22_100})
+    assert p.get_health()["upstream_status"] == "CONNECTING"
+    p._on_bidask_raw({"Ticker": "HPG", "BidPrice1": 22_050})
     assert p.get_health()["upstream_status"] == "LIVE"
 
     await p.disconnect()
@@ -552,3 +585,94 @@ async def test_T14_repeated_close_callbacks_are_single_flighted(monkeypatch):
     await p.disconnect()
     assert await _wait_until(lambda: _alive_ping_threads() == 0)
 
+
+# --------------------------------------------------------------------------- #
+# T15 - one failed provider-owned reconnect remains recoverable
+# --------------------------------------------------------------------------- #
+async def test_T15_failed_reconnect_attempt_reschedules_and_recovers(monkeypatch):
+    p, _ = _make_provider(monkeypatch)
+    p._reconnect_backoffs = (0.01,)
+    await p.connect()
+    await p.set_subscriptions(["HPG"])
+    first_trade = p._trade_stream
+
+    # Fail the first replacement stream.start(), then allow the following bounded
+    # retry to recover without another close callback or manual subscription call.
+    _FakeStream.start_failures_remaining = 1
+    first_trade.hub_connection.trigger_close()
+
+    assert await _wait_until(lambda: p._reconnect_count >= 2)
+    assert await _wait_until(
+        lambda: len(p._owned_streams) == 2
+        and p._trade_stream is not None
+        and p._trade_stream is not first_trade
+        and p._trade_stream.connected
+    )
+    assert p._reconnect_backoff_index == 0
+    assert p.get_health()["upstream_status"] == "CONNECTING"
+
+    await p.disconnect()
+    assert await _wait_until(lambda: _alive_ping_threads() == 0)
+
+
+@pytest.mark.parametrize("failure", ["close", "frame_error"])
+async def test_T16_synchronous_start_failure_preserves_reconnect_target(
+    monkeypatch,
+    failure,
+):
+    p, _ = _make_provider(monkeypatch)
+    p._reconnect_backoffs = (0.01,)
+    await p.connect()
+
+    if failure == "close":
+        _FakeStream.synchronous_closes_remaining = 1
+    else:
+        _FakeStream.synchronous_frame_errors_remaining = 1
+
+    assert await p.set_subscriptions(["HPG"]) is True
+    # The callback fired from inside stream.start(), before set_subscriptions
+    # returned. The target must already be visible so recovery is not discarded.
+    assert p.get_active_subscriptions() == ["HPG"]
+    assert await _wait_until(lambda: p._reconnect_count >= 1)
+    assert await _wait_until(
+        lambda: len(p._owned_streams) == 2
+        and p._trade_stream is not None
+        and p._trade_stream.connected
+    )
+
+    await p.disconnect()
+    assert await _wait_until(lambda: _alive_ping_threads() == 0)
+
+
+async def test_T17_late_callbacks_from_retired_stream_do_not_restart_replacement(
+    monkeypatch,
+):
+    p, _ = _make_provider(monkeypatch)
+    await p.connect()
+    await p.set_subscriptions(["HPG"])
+    retired_trade = p._trade_stream
+    retired_hub = retired_trade.hub_connection
+
+    await p.set_subscriptions(["SSI"])
+    current_trade = p._trade_stream
+    restart_count = p._stream_restart_count
+    stream_generation = p._stream_generation
+    decode_error_count = p._signalr_decode_error_count
+
+    # A transport callback can already be queued while retirement is happening.
+    # Its stream generation must not disturb the healthy replacement lifecycle.
+    retired_hub.trigger_close()
+    retired_hub.transport.on_message(None, "{invalid-json}\x1e")
+    retired_trade.callback({"Ticker": "HPG", "Close": 22_100})
+    await asyncio.sleep(0.05)
+
+    assert p._stream_generation == stream_generation
+    assert p._stream_restart_count == restart_count
+    assert p._trade_stream is current_trade
+    assert p._reconnect_task is None
+    assert p._upstream_status == "CONNECTED"
+    assert p._signalr_decode_error_count == decode_error_count
+    assert p._current_trade_tick_at_ms is None
+
+    await p.disconnect()
+    assert await _wait_until(lambda: _alive_ping_threads() == 0)

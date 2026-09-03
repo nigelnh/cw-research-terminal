@@ -11,7 +11,7 @@ from app.market_data.market_schemas import CanonicalQuote
 from app.market_data.market_state import MarketState, market_state
 from app.market_data.market_state_store import NullMarketStateStore
 from app.market_data.redis_market_state_store import RedisMarketStateStore
-from app.market_data.market_subscription_manager import SubscriptionManager
+from app.market_data.market_subscription_manager import SubscriptionManager, subscription_manager
 from tests.fixtures.mock_market_provider import MockMarketDataProvider
 from app.instruments.instrument_registry import instrument_registry
 
@@ -188,6 +188,36 @@ async def test_redis_market_state_store_save_load_preserves_canonical_units():
 
 
 @pytest.mark.asyncio
+async def test_redis_accepts_fresh_reference_only_quote_without_promoting_it_to_live():
+    mock_client = MockRedisClient()
+    store = RedisMarketStateStore(
+        enabled=True,
+        ttl_seconds=3600,
+        max_staleness_seconds=3600,
+        redis_client=mock_client,
+    )
+    await store.initialize()
+    now_ms = int(time.time() * 1000)
+    quote = CanonicalQuote(
+        symbol="HPG",
+        reference_price=22_200,
+        ceiling_price=23_750,
+        floor_price=20_650,
+        reference_session_date=datetime.now(timezone.utc).date().isoformat(),
+        reference_timestamp=now_ms,
+        received_timestamp=0,
+    )
+
+    await store.save("HPG", quote)
+    loaded = await store.load("HPG")
+
+    assert loaded is not None
+    assert loaded.reference_price == 22_200
+    assert loaded.received_timestamp == 0
+    await store.close()
+
+
+@pytest.mark.asyncio
 async def test_redis_market_state_store_staleness_rejection():
     mock_client = MockRedisClient()
     store = RedisMarketStateStore(
@@ -251,6 +281,71 @@ async def test_redis_failure_graceful_degradation():
 
 
 @pytest.mark.asyncio
+async def test_redis_health_counts_successful_quote_writes_and_unique_restores():
+    mock_client = MockRedisClient()
+    store = RedisMarketStateStore(
+        enabled=True,
+        ttl_seconds=3600,
+        max_staleness_seconds=86400,
+        redis_client=mock_client,
+    )
+    await store.initialize()
+    now_ms = int(time.time() * 1000)
+    hpg = CanonicalQuote(symbol="HPG", last_price=21_850.0, received_timestamp=now_ms)
+    vhm = CanonicalQuote(symbol="VHM", last_price=58_000.0, received_timestamp=now_ms)
+
+    await store.save("HPG", hpg)
+    await store.save_many({"HPG": hpg, "VHM": vhm})
+    assert await store.load("HPG") == hpg
+    loaded = await store.load_many(["HPG", " hpg ", "VHM", "MISSING"])
+    assert set(loaded) == {"HPG", "VHM"}
+
+    health = await store.health()
+    assert health["counters"] == {
+        "writes_succeeded": 3,
+        "quotes_restored": 3,
+        "write_errors": 0,
+        "restore_errors": 0,
+        "connection_restores": 0,
+    }
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_redis_health_counts_errors_and_connectivity_restores_without_payloads():
+    mock_client = MockRedisClient()
+    store = RedisMarketStateStore(enabled=True, redis_client=mock_client)
+    await store.initialize()
+    now_ms = int(time.time() * 1000)
+    quote = CanonicalQuote(symbol="HPG", last_price=21_850.0, received_timestamp=now_ms)
+
+    mock_client.store[store._get_key("BAD")] = "not-json"
+    assert await store.load("BAD") is None
+    assert store.is_available() is True
+
+    mock_client.should_fail = True
+    await store.save("HPG", quote)
+    assert store.is_available() is False
+    mock_client.should_fail = False
+    assert (await store.health())["redis_connected"] is True
+
+    mock_client.should_fail = True
+    assert await store.load_many(["HPG"]) == {}
+    mock_client.should_fail = False
+    health = await store.health()
+
+    assert health["counters"] == {
+        "writes_succeeded": 0,
+        "quotes_restored": 0,
+        "write_errors": 1,
+        "restore_errors": 2,
+        "connection_restores": 2,
+    }
+    assert all(isinstance(value, int) for value in health["counters"].values())
+    await store.close()
+
+
+@pytest.mark.asyncio
 async def test_browser_reconnect_receives_in_memory_market_state_immediately():
     """
     Asserts that when a WebSocket client subscribes, it immediately receives
@@ -272,7 +367,8 @@ async def test_browser_reconnect_receives_in_memory_market_state_immediately():
         source_timestamp=now_ms,
     )
 
-    with patch("app.market_data.market_state.market_session.is_trading_active", return_value=True):
+    with patch("app.market_data.market_state.market_session.is_trading_active", return_value=True), \
+         patch.object(subscription_manager, "_server_universe_symbols", {"HPG"}):
         with client.websocket_connect("/ws/market") as ws:
             # Status frame
             status_raw = ws.receive_text()
@@ -332,6 +428,7 @@ async def test_backend_restart_warm_cache_restoration_and_overwrite():
 
     # Patch subscription_manager.store to use test_store and test active session
     with patch("app.market_data.market_websocket.subscription_manager.store", test_store), \
+         patch.object(subscription_manager, "_server_universe_symbols", {"HPG"}), \
          patch("app.market_data.market_state.market_session.is_trading_active", return_value=True):
         assert market_state.has_quote("HPG") is False
 

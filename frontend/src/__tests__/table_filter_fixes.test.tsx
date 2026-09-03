@@ -66,6 +66,7 @@ vi.mock("@/data/use_research_market", () => ({
     quotes: new Map(),
     warrants: new Map(),
     marketSessionActive: false,
+    isRealtimeTracked: () => true,
   }),
 }));
 vi.mock("@/data/instruments/use_instrument_specs", () => ({
