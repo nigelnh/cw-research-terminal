@@ -84,6 +84,25 @@ class MockRedisPipeline:
 
 
 @pytest.mark.asyncio
+async def test_redis_initialize_never_logs_connection_url(caplog):
+    secret_url = "redis://default:private-password@redis.internal:6379/0"
+    store = RedisMarketStateStore(
+        redis_url=secret_url,
+        enabled=True,
+        redis_client=MockRedisClient(),
+    )
+
+    with caplog.at_level("INFO", logger="app.market_data.redis_market_state_store"):
+        await store.initialize()
+    try:
+        assert "private-password" not in caplog.text
+        assert secret_url not in caplog.text
+        assert "Connected to Redis Warm Market State Cache." in caplog.text
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
 async def test_null_market_state_store():
     store = NullMarketStateStore()
     assert store.is_available() is False
