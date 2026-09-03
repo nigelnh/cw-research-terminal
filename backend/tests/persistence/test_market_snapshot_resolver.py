@@ -165,6 +165,37 @@ async def test_snapshot_wins_when_market_closed(resolver, sessionmaker_):
     assert r.quote_prov.session_date == _FRI.isoformat()
 
 
+async def test_closed_snapshot_uses_current_canonical_reference_bands(resolver, sessionmaker_):
+    await _put_snapshot(
+        sessionmaker_, symbol="HPG", session_date=_FRI,
+        captured_at=datetime(2026, 8, 28, 15, 2, tzinfo=_VN),
+        source="SESSION_CLOSE", quality="FINAL", instrument_type="STOCK",
+        reference_price=29000.0, last_price=30200.0, total_volume=7_000_000,
+        open_price=29900.0, high_price=30500.0, low_price=29700.0,
+        price_change=1200.0, price_change_percent=0.041379,
+        bid1_price=30100.0, ask1_price=30300.0,
+    )
+    ts = int(_SAT_NOW.timestamp() * 1000)
+    market_state.restore_quote(CanonicalQuote(
+        symbol="HPG", instrument_type="STOCK", last_price=99999.0,
+        total_volume=999, received_timestamp=ts, source_timestamp=ts,
+    ))
+    market_state.apply_reference_metadata(
+        "HPG", session_date=_FRI.isoformat(), reference_price=29800.0,
+        ceiling_price=31850.0, floor_price=27750.0, observed_timestamp=ts,
+    )
+
+    r = (await resolver.resolve_rows(["HPG"], now=_SAT_NOW))[0]
+    wire = r.to_wire()
+
+    assert r.values["last_price"] == 30200.0
+    assert r.values["total_volume"] == 7_000_000
+    assert wire["Ref"] == 29.8
+    assert wire["Ceil"] == 31.85
+    assert wire["Floor"] == 27.75
+    assert wire["provenance"]["reference"]["source"] == "SESSION_REFERENCE"
+
+
 async def test_eod_bars_when_no_snapshot(resolver, sessionmaker_):
     await _seed_bars(sessionmaker_, "VHM", {_THU: 40000.0, _FRI: 41000.0})
     r = (await resolver.resolve_rows(["VHM"], now=_SAT_NOW))[0]

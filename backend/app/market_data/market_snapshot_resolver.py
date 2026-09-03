@@ -28,6 +28,7 @@ from app.core.config import settings
 from app.market_data import trading_calendar as cal
 from app.market_data.market_schemas import HistoricalBar
 from app.market_data.market_session import market_session
+from app.market_data.session_reference import reference_session_date
 from app.market_data.market_state import market_state
 from app.market_data.temporal import (
     DataSource,
@@ -228,6 +229,7 @@ class MarketSnapshotResolver:
             return row
 
         # ---- B. LAST_SESSION snapshot ------------------------------- #
+        snapshot_complete = False
         if snapshot is not None:
             snap_session = snapshot.session_date
             snap_stale = snap_session < latest_session
@@ -269,10 +271,19 @@ class MarketSnapshotResolver:
                 "last_price", "open_price", "high_price", "low_price",
                 "total_volume", "reference_price", "price_change", "price_change_percent",
             )
-            if not snap_stale and all(row.values.get(f) is not None for f in history_fields):
-                if diag:
-                    row.diag = {"chosen": "SNAPSHOT", "trace": trace}
-                return row
+            snapshot_complete = not snap_stale and all(
+                row.values.get(f) is not None for f in history_fields
+            )
+
+        # A persisted closing snapshot owns last trade/OHLC/book outside the live
+        # session, while the canonical in-memory state owns the static bands for the
+        # current display session. Overlay only those three fields so a closed-session
+        # row can still classify its prices without exposing stale intraday data.
+        self._overlay_current_reference(row, live, now=now, trace=trace)
+        if snapshot_complete:
+            if diag:
+                row.diag = {"chosen": "SNAPSHOT", "trace": trace}
+            return row
 
         # ---- C. HISTORICAL / EOD bars ------------------------------ #
         bars = await self._recent_daily_bars(sym, inst_type, now=now)
@@ -339,6 +350,37 @@ class MarketSnapshotResolver:
         if diag:
             row.diag = {"chosen": "UNAVAILABLE", "trace": trace}
         return row
+
+    @staticmethod
+    def _overlay_current_reference(
+        row: ResolvedRow,
+        live,
+        *,
+        now: datetime,
+        trace: list[str],
+    ) -> None:
+        if live is None:
+            return
+        session_date = reference_session_date(now).isoformat()
+        if live.reference_session_date != session_date:
+            return
+        values = {
+            "reference_price": live.reference_price,
+            "ceiling_price": live.ceiling_price,
+            "floor_price": live.floor_price,
+        }
+        if not any(value is not None for value in values.values()):
+            return
+        for field, value in values.items():
+            if value is not None:
+                row.values[field] = value
+        row.reference_prov = FieldProvenance(
+            DataTemporalState.DERIVED,
+            DataSource.SESSION_REFERENCE,
+            _iso_ms(live.reference_timestamp),
+            session_date,
+        )
+        trace.append("A:SESSION_REFERENCE_STATIC")
 
     async def _fill_live_reference(
         self,
