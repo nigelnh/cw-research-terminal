@@ -493,14 +493,12 @@ export class BackendWebSocketClient {
           this.setUpstreamFeedState("STALE");
         } else if (
           msg.upstream_status === "LIVE" ||
+          msg.upstream_status === "READY" ||
           (msg.connected === true && msg.feed_fresh !== false) ||
           (msg.gateway_connected && msg.market_session === "LUNCH_BREAK")
         ) {
           this.setUpstreamFeedState("CONNECTED");
-        } else if (
-          msg.upstream_status === "CONNECTING" ||
-          msg.upstream_status === "READY"
-        ) {
+        } else if (msg.upstream_status === "CONNECTING") {
           this.setUpstreamFeedState("CONNECTING");
         } else if (
           msg.upstream_status === "UNAVAILABLE" ||
