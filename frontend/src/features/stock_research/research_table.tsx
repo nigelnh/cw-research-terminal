@@ -106,7 +106,7 @@ export function ResearchTable<T extends { symbol: string }>({
           style={{ padding: "40px 8px", textAlign: "center", color: isError ? "var(--down)" : "var(--t-46)" }}>
           {isLoading ? "Loading research registry…" : isError ? "Could not load the research registry. Retry shortly." : "No instruments match."}
         </td></tr> : grid.ordered.map((row, index) => <tr key={row.symbol} data-symbol={row.symbol} tabIndex={0}
-          className={`registry-row${matches.has(row.symbol) ? " is-search-match" : ""}${dropTarget === `row:${row.symbol}` ? " is-drop-target" : ""}`}
+          className={`registry-row${matches.has(row.symbol) ? " is-search-match" : ""}${selectedSymbol === row.symbol ? " is-selected" : ""}${dropTarget === `row:${row.symbol}` ? " is-drop-target" : ""}`}
           title="Drag to reorder · Alt + ↑/↓ to move"
           {...dragProps("row", row.symbol)}
           onClick={() => { if (!drag.current) onSelect(row.symbol); }}

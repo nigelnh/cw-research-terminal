@@ -60,8 +60,12 @@ describe("NewsFeed — unified research feed", () => {
     expect(html).toContain("HPG: Board resolution on 2025 dividend");
     expect(html).toContain("DISCLOSURE");
     expect(html).toContain("EVENT");
-    // Vietnamese category label is not in the collapsed table
+    // Structured detail is inline; untranslated Vietnamese category metadata stays out.
     expect(html).not.toContain("Tin Tổ chức niêm yết");
+    expect(html).toContain("The board approved a cash dividend.");
+    expect(html).toContain("HOSE disclosures &amp; company events");
+    expect(html).not.toContain("feed unavailable");
+    expect(html).toContain('<col style="width:96px"/><col style="width:72px"/><col style="width:96px"/><col/>');
     // causal restraint is stated, never "caused"
     expect(html).toContain("not causation");
     expect(html).not.toMatch(/caused (the |a )?price/i);

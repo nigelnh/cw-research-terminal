@@ -1,8 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/data/auth";
 import { SignInDialog } from "@/features/auth/sign_in_dialog";
 
-type Tab = "dashboard" | "research" | "news";
+export type Tab = "dashboard" | "research" | "news";
+export interface GlobalSearchOption {
+  symbol: string;
+  destination: Tab;
+  kind: "stock" | "cw" | "news";
+}
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "dashboard", label: "DASHBOARD" },
@@ -16,6 +21,8 @@ interface AppHeaderProps {
   filter: string;
   onFilterChange: (value: string) => void;
   marketSessionActive: boolean;
+  searchOptions?: GlobalSearchOption[];
+  onJump?: (option: GlobalSearchOption) => void;
 }
 
 const VN_TZ = "Asia/Ho_Chi_Minh";
@@ -184,9 +191,23 @@ export function AppHeader({
   filter,
   onFilterChange,
   marketSessionActive,
+  searchOptions = [],
+  onJump,
 }: AppHeaderProps) {
   const [draft, setDraft] = useState(filter);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeResult, setActiveResult] = useState(0);
   useEffect(() => setDraft(filter), [filter]);
+  const matches = useMemo(() => {
+    const term = draft.trim().toUpperCase();
+    if (!term) return [];
+    const order: Record<Tab, number> = { dashboard: 0, research: 1, news: 2 };
+    return searchOptions.filter(option => option.symbol.startsWith(term))
+      .sort((a, b) => a.symbol.localeCompare(b.symbol) || order[a.destination] - order[b.destination]);
+  }, [draft, searchOptions]);
+  const jump = (option: GlobalSearchOption) => {
+    setDraft(option.symbol); setSearchOpen(false); onJump?.(option);
+  };
 
   return (
     <header
@@ -225,33 +246,34 @@ export function AppHeader({
         </div>
       </div>
 
-      <input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing) return;
-          if (e.key === "Enter") {
-            e.preventDefault();
-            const query = e.currentTarget.value.trim();
-            setDraft(query);
-            onFilterChange(query);
-          }
-          if (e.key === "Escape") { e.preventDefault(); setDraft(filter); }
-        }}
-        placeholder="/ filter or jump to symbol"
-        aria-label="Filter or jump to symbol"
-        className="focus-ring terminal-header-search"
-        style={{
-          background: "var(--panel-2)",
-          border: "1px solid var(--border-strong)",
-          borderRadius: 3,
-          padding: "5px 10px",
-          fontFamily: "inherit",
-          fontSize: 11,
-          color: "var(--t-92)",
-          outline: "none",
-        }}
-      />
+      <div className="terminal-header-search" onBlur={event => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setSearchOpen(false);
+      }}>
+        <input value={draft} onChange={(e) => { setDraft(e.target.value); setSearchOpen(!!e.target.value.trim()); setActiveResult(0); }}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              if (!matches.length) return;
+              e.preventDefault(); setSearchOpen(true);
+              setActiveResult(index => Math.max(0, Math.min(matches.length - 1, index + (e.key === "ArrowDown" ? 1 : -1))));
+            }
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (searchOpen && matches[activeResult]) jump(matches[activeResult]);
+              else { const query = e.currentTarget.value.trim(); setDraft(query); setSearchOpen(false); onFilterChange(query); }
+            }
+            if (e.key === "Escape") { e.preventDefault(); setDraft(filter); setSearchOpen(false); }
+          }}
+          placeholder="/ filter or jump to symbol" aria-label="Filter or jump to symbol" aria-expanded={searchOpen && matches.length > 0}
+          aria-controls={searchOpen && matches.length ? "global-search-results" : undefined} className="focus-ring" />
+        {searchOpen && matches.length > 0 && <div id="global-search-results" className="global-search-results" role="listbox" aria-label="Global symbol destinations">
+          {matches.map((option, index) => <button type="button" role="option" aria-selected={index === activeResult}
+            key={`${option.symbol}:${option.destination}`} onMouseDown={event => event.preventDefault()} onClick={() => jump(option)}>
+            <span>{option.symbol}</span><span>{option.kind === "cw" ? "CW" : option.kind === "stock" ? "STOCK" : "NEWS"}</span>
+            <strong>{option.destination === "dashboard" ? "WATCHLIST" : option.destination.toUpperCase()}</strong>
+          </button>)}
+        </div>}
+      </div>
 
       <div
         className="terminal-header-end"

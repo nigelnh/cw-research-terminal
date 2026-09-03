@@ -336,7 +336,7 @@ export function PersonalDashboard({
       <tr
         key={r.symbol}
         data-symbol={r.symbol}
-        className={`watchlist-row${r.kind === "cw" ? " watchlist-cw" : ""}${dropTarget === r.symbol ? " is-drop-target" : ""}${searched.highlighted.has(r.symbol) ? " is-search-match" : ""}`}
+        className={`watchlist-row${r.kind === "cw" ? " watchlist-cw" : ""}${dropTarget === r.symbol ? " is-drop-target" : ""}${searched.highlighted.has(r.symbol) ? " is-search-match" : ""}${selected ? " is-selected" : ""}`}
         tabIndex={0}
         draggable
         title="Drag to reorder; Alt + ↑/↓ to move"

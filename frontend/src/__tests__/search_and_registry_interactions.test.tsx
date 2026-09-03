@@ -12,11 +12,14 @@ const fixture = vi.hoisted(() => {
     { symbol: "CHPG2602", underlyingSymbol: "HPG", issuer: "ACBS", strikePrice: 25000, exerciseRatio: 4, lastTradingDate: "2026-12-14", maturityDate: "2026-12-18" },
     { symbol: "CHPG2603", underlyingSymbol: "HPG", issuer: "KISVN", strikePrice: 27000, exerciseRatio: 3, lastTradingDate: null, maturityDate: "2027-05-01" },
   ];
+  const discovered = [...instruments,
+    { symbol: "CMBB2601", underlyingSymbol: "MBB", issuer: "SSI", strikePrice: 24000, exerciseRatio: 2, lastTradingDate: "2027-06-01", maturityDate: "2027-06-03" },
+  ];
   const feed = vi.fn(() => ({ items: [], isLoading: false, isError: false, isEmpty: true, hasNextPage: false, fetchNextPage: vi.fn(), refetch: vi.fn() }));
-  return { instruments, feed, add: vi.fn() };
+  return { instruments, discovered, feed, add: vi.fn() };
 });
 vi.mock("@/data/query", () => ({
-  useActiveWarrants: () => ({ instruments: fixture.instruments, isLoading: false, isError: false }),
+  useActiveWarrants: (filter?: { status?: string }) => ({ instruments: filter?.status === "ALL" ? fixture.discovered : fixture.instruments, isLoading: false, isError: false }),
   useResearchFeed: fixture.feed,
 }));
 vi.mock("@/data/watchlist", () => ({ useWatchlist: () => ({ isInWatchlist: () => false, addToWatchlist: fixture.add }) }));
@@ -52,6 +55,10 @@ describe("Research table interactions", () => {
     expect([...page.container.querySelectorAll(".is-search-match")].map(row => row.getAttribute("data-symbol"))).toEqual(["HPG"]);
     expect(rowOrder(page.getByRole("table", { name: "Covered warrants" }))).toHaveLength(3);
     expect(select).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "MBB" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(rowOrder(page.getByRole("table", { name: "Covered warrants" }))).toHaveLength(3);
+    expect([...page.container.querySelectorAll(".is-search-match")]).toHaveLength(0);
     fireEvent.change(input, { target: { value: "CVPB" } });
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -122,6 +129,24 @@ function NewsSearchHarness() {
 }
 
 describe("Global search submission", () => {
+  it("lists each symbol destination and jumps through the selected result", () => {
+    const jump = vi.fn();
+    const page = render(<AppHeader activeTab="dashboard" onTabChange={() => {}} filter="" onFilterChange={() => {}}
+      marketSessionActive={false} onJump={jump} searchOptions={[
+        { symbol: "HPG", destination: "dashboard", kind: "stock" },
+        { symbol: "HPG", destination: "research", kind: "stock" },
+        { symbol: "HPG", destination: "news", kind: "news" },
+      ]} />);
+    const input = page.getByRole("textbox", { name: "Filter or jump to symbol" });
+    fireEvent.change(input, { target: { value: "HP" } });
+    expect(page.getAllByRole("option").map(option => option.textContent)).toEqual([
+      "HPGSTOCKWATCHLIST", "HPGSTOCKRESEARCH", "HPGNEWSNEWS",
+    ]);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(jump).toHaveBeenCalledWith({ symbol: "HPG", destination: "research", kind: "stock" });
+  });
+
   it("waits for Enter and searches news text/symbols without interpreting dividend as a ticker", () => {
     const page = render(<NewsSearchHarness />);
     const input = page.getByRole("textbox", { name: "Filter or jump to symbol" });
