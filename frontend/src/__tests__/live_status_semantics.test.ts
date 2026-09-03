@@ -120,7 +120,26 @@ describe("Live Status Semantics & Two-State Tracking", () => {
     expect(client.getUpstreamFeedState()).toBe("RECONNECTING");
   });
 
-  it("9. Does not infer a live feed from a legacy index snapshot", () => {
+  it("9. Treats a ready upstream as connected outside the active session", () => {
+    const client = new BackendWebSocketClient("ws://localhost:8787");
+
+    client.handleIncomingMessage({
+      type: "status",
+      gateway_connected: true,
+      authenticated: true,
+      upstream_status: "READY",
+      feed_fresh: false,
+      market_session: "CLOSED_POST_MARKET",
+      market_session_active: false,
+      quote_display_eligible: false,
+    });
+
+    expect(client.getMarketSession()).toBe("CLOSED_POST_MARKET");
+    expect(client.isMarketSessionActive()).toBe(false);
+    expect(client.getUpstreamFeedState()).toBe("CONNECTED");
+  });
+
+  it("10. Does not infer a live feed from a legacy index snapshot", () => {
     const client = new BackendWebSocketClient("ws://localhost:8787");
 
     client.handleIncomingMessage({
@@ -131,7 +150,7 @@ describe("Live Status Semantics & Two-State Tracking", () => {
     expect(client.getUpstreamFeedState()).toBe("UNKNOWN");
   });
 
-  it("10. Does not let a data patch override backend feed health", () => {
+  it("11. Does not let a data patch override backend feed health", () => {
     const client = new BackendWebSocketClient("ws://localhost:8787");
     client.handleIncomingMessage({
       type: "status",
@@ -149,7 +168,7 @@ describe("Live Status Semantics & Two-State Tracking", () => {
     expect(client.getUpstreamFeedState()).toBe("RECONNECTING");
   });
 
-  it("11. Renders market-session and feed state independently", () => {
+  it("12. Renders market-session and feed state independently", () => {
     const html = renderToStaticMarkup(createElement(AppHeader, {
       activeTab: "dashboard",
       onTabChange: () => undefined,
