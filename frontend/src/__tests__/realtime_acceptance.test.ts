@@ -14,23 +14,26 @@ import * as path from "path";
 
 describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
   // 1. Primary display universe contains exactly HPG, NVL, VHM, CTCB2601, CVPB2615
-  it("1. Primary display universe contains exactly [CHPG2602, CVPB2615, HPG, VPB, VNINDEX]", () => {
-    expect(PRIMARY_UI_UNIVERSE).toEqual(["CHPG2602", "CVPB2615", "HPG", "VPB", "VNINDEX"]);
+  it("1. Primary display universe contains exactly [CHPG2625, CVPB2615, HPG, VPB, VNINDEX]", () => {
+    const canonical = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../backend/app/instruments/data/default_research_universe.json"), "utf8"));
+    expect(PRIMARY_UI_UNIVERSE).toEqual(canonical.items.map((i: { symbol: string }) => i.symbol));
+    expect(DEFAULT_PRIMARY_WATCHLIST_ITEMS.filter(i => i.instrumentType === "STOCK").map(i => i.symbol)).toEqual(["HPG", "FPT", "VPB"]);
+    expect(DEFAULT_PRIMARY_WATCHLIST_ITEMS.filter(i => i.instrumentType === "CW")).toHaveLength(27);
     const symbols = DEFAULT_PRIMARY_WATCHLIST_ITEMS.map((item) => item.symbol);
-    expect(symbols).toEqual(["CHPG2602", "CVPB2615", "HPG", "VPB", "VNINDEX"]);
+    expect(symbols).toEqual([...PRIMARY_UI_UNIVERSE]);
   });
 
   // 2. Primary universe count = 5
-  it("2. Primary universe count is exactly 5", () => {
-    expect(PRIMARY_UI_UNIVERSE.length).toBe(5);
-    expect(DEFAULT_PRIMARY_WATCHLIST_ITEMS.length).toBe(5);
+  it("2. Primary universe count is exactly 30", () => {
+    expect(PRIMARY_UI_UNIVERSE.length).toBe(30);
+    expect(DEFAULT_PRIMARY_WATCHLIST_ITEMS.length).toBe(30);
     const defaultWatchlist = createDefaultWatchlist();
-    expect(defaultWatchlist.items.length).toBe(5);
+    expect(defaultWatchlist.items.length).toBe(30);
   });
 
-  // 3. CHPG2602 resolves underlying HPG (verified default CW)
-  it("3. CHPG2602 resolves underlying HPG in the default watchlist model", () => {
-    const chpg = DEFAULT_PRIMARY_WATCHLIST_ITEMS.find((i) => i.symbol === "CHPG2602");
+  // 3. CHPG2625 resolves underlying HPG (verified default CW)
+  it("3. CHPG2625 resolves underlying HPG in the default watchlist model", () => {
+    const chpg = DEFAULT_PRIMARY_WATCHLIST_ITEMS.find((i) => i.symbol === "CHPG2625");
     expect(chpg).toBeDefined();
     expect(chpg?.instrumentType).toBe("CW");
     expect(chpg?.underlyingSymbol).toBe("HPG");
@@ -50,7 +53,7 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
     const plan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
     
     // Check dependency map
-    expect(plan.dependencyMap.get("HPG")?.has("CHPG2602")).toBe(true);
+    expect(plan.dependencyMap.get("HPG")?.has("CHPG2625")).toBe(true);
     expect(plan.dependencyMap.get("VPB")?.has("CVPB2615")).toBe(true);
 
     // Symbols appear only once in required symbols
@@ -59,13 +62,14 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
   });
 
   // 6. Deduplicated acceptance subscription count.
-  // Default = CHPG2602(HPG), CVPB2615(VPB), HPG, VPB, VNINDEX -> the CW underlyings are
-  // already watchlist items, so the deduped required set is exactly 5.
-  it("6. Deduplicated acceptance subscription count is exactly 5 (underlyings already watched)", () => {
+  // Default = CHPG2625(HPG), CVPB2615(VPB), HPG, VPB, VNINDEX -> the CW underlyings are
+  // already watchlist items, so the deduped required set is exactly 30.
+  it("6. Deduplicated acceptance subscription count is exactly 30 (underlyings already watched)", () => {
     const defaultWatchlist = createDefaultWatchlist();
     const plan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
-    expect(plan.requiredSymbols).toEqual(["CHPG2602", "CVPB2615", "HPG", "VNINDEX", "VPB"]);
-    expect(plan.symbolCount).toBe(5);
+    expect(plan.requiredSymbols).toEqual([...PRIMARY_UI_UNIVERSE].sort());
+    expect(plan.symbolCount).toBe(30);
+    expect(plan.remainingCapacity).toBe(3);
     expect(plan.isCapacityExceeded).toBe(false);
   });
 
@@ -95,7 +99,7 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
   it("9. Browsing a Research-only instrument does not automatically add it to realtime subscriptions", () => {
     const defaultWatchlist = createDefaultWatchlist();
     const initialPlan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
-    expect(initialPlan.symbolCount).toBe(5);
+    expect(initialPlan.symbolCount).toBe(30);
 
     // Browsing/selecting CFPT2401 in Research catalog without adding to watchlist
     const researchSelection = {
@@ -106,10 +110,10 @@ describe("Milestone: Universe Scoping & Realtime Acceptance Contract", () => {
     };
     expect(researchSelection.symbol).toBe("CFPT2401");
 
-    // Subscription plan remains unchanged at 5
+    // Subscription plan remains unchanged at 30
     const activePlan = SubscriptionPlanner.computePlan(defaultWatchlist.items, [], 33);
-    expect(activePlan.requiredSymbols).toEqual(["CHPG2602", "CVPB2615", "HPG", "VNINDEX", "VPB"]);
-    expect(activePlan.symbolCount).toBe(5);
+    expect(activePlan.requiredSymbols).toEqual([...PRIMARY_UI_UNIVERSE].sort());
+    expect(activePlan.symbolCount).toBe(30);
   });
 
   // 10. Research-only synthetic instruments do not supply fabricated realtime quote/IV/Greek values

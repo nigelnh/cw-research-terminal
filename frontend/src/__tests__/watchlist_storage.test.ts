@@ -1,9 +1,11 @@
+import { PRIMARY_UI_UNIVERSE } from "@/domain/models/watchlist";
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   WatchlistStorage,
   WATCHLIST_STORAGE_KEY_V1,
   WATCHLIST_STORAGE_KEY_V2,
   WATCHLIST_STORAGE_KEY_V3,
+  WATCHLIST_STORAGE_KEY_V4,
   CURRENT_WATCHLIST_SCHEMA_VERSION,
   type ResearchWatchlist,
 } from "../domain/models/watchlist";
@@ -115,22 +117,22 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
     expect(plan.requiredSymbols).toContain("TCB");
   });
 
-  it("3. Reload after migration remains exactly 5 symbols without resetting", () => {
+  it("3. Reload after migration remains exactly 30 symbols without resetting", () => {
     // Migrate once
     const defaultStorage = new WatchlistStorage(WATCHLIST_STORAGE_KEY_V2);
     const firstLoad = defaultStorage.loadWatchlist();
-    expect(firstLoad.items.length).toBe(5);
+    expect(firstLoad.items.length).toBe(30);
 
     // Second reload (e.g. page refresh)
     const secondLoad = defaultStorage.loadWatchlist();
-    expect(secondLoad.items.length).toBe(5);
-    expect(secondLoad.items.map((i) => i.symbol)).toEqual(["CHPG2602", "CVPB2615", "HPG", "VPB", "VNINDEX"]);
+    expect(secondLoad.items.length).toBe(30);
+    expect(secondLoad.items.map((i) => i.symbol)).toEqual([...PRIMARY_UI_UNIVERSE]);
   });
 
   it("4. Post-migration user edit persists across subsequent reloads", () => {
     const defaultStorage = new WatchlistStorage(WATCHLIST_STORAGE_KEY_V2);
     const current = defaultStorage.loadWatchlist();
-    expect(current.items.length).toBe(5);
+    expect(current.items.length).toBe(30);
 
     // User adds a new instrument from Research (e.g. CFPT2601)
     const withUserAdd: ResearchWatchlist = {
@@ -145,7 +147,7 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
 
     // Reload
     const reloaded = defaultStorage.loadWatchlist();
-    expect(reloaded.items.length).toBe(6);
+    expect(reloaded.items.length).toBe(31);
     expect(reloaded.items.map((i) => i.symbol)).toContain("CFPT2601");
   });
 
@@ -154,8 +156,8 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
 
     const loaded = storage.loadWatchlist();
     expect(loaded).toBeDefined();
-    expect(loaded.items.length).toBe(5);
-    expect(loaded.items.map((i) => i.symbol)).toEqual(["CHPG2602", "CVPB2615", "HPG", "VPB", "VNINDEX"]);
+    expect(loaded.items.length).toBe(30);
+    expect(loaded.items.map((i) => i.symbol)).toEqual([...PRIMARY_UI_UNIVERSE]);
     expect(loaded.version).toBe(CURRENT_WATCHLIST_SCHEMA_VERSION);
   });
 
@@ -163,8 +165,8 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
     mockStorage.setItem(TEST_KEY, JSON.stringify({ items: "not-an-array", version: 2 }));
 
     const loaded = storage.loadWatchlist();
-    expect(loaded.items.length).toBe(5);
-    expect(loaded.items.map((i) => i.symbol)).toEqual(["CHPG2602", "CVPB2615", "HPG", "VPB", "VNINDEX"]);
+    expect(loaded.items.length).toBe(30);
+    expect(loaded.items.map((i) => i.symbol)).toEqual([...PRIMARY_UI_UNIVERSE]);
   });
 
   it("7. Sanitizes corrupted watchlist item records in V2 payload", () => {
@@ -186,4 +188,19 @@ describe("WatchlistStorage Local Persistence, Versioned Migration & Resilience",
     expect(loaded.items[0].instrumentType).toBe("CW");
     expect(loaded.items[0].underlyingSymbol).toBe("HPG");
   });
+  it("replaces the old five-symbol demo even when its seed timestamps are nonzero", () => {
+    mockStorage.setItem(WATCHLIST_STORAGE_KEY_V4, JSON.stringify({ version: 4, items: ["HPG", "CHPG2602", "VPB", "CVPB2615", "VNINDEX"].map(symbol => ({ symbol, addedAt: 1234 })) }));
+    const list = new WatchlistStorage().loadWatchlist();
+    expect(list.items).toHaveLength(30);
+    expect(list.items.some(item => item.symbol === "VNINDEX")).toBe(false);
+  });
+
+  it("preserves customized and deliberately empty v4 watchlists", () => {
+    mockStorage.setItem(WATCHLIST_STORAGE_KEY_V4, JSON.stringify({ version: 4, items: [{ symbol: "HPG", instrumentType: "STOCK", addedAt: 1, notes: "Keep" }] }));
+    expect(new WatchlistStorage(TEST_KEY).loadWatchlist().items).toHaveLength(1);
+    mockStorage.clear();
+    mockStorage.setItem(WATCHLIST_STORAGE_KEY_V4, JSON.stringify({ version: 4, items: [] }));
+    expect(new WatchlistStorage(TEST_KEY).loadWatchlist().items).toEqual([]);
+  });
+
 });

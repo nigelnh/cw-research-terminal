@@ -34,7 +34,11 @@ export class BackendClient {
   private baseUrl: string;
 
   constructor(baseUrl?: string) {
-    this.baseUrl = (baseUrl || config.apiUrl || "http://localhost:8000").replace(/\/$/, "");
+    this.baseUrl = (
+      baseUrl ||
+      config.apiUrl ||
+      "http://localhost:8000"
+    ).replace(/\/$/, "");
   }
 
   /** Authenticated request for the `/api/me/*` namespace. */
@@ -42,7 +46,7 @@ export class BackendClient {
     method: "GET" | "PUT" | "POST" | "DELETE",
     path: string,
     body?: unknown,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<T> {
     const token = accessTokenProvider ? await accessTokenProvider() : null;
     if (!token) {
@@ -65,7 +69,9 @@ export class BackendClient {
       let detail = "";
       try {
         const errJson = await res.json();
-        detail = errJson.detail ? JSON.stringify(errJson.detail) : JSON.stringify(errJson);
+        detail = errJson.detail
+          ? JSON.stringify(errJson.detail)
+          : JSON.stringify(errJson);
       } catch {
         detail = await res.text();
       }
@@ -86,12 +92,12 @@ export class BackendClient {
   private async get<T>(
     path: string,
     params?: Record<string, string | number | undefined>,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<T> {
     const url = new URL(`${this.baseUrl}${path}`);
     if (params) {
       Object.entries(params).forEach(([key, val]) => {
-        if (val !== undefined && val !== null && val !== "") {
+        if (val !== undefined && val !== null) {
           url.searchParams.append(key, String(val));
         }
       });
@@ -149,17 +155,21 @@ export class BackendClient {
     underlying?: string,
     search?: string,
     signal?: AbortSignal,
-    status?: string
+    status?: string,
   ): Promise<any[]> {
     try {
-      const params: Record<string, string | undefined> = { issuer, underlying, search };
+      const params: Record<string, string | undefined> = {
+        issuer,
+        underlying,
+        search,
+      };
       if (status) params.status = status;
       else params.active_only = "true";
-      const res = await this.get<{ total: number; active_count: number; items: any[] }>(
-        "/api/instruments",
-        params,
-        signal
-      );
+      const res = await this.get<{
+        total: number;
+        active_count: number;
+        items: any[];
+      }>("/api/instruments", params, signal);
       return res.items || [];
     } catch (err) {
       console.warn("[BackendClient] Failed to fetch /api/instruments:", err);
@@ -168,18 +178,20 @@ export class BackendClient {
   }
 
   /** Curated default research/demo universe (verified CWs + underlyings + index). */
-  async getDefaultUniverse(signal?: AbortSignal): Promise<{ known_through?: string; items: any[] }> {
+  async getDefaultUniverse(
+    signal?: AbortSignal,
+  ): Promise<{ known_through?: string; items: any[] }> {
     return this.get<{ known_through?: string; items: any[] }>(
       "/api/instruments/default-universe",
       undefined,
-      signal
+      signal,
     );
   }
 
   /** Fully-resolved dashboard rows with the after-hours temporal fallback (Step 13C). */
   async getDashboardRows(
     symbols: string[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{
     rows: any[];
     as_of: string;
@@ -191,12 +203,27 @@ export class BackendClient {
     return this.get<any>(
       "/api/market/dashboard",
       { symbols: symbols.map((s) => s.toUpperCase()).join(",") },
-      signal
+      signal,
     );
   }
 
-  async getInstrumentSpecification(symbol: string, signal?: AbortSignal): Promise<any> {
-    return this.get<any>(`/api/instruments/${encodeURIComponent(symbol.toUpperCase())}`, undefined, signal);
+  async getStockProfiles(symbols: string[], signal?: AbortSignal): Promise<{ items: Array<{ symbol: string; name: string | null; short_name: string | null; exchange: string | null }> }> {
+    return this.get("/api/market/stock-profiles", { symbols: symbols.join(",") }, signal);
+  }
+
+  async getMarketOverview(signal?: AbortSignal): Promise<any> {
+    return this.get<any>("/api/market/overview", undefined, signal);
+  }
+
+  async getInstrumentSpecification(
+    symbol: string,
+    signal?: AbortSignal,
+  ): Promise<any> {
+    return this.get<any>(
+      `/api/instruments/${encodeURIComponent(symbol.toUpperCase())}`,
+      undefined,
+      signal,
+    );
   }
 
   async getCoverageMetrics(): Promise<any> {
@@ -214,8 +241,18 @@ export class BackendClient {
     return res.json();
   }
 
-  async getMarketWarrants(issuer_name?: string, symbol?: string, fromDate?: string, toDate?: string): Promise<any[]> {
-    return this.get<any[]>("/api/cw/market", { issuer_name, symbol, fromDate, toDate });
+  async getMarketWarrants(
+    issuer_name?: string,
+    symbol?: string,
+    fromDate?: string,
+    toDate?: string,
+  ): Promise<any[]> {
+    return this.get<any[]>("/api/cw/market", {
+      issuer_name,
+      symbol,
+      fromDate,
+      toDate,
+    });
   }
 
   async getMarketHistory(
@@ -224,7 +261,7 @@ export class BackendClient {
     fromDate?: string,
     toDate?: string,
     adjusted: boolean = true,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<any[]> {
     return this.get<any[]>(
       `/api/market/history/${encodeURIComponent(symbol)}`,
@@ -234,32 +271,60 @@ export class BackendClient {
         to_date: toDate,
         adjusted: adjusted ? "true" : "false",
       },
-      signal
+      signal,
     );
   }
 
-  async getHistoricalCWData(symbol?: string, fromDate?: string, toDate?: string): Promise<any[]> {
+  async getHistoricalCWData(
+    symbol?: string,
+    fromDate?: string,
+    toDate?: string,
+  ): Promise<any[]> {
     if (!symbol) return [];
     return this.getMarketHistory(symbol, "1D", fromDate, toDate, true);
   }
 
-  async getComparison(stockCode: string, fromDate?: string, toDate?: string): Promise<any[]> {
+  async getComparison(
+    stockCode: string,
+    fromDate?: string,
+    toDate?: string,
+  ): Promise<any[]> {
     return this.getMarketHistory(stockCode, "1D", fromDate, toDate, true);
   }
 
-  async getStockCloseHistory(symbol: string, fromDate?: string, toDate?: string): Promise<any[]> {
+  async getStockCloseHistory(
+    symbol: string,
+    fromDate?: string,
+    toDate?: string,
+  ): Promise<any[]> {
     return this.getMarketHistory(symbol, "1D", fromDate, toDate, true);
   }
 
-  async getIndexHistory(name: string = "VNINDEX", fromDate?: string, toDate?: string): Promise<any[]> {
+  async getIndexHistory(
+    name: string = "VNINDEX",
+    fromDate?: string,
+    toDate?: string,
+  ): Promise<any[]> {
     return this.getMarketHistory(name, "1D", fromDate, toDate, true);
   }
 
-  async getVolatility(symbol: string, fromDate?: string, toDate?: string): Promise<any[]> {
-    return this.get<any[]>("/api/v1/quant/volatility", { symbol, fromDate, toDate });
+  async getVolatility(
+    symbol: string,
+    fromDate?: string,
+    toDate?: string,
+  ): Promise<any[]> {
+    return this.get<any[]>("/api/v1/quant/volatility", {
+      symbol,
+      fromDate,
+      toDate,
+    });
   }
 
-  async getBeta(symbol: string, fromDate?: string, toDate?: string): Promise<any[]> {
+  async getBeta(
+    symbol: string,
+    fromDate?: string,
+    toDate?: string,
+  ): Promise<any[]> {
     return this.get<any[]>("/api/v1/quant/beta", { symbol, fromDate, toDate });
   }
 
@@ -276,8 +341,14 @@ export class BackendClient {
   // un-ingested deployment answers 200 with an empty, well-formed payload.
 
   async getResearchNews(
-    params: { symbol?: string; q?: string; lang?: string; limit?: number; before?: string } = {},
-    signal?: AbortSignal
+    params: {
+      symbol?: string;
+      q?: string;
+      lang?: string;
+      limit?: number;
+      before?: string;
+    } = {},
+    signal?: AbortSignal,
   ): Promise<ResearchNewsResponse> {
     return this.get<ResearchNewsResponse>(
       "/api/research/news",
@@ -288,20 +359,34 @@ export class BackendClient {
         limit: params.limit,
         before: params.before,
       },
-      signal
+      signal,
     );
   }
 
-  async getResearchNewsFacets(lang: string = "vi", signal?: AbortSignal): Promise<{ symbols: string[] }> {
-    return this.get<{ symbols: string[] }>("/api/research/news/facets", { lang }, signal);
+  async getResearchNewsFacets(
+    lang: string = "vi",
+    signal?: AbortSignal,
+  ): Promise<{ symbols: string[] }> {
+    return this.get<{ symbols: string[] }>(
+      "/api/research/news/facets",
+      { lang },
+      signal,
+    );
   }
 
   /** Unified research feed: HOSE disclosures + company events, cursor-paginated. */
-  async getResearchFeed(params: ResearchFeedQuery = {}, signal?: AbortSignal): Promise<ResearchFeedResponse> {
+  async getResearchFeed(
+    params: ResearchFeedQuery = {},
+    signal?: AbortSignal,
+  ): Promise<ResearchFeedResponse> {
     return this.get<ResearchFeedResponse>(
       "/api/research/feed",
       {
         symbol: params.symbol,
+        symbols: params.symbols?.join(","),
+        date_from: params.date_from,
+        date_to: params.date_to,
+        cursor: params.cursor,
         source: params.source,
         content_type: params.content_type,
         category: params.category,
@@ -311,27 +396,34 @@ export class BackendClient {
         limit: params.limit,
         before: params.before,
       },
-      signal
+      signal,
     );
+  }
+
+  async getFeedFacets(signal?: AbortSignal): Promise<{ symbols: string[] }> {
+    return this.get("/api/research/feed/facets", { lang: "vi" }, signal);
   }
 
   async getCorporateActions(
     symbol: string,
     limit?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<CorporateActionsResponse> {
     return this.get<CorporateActionsResponse>(
       `/api/research/corporate-actions/${encodeURIComponent(symbol.toUpperCase())}`,
       { limit },
-      signal
+      signal,
     );
   }
 
-  async getCompanyProfile(symbol: string, signal?: AbortSignal): Promise<CompanyProfileResponse> {
+  async getCompanyProfile(
+    symbol: string,
+    signal?: AbortSignal,
+  ): Promise<CompanyProfileResponse> {
     return this.get<CompanyProfileResponse>(
       `/api/research/company/${encodeURIComponent(symbol.toUpperCase())}`,
       undefined,
-      signal
+      signal,
     );
   }
 }

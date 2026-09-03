@@ -17,6 +17,8 @@ export type HistoryKeyParams = {
 
 export const queryKeys = {
   all: ["cw-research"] as const,
+  marketOverview: ["cw-research", "market-overview"] as const,
+  stockProfiles: (symbols: string[]) => ["cw-research", "stock-profiles", ...symbols] as const,
 
   history: {
     all: ["cw-research", "history"] as const,
@@ -35,7 +37,11 @@ export const queryKeys = {
 
   instruments: {
     all: ["cw-research", "instruments"] as const,
-    activeWarrants: (f?: { issuer?: string | null; underlying?: string | null; status?: string }) =>
+    activeWarrants: (f?: {
+      issuer?: string | null;
+      underlying?: string | null;
+      status?: string;
+    }) =>
       [
         "cw-research",
         "instruments",
@@ -45,13 +51,23 @@ export const queryKeys = {
         f?.status ?? "ACTIVE",
       ] as const,
     spec: (symbol: string) =>
-      ["cw-research", "instruments", "spec", symbol.trim().toUpperCase()] as const,
+      [
+        "cw-research",
+        "instruments",
+        "spec",
+        symbol.trim().toUpperCase(),
+      ] as const,
   },
 
   quant: {
     all: ["cw-research", "quant"] as const,
     analytics: (symbol: string) =>
-      ["cw-research", "quant", "analytics", symbol.trim().toUpperCase()] as const,
+      [
+        "cw-research",
+        "quant",
+        "analytics",
+        symbol.trim().toUpperCase(),
+      ] as const,
   },
 
   /** Research enrichment (Step 14A): PostgreSQL-backed news / corporate actions. */
@@ -67,10 +83,25 @@ export const queryKeys = {
         p.lang ?? "vi",
       ] as const,
     corporateActions: (symbol: string) =>
-      ["cw-research", "research", "corporate-actions", symbol.trim().toUpperCase()] as const,
+      [
+        "cw-research",
+        "research",
+        "corporate-actions",
+        symbol.trim().toUpperCase(),
+      ] as const,
     companyEvents: (symbol: string) =>
-      ["cw-research", "research", "company-events", symbol.trim().toUpperCase()] as const,
+      [
+        "cw-research",
+        "research",
+        "company-events",
+        symbol.trim().toUpperCase(),
+      ] as const,
+    feedFacets: ["cw-research", "research", "feed-facets"] as const,
     feed: (p: {
+      symbols?: string[] | null;
+      dateFrom?: string;
+      dateTo?: string;
+      pageSize?: number;
       symbol?: string | null;
       source?: string | null;
       contentType?: string | null;
@@ -82,6 +113,10 @@ export const queryKeys = {
         "cw-research",
         "research",
         "feed",
+        p.symbols == null ? null : [...p.symbols].sort(),
+        p.dateFrom || null,
+        p.dateTo || null,
+        p.pageSize ?? 40,
         (p.symbol ?? "").trim().toUpperCase() || null,
         p.source ?? null,
         p.contentType ?? null,
@@ -98,6 +133,7 @@ export const queryKeys = {
    */
   me: {
     root: (subject: string) => ["cw-research", "me", subject] as const,
-    watchlist: (subject: string) => ["cw-research", "me", subject, "watchlist"] as const,
+    watchlist: (subject: string) =>
+      ["cw-research", "me", subject, "watchlist"] as const,
   },
 } as const;

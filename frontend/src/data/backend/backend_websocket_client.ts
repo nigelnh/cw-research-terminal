@@ -1,5 +1,9 @@
 import { config, normalizeWsUrl } from "@/config";
-import type { GatewayConnectionState, UpstreamFeedState, ConnectionState } from "@/data/providers";
+import type {
+  GatewayConnectionState,
+  UpstreamFeedState,
+  ConnectionState,
+} from "@/data/providers";
 import type { CoveredWarrant, MarketQuote } from "@/domain/models";
 import {
   mapRawSnapshotToCoveredWarrant,
@@ -13,11 +17,11 @@ type UpstreamFeedStateHandler = (state: UpstreamFeedState) => void;
 
 /**
  * Hardened, shared WebSocket client for the Research Platform Market Data Gateway.
- * 
+ *
  * Tracks two independent states:
  * 1. `gatewayConnectionState`: Browser WebSocket connectivity to backend gateway (ws://localhost:8501/ws/market).
  * 2. `upstreamFeedState`: Backend gateway upstream connectivity to active market data feed.
- * 
+ *
  * Never treats a successful WebSocket open state as "Live" without verified upstream feed.
  */
 const WS_CONNECTING = 0;
@@ -44,7 +48,9 @@ export class BackendWebSocketClient {
   // Subscriptions & listeners
   private gatewayStateListeners = new Set<GatewayStateHandler>();
   private upstreamFeedListeners = new Set<UpstreamFeedStateHandler>();
-  private sessionListeners = new Set<(session: { status: string; active: boolean }) => void>();
+  private sessionListeners = new Set<
+    (session: { status: string; active: boolean }) => void
+  >();
   private quoteListeners = new Set<(quote: MarketQuote) => void>();
   private cwListeners = new Set<(cw: CoveredWarrant) => void>();
   private indexListeners = new Set<(data: any) => void>();
@@ -59,7 +65,9 @@ export class BackendWebSocketClient {
   private marketSessionActive: boolean = false;
 
   constructor(wsUrl?: string) {
-    this.wsUrl = normalizeWsUrl(wsUrl || config.wsUrl || "ws://localhost:8501/ws/market");
+    this.wsUrl = normalizeWsUrl(
+      wsUrl || config.wsUrl || "ws://localhost:8501/ws/market",
+    );
   }
 
   public getConnectionState(): ConnectionState {
@@ -82,7 +90,9 @@ export class BackendWebSocketClient {
     return this.marketSessionActive;
   }
 
-  public onMarketSessionChange(listener: (session: { status: string; active: boolean }) => void): () => void {
+  public onMarketSessionChange(
+    listener: (session: { status: string; active: boolean }) => void,
+  ): () => void {
     this.sessionListeners.add(listener);
     listener({ status: this.marketSession, active: this.marketSessionActive });
     return () => this.sessionListeners.delete(listener);
@@ -109,14 +119,21 @@ export class BackendWebSocketClient {
   }
 
   public syncSubscriptions(symbols: string[]): void {
-    const clean = Array.from(new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)));
+    const clean = Array.from(
+      new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)),
+    );
     this.subscribedSymbols = new Set(clean);
 
     if (this.ws && this.ws.readyState === WS_OPEN) {
       try {
-        this.ws.send(JSON.stringify({ type: "subscribe", symbols: clean, replace: true }));
+        this.ws.send(
+          JSON.stringify({ type: "subscribe", symbols: clean, replace: true }),
+        );
       } catch (err) {
-        console.warn("[BackendWebSocketClient] Failed to send syncSubscriptions:", err);
+        console.warn(
+          "[BackendWebSocketClient] Failed to send syncSubscriptions:",
+          err,
+        );
       }
     }
   }
@@ -133,9 +150,18 @@ export class BackendWebSocketClient {
 
     if (toSend.length > 0 && this.ws && this.ws.readyState === WS_OPEN) {
       try {
-        this.ws.send(JSON.stringify({ type: "subscribe", symbols: toSend, replace: false }));
+        this.ws.send(
+          JSON.stringify({
+            type: "subscribe",
+            symbols: toSend,
+            replace: false,
+          }),
+        );
       } catch (err) {
-        console.warn("[BackendWebSocketClient] Failed to send subscribe message:", err);
+        console.warn(
+          "[BackendWebSocketClient] Failed to send subscribe message:",
+          err,
+        );
       }
     }
   }
@@ -154,7 +180,10 @@ export class BackendWebSocketClient {
       try {
         this.ws.send(JSON.stringify({ type: "unsubscribe", symbols: toSend }));
       } catch (err) {
-        console.warn("[BackendWebSocketClient] Failed to send unsubscribe message:", err);
+        console.warn(
+          "[BackendWebSocketClient] Failed to send unsubscribe message:",
+          err,
+        );
       }
     }
   }
@@ -179,7 +208,9 @@ export class BackendWebSocketClient {
     return () => this.gatewayStateListeners.delete(listener);
   }
 
-  public onUpstreamFeedStateChange(listener: UpstreamFeedStateHandler): () => void {
+  public onUpstreamFeedStateChange(
+    listener: UpstreamFeedStateHandler,
+  ): () => void {
     this.upstreamFeedListeners.add(listener);
     listener(this.upstreamFeedState);
     return () => this.upstreamFeedListeners.delete(listener);
@@ -190,7 +221,9 @@ export class BackendWebSocketClient {
     return () => this.quoteListeners.delete(listener);
   }
 
-  public onCoveredWarrantUpdate(listener: (cw: CoveredWarrant) => void): () => void {
+  public onCoveredWarrantUpdate(
+    listener: (cw: CoveredWarrant) => void,
+  ): () => void {
     this.cwListeners.add(listener);
     return () => this.cwListeners.delete(listener);
   }
@@ -217,12 +250,17 @@ export class BackendWebSocketClient {
   }
 
   public connect(): void {
-    if (this.ws && (this.ws.readyState === WS_OPEN || this.ws.readyState === WS_CONNECTING)) {
+    if (
+      this.ws &&
+      (this.ws.readyState === WS_OPEN || this.ws.readyState === WS_CONNECTING)
+    ) {
       return;
     }
 
     this.isIntentionallyClosed = false;
-    this.setGatewayState(this.reconnectAttempts > 0 ? "RECONNECTING" : "CONNECTING");
+    this.setGatewayState(
+      this.reconnectAttempts > 0 ? "RECONNECTING" : "CONNECTING",
+    );
 
     try {
       this.ws = new WebSocket(this.wsUrl);
@@ -231,22 +269,32 @@ export class BackendWebSocketClient {
         this.reconnectAttempts = 0;
         this.setGatewayState("CONNECTED");
         // Upstream state remains UNKNOWN or CONNECTING until confirmed by status message or live ticks
-        if (this.upstreamFeedState === "DISCONNECTED" || this.upstreamFeedState === "ERROR") {
+        if (
+          this.upstreamFeedState === "DISCONNECTED" ||
+          this.upstreamFeedState === "ERROR"
+        ) {
           this.setUpstreamFeedState("UNKNOWN");
         }
 
         // Send active desired subscriptions on connect/reconnect with replacement semantics
-        if (this.subscribedSymbols.size > 0 && this.ws && this.ws.readyState === WS_OPEN) {
+        if (
+          this.subscribedSymbols.size > 0 &&
+          this.ws &&
+          this.ws.readyState === WS_OPEN
+        ) {
           try {
             this.ws.send(
               JSON.stringify({
                 type: "subscribe",
                 symbols: Array.from(this.subscribedSymbols),
                 replace: true,
-              })
+              }),
             );
           } catch (err) {
-            console.warn("[BackendWebSocketClient] Failed to send initial subscriptions:", err);
+            console.warn(
+              "[BackendWebSocketClient] Failed to send initial subscriptions:",
+              err,
+            );
           }
         }
       };
@@ -257,7 +305,10 @@ export class BackendWebSocketClient {
           const raw = JSON.parse(event.data);
           this.handleIncomingMessage(raw);
         } catch (e) {
-          console.warn("[BackendWebSocketClient] Ignoring malformed message:", e);
+          console.warn(
+            "[BackendWebSocketClient] Ignoring malformed message:",
+            e,
+          );
         }
       };
 
@@ -287,7 +338,7 @@ export class BackendWebSocketClient {
     this.reconnectAttempts++;
     const delay = Math.min(
       this.baseReconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1),
-      this.maxReconnectDelay
+      this.maxReconnectDelay,
     );
 
     this.reconnectTimer = setTimeout(() => {
@@ -313,10 +364,14 @@ export class BackendWebSocketClient {
   /**
    * Evaluates if an incoming event is stale compared to the current in-memory quote.
    */
-  private isEventStale(existing: CoveredWarrant | undefined, incomingSourceTs?: number | null, incomingServerTs?: number | null): boolean {
+  private isEventStale(
+    existing: CoveredWarrant | undefined,
+    incomingSourceTs?: number | null,
+    incomingServerTs?: number | null,
+  ): boolean {
     if (!existing) return false;
     const currentSourceTs = existing.quote.sourceTimestamp;
-    
+
     // 1. Compare source timestamps if present
     if (incomingSourceTs && currentSourceTs) {
       return incomingSourceTs < currentSourceTs;
@@ -349,11 +404,20 @@ export class BackendWebSocketClient {
         if (msg.market_session) {
           this.marketSession = String(msg.market_session);
           this.marketSessionActive = Boolean(msg.market_session_active);
-          this.sessionListeners.forEach((fn) => fn({ status: this.marketSession, active: this.marketSessionActive }));
+          this.sessionListeners.forEach((fn) =>
+            fn({
+              status: this.marketSession,
+              active: this.marketSessionActive,
+            }),
+          );
         }
 
         // Explicit upstream market feed status from backend gateway
-        if (msg.upstream_status === "LIVE" || msg.connected === true || (msg.gateway_connected && msg.market_session === "LUNCH_BREAK")) {
+        if (
+          msg.upstream_status === "LIVE" ||
+          msg.connected === true ||
+          (msg.gateway_connected && msg.market_session === "LUNCH_BREAK")
+        ) {
           this.setUpstreamFeedState("CONNECTED");
         } else if (
           msg.upstream_status === "CONNECTING" ||
@@ -374,7 +438,11 @@ export class BackendWebSocketClient {
 
       case "snapshots": {
         // Bulk snapshot hydration (supporting msg.rows and msg.data)
-        const list = Array.isArray(msg.rows) ? msg.rows : (Array.isArray(msg.data) ? msg.data : null);
+        const list = Array.isArray(msg.rows)
+          ? msg.rows
+          : Array.isArray(msg.data)
+            ? msg.data
+            : null;
         if (list) {
           this.setUpstreamFeedState("CONNECTED");
           list.forEach((row: any) => {
@@ -400,7 +468,10 @@ export class BackendWebSocketClient {
 
         this.setUpstreamFeedState("CONNECTED");
 
-        const incomingSourceTs = msg.patch._ts_source || msg.ts_origin || (msg.patch.ExchangeTime ? Number(msg.patch.ExchangeTime) : null);
+        const incomingSourceTs =
+          msg.patch._ts_source ||
+          msg.ts_origin ||
+          (msg.patch.ExchangeTime ? Number(msg.patch.ExchangeTime) : null);
         const existingCw = this.warrantsMap.get(sym);
         const existingQuote = this.quotesMap.get(sym);
 
@@ -409,7 +480,12 @@ export class BackendWebSocketClient {
           return;
         }
 
-        const updatedQuote = applyRawPatchToQuote(existingQuote, sym, msg.patch, incomingSourceTs);
+        const updatedQuote = applyRawPatchToQuote(
+          existingQuote,
+          sym,
+          msg.patch,
+          incomingSourceTs,
+        );
         this.quotesMap.set(sym, updatedQuote);
         this.quoteListeners.forEach((fn) => fn(updatedQuote));
 
@@ -444,36 +520,83 @@ export class BackendWebSocketClient {
       }
 
       case "analytics_patch": {
-        const sym = String(msg.symbol || msg.analytics?.symbol || "").toUpperCase();
+        const sym = String(
+          msg.symbol || msg.analytics?.symbol || "",
+        ).toUpperCase();
         if (!sym || !msg.analytics) break;
 
         const an = msg.analytics;
         const existing = this.warrantsMap.get(sym);
         if (existing) {
           const g = an.greeks || {};
+          const numeric = (
+            obj: any,
+            snake: string,
+            camel: string,
+            fallback: number | null | undefined,
+          ) => {
+            const value =
+              snake in obj ? obj[snake] : camel in obj ? obj[camel] : fallback;
+            return an.is_available === false ||
+              typeof value !== "number" ||
+              !Number.isFinite(value)
+              ? null
+              : value;
+          };
           const updatedCw: CoveredWarrant = {
             ...existing,
-            ivBid: typeof an.iv_bid === "number" ? an.iv_bid : (typeof an.ivBid === "number" ? an.ivBid : existing.ivBid),
-            ivTrade: typeof an.iv_trade === "number" ? an.iv_trade : (typeof an.ivTrade === "number" ? an.ivTrade : existing.ivTrade),
-            ivAsk: typeof an.iv_ask === "number" ? an.iv_ask : (typeof an.ivAsk === "number" ? an.ivAsk : existing.ivAsk),
-            theoreticalPrice: typeof g.theoretical_price === "number" ? g.theoretical_price : (typeof g.theoreticalPrice === "number" ? g.theoreticalPrice : existing.theoreticalPrice),
-            delta: typeof g.delta === "number" ? g.delta : existing.delta,
-            gamma: typeof g.gamma === "number" ? g.gamma : existing.gamma,
-            theta: typeof g.theta === "number" ? g.theta : existing.theta,
-            vega: typeof g.vega === "number" ? g.vega : existing.vega,
-            rho: typeof g.rho === "number" ? g.rho : existing.rho,
-            moneynessRatio: typeof an.moneyness === "number" ? an.moneyness : existing.moneynessRatio,
+            analyticsCalculatedAt:
+              an.calculated_at ?? existing.analyticsCalculatedAt ?? null,
+            modelDte: an.model_inputs?.days_to_expiry ?? null,
+            modelRiskFreeRate: an.model_inputs?.risk_free_rate ?? null,
+            greeksVolatilitySource: g.volatility_source ?? null,
+            quantAvailable: an.is_available !== false,
+            ivBid: numeric(an, "iv_bid", "ivBid", existing.ivBid),
+            ivTrade: numeric(an, "iv_trade", "ivTrade", existing.ivTrade),
+            ivAsk: numeric(an, "iv_ask", "ivAsk", existing.ivAsk),
+            theoreticalPrice: numeric(
+              g,
+              "theoretical_price",
+              "theoreticalPrice",
+              existing.theoreticalPrice,
+            ),
+            delta: numeric(g, "delta", "delta", existing.delta),
+            gamma: numeric(g, "gamma", "gamma", existing.gamma),
+            theta: numeric(g, "theta", "theta", existing.theta),
+            vega: numeric(g, "vega", "vega", existing.vega),
+            rho: numeric(g, "rho", "rho", existing.rho),
+            moneynessRatio: numeric(
+              an,
+              "moneyness",
+              "moneynessRatio",
+              existing.moneynessRatio,
+            ),
             moneynessCategory:
-              an.moneyness_category ?? an.moneynessCategory ?? existing.moneynessCategory ?? null,
-            contractState: an.contract_state ?? an.contractState ?? existing.contractState ?? null,
+              an.moneyness_category ??
+              an.moneynessCategory ??
+              existing.moneynessCategory ??
+              null,
+            contractState:
+              an.contract_state ??
+              an.contractState ??
+              existing.contractState ??
+              null,
             isTradable:
               typeof an.is_tradable === "boolean"
                 ? an.is_tradable
                 : typeof an.isTradable === "boolean"
-                ? an.isTradable
-                : existing.isTradable ?? null,
-            quantUnavailableReason: an.is_available === false ? (an.unavailable_reason ?? null) : null,
-            historicalVolatility: typeof an.historical_volatility === "number" ? an.historical_volatility : (typeof an.historicalVolatility === "number" ? an.historicalVolatility : existing.historicalVolatility),
+                  ? an.isTradable
+                  : (existing.isTradable ?? null),
+            quantUnavailableReason:
+              an.is_available === false
+                ? (an.unavailable_reason ?? null)
+                : null,
+            historicalVolatility:
+              typeof an.historical_volatility === "number"
+                ? an.historical_volatility
+                : typeof an.historicalVolatility === "number"
+                  ? an.historicalVolatility
+                  : existing.historicalVolatility,
           };
           this.warrantsMap.set(sym, updatedCw);
           this.cwListeners.forEach((fn) => fn(updatedCw));
@@ -498,7 +621,8 @@ export class BackendWebSocketClient {
   private processSnapshotRow(row: any, serverTs?: number): void {
     if (!row || !row.Symbol) return;
     const sym = String(row.Symbol).toUpperCase();
-    const incomingSourceTs = row._ts_source || (row.ExchangeTime ? Number(row.ExchangeTime) : null);
+    const incomingSourceTs =
+      row._ts_source || (row.ExchangeTime ? Number(row.ExchangeTime) : null);
     const existing = this.warrantsMap.get(sym);
 
     if (this.isEventStale(existing, incomingSourceTs, serverTs)) {
@@ -506,7 +630,11 @@ export class BackendWebSocketClient {
     }
 
     const isCwSymbol = sym.startsWith("C") && sym.length >= 6;
-    const isCwType = row.instrument_type === "CW" || row.InstrumentType === "CW" || !!row.Under_Symbol || !!row.Underlying;
+    const isCwType =
+      row.instrument_type === "CW" ||
+      row.InstrumentType === "CW" ||
+      !!row.Under_Symbol ||
+      !!row.Underlying;
 
     if (isCwSymbol || isCwType) {
       let cw = mapRawSnapshotToCoveredWarrant(row);

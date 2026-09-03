@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
@@ -13,12 +14,14 @@ from app.market_data.market_schemas import (
     HistoricalRateLimitError,
     HistoricalUpstreamError,
     HistoricalTransportError,
+    StockProfilesResponse,
     CIRCUIT_REASON_RATE_LIMIT,
 )
 from app.market_data.market_state import market_state
 from app.market_data.market_subscription_manager import subscription_manager
 from app.market_data.history_read_service import HistoryRequestError, history_read_service
 from app.market_data.market_snapshot_resolver import market_snapshot_resolver
+from app.instruments.instrument_registry import instrument_registry
 from app.market_data import trading_calendar as cal
 
 logger = logging.getLogger(__name__)
@@ -159,6 +162,35 @@ async def get_dashboard_rows(
         "latest_completed_session": cal.latest_completed_trading_session(now).isoformat(),
         "calendar_confidence": cal.calendar_confidence(now.date()),
     }
+
+
+@market_router.get("/stock-profiles", response_model=StockProfilesResponse)
+async def get_stock_profiles(symbols: str = Query(..., max_length=1000)):
+    syms = sorted({s.strip().upper() for s in symbols.split(",") if s.strip()})
+    if not syms or len(syms) > 60 or any(not re.fullmatch(r"[A-Z][A-Z0-9]{1,11}", s) for s in syms):
+        raise HTTPException(status_code=400, detail="Provide between 1 and 60 valid stock symbols")
+    try:
+        return {"items": await subscription_manager.provider.get_stock_profiles(syms)}
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc))
+    except Exception as exc:
+        logger.warning("Stock profiles unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Stock profiles are temporarily unavailable")
+
+
+@market_router.get("/overview")
+async def get_market_overview():
+    """Market-wide research strip; cached provider reads, no subscription mutations."""
+    try:
+        active_cws = await instrument_registry.search(active_only=True)
+        return await subscription_manager.provider.get_market_overview(
+            [item.symbol for item in active_cws]
+        )
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc))
+    except Exception as exc:
+        logger.warning("Market overview unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Market overview is temporarily unavailable")
 
 
 @market_router.get("/_diag/{symbol}")

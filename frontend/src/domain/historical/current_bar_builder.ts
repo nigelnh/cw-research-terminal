@@ -49,7 +49,10 @@ export function getIntervalDurationMs(interval: ChartInterval): number {
 /**
  * Calculates current interval bucket start timestamp.
  */
-export function getIntervalBucketStartMs(timestampMs: number, interval: ChartInterval): number {
+export function getIntervalBucketStartMs(
+  timestampMs: number,
+  interval: ChartInterval,
+): number {
   const duration = getIntervalDurationMs(interval);
   return Math.floor(timestampMs / duration) * duration;
 }
@@ -61,8 +64,12 @@ export function mergeCompletedBarsWithLiveQuote(
   bars: HistoricalBar[],
   quote?: MarketQuote | null,
   interval: ChartInterval = "1D",
-  nowMs: number = Date.now()
+  timestampMs?: number,
 ): HistoricalBar[] {
+  // A cached quote belongs to its observed time, never the browser's current clock.
+  const nowMs =
+    timestampMs ?? quote?.exchangeTimestamp ?? quote?.sourceTimestamp;
+  if (nowMs == null || !Number.isFinite(nowMs) || nowMs <= 0) return bars ?? [];
   if (!bars || bars.length === 0) {
     // If no historical bars, check if quote has a valid matched trade
     if (quote && quote.lastPrice !== null && !isNaN(quote.lastPrice)) {
@@ -98,20 +105,36 @@ export function mergeCompletedBarsWithLiveQuote(
   const livePrice = quote.lastPrice;
 
   // If latest bar falls in the current interval bucket, update it
-  if (lastBarBucketStart === currentBucketStart || (interval === "1D" && lastBar.date.startsWith(new Date(nowMs).toISOString().split("T")[0]))) {
+  if (
+    lastBarBucketStart === currentBucketStart ||
+    (interval === "1D" &&
+      lastBar.date.startsWith(new Date(nowMs).toISOString().split("T")[0]))
+  ) {
     result[lastIndex] = {
       ...lastBar,
       open: lastBar.open ?? quote.openPrice ?? livePrice,
-      high: Math.max(lastBar.high ?? livePrice, quote.highPrice ?? livePrice, livePrice),
-      low: Math.min(lastBar.low ?? livePrice, quote.lowPrice ?? livePrice, livePrice),
+      high: Math.max(
+        lastBar.high ?? livePrice,
+        quote.highPrice ?? livePrice,
+        livePrice,
+      ),
+      low: Math.min(
+        lastBar.low ?? livePrice,
+        quote.lowPrice ?? livePrice,
+        livePrice,
+      ),
       close: livePrice,
       volume: quote.totalVolume ?? lastBar.volume ?? 0,
     };
   } else if (currentBucketStart > lastBarBucketStart) {
     // New interval has started, append fresh live candle
-    const dateStr = interval === "1D" || interval === "1W" || interval === "1M"
-      ? new Date(nowMs).toISOString().split("T")[0]
-      : new Date(currentBucketStart).toISOString().replace("T", " ").slice(0, 19);
+    const dateStr =
+      interval === "1D" || interval === "1W" || interval === "1M"
+        ? new Date(nowMs).toISOString().split("T")[0]
+        : new Date(currentBucketStart)
+            .toISOString()
+            .replace("T", " ")
+            .slice(0, 19);
 
     result.push({
       symbol: quote.symbol,

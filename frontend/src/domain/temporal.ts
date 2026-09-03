@@ -6,18 +6,14 @@
  */
 
 export type DataTemporalState =
-  | "LIVE"
-  | "LAST_SESSION"
-  | "HISTORICAL"
-  | "DERIVED"
-  | "UNAVAILABLE";
+  "LIVE" | "LAST_SESSION" | "HISTORICAL" | "DERIVED" | "UNAVAILABLE";
 
 export type DisplayState = "LIVE" | "LAST_SESSION" | "MIXED" | "UNAVAILABLE";
 
 export interface FieldProvenance {
   state: DataTemporalState;
   source: string;
-  asOf?: string | null;        // ISO8601 (VN)
+  asOf?: string | null; // ISO8601 (VN)
   sessionDate?: string | null; // VN trading-session date
   stale?: boolean;
   note?: string | null;
@@ -27,6 +23,46 @@ export interface RowProvenance {
   quote: FieldProvenance;
   book: FieldProvenance;
   analytics?: FieldProvenance;
+}
+
+export function quoteTimestamp(
+  q?: {
+    exchangeTimestamp?: number | null;
+    sourceTimestamp?: number | null;
+  } | null,
+): string | null {
+  const ts = q?.exchangeTimestamp ?? q?.sourceTimestamp;
+  if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return null;
+  const value = new Date(ts);
+  return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+}
+
+export function formatAsOf(iso?: string | null): string {
+  if (!iso) return "Time unavailable";
+  if (iso.length === 10) {
+    const day = new Date(`${iso}T00:00:00+07:00`);
+    return Number.isFinite(day.getTime())
+      ? new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Ho_Chi_Minh",
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        }).format(day) + " · session date (ICT)"
+      : "Time unavailable";
+  }
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "Time unavailable";
+  return (
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(d) + " ICT"
+  );
 }
 
 /** Short label for a display state (no styling opinion - the visual phase owns that). */

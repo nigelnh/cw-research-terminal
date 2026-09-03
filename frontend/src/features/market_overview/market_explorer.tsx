@@ -12,6 +12,9 @@ import { useSearchParam, useNullableSearchParam } from "@/data/url/use_url_state
 import { deriveSelectedInstrument } from "@/data/selected_instrument";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import { useDashboardData } from "@/data/query/use_dashboard_data";
+import { useActiveWarrants } from "@/data/query";
+import { useFeedFacets } from "@/data/query/use_research_feed";
+import type { GlobalSearchOption } from "@/components/common/app_header";
 import { computeSpread } from "@/domain/quant_display";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
 
@@ -25,6 +28,8 @@ export function MarketExplorer() {
   const [filter, setFilter] = useSearchParam("q", "");
 
   const { items } = useWatchlist();
+  const { instruments: activeWarrants } = useActiveWarrants({ status: "ACTIVE" });
+  const { data: feedFacets } = useFeedFacets();
   const { getSpec } = useInstrumentSpecs();
   const {
     quotes,
@@ -36,6 +41,28 @@ export function MarketExplorer() {
   } = useResearchMarket();
   const dashSymbols = useMemo(() => items.map((i) => i.symbol), [items]);
   const { getRow: getDashRow, meta: dashMeta } = useDashboardData(dashSymbols);
+  const globalSearchOptions = useMemo<GlobalSearchOption[]>(() => {
+    const options: GlobalSearchOption[] = [];
+    const knownSymbols = new Set<string>();
+    items.forEach(item => {
+      const symbol = item.symbol.toUpperCase();
+      options.push({ symbol, destination: "dashboard", kind: item.instrumentType === "CW" ? "cw" : "stock" });
+      knownSymbols.add(symbol);
+    });
+    activeWarrants.forEach(cw => {
+      const symbol = cw.symbol.toUpperCase();
+      options.push({ symbol, destination: "research", kind: "cw" });
+      knownSymbols.add(symbol);
+      if (cw.underlyingSymbol) {
+        const underlying = cw.underlyingSymbol.toUpperCase();
+        options.push({ symbol: underlying, destination: "research", kind: "stock" });
+        knownSymbols.add(underlying);
+      }
+    });
+    (feedFacets?.symbols ?? []).forEach(symbol => knownSymbols.add(symbol.toUpperCase()));
+    knownSymbols.forEach(symbol => options.push({ symbol, destination: "news", kind: "news" }));
+    return [...new Map(options.map(option => [`${option.symbol}:${option.destination}`, option])).values()];
+  }, [items, activeWarrants, feedFacets]);
 
   const selectedQuote = useQuote(selectedSymbol);
   const selectedCw = useCoveredWarrant(selectedSymbol);
@@ -168,6 +195,12 @@ export function MarketExplorer() {
         filter={filter}
         onFilterChange={(v) => setFilter(v, "replace")}
         marketSessionActive={marketSessionActive}
+        searchOptions={globalSearchOptions}
+        onJump={(option) => {
+          setTabParam(option.destination, "push");
+          setSelectedSymbol(option.symbol, "push");
+          setFilter(option.symbol, "replace");
+        }}
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>

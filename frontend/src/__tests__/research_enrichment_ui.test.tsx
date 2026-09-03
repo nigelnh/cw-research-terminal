@@ -60,8 +60,12 @@ describe("NewsFeed — unified research feed", () => {
     expect(html).toContain("HPG: Board resolution on 2025 dividend");
     expect(html).toContain("DISCLOSURE");
     expect(html).toContain("EVENT");
-    // Vietnamese category label is not in the collapsed table
+    // Structured detail is inline; untranslated Vietnamese category metadata stays out.
     expect(html).not.toContain("Tin Tổ chức niêm yết");
+    expect(html).toContain("The board approved a cash dividend.");
+    expect(html).toContain("HOSE disclosures &amp; company events");
+    expect(html).not.toContain("feed unavailable");
+    expect(html).toContain('<col style="width:96px"/><col style="width:72px"/><col style="width:96px"/><col/>');
     // causal restraint is stated, never "caused"
     expect(html).toContain("not causation");
     expect(html).not.toMatch(/caused (the |a )?price/i);
@@ -75,7 +79,7 @@ describe("NewsFeed — unified research feed", () => {
 
   it("a symbol filter narrows the subtitle and the feed query", () => {
     const key = queryKeys.research.feed({
-      symbol: "VPB", source: null, contentType: null, eventClass: null, q: null, lang: "vi",
+      symbol: null, source: null, contentType: null, eventClass: null, q: "VPB", lang: "vi",
     });
     const html = renderMarkup(<NewsFeed filter="VPB" />, [
       {
@@ -95,7 +99,7 @@ describe("NewsFeed — unified research feed", () => {
         ]),
       },
     ]);
-    expect(html).toContain("feed for VPB");
+    expect(html).toContain("search · “VPB”");
     expect(html).toContain("VPB: capital raise");
   });
 
@@ -120,7 +124,7 @@ describe("NewsFeed — unified research feed", () => {
   });
 });
 
-describe("InstrumentPanel — CORP EVENTS wired to /api/research/corporate-actions", () => {
+describe("InstrumentPanel — CORPORATE EVENTS wired to /api/research/corporate-actions", () => {
   beforeEach(() => {
     (globalThis as any).window = (globalThis as any).window || {};
     (globalThis as any).window.localStorage = {
@@ -168,10 +172,15 @@ describe("InstrumentPanel — CORP EVENTS wired to /api/research/corporate-actio
         },
       ],
     );
-    expect(html).toContain("CORP EVENTS");
+    expect(html).toContain("CORPORATE EVENTS");
     expect(html).toContain("CASH DIV");
     expect(html).toContain("2026-07-10");
     expect(html).toContain("VND/sh");
+    expect(html).toContain('aria-label="Corporate events"');
+    expect(html).toContain(">PE<");
+    expect(html).toContain(">PB<");
+    expect(html).not.toContain("PE · PB");
+    expect(html).not.toContain("fundamentals: pending data provider");
     // no Vietnamese unit label
     expect(html).not.toContain("đ/sh");
     // the "not yet wired" placeholder is gone

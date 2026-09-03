@@ -12,10 +12,11 @@ payload (200) rather than a 503 — a fresh deploy with no ingestion yet is a va
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+import re
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.enrichment import repository as repo
@@ -84,6 +85,8 @@ class FeedItem(BaseModel):
     id: str
     symbol: str | None
     published_at: str | None
+    display_date: str | None = None
+    date_kind: str = "published"
     title_en: str
     title_en_exact: bool
     category_en: str
@@ -101,6 +104,7 @@ class FeedResponse(BaseModel):
     count: int
     has_more: bool
     next_before: str | None
+    next_cursor: str | None = None
 
 
 class CompanyProfileResponse(BaseModel):
@@ -247,9 +251,21 @@ async def get_company_events(
     return {"symbol": symbol.upper(), "items": items, "count": len(items)}
 
 
+@research_router.get("/feed/facets")
+async def get_feed_facets(lang: str = Query(default="vi", pattern="^(vi|en)$")):
+    if not persistence_db.is_configured():
+        return {"symbols": []}
+    async with persistence_db.get_sessionmaker()() as session:
+        return {"symbols": await repo.feed_symbol_facets(session, lang=lang)}
+
+
 @research_router.get("/feed", response_model=FeedResponse)
 async def get_feed(
     symbol: str | None = Query(default=None, max_length=32),
+    symbols: str | None = Query(default=None, max_length=32768),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    cursor: str | None = Query(default=None, max_length=512),
     source: str | None = Query(default=None, description="HOSE|SSI|VNDIRECT"),
     content_type: str | None = Query(default=None, description="exchange_disclosure|company_event"),
     category: str | None = Query(default=None, max_length=200),
@@ -259,12 +275,25 @@ async def get_feed(
     limit: int = Query(default=30, ge=1, le=100),
     before: str | None = Query(default=None, description="cursor: sort_ts of the last row seen"),
 ):
+    selected = None if symbols is None else sorted(set(s.strip().upper() for s in symbols.split(",") if s.strip()))
+    if selected is not None and (len(selected) > 2000 or any(not re.fullmatch(r"[A-Z][A-Z0-9]{0,31}", s) for s in selected)):
+        raise HTTPException(422, "Invalid symbol selection")
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(422, "Start date must not be after end date")
+    try:
+        if cursor:
+            repo.decode_feed_cursor(cursor)
+        elif before:
+            datetime.fromisoformat(before.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(422, "Invalid feed cursor") from exc
     if not persistence_db.is_configured():
         return FeedResponse(items=[], count=0, has_more=False, next_before=None)
     maker = persistence_db.get_sessionmaker()
     async with maker() as s:
         rows, has_more = await repo.list_feed(
-            s, symbol=symbol, source=source, content_type=content_type, category=category,
+            s, symbol=symbol, symbols=selected, date_from=date_from, date_to=date_to, cursor=cursor,
+            source=source, content_type=content_type, category=category,
             event_class=event_class, query=q, lang=lang, limit=limit, before=before,
         )
     items = []
@@ -280,6 +309,7 @@ async def get_feed(
         items.append(
             FeedItem(
                 id=r.id, symbol=r.symbol, published_at=r.published_at,
+                display_date=r.display_date, date_kind=r.date_kind,
                 title_en=t_en, title_en_exact=exact, category_en=cat_en,
                 title=r.title, summary=_strip_html(r.summary), category=r.category,
                 source_language="vi",  # HOSE disclosures + SSI/VNDirect event text are Vietnamese at source
@@ -287,7 +317,8 @@ async def get_feed(
             )
         )
     next_before = str(rows[-1]._sort) if (has_more and rows) else None
-    return FeedResponse(items=items, count=len(items), has_more=has_more, next_before=next_before)
+    return FeedResponse(items=items, count=len(items), has_more=has_more, next_before=next_before,
+                        next_cursor=repo.encode_feed_cursor(rows[-1]) if has_more and rows else None)
 
 
 @research_router.get("/company/{symbol}", response_model=CompanyProfileResponse)

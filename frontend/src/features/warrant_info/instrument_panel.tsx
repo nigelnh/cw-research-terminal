@@ -6,9 +6,10 @@ import type { CorporateActionItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
 import { TradingChart } from "@/components/common/trading_chart";
-import { DASH, fmtChg, fmtIV, fmtPrice, fmtRatio, fmtVol, dteDisplay } from "@/components/common/grid_table";
+import { DASH, fmtIV, fmtPrice, dteDisplay } from "@/components/common/grid_table";
 
-const VN_TZ = "Asia/Ho_Chi_Minh";
+import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, quoteCell, type QuoteTableValues } from "@/components/common/quote_columns";
+import { useWatchlistLayout } from "@/components/common/watchlist_layout";
 
 interface InstrumentPanelProps {
   instrument: SelectedInstrumentView | null;
@@ -22,59 +23,36 @@ interface InstrumentPanelProps {
 
 /* ---------------------------------------------------------------- helpers */
 
-function useTick(active: boolean, ms = 1000): number {
-  const [t, setT] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const id = window.setInterval(() => setT(Date.now()), ms);
-    return () => window.clearInterval(id);
-  }, [active, ms]);
-  return t;
-}
-
-function asOfText(live: boolean, quoteAsOf: string | null | undefined, nowTick: number): string {
-  const d = live ? new Date(nowTick) : quoteAsOf ? new Date(quoteAsOf) : null;
-  if (!d || Number.isNaN(d.getTime())) return DASH;
-  const mon = new Intl.DateTimeFormat("en-US", { timeZone: VN_TZ, month: "short", day: "numeric" }).format(d);
-  const time = new Intl.DateTimeFormat("en-GB", {
-    timeZone: VN_TZ,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(d);
-  return `${mon} at ${time}`;
-}
-
 const LABEL: React.CSSProperties = { fontSize: 10, color: "var(--t-46)" };
-const MICRO: React.CSSProperties = { fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 };
 
 function MetricRow({
   label,
   value,
   color = "var(--t-92)",
   size = 13,
-  top = false,
-  pad = "5px 0",
+  compact = false,
+  title,
 }: {
   label: string;
   value: React.ReactNode;
   color?: string;
   size?: number;
-  top?: boolean;
-  pad?: string;
+  compact?: boolean;
+  title?: string;
 }) {
   return (
     <div
+      title={title}
+      className={compact ? "instrument-metric" : undefined}
       style={{
         display: "flex",
         justifyContent: "space-between",
-        padding: pad,
-        ...(top ? { borderTop: "1px solid var(--border-mid)", marginTop: 4, paddingTop: 8 } : null),
+        padding: compact ? "2px 0" : "5px 0",
+        lineHeight: compact ? "15px" : undefined,
       }}
     >
-      <span style={LABEL}>{label}</span>
-      <span style={{ fontSize: size, color }}>{value}</span>
+      <span style={{ ...LABEL, fontSize: compact ? 11 : size }}>{label}</span>
+      <span style={{ fontSize: compact ? 11 : size, color }}>{value}</span>
     </div>
   );
 }
@@ -117,7 +95,7 @@ function corpEventDesc(ev: CorporateActionItem): string {
   return DASH;
 }
 
-const TS_COLS = "48px 44px 42px 50px 50px 24px";
+const TS_COLS = "1.1fr 1fr 1fr 1.15fr 1fr 0.65fr";
 
 const TS_HEAD: React.CSSProperties = {
   textAlign: "right",
@@ -131,18 +109,8 @@ const TS_HEAD: React.CSSProperties = {
  */
 function TimeSalesPanel({ live }: { live: boolean }) {
   return (
-    <div
-      className="mono"
-      style={{
-        width: 340,
-        flexShrink: 0,
-        height: "100%",
-        border: "1px solid var(--border)",
-        padding: "8px 12px",
-        overflowY: "auto",
-      }}
-    >
-      <div style={MICRO}>TRADED LOGS</div>
+    <div className="mono instrument-data-panel">
+      <h3 className="instrument-section-heading">TRADED LOGS</h3>
       <div
         style={{
           display: "grid",
@@ -150,18 +118,19 @@ function TimeSalesPanel({ live }: { live: boolean }) {
           gap: "2px 6px",
           fontSize: 9,
           color: "var(--t-42)",
-          paddingBottom: 4,
+          padding: "5px 8px",
+          borderTop: "1px solid var(--border-mid)",
           borderBottom: "1px solid var(--border-mid)",
         }}
       >
         <span style={{ borderRight: "1px solid var(--border-row)", paddingRight: 4 }}>TIME</span>
-        <span style={TS_HEAD}>TRD</span>
+        <span style={TS_HEAD}>TRD_PRC</span>
         <span style={TS_HEAD}>+/-</span>
-        <span style={TS_HEAD}>CHG%</span>
+        <span style={TS_HEAD}>%CHG</span>
         <span style={TS_HEAD}>VOL</span>
         <span style={{ textAlign: "right" }}>B/S</span>
       </div>
-      <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8, lineHeight: 1.5 }}>
+      <div style={{ fontSize: 10.5, color: "var(--t-42)", padding: "8px 10px", lineHeight: 1.5 }}>
         {live
           ? "Live trade feed not yet wired — pending backend support."
           : "Traded logs unavailable outside a live session."}
@@ -176,7 +145,6 @@ export function InstrumentPanel({
   instrument,
   dashRow,
   marketSessionActive,
-  context,
   onClose,
   initialTab = "overview",
 }: InstrumentPanelProps) {
@@ -194,7 +162,7 @@ export function InstrumentPanel({
     setAddNote(null);
   }, [symbol]);
 
-  const nowTick = useTick(marketSessionActive);
+  const tableLayout = useWatchlistLayout();
 
   // Daily bars, ~6 months of recent sessions. "1D" is the bar INTERVAL; the "6M"
   // timeframe is the client-side window over the Postgres-first `daily_1y` dataset
@@ -208,7 +176,7 @@ export function InstrumentPanel({
   });
 
   // Corporate actions apply to the underlying company — stocks only, and only when
-  // the QUANT tab (which hosts the CORP EVENTS table) is actually open.
+  // the QUANT tab (which hosts the CORPORATE EVENTS table) is actually open.
   const corpActions = useCorporateActions(symbol, {
     enabled: hasInstrument && !isCW && !isIndex && tab === "quant",
     limit: 12,
@@ -218,30 +186,7 @@ export function InstrumentPanel({
   const q = instrument?.quote ?? cw?.quote ?? dashRow?.quote;
   const an = dashRow?.analytics ?? null;
 
-  const last = q?.lastPrice ?? null;
   const ref = q?.referencePrice ?? null;
-  const pct = typeof q?.priceChangePercent === "number" ? q.priceChangePercent * 100 : null;
-  const chg = fmtChg(pct);
-  const bidAsk = `${fmtPrice(q?.bidPrice)} · ${fmtPrice(q?.askPrice)}`;
-  const chgAmtNum = last !== null && ref !== null ? last - ref : null;
-  const chgAmt =
-    chgAmtNum === null
-      ? DASH
-      : `${chgAmtNum > 0 ? "+" : chgAmtNum < 0 ? "−" : ""}${fmtPrice(Math.abs(chgAmtNum))}`;
-  const chgAmtColor =
-    chgAmtNum === null || chgAmtNum === 0
-      ? "var(--t-50)"
-      : chgAmtNum > 0
-      ? "var(--up)"
-      : "var(--down)";
-
-  const trdColor = (() => {
-    if (last === null || ref === null) return "var(--t-70)";
-    if (last > ref) return "var(--up)";
-    if (last < ref) return "var(--down)";
-    return "var(--flat)";
-  })();
-
   const pick = (k: string): number | null => {
     const fromCw = (cw as Record<string, unknown> | undefined)?.[k];
     if (typeof fromCw === "number") return fromCw;
@@ -305,6 +250,19 @@ export function InstrumentPanel({
     color: tab === id ? "var(--t-92)" : "var(--t-55)",
   });
 
+  const stats: QuoteTableValues = {
+    symbol: instrument?.symbol ?? "", ref, ceiling: q?.ceilingPrice ?? null, floor: q?.floorPrice ?? null,
+    bid: q?.bidPrice ?? null, ask: q?.askPrice ?? null, last: q?.lastPrice ?? null,
+    tradingValue: q?.tradingValue ?? null,
+    issuer: isCW ? instrument?.issuer ?? null : null,
+    chgPct: typeof q?.priceChangePercent === "number" ? q.priceChangePercent * 100 : null,
+    vol: q?.totalVolume ?? null, strike: isCW ? instrument?.strikePrice ?? null : null,
+    ratio: isCW ? instrument?.exerciseRatio ?? null : null,
+    lastTradingDate: isCW ? instrument?.lastTradingDate ?? null : null,
+    ivBid: isCW ? pick("ivBid") : null, ivTrade: isCW ? pick("ivTrade") : null, ivAsk: isCW ? pick("ivAsk") : null,
+    dteText: isCW ? dteDisplay(instrument?.lastTradingDate, instrument?.maturityDate, an?.dte) : DASH,
+  };
+
   // No instrument selected -> render nothing. The AI assistant now lives entirely in the
   // draggable Orbit panel; Dashboard / Research reclaim the vertical space.
   if (!instrument) return null;
@@ -312,7 +270,7 @@ export function InstrumentPanel({
   return (
     <section
       style={{
-        height: "min(460px, 58vh)",
+        height: "min(410px, 58vh)",
         flexShrink: 0,
         borderTop: "1px solid var(--border-strong)",
         display: "flex",
@@ -337,7 +295,7 @@ export function InstrumentPanel({
             <span className="heading" style={{ fontSize: 13, color: "var(--accent)", fontWeight: 700 }}>
               {instrument.symbol}
             </span>
-            <span style={{ fontSize: 11, color: "var(--t-50)" }}>{kindLine}</span>
+            <span style={{ fontSize: 13, color: "var(--t-50)" }}>{kindLine}</span>
             <div style={{ display: "flex", gap: 2, marginLeft: 12 }}>
               <button type="button" onClick={() => setTab("overview")} style={tabBtn("overview")}>
                 OVERVIEW
@@ -386,42 +344,17 @@ export function InstrumentPanel({
       {/* OVERVIEW */}
       {hasInstrument && tab === "overview" && (
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", gap: 22, minHeight: 0 }}>
-          <div className="mono" style={{ width: 220, flexShrink: 0 }}>
-            <div style={{ display: "flex", flexDirection: "column", marginBottom: 10 }}>
-              <MetricRow label="REF" value={fmtPrice(ref)} color="var(--t-60)" size={11} pad="3px 0" />
-              <MetricRow label="BID · ASK" value={bidAsk} color="var(--t-70)" size={11} pad="3px 0" />
-              <MetricRow label="TRD" value={fmtPrice(last)} color={trdColor} size={11} pad="3px 0" />
-              <MetricRow label="+/-" value={chgAmt} color={chgAmtColor} size={11} pad="3px 0" />
-              <MetricRow label="CHG%" value={chg.text} color={chg.color} size={11} pad="3px 0" />
-              {!isCW && !isIndex && (
-                <>
-                  <MetricRow label="VOLUME" value={fmtVol(q?.totalVolume)} color="var(--t-60)" size={11} pad="3px 0" />
-                  <MetricRow label="FRN BUY" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
-                  <MetricRow label="FRN SELL" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
-                  <MetricRow label="FRN ROOM" value={DASH} color="var(--t-60)" size={11} pad="3px 0" />
-                </>
-              )}
-              <MetricRow
-                label="AS OF"
-                value={asOfText(marketSessionActive, context?.quoteAsOf, nowTick)}
-                color="var(--t-50)"
-                size={11}
-                pad="3px 0"
-              />
-            </div>
-            {isCW && (
-              <div style={{ borderTop: "1px solid var(--border-mid)", paddingTop: 8 }}>
-                <MetricRow label="STRIKE" value={fmtPrice(instrument!.strikePrice)} size={11} pad="3px 0" />
-                <MetricRow label="RATIO" value={fmtRatio(instrument!.exerciseRatio)} size={11} pad="3px 0" />
-                <MetricRow label="MATURITY" value={instrument!.maturityDate ?? DASH} size={11} pad="3px 0" />
-                <MetricRow
-                  label="DTE"
-                  value={dteDisplay(instrument!.lastTradingDate, instrument!.maturityDate, an?.dte)}
-                  size={11}
-                  pad="3px 0"
-                />
-              </div>
-            )}
+          <div className="mono" style={{ width: 220, flexShrink: 0, overflowY: "auto" }}>
+            <h3 className="instrument-section-heading">STATS</h3>
+            {tableLayout.columns.filter(key => {
+              if (key === "symbol") return false;
+              if (!isCW && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(key)) return false;
+              return !(isCW && key === "issuer");
+            }).map(key => {
+              const column = QUOTE_COLUMNS.find(c => c.key === key)!;
+              const cell = quoteCell(stats, key);
+              return <MetricRow key={key} label={column.label} value={cell.text} color={cell.color} compact title={QUOTE_COLUMN_HINTS[key]} />;
+            })}
             {conflicting && (
               <div
                 style={{
@@ -475,34 +408,21 @@ export function InstrumentPanel({
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px", display: "flex", gap: 22, minHeight: 0 }}>
           {isCW ? (
             <>
-              <div className="mono" style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-                <MetricRow
-                  label="IV BID·TRD·ASK"
-                  color="var(--t-85)"
-                  size={11}
-                  value={`${fmtIV(pick("ivBid"))} · ${fmtIV(pick("ivTrade"))} · ${fmtIV(pick("ivAsk"))}`}
-                />
-                <MetricRow label="HV22" color="var(--t-85)" size={11} value={fmtIV(pick("historicalVolatility"))} />
-                <MetricRow
-                  label="MONEYNESS S/K"
-                  color="var(--t-85)"
-                  size={11}
-                  value={
-                    pick("moneynessRatio") !== null
-                      ? `${pick("moneynessRatio")!.toFixed(3)}${moneynessCat ? ` · ${moneynessCat}` : ""}`
-                      : DASH
-                  }
-                />
-                <MetricRow label="THEO PRICE" color="var(--t-85)" size={11} value={fmtPrice(pick("theoreticalPrice"))} />
-                <MetricRow label="DELTA" color="var(--t-85)" size={11} value={greek(pick("delta"), 4)} />
-                <MetricRow label="GAMMA" color="var(--t-85)" size={11} value={greek(pick("gamma"), 6)} />
-                <MetricRow label="THETA/DAY" color="var(--t-85)" size={11} value={greek(pick("theta"), 2)} />
-                <MetricRow
-                  label="VEGA·RHO /1%"
-                  color="var(--t-85)"
-                  size={11}
-                  value={`${greek(pick("vega"), 2)} · ${greek(pick("rho"), 2)}`}
-                />
+              <div className="mono" style={{ width: 220, flexShrink: 0, overflowY: "auto" }}>
+                <h3 className="instrument-section-heading">OPTIONS ANALYTICS</h3>
+                <MetricRow label="IV_BID" color="var(--t-85)" compact value={fmtIV(pick("ivBid"))} />
+                <MetricRow label="IV_TRD" color="var(--t-85)" compact value={fmtIV(pick("ivTrade"))} />
+                <MetricRow label="IV_ASK" color="var(--t-85)" compact value={fmtIV(pick("ivAsk"))} />
+                <MetricRow label="HV22" color="var(--t-85)" compact value={fmtIV(pick("historicalVolatility"))} />
+                <MetricRow label="MONEYNESS S/K" color="var(--t-85)" compact
+                  value={pick("moneynessRatio") !== null ? pick("moneynessRatio")!.toFixed(3) : DASH} />
+                <MetricRow label="MONEYNESS" color="var(--t-85)" compact value={moneynessCat ?? DASH} />
+                <MetricRow label="THEO_PRC" color="var(--t-85)" compact value={fmtPrice(pick("theoreticalPrice"))} />
+                <MetricRow label="DELTA" color="var(--t-85)" compact value={greek(pick("delta"), 4)} />
+                <MetricRow label="GAMMA" color="var(--t-85)" compact value={greek(pick("gamma"), 6)} />
+                <MetricRow label="THETA/DAY" color="var(--t-85)" compact value={greek(pick("theta"), 2)} />
+                <MetricRow label="VEGA /1%" color="var(--t-85)" compact value={greek(pick("vega"), 2)} />
+                <MetricRow label="RHO /1%" color="var(--t-85)" compact value={greek(pick("rho"), 2)} />
               </div>
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
                 {marketSessionActive ? (
@@ -536,20 +456,21 @@ export function InstrumentPanel({
           ) : (
             <>
               <div className="mono" style={{ width: 220, flexShrink: 0 }}>
-                <div style={MICRO}>FINANCIAL INDICATORS</div>
+                <h3 className="instrument-section-heading">FINANCIAL INDICATORS</h3>
                 {isIndex ? (
                   <div style={{ fontSize: 11, color: "var(--t-42)", padding: "8px 0" }}>
                     No fundamentals — index.
                   </div>
                 ) : (
                   <>
-                    <MetricRow label="EPS" color="var(--t-85)" size={12} value={DASH} />
-                    <MetricRow label="PE · PB" color="var(--t-85)" size={12} value={`${DASH} · ${DASH}`} />
-                    <MetricRow label="ROE" color="var(--t-85)" size={12} value={DASH} top />
-                    <MetricRow label="ROA" color="var(--t-85)" size={12} value={DASH} />
-                    <MetricRow label="ROIC" color="var(--t-85)" size={12} value={DASH} />
-                    <MetricRow label="GROSS MARGIN" color="var(--t-85)" size={12} value={DASH} />
-                    <MetricRow label="NET MARGIN" color="var(--t-85)" size={12} value={DASH} />
+                    <MetricRow label="EPS" color="var(--t-85)" compact value={DASH} />
+                    <MetricRow label="PE" color="var(--t-85)" compact value={DASH} />
+                    <MetricRow label="PB" color="var(--t-85)" compact value={DASH} />
+                    <MetricRow label="ROE" color="var(--t-85)" compact value={DASH} />
+                    <MetricRow label="ROA" color="var(--t-85)" compact value={DASH} />
+                    <MetricRow label="ROIC" color="var(--t-85)" compact value={DASH} />
+                    <MetricRow label="GROSS MARGIN" color="var(--t-85)" compact value={DASH} />
+                    <MetricRow label="NET MARGIN" color="var(--t-85)" compact value={DASH} />
                   </>
                 )}
               </div>
@@ -577,77 +498,57 @@ export function InstrumentPanel({
                   </span>
                 </div>
                 {!isIndex && (
-                  <div
-                    className="mono"
-                    style={{
-                      width: 340,
-                      flexShrink: 0,
-                      height: "100%",
-                      border: "1px solid var(--border)",
-                      padding: "8px 12px",
-                      overflowY: "auto",
-                    }}
-                  >
-                    <div style={MICRO}>CORP EVENTS</div>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "86px 60px 60px 1fr",
-                        gap: "4px 8px",
-                        fontSize: 9,
-                        color: "var(--t-42)",
-                        paddingBottom: 4,
-                        borderBottom: "1px solid var(--border-mid)",
-                      }}
-                    >
-                      <span>EVENT TYPE</span>
-                      <span>EX-DIV</span>
-                      <span>ISSUE</span>
-                      <span>DESC</span>
-                    </div>
-                    {corpActions.isLoading ? (
-                      <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8 }}>loading…</div>
-                    ) : corpActions.isError ? (
-                      <div style={{ fontSize: 10.5, color: "var(--down)", paddingTop: 8 }}>
-                        corporate-events feed unavailable
-                      </div>
-                    ) : corpActions.items.length === 0 ? (
-                      <div style={{ fontSize: 10.5, color: "var(--t-42)", paddingTop: 8 }}>
-                        {DASH} no corporate events on record for {symbol}
-                      </div>
-                    ) : (
-                      corpActions.items.map((ev) => (
-                        <div
-                          key={ev.id}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "86px 60px 60px 1fr",
-                            gap: "4px 8px",
-                            fontSize: 10,
-                            padding: "5px 0",
-                            borderBottom: "1px solid var(--border-row)",
-                          }}
-                        >
-                          <span style={{ color: "var(--t-80)" }}>{ev.event_label || corpEventLabel(ev.action_type)}</span>
-                          <span style={{ color: "var(--t-55)" }}>{isoDay(ev.ex_date)}</span>
-                          <span style={{ color: "var(--t-50)" }}>
-                            {isoDay(ev.record_date ?? ev.disclosure_date)}
-                          </span>
-                          <span style={{ color: "var(--t-60)" }}>{corpEventDesc(ev)}</span>
-                        </div>
-                      ))
-                    )}
+                  <div className="mono instrument-data-panel">
+                    <h3 className="instrument-section-heading">CORPORATE EVENTS</h3>
+                    <table className="instrument-data-table corporate-events-table" aria-label="Corporate events">
+                      <colgroup>
+                        <col className="event-type-column" />
+                        <col className="event-date-column" />
+                        <col className="event-date-column" />
+                        <col />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th scope="col">EVENT TYPE</th>
+                          <th scope="col">EX-DIV</th>
+                          <th scope="col">ISSUE</th>
+                          <th scope="col">DESC</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {corpActions.isLoading ? (
+                          <tr>
+                            <td colSpan={4} className="instrument-data-state">loading…</td>
+                          </tr>
+                        ) : corpActions.isError ? (
+                          <tr>
+                            <td colSpan={4} className="instrument-data-state" style={{ color: "var(--down)" }}>
+                              corporate-events feed unavailable
+                            </td>
+                          </tr>
+                        ) : corpActions.items.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="instrument-data-state">
+                              {DASH} no corporate events on record for {symbol}
+                            </td>
+                          </tr>
+                        ) : (
+                          corpActions.items.map((ev) => (
+                            <tr key={ev.id}>
+                              <td style={{ color: "var(--t-80)" }}>{ev.event_label || corpEventLabel(ev.action_type)}</td>
+                              <td style={{ color: "var(--t-55)" }}>{isoDay(ev.ex_date)}</td>
+                              <td style={{ color: "var(--t-50)" }}>{isoDay(ev.record_date ?? ev.disclosure_date)}</td>
+                              <td style={{ color: "var(--t-60)" }}>{corpEventDesc(ev)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
             </>
           )}
-        </div>
-      )}
-
-      {hasInstrument && !isCW && !isIndex && tab === "quant" && (
-        <div style={{ padding: "0 20px 8px 20px", fontSize: 9.5, color: "var(--t-42)" }} className="mono">
-          — fundamentals: pending data provider · corp events: disclosed timing only, not causation
         </div>
       )}
     </section>

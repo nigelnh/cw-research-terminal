@@ -105,6 +105,9 @@ class MaxBodySizeMiddleware:
         self.app = app
 
     def _limit_for(self, path: str) -> int:
+        if path.rstrip("/") == "/api/ai/files/extract":
+            from app.ai.attachments import MAX_FILE_BYTES
+            return MAX_FILE_BYTES + int(settings.AI_MAX_BODY_BYTES)
         if path.startswith("/api/ai/"):
             return int(settings.AI_MAX_BODY_BYTES)
         return int(settings.API_MAX_BODY_BYTES)

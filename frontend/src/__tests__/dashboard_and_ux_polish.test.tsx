@@ -40,12 +40,12 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     const html = renderMarkup(<PersonalDashboard />);
     expect(html).toContain("Watchlist");
     // one shared schema for stock parents and CW children — incl. the absolute-change (+/-)
-    // column between TRD and CHG%
+    // column between TRD and %CHG
     expect(html).toContain("SYMBOL");
     expect(html).toContain("+/-");
     expect(html).toContain("VOLUME");
     expect(html).toContain("STRIKE");
-    expect(html).toContain("IV TRD");
+    expect(html).toContain("IV_TRD");
     // redundant CW-only columns were merged away in the unified table
     expect(html).not.toContain("UND.PRC");
     expect(html).not.toContain("FRN ROOM");
