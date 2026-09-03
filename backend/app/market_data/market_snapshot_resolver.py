@@ -28,6 +28,7 @@ from app.core.config import settings
 from app.market_data import trading_calendar as cal
 from app.market_data.market_schemas import HistoricalBar
 from app.market_data.market_session import market_session
+from app.market_data.session_reference import reference_session_date
 from app.market_data.market_state import market_state
 from app.market_data.temporal import (
     DataSource,
@@ -39,7 +40,8 @@ from app.market_data.temporal import (
 logger = logging.getLogger(__name__)
 
 _QUOTE_FIELDS = (
-    "reference_price", "last_price", "price_change", "price_change_percent",
+    "reference_price", "ceiling_price", "floor_price",
+    "last_price", "price_change", "price_change_percent",
     "open_price", "high_price", "low_price", "average_price",
     "total_volume", "trading_value", "underlying_price",
 )
@@ -61,6 +63,9 @@ class ResolvedRow:
         default_factory=lambda: FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE)
     )
     book_prov: FieldProvenance = field(
+        default_factory=lambda: FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE)
+    )
+    reference_prov: FieldProvenance = field(
         default_factory=lambda: FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE)
     )
     analytics_prov: Optional[FieldProvenance] = None
@@ -89,6 +94,8 @@ class ResolvedRow:
             "Symbol": self.symbol,
             "InstrumentType": self.instrument_type,
             "Ref": p("reference_price"),
+            "Ceil": p("ceiling_price"),
+            "Floor": p("floor_price"),
             "Traded": p("last_price"),
             "change": p("price_change"),
             "ChangePercent": v.get("price_change_percent"),
@@ -113,6 +120,7 @@ class ResolvedRow:
             "provenance": {
                 "quote": self.quote_prov.to_wire(),
                 "book": self.book_prov.to_wire(),
+                "reference": self.reference_prov.to_wire(),
                 **({"analytics": self.analytics_prov.to_wire()} if self.analytics_prov else {}),
             },
         }
@@ -195,11 +203,33 @@ class MarketSnapshotResolver:
             row.book_prov = FieldProvenance(DataTemporalState.LIVE, DataSource.LIVE_FEED, as_of, sd)
             row.is_realtime_eligible = True
             trace.append("A:LIVE")
+            if live.reference_session_date == sd and any(
+                row.values.get(field) is not None
+                for field in ("reference_price", "ceiling_price", "floor_price")
+            ):
+                row.reference_prov = FieldProvenance(
+                    DataTemporalState.DERIVED,
+                    DataSource.SESSION_REFERENCE,
+                    _iso_ms(live.reference_timestamp),
+                    sd,
+                )
+                trace.append("A:SESSION_REFERENCE")
+            else:
+                # Never carry a previous session's bands into a current live row.
+                row.values["reference_price"] = None
+                row.values["ceiling_price"] = None
+                row.values["floor_price"] = None
+            if row.values.get("reference_price") is None:
+                await self._fill_live_reference(
+                    row, sym, inst_type=inst_type, snapshot=snapshot,
+                    latest_session=latest_session, now=now, trace=trace,
+                )
             if diag:
                 row.diag = {"chosen": "LIVE", "trace": trace}
             return row
 
         # ---- B. LAST_SESSION snapshot ------------------------------- #
+        snapshot_complete = False
         if snapshot is not None:
             snap_session = snapshot.session_date
             snap_stale = snap_session < latest_session
@@ -217,6 +247,8 @@ class MarketSnapshotResolver:
                 DataTemporalState.LAST_SESSION if not snap_stale else DataTemporalState.HISTORICAL,
                 src, as_of, sd, stale=snap_stale,
             )
+            if row.values.get("reference_price") is not None:
+                row.reference_prov = row.quote_prov
             # Book only from a real observed snapshot (not the EOD seed).
             has_book = snapshot.quality != "SEED" and (
                 _num(snapshot.bid1_price) is not None or _num(snapshot.ask1_price) is not None
@@ -233,15 +265,28 @@ class MarketSnapshotResolver:
                     DataTemporalState.UNAVAILABLE, DataSource.NONE, note="no closing order book recorded",
                 )
             trace.append(f"B:SNAPSHOT({snapshot.quality})")
-            # A snapshot for the latest session is complete; older -> still fill OHLC/ref
-            # gaps from bars below.
-            if not snap_stale and row.values.get("last_price") is not None:
-                if diag:
-                    row.diag = {"chosen": "SNAPSHOT", "trace": trace}
-                return row
+            # A present close alone does not make the snapshot complete. Preserve its
+            # observed fields while filling any OHLC/reference gaps from daily bars.
+            history_fields = (
+                "last_price", "open_price", "high_price", "low_price",
+                "total_volume", "reference_price", "price_change", "price_change_percent",
+            )
+            snapshot_complete = not snap_stale and all(
+                row.values.get(f) is not None for f in history_fields
+            )
+
+        # A persisted closing snapshot owns last trade/OHLC/book outside the live
+        # session, while the canonical in-memory state owns the static bands for the
+        # current display session. Overlay only those three fields so a closed-session
+        # row can still classify its prices without exposing stale intraday data.
+        self._overlay_current_reference(row, live, now=now, trace=trace)
+        if snapshot_complete:
+            if diag:
+                row.diag = {"chosen": "SNAPSHOT", "trace": trace}
+            return row
 
         # ---- C. HISTORICAL / EOD bars ------------------------------ #
-        bars = await self._recent_daily_bars(sym, inst_type)
+        bars = await self._recent_daily_bars(sym, inst_type, now=now)
         if bars:
             last_bar = bars[-1]
             prev_close = bars[-2].close if len(bars) >= 2 else None
@@ -251,7 +296,9 @@ class MarketSnapshotResolver:
             as_of = f"{sd}T15:00:00+07:00" if sd else None
 
             # Only fill fields the snapshot didn't already provide.
-            _fill = lambda k, val: row.values.setdefault(k, val) if row.values.get(k) is None else None  # noqa: E731
+            def _fill(key: str, value: Optional[float]) -> None:
+                if row.values.get(key) is None:
+                    row.values[key] = value
             _fill("last_price", last_bar.close)
             _fill("open_price", last_bar.open)
             _fill("high_price", last_bar.high)
@@ -259,9 +306,28 @@ class MarketSnapshotResolver:
             _fill("total_volume", int(last_bar.volume) if last_bar.volume is not None else None)
             if row.values.get("reference_price") is None:
                 _fill("reference_price", prev_close)
-            if row.values.get("price_change") is None and prev_close not in (None, 0):
-                row.values["price_change"] = round(last_bar.close - prev_close, 4)
-                row.values["price_change_percent"] = round((last_bar.close - prev_close) / prev_close, 6)
+                if prev_close is not None:
+                    prev_session = _parse_date(bars[-2].date)
+                    ref_as_of = (
+                        f"{prev_session.isoformat()}T15:00:00+07:00"
+                        if prev_session else None
+                    )
+                    row.reference_prov = FieldProvenance(
+                        DataTemporalState.LAST_SESSION if not bar_stale else DataTemporalState.HISTORICAL,
+                        DataSource.PRIOR_CLOSE,
+                        ref_as_of,
+                        sd,
+                        stale=bool(bar_stale),
+                    )
+            resolved_close = row.values.get("last_price")
+            resolved_reference = row.values.get("reference_price")
+            if resolved_close is not None and resolved_reference not in (None, 0):
+                if row.values.get("price_change") is None:
+                    row.values["price_change"] = round(resolved_close - resolved_reference, 4)
+                if row.values.get("price_change_percent") is None:
+                    row.values["price_change_percent"] = round(
+                        (resolved_close - resolved_reference) / resolved_reference, 6
+                    )
 
             state = DataTemporalState.LAST_SESSION if not bar_stale else DataTemporalState.HISTORICAL
             if row.quote_prov.state == DataTemporalState.UNAVAILABLE:
@@ -284,6 +350,82 @@ class MarketSnapshotResolver:
         if diag:
             row.diag = {"chosen": "UNAVAILABLE", "trace": trace}
         return row
+
+    @staticmethod
+    def _overlay_current_reference(
+        row: ResolvedRow,
+        live,
+        *,
+        now: datetime,
+        trace: list[str],
+    ) -> None:
+        if live is None:
+            return
+        session_date = reference_session_date(now).isoformat()
+        if live.reference_session_date != session_date:
+            return
+        values = {
+            "reference_price": live.reference_price,
+            "ceiling_price": live.ceiling_price,
+            "floor_price": live.floor_price,
+        }
+        if not any(value is not None for value in values.values()):
+            return
+        for field, value in values.items():
+            if value is not None:
+                row.values[field] = value
+        row.reference_prov = FieldProvenance(
+            DataTemporalState.DERIVED,
+            DataSource.SESSION_REFERENCE,
+            _iso_ms(live.reference_timestamp),
+            session_date,
+        )
+        trace.append("A:SESSION_REFERENCE_STATIC")
+
+    async def _fill_live_reference(
+        self,
+        row: ResolvedRow,
+        sym: str,
+        *,
+        inst_type: str,
+        snapshot,
+        latest_session: date,
+        now: datetime,
+        trace: list[str],
+    ) -> None:
+        """Fill only today's reference price; session bands are never inferred."""
+        if row.values.get("reference_price") is not None:
+            return
+        reference = None
+        as_of = None
+        if snapshot is not None and snapshot.session_date == latest_session:
+            reference = _num(snapshot.last_price)
+            as_of = snapshot.captured_at.isoformat() if snapshot.captured_at else None
+            if reference is not None:
+                trace.append("B:PRIOR_CLOSE_SNAPSHOT")
+        if reference is None:
+            bars = await self._recent_daily_bars(sym, inst_type, now=now)
+            eligible = [bar for bar in bars if (_parse_date(bar.date) or latest_session) <= latest_session]
+            if eligible:
+                latest = eligible[-1]
+                reference = latest.close
+                session = _parse_date(latest.date)
+                as_of = f"{session.isoformat()}T15:00:00+07:00" if session else None
+                trace.append("C:PRIOR_CLOSE_EOD")
+        if reference is not None:
+            row.values["reference_price"] = reference
+            row.reference_prov = FieldProvenance(
+                DataTemporalState.DERIVED,
+                DataSource.PRIOR_CLOSE,
+                as_of,
+                now.date().isoformat(),
+            )
+        else:
+            row.reference_prov = FieldProvenance(
+                DataTemporalState.UNAVAILABLE,
+                DataSource.NONE,
+                note="current-session reference metadata unavailable",
+            )
 
     async def _attach_analytics(
         self, row: ResolvedRow, sym: str, *, now: datetime, latest_session: date, session_active: bool
@@ -321,11 +463,13 @@ class MarketSnapshotResolver:
                 note=(eod.unavailable_reason if eod is not None else "no EOD analytics"),
             )
 
-    async def _recent_daily_bars(self, sym: str, inst_type: str) -> list[HistoricalBar]:
+    async def _recent_daily_bars(
+        self, sym: str, inst_type: str, *, now: datetime | None = None
+    ) -> list[HistoricalBar]:
         """Last ~3 daily bars, PostgreSQL-first, one controlled gap-fill allowed."""
         from app.market_data.history_read_service import history_read_service
 
-        to_d = datetime.now(cal.VN_TZ).date()
+        to_d = (now or datetime.now(cal.VN_TZ)).date()
         from_d = to_d - timedelta(days=20)
         adjusted = inst_type != "CW"
         try:

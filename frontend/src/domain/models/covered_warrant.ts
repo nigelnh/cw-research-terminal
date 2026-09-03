@@ -1,4 +1,4 @@
-import type { MarketQuote } from "./market_quote";
+import type { MarketQuote, RealtimePulseMap } from "./market_quote";
 
 /**
  * Canonical Covered Warrant Specification & State Model
@@ -60,6 +60,9 @@ export interface CoveredWarrant {
   // Supply / Listing info
   listedVolume?: number | null;
   outstandingVolume?: number | null;
+
+  /** Incremental IV/analytics/underlying-value changes; snapshots have no pulses. */
+  realtimePulses?: RealtimePulseMap;
 }
 
 export interface CoveredWarrantSnapshot extends CoveredWarrant {

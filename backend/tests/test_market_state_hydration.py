@@ -8,6 +8,7 @@ from app.market_data.market_state import MarketState
 from app.market_data.market_state_store import MarketStateStore, NullMarketStateStore
 from app.market_data.market_subscription_manager import SubscriptionManager
 from app.market_data.market_session import VN_TZ, market_session
+from app.market_data.session_reference import reference_session_date
 from app.market_data.providers.base_market_provider import MarketDataProvider
 
 
@@ -89,9 +90,19 @@ async def test_same_session_warm_cache_populates_initial_market_state():
         symbol="HPG",
         instrument_type="STOCK",
         last_price=22200.0,
+        open_price=22_300.0,
+        high_price=22_500.0,
+        low_price=22_000.0,
+        average_price=22_250.0,
+        price_change=-50.0,
+        price_change_percent=-0.0022,
         total_volume=1429000,
+        trading_value=31_800_000_000.0,
+        traded_quantity=100,
         bid1_price=22150.0,
         ask1_price=22200.0,
+        bid2_price=22_100.0,
+        ask2_price=22_250.0,
         reference_price=22250.0,
         received_timestamp=now_ms,
         source_timestamp=now_ms,
@@ -235,9 +246,19 @@ async def test_previous_session_last_volume_not_presented_as_today_session_state
         symbol="HPG",
         instrument_type="STOCK",
         last_price=22200.0,
+        open_price=22_300.0,
+        high_price=22_500.0,
+        low_price=22_000.0,
+        average_price=22_250.0,
+        price_change=-50.0,
+        price_change_percent=-0.0022,
         total_volume=1429000,
+        trading_value=31_800_000_000.0,
+        traded_quantity=100,
         bid1_price=22150.0,
         ask1_price=22200.0,
+        bid2_price=22_100.0,
+        ask2_price=22_250.0,
         reference_price=22250.0,
         received_timestamp=yesterday_ms,
         source_timestamp=yesterday_ms,
@@ -255,8 +276,84 @@ async def test_previous_session_last_volume_not_presented_as_today_session_state
     assert q.total_volume is None
     assert q.bid1_price is None
     assert q.ask1_price is None
-    # Safe reference data is preserved
-    assert q.reference_price == 22250.0
+    assert q.open_price is None
+    assert q.high_price is None
+    assert q.low_price is None
+    assert q.average_price is None
+    assert q.price_change is None
+    assert q.price_change_percent is None
+    assert q.trading_value is None
+    assert q.traded_quantity is None
+    assert q.bid2_price is None
+    assert q.ask2_price is None
+    assert q.source_timestamp is None
+    # Legacy cached reference data without an explicit session tag is not safe to
+    # reuse as today's band metadata.
+    assert q.reference_price is None
+
+
+@pytest.mark.asyncio
+async def test_same_reference_session_survives_redis_restore_while_old_trade_is_sanitized():
+    state = MarketState()
+    yesterday_ms = int((market_session.get_vn_now() - timedelta(days=1)).timestamp() * 1000)
+    reference_day = reference_session_date().isoformat()
+    cached = CanonicalQuote(
+        symbol="HPG",
+        instrument_type="STOCK",
+        last_price=22000.0,
+        bid1_price=21950.0,
+        reference_price=22100.0,
+        ceiling_price=23600.0,
+        floor_price=20600.0,
+        reference_session_date=reference_day,
+        reference_timestamp=yesterday_ms,
+        received_timestamp=yesterday_ms,
+    )
+    mgr = SubscriptionManager(
+        provider=MockProvider(), state=state, store=MockStore({"HPG": cached})
+    )
+
+    await mgr.hydrate_missing_market_state(["HPG"])
+    restored = state.get_quote("HPG")
+    assert restored is not None
+    assert restored.last_price is None
+    assert restored.bid1_price is None
+    assert restored.reference_price == 22100.0
+    assert restored.ceiling_price == 23600.0
+    assert restored.floor_price == 20600.0
+    assert restored.reference_session_date == reference_day
+
+
+@pytest.mark.asyncio
+async def test_redis_reference_fills_live_quote_without_overwriting_trade_or_book():
+    state = MarketState()
+    now_ms = int(market_session.get_vn_now().timestamp() * 1000)
+    reference_day = reference_session_date().isoformat()
+    state.apply_trade_event({"Ticker": "HPG", "Close": 22200.0})
+    state.apply_bidask_event({"Ticker": "HPG", "Best1Bid": 22150.0, "Best1Ask": 22250.0})
+    cached = CanonicalQuote(
+        symbol="HPG",
+        instrument_type="STOCK",
+        reference_price=22100.0,
+        ceiling_price=23600.0,
+        floor_price=20600.0,
+        reference_session_date=reference_day,
+        reference_timestamp=now_ms - 10_000,
+        received_timestamp=now_ms - 10_000,
+    )
+    mgr = SubscriptionManager(
+        provider=MockProvider(), state=state, store=MockStore({"HPG": cached})
+    )
+
+    await mgr.hydrate_missing_market_state(["HPG"])
+    merged = state.get_quote("HPG")
+    assert merged is not None
+    assert merged.last_price == 22200.0
+    assert merged.bid1_price == 22150.0
+    assert merged.ask1_price == 22250.0
+    assert merged.reference_price == 22100.0
+    assert merged.ceiling_price == 23600.0
+    assert merged.floor_price == 20600.0
 
 
 @pytest.mark.asyncio

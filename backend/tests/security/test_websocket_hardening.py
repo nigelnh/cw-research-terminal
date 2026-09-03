@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +16,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.core.config import settings
 from app.main import app
+from app.market_data.market_subscription_manager import subscription_manager
 from app.market_data.market_websocket import manager
 
 client = TestClient(app)
@@ -25,9 +27,11 @@ def _ws_baseline():
     # start from a clean connection ledger
     manager._active_connections.clear()
     manager._conn_by_ip.clear()
+    manager._client_subscriptions.clear()
     yield
     manager._active_connections.clear()
     manager._conn_by_ip.clear()
+    manager._client_subscriptions.clear()
 
 
 def _drain_status(ws):
@@ -42,6 +46,19 @@ def test_normal_subscribe_path_unchanged():
         ws.send_text(json.dumps({"type": "subscribe", "symbols": ["HPG", "CHPG2602"]}))
         ws.send_text(json.dumps({"type": "unsubscribe", "symbols": ["CHPG2602"]}))
     assert manager.active_count == 0  # cleanup released the slot
+
+
+def test_ping_returns_current_status_without_mutating_client_interest():
+    with client.websocket_connect("/ws/market") as ws:
+        _drain_status(ws)
+        before = manager.get_client_subscriptions(next(iter(manager._active_connections)))
+        ws.send_text(json.dumps({"type": "ping"}))
+        reply = json.loads(ws.receive_text())
+        assert reply["type"] == "status"
+        assert "feed_fresh" in reply
+        assert "market_session_date" in reply
+        after = manager.get_client_subscriptions(next(iter(manager._active_connections)))
+        assert after == before
 
 
 def test_public_realtime_kill_switch(monkeypatch):
@@ -76,13 +93,29 @@ def test_per_client_connection_cap(monkeypatch):
 
 def test_too_many_symbols_is_rejected_without_closing(monkeypatch):
     monkeypatch.setattr(settings, "WS_MAX_SYMBOLS_PER_CLIENT", 5)
-    with client.websocket_connect("/ws/market") as ws:
-        _drain_status(ws)
-        ws.send_text(json.dumps({"type": "subscribe", "symbols": [f"S{i}" for i in range(50)]}))
-        reply = json.loads(ws.receive_text())
-        assert reply["type"] == "error" and reply["error"] == "too_many_symbols"
-        # connection still usable
-        ws.send_text(json.dumps({"type": "subscribe", "symbols": ["HPG"]}))
+    eligible = {f"S{i}" for i in range(6)}
+    with patch.object(subscription_manager, "_server_universe_symbols", eligible):
+        with client.websocket_connect("/ws/market") as ws:
+            _drain_status(ws)
+            ws.send_text(json.dumps({"type": "subscribe", "symbols": sorted(eligible)}))
+            reply = json.loads(ws.receive_text())
+            assert reply["type"] == "error" and reply["error"] == "too_many_symbols"
+            # connection still usable
+            ws.send_text(json.dumps({"type": "subscribe", "symbols": ["S0"]}))
+
+
+def test_outside_universe_symbols_do_not_consume_client_interest_budget(monkeypatch):
+    monkeypatch.setattr(settings, "WS_MAX_SYMBOLS_PER_CLIENT", 1)
+    requested = ["HPG", *[f"X{i}" for i in range(50)]]
+    with patch.object(subscription_manager, "_server_universe_symbols", {"HPG"}):
+        with client.websocket_connect("/ws/market") as ws:
+            _drain_status(ws)
+            ws.send_text(json.dumps({"type": "subscribe", "symbols": requested}))
+            reply = json.loads(ws.receive_text())
+
+    assert reply["type"] == "subscription_ack"
+    assert reply["accepted_symbols"] == ["HPG"]
+    assert len(reply["outside_symbols"]) == 50
 
 
 def test_oversized_message_closes_connection(monkeypatch):

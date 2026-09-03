@@ -31,6 +31,13 @@ def test_csv_preserves_headers_values_and_locations():
     assert doc.sections[1][0] == 'row 2'
 
 
+def test_csv_field_above_parser_default_uses_extraction_limit(monkeypatch):
+    monkeypatch.setattr('app.ai.attachments.MAX_EXTRACTED_CHARS', 140_000)
+    doc = extract_document('large.csv', ('Value\n' + 'x' * 150_000).encode())
+    assert doc.characters == 140_000
+    assert any('140,000 characters' in warning for warning in doc.warnings)
+
+
 def test_xlsx_preserves_sheet_rows_and_does_not_execute_formulas():
     from openpyxl import Workbook
     book = Workbook()
@@ -105,9 +112,10 @@ def test_document_expansion_is_bounded(monkeypatch):
         extract_document('large.docx', data.getvalue())
 
 
-def test_upload_runs_real_parser_and_never_calls_ai(monkeypatch):
+def test_upload_runs_real_parser_and_never_calls_ai(monkeypatch, tmp_path):
     generate = AsyncMock(side_effect=AssertionError('must not send files to AI'))
     monkeypatch.setattr(openrouter_client, 'generate_chat', generate)
+    monkeypatch.chdir(tmp_path)
     response = client.post('/api/ai/files/extract', files=[('files', ('numbers.csv', b'Ticker,Value\nHPG,12345', 'text/csv'))])
     assert response.status_code == 200, response.text
     assert response.headers['cache-control'] == 'no-store'

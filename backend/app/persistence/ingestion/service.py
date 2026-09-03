@@ -230,12 +230,30 @@ class IngestionService:
     # ---- plan a single stream ----------------------------------- #
     async def _plan_stream(
         self, *, operation: str, instrument_id: int | None, tf: str, price_basis: str,
-        from_date: date | None, to_date: date | None, force: bool,
+        from_date: date | None, to_date: date | None, force: bool, include_forming: bool,
     ) -> BackfillPlan:
         today = date.today()
         if operation == "backfill":
             assert from_date is not None and to_date is not None
-            plan = plan_backfill_windows(from_date, to_date, today=today)
+            # A daily bar after the last completed exchange session cannot be canonical.
+            # Do not fetch a trailing holiday/current-session tail that ``map_history``
+            # would discard and that the resume cursor could never mark as covered.
+            effective_to = (
+                min(to_date, last_completed_session_date())
+                if tf == "1d" and not include_forming
+                else to_date
+            )
+            if effective_to < from_date:
+                return BackfillPlan(
+                    requested_start=from_date,
+                    requested_end=to_date,
+                    effective_start=from_date,
+                    effective_end=effective_to,
+                    chunks=(),
+                    lookback_clamped=False,
+                    clamp_note="requested range is after the last completed daily session",
+                )
+            plan = plan_backfill_windows(from_date, effective_to, today=today)
             if force or plan.is_empty or instrument_id is None:
                 return plan
             state = await self._get_state(instrument_id, tf, price_basis)
@@ -374,6 +392,7 @@ class IngestionService:
             plan = await self._plan_stream(
                 operation="backfill", instrument_id=instrument_id, tf=tf, price_basis=pb,
                 from_date=base_plan.effective_start, to_date=base_plan.effective_end, force=False,
+                include_forming=False,
             )
             if plan.is_empty:
                 outcome.status = "ALREADY_COVERED"
@@ -479,6 +498,7 @@ class IngestionService:
         plan = await self._plan_stream(
             operation=operation, instrument_id=instrument_id, tf=tf, price_basis=price_basis,
             from_date=from_date, to_date=to_date, force=(force or dry_run),
+            include_forming=include_forming,
         )
         outcome.lookback_clamped = plan.lookback_clamped
         outcome.clamp_note = plan.clamp_note

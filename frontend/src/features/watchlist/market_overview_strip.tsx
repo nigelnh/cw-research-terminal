@@ -1,5 +1,6 @@
 import { useMarketOverview, type IndexOverview, type VolumeLeader } from "@/data/query/use_market_overview";
 import { DASH, fmtPrice, fmtVol } from "@/components/common/grid_table";
+import { PolledRealtimeValue } from "@/components/common/realtime_value";
 
 const ORDER = ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"];
 const number = (value: number | null | undefined) => value == null ? DASH : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -38,17 +39,24 @@ function Sparkline({ values, direction }: { values: number[]; direction: number 
 
 function IndexCard({ item }: { item: IndexOverview }) {
   const prefix = item.change != null && item.change > 0 ? "+" : "";
+  const sessionKey = item.as_of?.slice(0, 10) ?? null;
   return <article className="index-card mono" aria-label={`${item.symbol} index overview`}>
     <Sparkline values={item.sparkline || []} direction={item.change} />
     <div className="index-card-main">
       <strong className="heading">{item.symbol}</strong>
-      <span style={{ color: tone(item.change) }}>{number(item.value)} <small>{prefix}{number(item.change)} ({prefix}{item.change_percent == null ? DASH : `${item.change_percent.toFixed(2)}%`})</small></span>
+      <span style={{ color: tone(item.change) }}>
+        <PolledRealtimeValue value={item.value} resetKey={sessionKey}>{number(item.value)}</PolledRealtimeValue>{" "}
+        <small>
+          <PolledRealtimeValue value={item.change} resetKey={sessionKey}>{prefix}{number(item.change)}</PolledRealtimeValue>{" "}(
+          <PolledRealtimeValue value={item.change_percent} resetKey={sessionKey}>{prefix}{item.change_percent == null ? DASH : `${item.change_percent.toFixed(2)}%`}</PolledRealtimeValue>)
+        </small>
+      </span>
     </div>
-    <div className="index-card-line"><span>VOL {compact(item.volume)}</span><span>VAL {compact(item.trading_value)}</span></div>
+    <div className="index-card-line"><span>VOL <PolledRealtimeValue value={item.volume} resetKey={sessionKey}>{compact(item.volume)}</PolledRealtimeValue></span><span>VAL <PolledRealtimeValue value={item.trading_value} resetKey={sessionKey}>{compact(item.trading_value)}</PolledRealtimeValue></span></div>
     <div className="index-card-breadth">
-      <span style={{ color: "var(--up)" }}><DirectionTriangle color="var(--up)" /> {number(item.advancing)} <small style={{ color: "var(--price-ceiling)" }}>({number(item.ceiling)})</small></span>
-      <span style={{ color: "var(--flat)" }}>― {number(item.unchanged)}</span>
-      <span style={{ color: "var(--down)" }}><DirectionTriangle down color="var(--down)" /> {number(item.declining)} <small style={{ color: "var(--price-floor)" }}>({number(item.floor)})</small></span>
+      <span style={{ color: "var(--up)" }}><DirectionTriangle color="var(--up)" /> <PolledRealtimeValue value={item.advancing} resetKey={sessionKey}>{number(item.advancing)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.ceiling} resetKey={sessionKey} style={{ color: "var(--price-ceiling)" }}>({number(item.ceiling)})</PolledRealtimeValue></span>
+      <span style={{ color: "var(--flat)" }}>― <PolledRealtimeValue value={item.unchanged} resetKey={sessionKey}>{number(item.unchanged)}</PolledRealtimeValue></span>
+      <span style={{ color: "var(--down)" }}><DirectionTriangle down color="var(--down)" /> <PolledRealtimeValue value={item.declining} resetKey={sessionKey}>{number(item.declining)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.floor} resetKey={sessionKey} style={{ color: "var(--price-floor)" }}>({number(item.floor)})</PolledRealtimeValue></span>
     </div>
   </article>;
 }
@@ -61,7 +69,7 @@ function LeaderTable({ title, rows }: { title: string; rows: VolumeLeader[] }) {
     <div className="leader-rows">
       {rows.length === 0 ? <div className="overview-unavailable">DATA UNAVAILABLE</div> : rows.map((row, index) => <div className="leader-row" key={row.symbol}>
         <i style={{ width: `${Math.max(3, row.volume / peak * 100)}%` }} />
-        <span>{index + 1}. <b style={{ color: marketTone(row.market_state) }}>{row.symbol}</b></span><span>{fmtVol(row.volume)}</span><span style={{ color: marketTone(row.market_state) }}>{fmtPrice(row.price)}</span>
+        <span>{index + 1}. <b style={{ color: marketTone(row.market_state) }}>{row.symbol}</b></span><span><PolledRealtimeValue value={row.volume} resetKey={row.as_of?.slice(0, 10)}>{fmtVol(row.volume)}</PolledRealtimeValue></span><span><PolledRealtimeValue value={row.price} resetKey={row.as_of?.slice(0, 10)} style={{ color: marketTone(row.market_state) }}>{fmtPrice(row.price)}</PolledRealtimeValue></span>
       </div>)}
     </div>
   </section>;

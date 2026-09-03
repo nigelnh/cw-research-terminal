@@ -176,5 +176,6 @@ describe("Grid Terminal — dashboard, panel & assistant UX", () => {
     expect(html).toContain("DASHBOARD");
     expect(html).toContain("RESEARCH");
     expect(html).toContain("CLOSED");
+    expect(html).toContain("CONNECTING");
   });
 });

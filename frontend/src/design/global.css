@@ -145,6 +145,30 @@ textarea::placeholder {
 .text-flat { color: var(--flat); }
 .text-destructive { color: var(--down); }
 
+/* Incremental market updates. Foreground continues to encode price-vs-reference. */
+.realtime-flash {
+  display: inline-block;
+  border-radius: 1px;
+  animation-duration: 600ms;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+.realtime-flash-up { animation-name: realtime-flash-up; }
+.realtime-flash-down { animation-name: realtime-flash-down; }
+@keyframes realtime-flash-up {
+  from { background-color: color-mix(in srgb, var(--up) 38%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--up) 18%, transparent); }
+  to { background-color: transparent; box-shadow: 0 0 0 2px transparent; }
+}
+@keyframes realtime-flash-down {
+  from { background-color: color-mix(in srgb, var(--down) 38%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--down) 18%, transparent); }
+  to { background-color: transparent; box-shadow: 0 0 0 2px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .realtime-flash { animation: none; box-shadow: none; }
+  .realtime-flash-up { background-color: color-mix(in srgb, var(--up) 38%, transparent); }
+  .realtime-flash-down { background-color: color-mix(in srgb, var(--down) 38%, transparent); }
+}
+
 .bg-background { background-color: var(--bg); }
 .bg-surface { background-color: var(--panel); }
 .bg-surface-hover { background-color: var(--panel-2); }
@@ -297,6 +321,7 @@ select:focus-visible,
 .watchlist-search-kind { text-align: right; color: var(--t-55); white-space: nowrap; }
 .watchlist-search-empty { padding: 18px 10px; text-align: center; color: var(--t-46); font-size: 10.5px; }
 .watchlist-row.is-search-match, .watchlist-row.is-selected { box-shadow: inset 3px 0 var(--accent); }
+.untracked-realtime-mark::after { content: "◇"; margin-left: 5px; color: var(--t-40); font-size: .82em; }
 .research-registry-grid { display: grid; grid-template-columns: minmax(720px, 1fr) 300px; gap: 16px; align-items: start; }
 .research-registry-panel, .research-stock-panel { min-width: 0; }
 .registry-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--border-strong); }

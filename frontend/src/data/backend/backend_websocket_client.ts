@@ -11,6 +11,7 @@ import {
   mapRawSnapshotToQuote,
   applyRawPatchToQuote,
 } from "./mappers";
+import { mergeRealtimePulses } from "./mappers/realtime_pulse";
 
 type GatewayStateHandler = (state: GatewayConnectionState) => void;
 type UpstreamFeedStateHandler = (state: UpstreamFeedState) => void;
@@ -37,6 +38,7 @@ export class BackendWebSocketClient {
   private maxReconnectDelay = 15000;
   private baseReconnectDelay = 1000;
   private reconnectTimer: any = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private isIntentionallyClosed = false;
 
   // In-memory canonical state cache
@@ -44,6 +46,10 @@ export class BackendWebSocketClient {
   private quotesMap = new Map<string, MarketQuote>();
   private pendingPatches = new Map<string, any[]>();
   private subscribedSymbols = new Set<string>();
+  private pulseReadySymbols = new Set<string>();
+  private realtimeUniverse: Set<string> | null = null;
+  private untrackedSymbols = new Set<string>();
+  private sessionBaselineKey = "";
 
   // Subscriptions & listeners
   private gatewayStateListeners = new Set<GatewayStateHandler>();
@@ -116,6 +122,18 @@ export class BackendWebSocketClient {
 
   public getSubscribedSymbols(): Set<string> {
     return new Set(this.subscribedSymbols);
+  }
+
+  public getRealtimeUniverse(): Set<string> | null {
+    return this.realtimeUniverse ? new Set(this.realtimeUniverse) : null;
+  }
+
+  public isRealtimeTracked(symbol: string): boolean {
+    const sym = symbol.toUpperCase();
+    if (this.untrackedSymbols.has(sym)) return false;
+    return this.realtimeUniverse
+      ? this.realtimeUniverse.has(sym)
+      : this.subscribedSymbols.has(sym);
   }
 
   public syncSubscriptions(symbols: string[]): void {
@@ -202,6 +220,28 @@ export class BackendWebSocketClient {
     this.storeListeners.forEach((fn) => fn());
   }
 
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WS_OPEN) {
+        this.stopHeartbeat();
+        return;
+      }
+      try {
+        this.ws.send(JSON.stringify({ type: "ping" }));
+      } catch {
+        this.stopHeartbeat();
+      }
+    }, 20_000);
+  }
+
   public onConnectionStateChange(listener: GatewayStateHandler): () => void {
     this.gatewayStateListeners.add(listener);
     listener(this.gatewayState);
@@ -268,6 +308,7 @@ export class BackendWebSocketClient {
       this.ws.onopen = () => {
         this.reconnectAttempts = 0;
         this.setGatewayState("CONNECTED");
+        this.startHeartbeat();
         // Upstream state remains UNKNOWN or CONNECTING until confirmed by status message or live ticks
         if (
           this.upstreamFeedState === "DISCONNECTED" ||
@@ -313,10 +354,12 @@ export class BackendWebSocketClient {
       };
 
       this.ws.onclose = () => {
+        this.stopHeartbeat();
         this.ws = null;
+        this.pulseReadySymbols.clear();
         if (!this.isIntentionallyClosed) {
-          this.setGatewayState("DISCONNECTED");
-          this.setUpstreamFeedState("UNKNOWN");
+          this.setGatewayState("RECONNECTING");
+          this.setUpstreamFeedState("RECONNECTING");
           this.scheduleReconnect();
         }
       };
@@ -349,6 +392,7 @@ export class BackendWebSocketClient {
 
   public disconnect(): void {
     this.isIntentionallyClosed = true;
+    this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -365,12 +409,12 @@ export class BackendWebSocketClient {
    * Evaluates if an incoming event is stale compared to the current in-memory quote.
    */
   private isEventStale(
-    existing: CoveredWarrant | undefined,
+    existingQuote: MarketQuote | undefined,
     incomingSourceTs?: number | null,
     incomingServerTs?: number | null,
   ): boolean {
-    if (!existing) return false;
-    const currentSourceTs = existing.quote.sourceTimestamp;
+    if (!existingQuote) return false;
+    const currentSourceTs = existingQuote.sourceTimestamp;
 
     // 1. Compare source timestamps if present
     if (incomingSourceTs && currentSourceTs) {
@@ -378,8 +422,8 @@ export class BackendWebSocketClient {
     }
 
     // 2. Fallback to server timestamps if source timestamps absent
-    if (incomingServerTs && existing.quote.exchangeTimestamp) {
-      return incomingServerTs < existing.quote.exchangeTimestamp;
+    if (incomingServerTs && existingQuote.exchangeTimestamp) {
+      return incomingServerTs < existingQuote.exchangeTimestamp;
     }
 
     return false;
@@ -401,6 +445,33 @@ export class BackendWebSocketClient {
   private routeIncomingMessage(msg: any): void {
     switch (msg.type) {
       case "status": {
+        const nextSessionKey = String(
+          msg.market_session_date ?? msg.session_date ?? msg.market_session ?? "",
+        );
+        if (
+          this.sessionBaselineKey &&
+          nextSessionKey &&
+          nextSessionKey !== this.sessionBaselineKey
+        ) {
+          this.pulseReadySymbols.clear();
+        }
+        if (nextSessionKey) this.sessionBaselineKey = nextSessionKey;
+
+        const rawUniverse =
+          msg.realtime_universe_symbols ??
+          msg.universe_symbols ??
+          msg.allowed_symbols;
+        if (Array.isArray(rawUniverse)) {
+          this.realtimeUniverse = new Set(
+            rawUniverse.map((value: unknown) => String(value).toUpperCase()),
+          );
+          this.untrackedSymbols = new Set(
+            [...this.subscribedSymbols].filter(
+              (symbol) => !this.realtimeUniverse!.has(symbol),
+            ),
+          );
+        }
+
         if (msg.market_session) {
           this.marketSession = String(msg.market_session);
           this.marketSessionActive = Boolean(msg.market_session_active);
@@ -414,14 +485,20 @@ export class BackendWebSocketClient {
 
         // Explicit upstream market feed status from backend gateway
         if (
+          msg.upstream_status === "RESTARTING" ||
+          msg.upstream_status === "RECONNECTING"
+        ) {
+          this.setUpstreamFeedState("RECONNECTING");
+        } else if (msg.feed_fresh === false && Boolean(msg.market_session_active)) {
+          this.setUpstreamFeedState("STALE");
+        } else if (
           msg.upstream_status === "LIVE" ||
-          msg.connected === true ||
+          (msg.connected === true && msg.feed_fresh !== false) ||
           (msg.gateway_connected && msg.market_session === "LUNCH_BREAK")
         ) {
           this.setUpstreamFeedState("CONNECTED");
         } else if (
           msg.upstream_status === "CONNECTING" ||
-          msg.upstream_status === "RESTARTING" ||
           msg.upstream_status === "READY"
         ) {
           this.setUpstreamFeedState("CONNECTING");
@@ -444,7 +521,6 @@ export class BackendWebSocketClient {
             ? msg.data
             : null;
         if (list) {
-          this.setUpstreamFeedState("CONNECTED");
           list.forEach((row: any) => {
             this.processSnapshotRow(row, msg.ts);
           });
@@ -455,7 +531,6 @@ export class BackendWebSocketClient {
       case "snapshot": {
         // Single symbol full snapshot
         if (msg.row) {
-          this.setUpstreamFeedState("CONNECTED");
           this.processSnapshotRow(msg.row, msg.ts);
         }
         break;
@@ -466,8 +541,6 @@ export class BackendWebSocketClient {
         const sym = String(msg.symbol || msg.patch?.Symbol || "").toUpperCase();
         if (!sym || !msg.patch) return;
 
-        this.setUpstreamFeedState("CONNECTED");
-
         const incomingSourceTs =
           msg.patch._ts_source ||
           msg.ts_origin ||
@@ -475,16 +548,30 @@ export class BackendWebSocketClient {
         const existingCw = this.warrantsMap.get(sym);
         const existingQuote = this.quotesMap.get(sym);
 
+        const patchSessionKey = String(
+          msg.patch._market_session_date ?? msg.patch.market_session_date ?? "",
+        );
+        if (
+          this.sessionBaselineKey &&
+          patchSessionKey &&
+          patchSessionKey !== this.sessionBaselineKey
+        ) {
+          this.pulseReadySymbols.clear();
+        }
+        if (patchSessionKey) this.sessionBaselineKey = patchSessionKey;
+
         // Stale tick rejection check
-        if (this.isEventStale(existingCw, incomingSourceTs, msg.ts)) {
+        if (this.isEventStale(existingQuote, incomingSourceTs, msg.ts)) {
           return;
         }
 
+        const emitPulses = this.pulseReadySymbols.has(sym);
         const updatedQuote = applyRawPatchToQuote(
           existingQuote,
           sym,
           msg.patch,
           incomingSourceTs,
+          { emitPulses },
         );
         this.quotesMap.set(sym, updatedQuote);
         this.quoteListeners.forEach((fn) => fn(updatedQuote));
@@ -512,10 +599,13 @@ export class BackendWebSocketClient {
             ivTrade: null,
             ivBid: null,
           };
-          const updatedCw = applyRawPatchToCoveredWarrant(baseCw, msg.patch);
+          const updatedCw = applyRawPatchToCoveredWarrant(baseCw, msg.patch, {
+            emitPulses,
+          });
           this.warrantsMap.set(sym, updatedCw);
           this.cwListeners.forEach((fn) => fn(updatedCw));
         }
+        this.pulseReadySymbols.add(sym);
         break;
       }
 
@@ -598,15 +688,57 @@ export class BackendWebSocketClient {
                   ? an.historicalVolatility
                   : existing.historicalVolatility,
           };
+          const analyticsFields = [
+            "ivBid",
+            "ivTrade",
+            "ivAsk",
+            "theoreticalPrice",
+            "delta",
+            "gamma",
+            "theta",
+            "vega",
+            "rho",
+            "moneynessRatio",
+            "historicalVolatility",
+          ];
+          updatedCw.realtimePulses = mergeRealtimePulses(
+            existing.realtimePulses,
+            existing as unknown as Record<string, number | null | undefined>,
+            updatedCw as unknown as Record<string, number | null | undefined>,
+            analyticsFields,
+            this.pulseReadySymbols.has(sym),
+          );
           this.warrantsMap.set(sym, updatedCw);
           this.cwListeners.forEach((fn) => fn(updatedCw));
+          this.pulseReadySymbols.add(sym);
+        }
+        break;
+      }
+
+      case "subscription_ack":
+      case "subscribed": {
+        const outside =
+          msg.outside_symbols ??
+          msg.unavailable_symbols ??
+          msg.outside_universe ??
+          msg.rejected_symbols ??
+          [];
+        if (Array.isArray(outside)) {
+          outside.forEach((value: unknown) =>
+            this.untrackedSymbols.add(String(value).toUpperCase()),
+          );
+        }
+        const accepted = msg.accepted_symbols ?? msg.symbols ?? [];
+        if (Array.isArray(accepted)) {
+          accepted.forEach((value: unknown) =>
+            this.untrackedSymbols.delete(String(value).toUpperCase()),
+          );
         }
         break;
       }
 
       case "index_update": {
         if (msg.data && typeof msg.data === "object") {
-          this.setUpstreamFeedState("CONNECTED");
           this.indexListeners.forEach((fn) => fn(msg.data));
         }
         break;
@@ -623,9 +755,9 @@ export class BackendWebSocketClient {
     const sym = String(row.Symbol).toUpperCase();
     const incomingSourceTs =
       row._ts_source || (row.ExchangeTime ? Number(row.ExchangeTime) : null);
-    const existing = this.warrantsMap.get(sym);
+    const existingQuote = this.quotesMap.get(sym);
 
-    if (this.isEventStale(existing, incomingSourceTs, serverTs)) {
+    if (this.isEventStale(existingQuote, incomingSourceTs, serverTs)) {
       return; // Drop stale snapshot
     }
 
@@ -643,7 +775,7 @@ export class BackendWebSocketClient {
       if (this.pendingPatches.has(sym)) {
         const patches = this.pendingPatches.get(sym)!;
         patches.forEach((p) => {
-          cw = applyRawPatchToCoveredWarrant(cw, p);
+          cw = applyRawPatchToCoveredWarrant(cw, p, { emitPulses: false });
         });
         this.pendingPatches.delete(sym);
       }
@@ -657,6 +789,7 @@ export class BackendWebSocketClient {
       this.quotesMap.set(sym, quote);
       this.quoteListeners.forEach((fn) => fn(quote));
     }
+    this.pulseReadySymbols.add(sym);
   }
 }
 

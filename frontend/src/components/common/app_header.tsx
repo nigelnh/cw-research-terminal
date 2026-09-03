@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/data/auth";
 import { SignInDialog } from "@/features/auth/sign_in_dialog";
+import type { GatewayConnectionState, UpstreamFeedState } from "@/data/providers";
 
 export type Tab = "dashboard" | "research" | "news";
 export interface GlobalSearchOption {
@@ -21,6 +22,8 @@ interface AppHeaderProps {
   filter: string;
   onFilterChange: (value: string) => void;
   marketSessionActive: boolean;
+  gatewayState?: GatewayConnectionState;
+  upstreamFeedState?: UpstreamFeedState;
   searchOptions?: GlobalSearchOption[];
   onJump?: (option: GlobalSearchOption) => void;
 }
@@ -191,6 +194,8 @@ export function AppHeader({
   filter,
   onFilterChange,
   marketSessionActive,
+  gatewayState = "CONNECTED",
+  upstreamFeedState = marketSessionActive ? "CONNECTED" : "UNKNOWN",
   searchOptions = [],
   onJump,
 }: AppHeaderProps) {
@@ -208,6 +213,21 @@ export function AppHeader({
   const jump = (option: GlobalSearchOption) => {
     setDraft(option.symbol); setSearchOpen(false); onJump?.(option);
   };
+  const sessionLabel = marketSessionActive ? "OPEN" : "CLOSED";
+  const feedLabel = gatewayState === "RECONNECTING" || upstreamFeedState === "RECONNECTING"
+      ? "RECONNECTING"
+      : upstreamFeedState === "STALE"
+        ? "STALE"
+        : gatewayState === "ERROR" || gatewayState === "DISCONNECTED" || upstreamFeedState === "DISCONNECTED" || upstreamFeedState === "ERROR"
+          ? "OFFLINE"
+          : upstreamFeedState === "CONNECTED"
+            ? marketSessionActive ? "LIVE" : "READY"
+            : "CONNECTING";
+  const feedTone = feedLabel === "LIVE"
+    ? "var(--up)"
+    : feedLabel === "STALE" || feedLabel === "RECONNECTING" || feedLabel === "CONNECTING"
+      ? "var(--flat)"
+      : "var(--t-46)";
 
   return (
     <header
@@ -286,7 +306,7 @@ export function AppHeader({
         }}
       >
         <HeaderClock />
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span aria-label={`Market session ${sessionLabel.toLowerCase()}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span
             style={{
               width: 6,
@@ -295,7 +315,11 @@ export function AppHeader({
             }}
             aria-hidden
           />
-          {marketSessionActive ? "LIVE" : "CLOSED"}
+          {sessionLabel}
+        </span>
+        <span aria-label={`Market feed ${feedLabel.toLowerCase()}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 6, height: 6, background: feedTone }} aria-hidden />
+          {feedLabel}
         </span>
         <SignInControl />
       </div>

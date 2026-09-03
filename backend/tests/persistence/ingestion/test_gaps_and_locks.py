@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.persistence.database import session_scope
+from app.persistence.ingestion.trading_calendar import last_completed_session_date
 from app.persistence.ingestion.gaps import detect_gaps, repair_gaps
 from app.persistence.ingestion.locks import stream_lock
 from app.persistence.models import MarketBar
@@ -152,7 +153,12 @@ async def test_overlapping_runs_one_is_locked_skipped_no_duplicate_data(engine, 
     assert "SUCCEEDED" in statuses or "PARTIAL" in statuses
 
     async with session_scope() as s:
-        weekdays = sum(1 for i in range((to - frm).days + 1) if (frm + timedelta(days=i)).weekday() < 5)
+        completed_to = min(to, last_completed_session_date())
+        weekdays = sum(
+            1
+            for i in range((completed_to - frm).days + 1)
+            if (frm + timedelta(days=i)).weekday() < 5
+        )
         n = (await s.execute(select(func.count()).select_from(MarketBar).where(MarketBar.instrument_id == iid))).scalar_one()
     assert n == weekdays                          # no duplicates
 
