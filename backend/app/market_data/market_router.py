@@ -37,6 +37,7 @@ async def market_health():
     """Sanitized operational health check for market data provider and warm cache."""
     health_data = subscription_manager.provider.get_health()
     store_health = await subscription_manager.store.health()
+    universe_health = subscription_manager.get_universe_health()
     sess_status = market_session.get_session_status().value
     sess_active = market_session.is_trading_active()
 
@@ -53,6 +54,14 @@ async def market_health():
         redis_enabled=bool(store_health.get("redis_enabled", False)),
         redis_connected=bool(store_health.get("redis_connected", False)),
         market_cache_available=bool(store_health.get("market_cache_available", False)),
+        market_cache_counters=store_health.get("counters", {}),
+        feed_fresh=bool(health_data.get("feed_fresh", False)),
+        last_trade_tick_at=health_data.get("last_trade_tick_at"),
+        last_book_tick_at=health_data.get("last_book_tick_at"),
+        last_tick_at=health_data.get("last_tick_at"),
+        signalr_decode_error_count=int(health_data.get("signalr_decode_error_count", 0)),
+        signalr_reconnect_count=int(health_data.get("reconnect_count", 0)),
+        realtime_universe=universe_health,
         market_session=sess_status,
         market_session_active=sess_active,
         quote_display_eligible=sess_active,
@@ -148,10 +157,15 @@ async def get_dashboard_rows(
     now = cal._as_vn(None)
     rows = await market_snapshot_resolver.resolve_rows(syms, now=now, diag=debug)
     tracked = set(subscription_manager.get_active_symbols())
+    in_server_universe = getattr(subscription_manager, "is_in_server_universe", None)
     wire_rows = []
     for r in rows:
         w = r.to_wire()
-        w["tracked_realtime"] = r.symbol in tracked
+        w["tracked_realtime"] = (
+            bool(in_server_universe(r.symbol))
+            if callable(in_server_universe)
+            else r.symbol in tracked
+        )
         wire_rows.append(w)
 
     return {
@@ -169,13 +183,63 @@ async def get_stock_profiles(symbols: str = Query(..., max_length=1000)):
     syms = sorted({s.strip().upper() for s in symbols.split(",") if s.strip()})
     if not syms or len(syms) > 60 or any(not re.fullmatch(r"[A-Z][A-Z0-9]{1,11}", s) for s in syms):
         raise HTTPException(status_code=400, detail="Provide between 1 and 60 valid stock symbols")
+    provider_rows = []
     try:
-        return {"items": await subscription_manager.provider.get_stock_profiles(syms)}
-    except NotImplementedError as exc:
-        raise HTTPException(status_code=501, detail=str(exc))
-    except Exception as exc:
-        logger.warning("Stock profiles unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail="Stock profiles are temporarily unavailable")
+        provider_rows = await subscription_manager.provider.get_stock_profiles(syms)
+    except Exception as exc:  # entitlement and provider failures both fall through to PostgreSQL
+        logger.warning("FiinQuant stock profiles unavailable; using persisted profiles: %s", exc)
+
+    persisted = {}
+    try:
+        from app.enrichment import repository as enrichment_repo
+        from app.persistence import database as persistence_db
+
+        if persistence_db.is_configured():
+            async with persistence_db.get_sessionmaker()() as session:
+                persisted = await enrichment_repo.get_company_profiles(session, syms)
+    except Exception as exc:  # noqa: BLE001 - each item still gets a truthful unavailable row
+        logger.warning("Persisted stock profile fallback unavailable: %s", exc)
+
+    provider_by_symbol = {
+        str(row.get("symbol", "")).strip().upper(): row
+        for row in provider_rows
+        if isinstance(row, dict) and row.get("symbol")
+    }
+    items = []
+    for symbol in syms:
+        upstream = provider_by_symbol.get(symbol, {})
+        fallback = persisted.get(symbol)
+        fallback_name = None
+        fallback_exchange = None
+        if fallback is not None:
+            fallback_name = fallback.en_name or fallback.vn_name
+            fallback_exchange = fallback.exchange
+        name = upstream.get("name") or fallback_name
+        short_name = upstream.get("short_name")
+        exchange = upstream.get("exchange") or fallback_exchange
+        used_provider = any(upstream.get(key) for key in ("name", "short_name", "exchange"))
+        used_fallback = fallback is not None and (
+            (not upstream.get("name") and bool(fallback_name))
+            or (not upstream.get("exchange") and bool(fallback_exchange))
+        )
+        sources = (["FIINQUANT"] if used_provider else []) + (
+            [str(fallback.source or "COMPANY_PROFILES").upper()] if used_fallback else []
+        )
+        populated = sum(value is not None for value in (name, short_name, exchange))
+        availability = (
+            "AVAILABLE" if name is not None and exchange is not None
+            else "PARTIAL" if populated
+            else "UNAVAILABLE"
+        )
+        items.append({
+            "symbol": symbol,
+            "name": name,
+            "short_name": short_name,
+            "exchange": str(exchange).upper() if exchange else None,
+            "source": "+".join(dict.fromkeys(sources)) or None,
+            "availability": availability,
+        })
+    return {"items": items}
 
 
 @market_router.get("/overview")
@@ -210,6 +274,7 @@ async def get_symbol_diagnostics(symbol: str):
         "provenance": {
             "quote": r.quote_prov.to_wire(),
             "book": r.book_prov.to_wire(),
+            "reference": r.reference_prov.to_wire(),
             **({"analytics": r.analytics_prov.to_wire()} if r.analytics_prov else {}),
         },
     }
