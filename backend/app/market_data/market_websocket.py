@@ -1,9 +1,10 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from collections import defaultdict, deque
-from typing import Set, Dict, Any
+from typing import Set, Dict, Any, Iterable
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.config import settings
@@ -21,6 +22,7 @@ _CLOSE_POLICY = 1008        # policy violation (caps, rate)
 _CLOSE_TOO_BIG = 1009       # message too large
 _CLOSE_GOING_AWAY = 1001    # idle timeout
 _CLOSE_TRY_LATER = 1013     # feature disabled / try again later
+_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9]{1,11}$")
 
 
 class MarketConnectionManager:
@@ -31,12 +33,78 @@ class MarketConnectionManager:
     def __init__(self):
         self._active_connections: Set[WebSocket] = set()
         self._conn_by_ip: Dict[str, int] = defaultdict(int)
+        self._client_subscriptions: Dict[WebSocket, Set[str]] = {}
         subscription_manager.register_patch_listener(self.broadcast_patch_threadsafe)
         subscription_manager.register_status_listener(self.broadcast_status)
 
     @property
     def active_count(self) -> int:
         return len(self._active_connections)
+
+    def get_client_subscriptions(self, websocket: WebSocket) -> Set[str]:
+        return set(self._client_subscriptions.get(websocket, set()))
+
+    def update_client_subscriptions(
+        self,
+        websocket: WebSocket,
+        symbols: Iterable[str],
+        *,
+        replace: bool,
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Update one socket's interests without touching the provider universe.
+
+        Returns ``(accepted_from_request, unavailable, current_interests)``.
+        """
+        requested = list(dict.fromkeys(symbols))
+        eligible = set(subscription_manager.get_server_universe_symbols())
+        accepted = [symbol for symbol in requested if symbol in eligible]
+        unavailable = [symbol for symbol in requested if symbol not in eligible]
+        current = set() if replace else set(self._client_subscriptions.get(websocket, set()))
+        current.update(accepted)
+        self._client_subscriptions[websocket] = current
+        return accepted, unavailable, sorted(current)
+
+    def remove_client_subscriptions(
+        self, websocket: WebSocket, symbols: Iterable[str]
+    ) -> list[str]:
+        current = set(self._client_subscriptions.get(websocket, set()))
+        current.difference_update(symbols)
+        self._client_subscriptions[websocket] = current
+        return sorted(current)
+
+    def _status_message(self, websocket: WebSocket | None = None) -> Dict[str, Any]:
+        health = subscription_manager.provider.get_health()
+        up_status = health.get("upstream_status", "UNKNOWN")
+        feed_fresh = health.get("feed_fresh")
+        sess_status = market_session.get_session_status().value
+        sess_active = market_session.is_trading_active()
+        session_date = market_session.get_vn_now().date().isoformat()
+        universe_health = subscription_manager.get_universe_health()
+        return {
+            "type": "status",
+            "gateway_connected": True,
+            "authenticated": bool(health.get("authenticated", False)),
+            "upstream_status": up_status,
+            "connected": up_status == "LIVE" and feed_fresh is not False,
+            "feed_fresh": feed_fresh,
+            "last_trade_tick_at": health.get("last_trade_tick_at"),
+            "last_book_tick_at": health.get("last_book_tick_at"),
+            "last_tick_at": health.get("last_tick_at"),
+            "signalr_decode_error_count": health.get("signalr_decode_error_count", 0),
+            "signalr_reconnect_count": health.get("reconnect_count", 0),
+            "market_session": sess_status,
+            "market_session_date": session_date,
+            "market_session_active": sess_active,
+            "cache_available": subscription_manager.store.is_available(),
+            "quote_display_eligible": sess_active,
+            "subscription_count": len(subscription_manager.get_active_symbols()),
+            "realtime_universe": universe_health,
+            "realtime_universe_symbols": subscription_manager.get_server_universe_symbols(),
+            "client_subscription_count": (
+                len(self._client_subscriptions.get(websocket, set())) if websocket is not None else None
+            ),
+            "message": f"Connected to CW Research Gateway ({up_status}, Session: {sess_status})",
+        }
 
     async def connect(self, websocket: WebSocket) -> bool:
         """Apply the connection caps, then accept. Returns False (handshake refused) when a
@@ -60,6 +128,7 @@ class MarketConnectionManager:
 
         await websocket.accept()
         self._active_connections.add(websocket)
+        self._client_subscriptions[websocket] = set()
         self._conn_by_ip[ip] += 1
         websocket.scope["_cw_client_ip"] = ip
         security_counters.set_gauge("ws.active_connections", len(self._active_connections))
@@ -69,27 +138,8 @@ class MarketConnectionManager:
             client_str, len(self._active_connections),
         )
 
-        # Emit hardened initial gateway, session, and upstream status frame
-        health = subscription_manager.provider.get_health()
-        up_status = health.get("upstream_status", "UNKNOWN")
-        is_live = (up_status == "LIVE")
-        sess_status = market_session.get_session_status().value
-        sess_active = market_session.is_trading_active()
-
-        status_msg = {
-            "type": "status",
-            "gateway_connected": True,
-            "authenticated": bool(health.get("authenticated", False)),
-            "upstream_status": up_status,
-            "connected": is_live,  # Backward-compatible boolean: True ONLY when genuinely LIVE
-            "market_session": sess_status,
-            "market_session_active": sess_active,
-            "cache_available": subscription_manager.store.is_available(),
-            "quote_display_eligible": sess_active,
-            "subscription_count": len(subscription_manager.get_active_symbols()),
-            "message": f"Connected to CW Research Gateway ({up_status}, Session: {sess_status})",
-        }
-        await websocket.send_text(json.dumps(status_msg))
+        # Emit hardened initial gateway, session, and upstream status frame.
+        await websocket.send_text(json.dumps(self._status_message(websocket)))
         return True
 
     async def _safe_send(self, ws: WebSocket, payload_str: str) -> None:
@@ -104,35 +154,15 @@ class MarketConnectionManager:
         if not self._active_connections:
             return
 
-        health = subscription_manager.provider.get_health()
-        up_status = health.get("upstream_status", "UNKNOWN")
-        is_live = (up_status == "LIVE")
-        sess_status = market_session.get_session_status().value
-        sess_active = market_session.is_trading_active()
-
-        status_msg = {
-            "type": "status",
-            "gateway_connected": True,
-            "authenticated": bool(health.get("authenticated", False)),
-            "upstream_status": up_status,
-            "connected": is_live,
-            "market_session": sess_status,
-            "market_session_active": sess_active,
-            "cache_available": subscription_manager.store.is_available(),
-            "quote_display_eligible": sess_active,
-            "subscription_count": len(subscription_manager.get_active_symbols()),
-            "message": f"Connected to CW Research Gateway ({up_status}, Session: {sess_status})",
-        }
-        payload_str = json.dumps(status_msg)
         for ws in list(self._active_connections):
             try:
-                import asyncio
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._safe_send(ws, payload_str))
+                loop.create_task(self._safe_send(ws, json.dumps(self._status_message(ws))))
             except Exception:
                 self.disconnect(ws)
 
     def disconnect(self, websocket: WebSocket) -> None:
+        self._client_subscriptions.pop(websocket, None)
         if websocket in self._active_connections:
             self._active_connections.remove(websocket)
             ip = websocket.scope.get("_cw_client_ip") if hasattr(websocket, "scope") else None
@@ -158,30 +188,36 @@ class MarketConnectionManager:
         if not self._active_connections:
             return
 
+        symbol = str(patch_msg.get("symbol") or patch_msg.get("patch", {}).get("Symbol") or "").upper()
+        if not symbol:
+            return
         payload_str = json.dumps(patch_msg)
         for ws in list(self._active_connections):
+            if symbol not in self._client_subscriptions.get(ws, set()):
+                continue
             try:
-                import asyncio
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._safe_send(ws, payload_str))
             except Exception:
                 self.disconnect(ws)
 
     def broadcast_analytics_patch(self, symbol: str, analytics_obj: Any) -> None:
-        """Broadcasts normalized analytics patch for a Covered Warrant to all connected WebSocket clients."""
+        """Send normalized analytics only to clients interested in this warrant."""
         if not self._active_connections:
             return
 
+        clean_symbol = symbol.upper()
         analytics_dict = analytics_obj.model_dump(by_alias=True) if hasattr(analytics_obj, "model_dump") else dict(analytics_obj)
         analytics_msg = {
             "type": "analytics_patch",
-            "symbol": symbol.upper(),
+            "symbol": clean_symbol,
             "analytics": analytics_dict,
         }
         payload_str = json.dumps(analytics_msg)
         for ws in list(self._active_connections):
+            if clean_symbol not in self._client_subscriptions.get(ws, set()):
+                continue
             try:
-                import asyncio
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._safe_send(ws, payload_str))
             except Exception:
@@ -216,11 +252,28 @@ class _MessageRate:
         return True
 
 
+def _normalize_client_symbols(values: list[Any]) -> tuple[list[str], list[str]]:
+    """Strictly normalize client symbols without coercing arbitrary JSON values."""
+    clean: list[str] = []
+    invalid: list[str] = []
+    seen: set[str] = set()
+    for index, value in enumerate(values):
+        if not isinstance(value, str):
+            invalid.append(f"item[{index}]")
+            continue
+        symbol = value.strip().upper()
+        if not _SYMBOL_RE.fullmatch(symbol):
+            invalid.append(symbol or f"item[{index}]")
+            continue
+        if symbol not in seen:
+            clean.append(symbol)
+            seen.add(symbol)
+    return clean, invalid
+
+
 @ws_router.websocket("/ws/market")
 async def websocket_market_endpoint(websocket: WebSocket):
-    from app.instruments.instrument_registry import instrument_registry
     from app.quant.quant_engine import live_quant_engine
-    from app.quant.historical_volatility_service import historical_volatility_service
 
     if not await manager.connect(websocket):
         return
@@ -266,43 +319,60 @@ async def websocket_market_endpoint(websocket: WebSocket):
 
             if not isinstance(symbols, list):
                 continue
-            if len(symbols) > settings.WS_MAX_SYMBOLS_PER_CLIENT:
-                security_counters.incr("ws.rejected_symbol_count_total")
-                await manager.send_personal_message(
-                    {
-                        "type": "error",
-                        "error": "too_many_symbols",
-                        "detail": f"At most {settings.WS_MAX_SYMBOLS_PER_CLIENT} symbols per subscribe frame.",
-                    },
-                    websocket,
-                )
-                continue
-
             if msg_type == "subscribe":
-                clean_syms = [str(s).upper() for s in symbols if str(s).strip()][
-                    : settings.WS_MAX_SYMBOLS_PER_CLIENT
-                ]
-                replace = bool(msg.get("replace", True))
-                if replace:
-                    success, reason = subscription_manager.set_exact_subscriptions(clean_syms)
-                else:
-                    success, reason = subscription_manager.subscribe(clean_syms)
+                clean_syms, invalid_syms = _normalize_client_symbols(symbols)
+                replace = msg.get("replace", True)
+                if not isinstance(replace, bool):
+                    await manager.send_personal_message(
+                        {
+                            "type": "error",
+                            "error": "invalid_replace",
+                            "detail": "subscribe.replace must be a boolean",
+                        },
+                        websocket,
+                    )
+                    continue
 
-                # Register watched CWs with quant engine
-                for sym in clean_syms:
-                    if sym.startswith("C") and len(sym) == 8:
-                        spec = await instrument_registry.get_instrument(sym)
-                        if spec and spec.underlying_symbol:
-                            live_quant_engine.register_watched_cw(sym, spec.underlying_symbol)
-                            # Ensure this underlying has a historical-volatility estimate.
-                            # Fire-and-forget, single-flighted, never blocks this handler.
-                            historical_volatility_service.ensure(spec.underlying_symbol)
+                eligible = set(subscription_manager.get_server_universe_symbols())
+                requested_eligible = set(clean_syms).intersection(eligible)
+                proposed = requested_eligible if replace else (
+                    manager.get_client_subscriptions(websocket).union(requested_eligible)
+                )
+                if len(proposed) > settings.WS_MAX_SYMBOLS_PER_CLIENT:
+                    security_counters.incr("ws.rejected_symbol_count_total")
+                    await manager.send_personal_message(
+                        {
+                            "type": "error",
+                            "error": "too_many_symbols",
+                            "detail": f"At most {settings.WS_MAX_SYMBOLS_PER_CLIENT} active interests per client.",
+                        },
+                        websocket,
+                    )
+                    continue
+
+                accepted, unavailable, current = manager.update_client_subscriptions(
+                    websocket, clean_syms, replace=replace
+                )
+                acknowledgement = {
+                    "type": "subscription_ack",
+                    "operation": "subscribe",
+                    "replace": replace,
+                    "requested_symbols": clean_syms,
+                    "accepted_symbols": accepted,
+                    "outside_symbols": unavailable,
+                    "rejected_symbols": invalid_syms,
+                    "subscribed_symbols": current,
+                    "unavailable_symbols": unavailable,
+                    "invalid_symbols": invalid_syms,
+                    "realtime_universe_size": len(eligible),
+                }
 
                 # Centralized hydration of missing symbols from warm cache with session freshness checks
-                await subscription_manager.hydrate_missing_market_state(clean_syms)
+                if accepted:
+                    await subscription_manager.hydrate_missing_market_state(accepted)
 
                 # Deliver immediate snapshot for cached symbols
-                cached_rows = market_state.get_snapshots(clean_syms)
+                cached_rows = market_state.get_snapshots(accepted)
                 if cached_rows:
                     import time
                     now_ms = int(time.time() * 1000)
@@ -314,7 +384,7 @@ async def websocket_market_endpoint(websocket: WebSocket):
                     await manager.send_personal_message(snap_msg, websocket)
 
                 # Deliver cached analytics for watched CWs
-                for sym in clean_syms:
+                for sym in accepted:
                     cached_analytics = live_quant_engine.get_analytics(sym)
                     if cached_analytics and cached_analytics.is_available:
                         an_dict = cached_analytics.model_dump(by_alias=True)
@@ -325,11 +395,39 @@ async def websocket_market_endpoint(websocket: WebSocket):
                         }
                         await manager.send_personal_message(an_msg, websocket)
 
+                # Preserve the legacy snapshot-first ordering while still giving every
+                # request an explicit result.  Clients with no cached data receive this
+                # acknowledgement immediately.
+                await manager.send_personal_message(acknowledgement, websocket)
+
+            elif msg_type == "ping":
+                # Keep the browser delivery socket alive and refresh the session/feed
+                # state. This never changes per-client interests or the upstream universe.
+                await manager.send_personal_message(
+                    manager._status_message(websocket), websocket
+                )
+
             elif msg_type == "unsubscribe":
-                clean_syms = [str(s).upper() for s in symbols if str(s).strip()]
-                subscription_manager.unsubscribe(clean_syms)
-                for sym in clean_syms:
-                    live_quant_engine.unregister_watched_cw(sym)
+                clean_syms, invalid_syms = _normalize_client_symbols(symbols)
+                before = manager.get_client_subscriptions(websocket)
+                removed = sorted(before.intersection(clean_syms))
+                current = manager.remove_client_subscriptions(websocket, clean_syms)
+                eligible = set(subscription_manager.get_server_universe_symbols())
+                await manager.send_personal_message(
+                    {
+                        "type": "subscription_ack",
+                        "operation": "unsubscribe",
+                        "requested_symbols": clean_syms,
+                        "removed_symbols": removed,
+                        "subscribed_symbols": current,
+                        "outside_symbols": [sym for sym in clean_syms if sym not in eligible],
+                        "rejected_symbols": invalid_syms,
+                        "unavailable_symbols": [sym for sym in clean_syms if sym not in eligible],
+                        "invalid_symbols": invalid_syms,
+                        "realtime_universe_size": len(eligible),
+                    },
+                    websocket,
+                )
 
     except WebSocketDisconnect:
         pass

@@ -48,6 +48,27 @@ class RedisMarketStateStore(MarketStateStore):
         self._flush_event: Optional[asyncio.Event] = None
         self._flush_task: Optional[asyncio.Task] = None
         self._is_closing = False
+        self._connectivity_failure_seen = False
+        # Process-lifetime, payload-free counters. Successes count quotes;
+        # errors count failed operations (or malformed restore entries).
+        self._counters: Dict[str, int] = {
+            "writes_succeeded": 0,
+            "quotes_restored": 0,
+            "write_errors": 0,
+            "restore_errors": 0,
+            "connection_restores": 0,
+        }
+
+    def _mark_connected(self) -> None:
+        """Record recovery once for each observed connectivity failure."""
+        if not self._connected and self._connectivity_failure_seen:
+            self._counters["connection_restores"] += 1
+        self._connected = True
+        self._connectivity_failure_seen = False
+
+    def _mark_disconnected(self) -> None:
+        self._connected = False
+        self._connectivity_failure_seen = True
 
     def _get_key(self, symbol: str) -> str:
         return f"{self.KEY_PREFIX}:{symbol.strip().upper()}"
@@ -75,17 +96,17 @@ class RedisMarketStateStore(MarketStateStore):
                 )
             except Exception as e:
                 logger.warning(f"Failed to create Redis client for URL {self._redis_url}: {e}")
-                self._connected = False
+                self._mark_disconnected()
                 return
 
         # Verify connectivity via ping
         try:
             await self._client.ping()
-            self._connected = True
+            self._mark_connected()
             logger.info(f"Connected to Redis Warm Market State Cache ({self._redis_url})")
         except (RedisError, OSError, Exception) as ping_err:
             logger.warning(f"Redis warm cache unavailable on startup ({ping_err}). Running in LIVE_WITHOUT_WARM_CACHE mode.")
-            self._connected = False
+            self._mark_disconnected()
 
         # Start coalesced background flush worker
         if self._flush_task is None or self._flush_task.done():
@@ -123,7 +144,11 @@ class RedisMarketStateStore(MarketStateStore):
     def _is_quote_fresh(self, quote: CanonicalQuote) -> bool:
         """Validates that a quote's timestamp is within the acceptable max_staleness_seconds window."""
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        reference_ts = quote.received_timestamp or quote.source_timestamp
+        reference_ts = max(
+            quote.received_timestamp or 0,
+            quote.source_timestamp or 0,
+            quote.reference_timestamp or 0,
+        )
         if not reference_ts:
             return False
         age_seconds = (now_ms - reference_ts) / 1000.0
@@ -136,23 +161,31 @@ class RedisMarketStateStore(MarketStateStore):
         key = self._get_key(symbol)
         try:
             raw = await self._client.get(key)
-            if not raw:
-                return None
+        except Exception as e:
+            self._counters["restore_errors"] += 1
+            logger.warning(f"Error loading {symbol} from Redis warm cache: {e}")
+            self._mark_disconnected()
+            return None
+
+        if not raw:
+            return None
+        try:
             quote = CanonicalQuote.model_validate_json(raw)
             if not self._is_quote_fresh(quote):
                 logger.debug(f"Cached quote for {symbol} rejected due to staleness.")
                 return None
+            self._counters["quotes_restored"] += 1
             return quote
         except Exception as e:
-            logger.warning(f"Error loading {symbol} from Redis warm cache: {e}")
-            self._connected = False
+            self._counters["restore_errors"] += 1
+            logger.warning(f"Malformed quote JSON in Redis for {symbol}: {e}")
             return None
 
     async def load_many(self, symbols: List[str]) -> Dict[str, CanonicalQuote]:
         if not self.is_available() or not symbols or self._client is None:
             return {}
 
-        clean_syms = [s.strip().upper() for s in symbols if s.strip()]
+        clean_syms = list(dict.fromkeys(s.strip().upper() for s in symbols if s.strip()))
         keys = [self._get_key(s) for s in clean_syms]
 
         try:
@@ -167,11 +200,16 @@ class RedisMarketStateStore(MarketStateStore):
                         else:
                             logger.debug(f"Cached quote for {sym} rejected due to staleness.")
                     except Exception as parse_err:
+                        self._counters["restore_errors"] += 1
                         logger.warning(f"Malformed quote JSON in Redis for {sym}: {parse_err}")
+            # Count returned symbols rather than Redis rows so duplicate inputs are
+            # not reported as multiple restores.
+            self._counters["quotes_restored"] += len(loaded)
             return loaded
         except Exception as e:
+            self._counters["restore_errors"] += 1
             logger.warning(f"Error loading symbols {clean_syms} from Redis: {e}")
-            self._connected = False
+            self._mark_disconnected()
             return {}
 
     async def save(self, symbol: str, quote: CanonicalQuote) -> None:
@@ -181,25 +219,43 @@ class RedisMarketStateStore(MarketStateStore):
         key = self._get_key(symbol)
         try:
             raw_json = quote.model_dump_json()
-            await self._client.set(key, raw_json, ex=self._ttl_seconds)
         except Exception as e:
+            self._counters["write_errors"] += 1
+            logger.warning(f"Failed to serialize {symbol} for Redis warm cache: {e}")
+            return
+
+        try:
+            await self._client.set(key, raw_json, ex=self._ttl_seconds)
+            self._counters["writes_succeeded"] += 1
+        except Exception as e:
+            self._counters["write_errors"] += 1
             logger.warning(f"Failed to save {symbol} to Redis warm cache: {e}")
-            self._connected = False
+            self._mark_disconnected()
 
     async def save_many(self, quotes: Dict[str, CanonicalQuote]) -> None:
         if not self.is_available() or not quotes or self._client is None:
             return
 
         try:
+            serialized = [
+                (self._get_key(sym), quote.model_dump_json())
+                for sym, quote in quotes.items()
+            ]
+        except Exception as e:
+            self._counters["write_errors"] += 1
+            logger.warning(f"Failed to serialize Redis batch of {len(quotes)} quotes: {e}")
+            return
+
+        try:
             pipe = self._client.pipeline()
-            for sym, quote in quotes.items():
-                key = self._get_key(sym)
-                raw_json = quote.model_dump_json()
+            for key, raw_json in serialized:
                 pipe.set(key, raw_json, ex=self._ttl_seconds)
             await pipe.execute()
+            self._counters["writes_succeeded"] += len(quotes)
         except Exception as e:
+            self._counters["write_errors"] += 1
             logger.warning(f"Failed to save batch of {len(quotes)} quotes to Redis: {e}")
-            self._connected = False
+            self._mark_disconnected()
 
     def enqueue_save(self, symbol: str, quote: CanonicalQuote) -> None:
         """Buffers quote for asynchronous batch writing without blocking."""
@@ -244,10 +300,10 @@ class RedisMarketStateStore(MarketStateStore):
                     # Periodically attempt reconnect health check
                     try:
                         await self._client.ping()
-                        self._connected = True
+                        self._mark_connected()
                         logger.info("Redis warm cache connection restored.")
                     except Exception:
-                        self._connected = False
+                        self._mark_disconnected()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -264,16 +320,16 @@ class RedisMarketStateStore(MarketStateStore):
             logger.warning(f"Failed to delete {symbol} from Redis: {e}")
 
     async def health(self) -> Dict[str, Any]:
-        """Sanitized observability health diagnostics."""
+        """Sanitized diagnostics with a copy of process-lifetime counters."""
         connected = False
         if self._enabled and self._client:
             try:
                 await self._client.ping()
                 connected = True
-                self._connected = True
+                self._mark_connected()
             except Exception:
                 connected = False
-                self._connected = False
+                self._mark_disconnected()
 
         return {
             "redis_enabled": self._enabled,
@@ -283,4 +339,5 @@ class RedisMarketStateStore(MarketStateStore):
             "ttl_seconds": self._ttl_seconds,
             "max_staleness_seconds": self._max_staleness_seconds,
             "pending_write_buffer_size": len(self._write_buffer),
+            "counters": dict(self._counters),
         }

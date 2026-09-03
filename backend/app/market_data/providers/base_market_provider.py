@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import date
 from typing import List, Dict, Any, Callable, Optional
 from app.market_data.market_schemas import HistoricalBar
 
@@ -64,3 +65,13 @@ class MarketDataProvider(ABC):
     async def get_stock_profiles(self, symbols: List[str]) -> List[Dict[str, Any]]:
         """Read company names and exchanges without streaming subscriptions."""
         raise NotImplementedError("stock profiles are not supported by this provider")
+
+    async def get_session_reference_data(
+        self, symbols: List[str], session_date: date
+    ) -> Dict[str, Dict[str, Any]]:
+        """Return raw-unit previous close and exchange bands for one session.
+
+        This is deliberately separate from the streaming subscription interface: many
+        vendor L1 feeds omit static reference/ceiling/floor fields from incremental events.
+        """
+        raise NotImplementedError("session reference data is not supported by this provider")
