@@ -45,6 +45,7 @@ export function useResearchMarket() {
     isDemo: false,
     warrants: ws.getAllCoveredWarrants(),
     quotes: ws.getAllQuotes(),
+    isRealtimeTracked: (symbol: string) => ws.isRealtimeTracked(symbol),
     getWarrant: (symbol: string) => ws.getCoveredWarrant(symbol.toUpperCase()),
     getQuote: (symbol: string) => ws.getQuote(symbol.toUpperCase()),
   };

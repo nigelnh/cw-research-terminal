@@ -129,8 +129,10 @@ export function MarketExplorer() {
     const realtimeStatusLabel =
       connectionState === "DISCONNECTED" || connectionState === "ERROR"
         ? "Backend offline"
-        : connectionState === "RECONNECTING"
+        : connectionState === "RECONNECTING" || upstreamFeedState === "RECONNECTING"
         ? "Reconnecting feed"
+        : upstreamFeedState === "STALE"
+        ? "Stale feed"
         : marketSession === "LUNCH_BREAK"
         ? "Lunch break"
         : marketSession === "CLOSED_PRE_OPEN" ||
@@ -195,6 +197,8 @@ export function MarketExplorer() {
         filter={filter}
         onFilterChange={(v) => setFilter(v, "replace")}
         marketSessionActive={marketSessionActive}
+        gatewayState={connectionState}
+        upstreamFeedState={upstreamFeedState}
         searchOptions={globalSearchOptions}
         onJump={(option) => {
           setTabParam(option.destination, "push");
