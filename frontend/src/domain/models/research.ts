@@ -43,7 +43,7 @@ export interface ResearchFeedItem {
   /** false = a category/verb classification, not a rendered translation — see original. */
   title_en_exact: boolean;
   category_en: string;
-  /** original Vietnamese, verbatim — provenance, shown in the expanded detail only. */
+  /** original Vietnamese, verbatim — provenance, shown inline when it differs. */
   title: string;
   summary: string | null;
   category: string | null;

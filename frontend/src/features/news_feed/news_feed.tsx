@@ -126,32 +126,28 @@ function NewsFilterDropdown({
 
 function FeedRow({
   item,
-  expanded,
-  onToggle,
   onSelectSymbol,
+  highlighted,
 }: {
   item: ResearchFeedItem;
-  expanded: boolean;
-  onToggle: () => void;
   onSelectSymbol?: (s: string) => void;
+  highlighted: boolean;
 }) {
   const isEvent = item.content_type === "company_event";
   const hasOriginal = item.title && item.title !== item.title_en;
+  const category = item.category_en && (item.category_en !== item.category || item.source_language !== "vi") ? item.category_en : null;
   return (
-    <>
       <tr
-        tabIndex={0}
-        onClick={onToggle}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onToggle())}
+        className={`news-row${highlighted ? " is-search-match" : ""}`}
+        data-symbol={item.symbol ?? undefined}
         style={{
-          cursor: "pointer",
-          height: 27,
-          background: expanded ? "var(--panel-3)" : "transparent",
+          background: highlighted ? "var(--panel-3)" : "transparent",
           borderBottom: "1px solid var(--border-row)",
+          verticalAlign: "top",
         }}
       >
-        <td style={{ ...TD, color: "var(--t-50)", whiteSpace: "nowrap" }}>{fmtTime(item.published_at)}</td>
-        <td style={{ ...TD, whiteSpace: "nowrap" }}>
+        <td style={{ ...TD, paddingTop: 8, color: "var(--t-50)", whiteSpace: "nowrap" }}>{fmtTime(item.published_at)}</td>
+        <td style={{ ...TD, paddingTop: 8, whiteSpace: "nowrap" }}>
           {item.symbol ? (
             <button
               type="button"
@@ -167,22 +163,25 @@ function FeedRow({
             <span style={{ color: "var(--t-42)" }}>{DASH}</span>
           )}
         </td>
-        <td style={{ ...TD, whiteSpace: "nowrap", color: isEvent ? "var(--accent-violet)" : "var(--t-55)" }}>
+        <td style={{ ...TD, paddingTop: 8, whiteSpace: "nowrap", color: isEvent ? "var(--accent-violet)" : "var(--t-55)" }}>
           {isEvent ? "EVENT" : "DISCLOSURE"}
         </td>
-        <td style={{ ...TD, color: "var(--t-85)" }}>
-          {item.title_en}
+        <td style={{ ...TD, paddingTop: 7, paddingBottom: 8, color: "var(--t-85)", whiteSpace: "normal", lineHeight: 1.45 }}>
+          <div style={{ fontWeight: 500 }}>{item.title_en}</div>
           {!item.title_en_exact && (
             <span
               title="Classified from the disclosure category — see the original Vietnamese title below"
               style={{ marginLeft: 6, color: "var(--t-42)", fontSize: 10 }}
             >
-              ~
+              Classified headline
             </span>
           )}
+          {category && <div style={{ marginTop: 2, color: "var(--t-50)", fontSize: 10 }}>{category}</div>}
+          {item.summary && <div style={{ marginTop: 4, color: "var(--t-70)" }}>{item.summary}</div>}
+          {hasOriginal && <div style={{ marginTop: 4, color: "var(--t-55)", fontSize: 10.5 }}><span style={{ color: "var(--t-42)" }}>Original (Vietnamese): </span>{item.title}</div>}
         </td>
-        <td style={{ ...TD, whiteSpace: "nowrap", color: "var(--t-50)" }}>{item.source}</td>
-        <td style={{ ...TD, textAlign: "center" }}>
+        <td style={{ ...TD, paddingTop: 8, whiteSpace: "nowrap", color: "var(--t-50)" }}>{item.source}</td>
+        <td style={{ ...TD, paddingTop: 8, textAlign: "center" }}>
           {item.source_url ? (
             <a
               href={item.source_url}
@@ -199,47 +198,6 @@ function FeedRow({
           )}
         </td>
       </tr>
-      {expanded && (
-        <tr style={{ background: "var(--panel-2)", borderBottom: "1px solid var(--border-row)" }}>
-          <td colSpan={6} style={{ padding: "10px 14px 12px" }}>
-            <div style={{ fontSize: 12, color: "var(--t-85)", lineHeight: 1.5, maxWidth: 820, fontWeight: 500 }}>
-              {item.title_en}
-            </div>
-            <div style={{ marginTop: 3, fontSize: 10.5, color: "var(--t-50)" }}>
-              {item.category_en}
-              {!item.title_en_exact && " · headline classified from category, not a translation"}
-            </div>
-            {item.summary && (
-              <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--t-70)", lineHeight: 1.55, maxWidth: 820 }}>
-                {item.summary}
-                <span style={{ marginLeft: 6, color: "var(--t-42)", fontSize: 10 }}>(original Vietnamese)</span>
-              </div>
-            )}
-            <div style={{ marginTop: 10, display: "flex", gap: 14, fontSize: 10, color: "var(--t-46)", flexWrap: "wrap" }}>
-              <span>SOURCE {item.source}</span>
-              <span>ORIGINAL LANGUAGE {(item.source_language || "vi").toUpperCase()}</span>
-              {item.source_url && (
-                <a
-                  href={item.source_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  style={{ color: "var(--accent)" }}
-                >
-                  OFFICIAL SOURCE ↗
-                </a>
-              )}
-            </div>
-            {hasOriginal && (
-              <div style={{ marginTop: 8, fontSize: 11, color: "var(--t-55)", lineHeight: 1.5, maxWidth: 820 }}>
-                <span style={{ color: "var(--t-42)", fontSize: 10 }}>Original (Vietnamese): </span>
-                {item.title}
-              </div>
-            )}
-          </td>
-        </tr>
-      )}
-    </>
   );
 }
 
@@ -248,7 +206,6 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
   const query = term || undefined;
 
   const [nf, setNf] = useState<NewsFilterState>(EMPTY_NEWS_FILTER);
-  const [openId, setOpenId] = useState<string | null>(null);
 
   // A global text search spans the feed even when an instrument panel is open.
   const symbol = query ? undefined : selectedSymbol ?? undefined;
@@ -290,7 +247,7 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
   const subtitle = useMemo(() => {
     if (symbol) return `feed for ${symbol}`;
     if (query) return `search · “${query}”`;
-    return "HOSE disclosures & structured company events";
+    return "HOSE disclosures & company events";
   }, [symbol, query]);
 
   return (
@@ -305,15 +262,12 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
           <NewsFilterDropdown symbolOptions={symbolOptions} value={nf} onChange={setNf} />
         </span>
       </div>
-      <p style={{ fontSize: 11, color: "var(--t-46)", marginBottom: 14 }}>
-        {isLoading
-          ? "Loading…"
-          : isError
-          ? "feed unavailable"
-          : `${items.length}${hasNextPage ? "+" : ""} item${items.length === 1 ? "" : "s"} · shown near the stated date — timing only, not causation`}
-      </p>
+      {!isLoading && !isError && <p style={{ fontSize: 11, color: "var(--t-46)", marginBottom: 14 }}>
+        {`${items.length}${hasNextPage ? "+" : ""} item${items.length === 1 ? "" : "s"} · shown near the stated date — timing only, not causation`}
+      </p>}
 
       <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+        <colgroup><col style={{ width: 96 }} /><col style={{ width: 72 }} /><col style={{ width: 96 }} /><col /><col style={{ width: 90 }} /><col style={{ width: 40 }} /></colgroup>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
             <th style={TH}>PUBLISH DATE</th>
@@ -357,9 +311,8 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
               <FeedRow
                 key={item.id}
                 item={item}
-                expanded={openId === item.id}
-                onToggle={() => setOpenId((cur) => (cur === item.id ? null : item.id))}
                 onSelectSymbol={(s) => onSelectSymbol?.(s)}
+                highlighted={!!item.symbol && (item.symbol === selectedSymbol || item.symbol.toUpperCase() === term.toUpperCase())}
               />
             ))
           )}

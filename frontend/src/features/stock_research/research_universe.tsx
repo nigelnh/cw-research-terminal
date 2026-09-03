@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useWatchlist } from "@/data/watchlist";
 import { useActiveWarrants } from "@/data/query";
-import { EMPTY_FILTER, RegistryFilter, isFilterActive, rowMatchesFilter, type FilterState } from "@/components/common/registry_filter";
+import { EMPTY_FILTER, RegistryFilter, rowMatchesFilter, type FilterState } from "@/components/common/registry_filter";
 import { DASH, DismissCell, HiddenNote, dteDisplay, dteNumber, fmtPrice, fmtRatio, useHiddenRows } from "@/components/common/grid_table";
 import { MarketOverviewStrip } from "@/features/watchlist/market_overview_strip";
 import { useStockProfiles } from "@/data/query/use_stock_profiles";
@@ -52,11 +52,11 @@ export function ResearchUniverse({ selectedSymbol = null, onSelectSymbol, filter
   const hiddenRows = useHiddenRows();
   const stockHidden = useHiddenRows();
   const term = filter.trim().toUpperCase().replace(/^\//, "").trim();
-  const browseAll = term.length > 0 || symbolSearch.length > 0 || isFilterActive(filterState);
   const active = useActiveWarrants({ status: "ACTIVE" });
   // Metadata only: suggestions can find discovered symbols without adding quote subscriptions.
   const discovered = useActiveWarrants({ status: "ALL" });
-  const { instruments, isLoading, isError } = browseAll ? discovered : active;
+  // Search never swaps the visible ACTIVE registry for the much larger discovered corpus.
+  const { instruments, isLoading, isError } = active;
   const searchable = discovered.instruments.length ? discovered.instruments : active.instruments;
   const underlyingOptions = useMemo(() => [...new Set(searchable.map(c => c.underlyingSymbol).filter((v): v is string => !!v))].sort(), [searchable]);
   const issuerOptions = useMemo(() => [...new Set(searchable.map(c => c.issuer).filter((v): v is string => !!v))].sort(), [searchable]);
