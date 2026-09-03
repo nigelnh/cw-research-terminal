@@ -22,6 +22,7 @@ from app.market_data.market_websocket import ws_router
 from app.market_data.market_subscription_manager import subscription_manager
 from app.instruments.instrument_router import instruments_router
 from app.instruments.instrument_registry import instrument_registry
+from app.instruments.research_universe import resolve_default_research_universe
 from app.quant.quant_router import quant_router
 from app.enrichment.router import research_router
 from app.me import me_router
@@ -98,6 +99,23 @@ async def lifespan(app: FastAPI):
         await instrument_registry.initialize()
     except Exception as e:
         logger.warning(f"Instrument registry initialization warning: {e}")
+
+    # Resolve the product-owned 3-stock/27-CW realtime universe once at startup.
+    # Invalid lifecycle/metadata entries are withheld without replacement; the app
+    # continues with an explicit DEGRADED completeness report.
+    realtime_universe = await resolve_default_research_universe(instrument_registry)
+    configured, universe_message = subscription_manager.configure_server_universe(realtime_universe)
+    universe_health = subscription_manager.get_universe_health()
+    if configured and universe_health.get("complete"):
+        logger.info("Realtime universe ready: %d/%d symbols.", len(realtime_universe.items), realtime_universe.expected_size)
+    else:
+        logger.warning(
+            "Realtime universe DEGRADED: %s (%d/%d eligible; issues=%s)",
+            universe_message,
+            len(realtime_universe.items),
+            realtime_universe.expected_size,
+            universe_health.get("issues", []),
+        )
 
     # Durable historical persistence (PostgreSQL). OFF unless DATABASE_ENABLED. Storage
     # foundation only - the realtime path and the public historical API do NOT depend on
@@ -207,6 +225,16 @@ async def lifespan(app: FastAPI):
             f"Historical volatility warm-up incomplete (non-fatal): {e.__class__.__name__}: {e}"
         )
 
+    # Quant analytics follows the same server-owned universe.  Browser unsubscribe or
+    # disconnect events only change delivery interests and cannot disable shared work.
+    for item in realtime_universe.items:
+        if item.get("instrument_type") != "CW":
+            continue
+        symbol = str(item["symbol"])
+        underlying = str(item.get("underlying_symbol") or "")
+        if underlying:
+            live_quant_engine.register_watched_cw(symbol, underlying)
+
     def _hv_refresh_symbols() -> list[str]:
         # Re-warm the startup universe plus anything ensure() has since pulled in.
         seen = set(_startup_underlyings) | set(historical_volatility_service.cached_underlyings())
@@ -306,6 +334,7 @@ async def root_health():
     from app.market_data.market_session import market_session
     sess_status = market_session.get_session_status().value
     sess_active = market_session.is_trading_active()
+    realtime_universe_health = subscription_manager.get_universe_health()
 
     def _cal_confidence() -> str:
         from app.market_data import trading_calendar as _c
@@ -322,12 +351,20 @@ async def root_health():
         "ai_enabled": settings.AI_ENABLED,
         "market_provider": health_data.get("provider", "unknown"),
         "market_upstream_status": health_data.get("upstream_status", "UNKNOWN"),
+        "feed_fresh": health_data.get("feed_fresh", False),
+        "last_trade_tick_at": health_data.get("last_trade_tick_at"),
+        "last_book_tick_at": health_data.get("last_book_tick_at"),
+        "last_tick_at": health_data.get("last_tick_at"),
+        "signalr_decode_error_count": health_data.get("signalr_decode_error_count", 0),
+        "signalr_reconnect_count": health_data.get("reconnect_count", 0),
         "market_session": sess_status,
         "market_session_active": sess_active,
         "quote_display_eligible": sess_active,
         "redis_enabled": store_health.get("redis_enabled", False),
         "redis_connected": store_health.get("redis_connected", False),
         "market_cache_available": store_health.get("market_cache_available", False),
+        "market_cache_counters": store_health.get("counters", {}),
+        "realtime_universe": realtime_universe_health,
         "quant_scheduler": live_quant_engine.stats(),
         "database": await persistence_db.health(),
         "history_reads": history_read_service.health(),
