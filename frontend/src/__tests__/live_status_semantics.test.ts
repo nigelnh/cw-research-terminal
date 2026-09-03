@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { BackendWebSocketClient } from "../data/backend/backend_websocket_client";
 import { BackendMarketDataProvider } from "../data/backend/backend_market_data_provider";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
+import { AppHeader } from "../components/common/app_header";
 
 describe("Live Status Semantics & Two-State Tracking", () => {
   it("1. Tracks gateway and upstream feed states independently", () => {
@@ -43,7 +46,7 @@ describe("Live Status Semantics & Two-State Tracking", () => {
     expect(feedStates).toContain("CONNECTED");
   });
 
-  it("4. Infers upstream feed is CONNECTED when receiving valid snapshots or ticks", () => {
+  it("4. Does not infer a live upstream feed from a cached snapshot", () => {
     const client = new BackendWebSocketClient("ws://localhost:8787");
     expect(client.getUpstreamFeedState()).toBe("UNKNOWN");
 
@@ -53,7 +56,7 @@ describe("Live Status Semantics & Two-State Tracking", () => {
       ts: Date.now(),
     });
 
-    expect(client.getUpstreamFeedState()).toBe("CONNECTED");
+    expect(client.getUpstreamFeedState()).toBe("UNKNOWN");
   });
 
   it("5. Resets upstream feed state to UNKNOWN when gateway disconnects", () => {
@@ -101,5 +104,63 @@ describe("Live Status Semantics & Two-State Tracking", () => {
     expect(client.getMarketSession()).toBe("LUNCH_BREAK");
     expect(client.isMarketSessionActive()).toBe(false);
     expect(client.getUpstreamFeedState()).toBe("CONNECTED");
+  });
+
+  it("8. Preserves explicit reconnecting state while the feed is not fresh", () => {
+    const client = new BackendWebSocketClient("ws://localhost:8787");
+
+    client.handleIncomingMessage({
+      type: "status",
+      upstream_status: "RECONNECTING",
+      feed_fresh: false,
+      market_session: "MORNING_SESSION",
+      market_session_active: true,
+    });
+
+    expect(client.getUpstreamFeedState()).toBe("RECONNECTING");
+  });
+
+  it("9. Does not infer a live feed from a legacy index snapshot", () => {
+    const client = new BackendWebSocketClient("ws://localhost:8787");
+
+    client.handleIncomingMessage({
+      type: "index_update",
+      data: { symbol: "VNINDEX", value: 1832.12 },
+    });
+
+    expect(client.getUpstreamFeedState()).toBe("UNKNOWN");
+  });
+
+  it("10. Does not let a data patch override backend feed health", () => {
+    const client = new BackendWebSocketClient("ws://localhost:8787");
+    client.handleIncomingMessage({
+      type: "status",
+      upstream_status: "RECONNECTING",
+      feed_fresh: false,
+      market_session_active: true,
+    });
+
+    client.handleIncomingMessage({
+      type: "patch",
+      symbol: "HPG",
+      patch: { Traded: 22.1, _market_session_date: "2026-09-03" },
+    });
+
+    expect(client.getUpstreamFeedState()).toBe("RECONNECTING");
+  });
+
+  it("11. Renders market-session and feed state independently", () => {
+    const html = renderToStaticMarkup(createElement(AppHeader, {
+      activeTab: "dashboard",
+      onTabChange: () => undefined,
+      filter: "",
+      onFilterChange: () => undefined,
+      marketSessionActive: false,
+      gatewayState: "RECONNECTING",
+      upstreamFeedState: "RECONNECTING",
+    }));
+
+    expect(html).toContain("CLOSED");
+    expect(html).toContain("RECONNECTING");
   });
 });

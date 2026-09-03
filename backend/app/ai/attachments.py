@@ -7,7 +7,8 @@ import json
 import re
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+from threading import Lock
 
 from fastapi import HTTPException
 
@@ -16,6 +17,8 @@ MAX_FILE_BYTES = 20 * 1024 * 1024  # combined, per request
 MAX_EXTRACTED_CHARS = 200_000
 MAX_ZIP_BYTES = 40 * 1024 * 1024
 SUPPORTED_EXTENSIONS = {'.pdf', '.txt', '.md', '.csv', '.tsv', '.json', '.xlsx', '.docx'}
+_CSV_LIMIT_LOCK = Lock()
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -34,7 +37,9 @@ class Document:
             return False
         remaining = MAX_EXTRACTED_CHARS - self.characters
         if len(text) > remaining:
-            self.warn('Extraction limited to 200,000 characters; some content was omitted.')
+            self.warn(
+                f'Extraction limited to {MAX_EXTRACTED_CHARS:,} characters; some content was omitted.'
+            )
         text = text[:remaining]
         for offset in range(0, len(text), 1000):
             self.sections.append((location, text[offset:offset + 1000]))
@@ -137,14 +142,27 @@ def extract_document(filename: str, data: bytes) -> Document:
             if '\x00' in text:
                 reject(f'{doc.name}: binary content is not a supported text document.')
             if extension in ('.csv', '.tsv'):
-                reader = csv.reader(io.StringIO(text), delimiter='\t' if extension == '.tsv' else ',')
-                header = ''
-                for number, row in enumerate(reader, 1):
-                    line = ' | '.join(row)
-                    if number == 1:
-                        header = line[:800]
-                    if not doc.add(f'row {number}', f'Columns: {header}\n{line}' if number > 1 else line):
-                        break
+                # ``csv`` defaults to a 128 KiB field limit, which is lower than our
+                # documented 200,000-character extraction limit. Allow the bounded upload
+                # to parse, then let ``Document.add`` apply the common output cap.
+                with _CSV_LIMIT_LOCK:
+                    previous_field_limit = csv.field_size_limit()
+                    csv.field_size_limit(max(previous_field_limit, len(text)))
+                    try:
+                        reader = csv.reader(
+                            io.StringIO(text), delimiter='\t' if extension == '.tsv' else ','
+                        )
+                        header = ''
+                        for number, row in enumerate(reader, 1):
+                            line = ' | '.join(row)
+                            if number == 1:
+                                header = line[:800]
+                            if not doc.add(
+                                f'row {number}', f'Columns: {header}\n{line}' if number > 1 else line
+                            ):
+                                break
+                    finally:
+                        csv.field_size_limit(previous_field_limit)
             else:
                 if extension == '.json':
                     text = json.dumps(json.loads(text), ensure_ascii=False, indent=2)
@@ -167,6 +185,10 @@ async def extract_in_worker(filename: str, data: bytes) -> Document:
         sys.executable, '-m', 'app.ai.attachment_worker', safe_name(filename),
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
+        # The API may be launched (and the test suite may be invoked) from the
+        # repository root. Run the module from the backend package root so the
+        # disposable worker does not depend on the parent's current directory.
+        cwd=_BACKEND_ROOT,
     )
     try:
         output, _ = await asyncio.wait_for(process.communicate(data), timeout=20)

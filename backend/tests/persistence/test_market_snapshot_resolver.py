@@ -88,6 +88,67 @@ async def test_live_wins_during_active_session(resolver):
     assert r.is_realtime_eligible is True
 
 
+async def test_live_row_keeps_session_bands_and_exposes_reference_provenance(resolver):
+    ts = int(_ACTIVE_NOW.timestamp() * 1000)
+    market_state.restore_quote(CanonicalQuote(
+        symbol="HPG", instrument_type="STOCK", last_price=30000.0,
+        bid1_price=29900.0, ask1_price=30100.0,
+        received_timestamp=ts, source_timestamp=ts,
+    ))
+    market_state.apply_reference_metadata(
+        "HPG", session_date=_ACTIVE_NOW.date().isoformat(), reference_price=29800.0,
+        ceiling_price=31850.0, floor_price=27750.0, observed_timestamp=ts,
+    )
+
+    r = (await resolver.resolve_rows(["HPG"], now=_ACTIVE_NOW))[0]
+    wire = r.to_wire()
+
+    assert wire["Ref"] == 29.8
+    assert wire["Ceil"] == 31.85
+    assert wire["Floor"] == 27.75
+    assert wire["provenance"]["reference"]["source"] == "SESSION_REFERENCE"
+    assert wire["displayState"] == "LIVE"
+
+
+async def test_live_row_backfills_only_reference_from_previous_close(resolver, sessionmaker_):
+    await _seed_bars(sessionmaker_, "HPG", {_THU: 29800.0})
+    ts = int(_ACTIVE_NOW.timestamp() * 1000)
+    market_state.restore_quote(CanonicalQuote(
+        symbol="HPG", instrument_type="STOCK", last_price=30000.0,
+        bid1_price=29900.0, ask1_price=30100.0,
+        received_timestamp=ts, source_timestamp=ts,
+    ))
+
+    r = (await resolver.resolve_rows(["HPG"], now=_ACTIVE_NOW))[0]
+
+    assert r.values["last_price"] == 30000.0
+    assert r.values["reference_price"] == 29800.0
+    assert r.values["ceiling_price"] is None
+    assert r.values["floor_price"] is None
+    assert r.reference_prov.source.value == "PRIOR_CLOSE"
+
+
+async def test_live_row_preserves_partial_current_bands_while_backfilling_reference(
+    resolver, sessionmaker_
+):
+    await _seed_bars(sessionmaker_, "HPG", {_THU: 29800.0})
+    ts = int(_ACTIVE_NOW.timestamp() * 1000)
+    market_state.restore_quote(CanonicalQuote(
+        symbol="HPG", instrument_type="STOCK", last_price=30000.0,
+        ceiling_price=31850.0, floor_price=None,
+        reference_session_date=_ACTIVE_NOW.date().isoformat(),
+        reference_timestamp=ts, received_timestamp=ts, source_timestamp=ts,
+    ))
+
+    r = (await resolver.resolve_rows(["HPG"], now=_ACTIVE_NOW))[0]
+
+    assert r.values["reference_price"] == 29800.0
+    assert r.values["ceiling_price"] == 31850.0
+    assert r.values["floor_price"] is None
+    assert r.values["last_price"] == 30000.0
+    assert r.reference_prov.source.value == "PRIOR_CLOSE"
+
+
 async def test_snapshot_wins_when_market_closed(resolver, sessionmaker_):
     await _put_snapshot(
         sessionmaker_, symbol="HPG", session_date=_FRI,
@@ -115,6 +176,28 @@ async def test_eod_bars_when_no_snapshot(resolver, sessionmaker_):
     assert r.values.get("bid1_price") is None
     assert r.book_prov.state.value == "UNAVAILABLE"
     assert r.to_wire()["Bid1_Prc"] is None
+
+
+@pytest.mark.parametrize("snapshot_session", [_THU, _FRI])
+async def test_daily_bars_fill_snapshot_fields_that_are_present_but_null(
+    resolver, sessionmaker_, snapshot_session
+):
+    await _seed_bars(sessionmaker_, "VHM", {_THU: 40000.0, _FRI: 41000.0})
+    await _put_snapshot(
+        sessionmaker_, symbol="VHM", session_date=snapshot_session,
+        captured_at=datetime(2026, 8, 27, 15, 2, tzinfo=_VN),
+        source="SESSION_CLOSE", quality="FINAL", instrument_type="STOCK",
+        reference_price=None, last_price=40500.0, open_price=None,
+    )
+
+    r = (await resolver.resolve_rows(["VHM"], now=_SAT_NOW))[0]
+
+    # The persisted observed trade wins; missing fields are truly assigned from bars.
+    assert r.values["last_price"] == 40500.0
+    assert r.values["open_price"] == 41000.0
+    assert r.values["reference_price"] == 40000.0
+    assert r.values["price_change"] == 500.0
+    assert r.values["price_change_percent"] == 0.0125
 
 
 async def test_no_trade_this_session_preserves_older_date(resolver, sessionmaker_):
