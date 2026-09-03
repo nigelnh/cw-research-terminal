@@ -50,6 +50,7 @@ import {
   calculateNormalizedRelative,
 } from "@/domain/historical/technical_overlays";
 import { RotateCcw } from "lucide-react";
+import { RealtimeValue } from "./realtime_value";
 
 /** Initial px between bars; the visible-range call below recomputes it to frame N bars. */
 const BAR_SPACING = 12;
@@ -166,6 +167,8 @@ export function TradingChart({
       changePercent: chgPct,
     };
   }, [hoveredReadout, latestBar, mode, underlyingSymbol, symbol, interval]);
+  const activeLiveQuote = mode === "UNDERLYING" ? underlyingLiveQuote : liveQuote;
+  const livePulses = hoveredReadout ? undefined : activeLiveQuote?.realtimePulses;
 
   const formatVnd = (val: number | null | undefined): string => {
     if (val === null || val === undefined || isNaN(val)) return "—";
@@ -479,10 +482,10 @@ export function TradingChart({
               style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--muted-foreground)", fontSize: "10.5px" }}
               className="tnum"
             >
-              <span>O <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.open)}</strong></span>
-              <span>H <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.high)}</strong></span>
-              <span>L <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.low)}</strong></span>
-              <span>C <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.close)}</strong></span>
+              <span>O <RealtimeValue as="strong" style={{ color: "var(--foreground)" }} pulse={livePulses?.openPrice}>{formatVnd(activeReadout.open)}</RealtimeValue></span>
+              <span>H <RealtimeValue as="strong" style={{ color: "var(--foreground)" }} pulse={livePulses?.highPrice}>{formatVnd(activeReadout.high)}</RealtimeValue></span>
+              <span>L <RealtimeValue as="strong" style={{ color: "var(--foreground)" }} pulse={livePulses?.lowPrice}>{formatVnd(activeReadout.low)}</RealtimeValue></span>
+              <span>C <RealtimeValue as="strong" style={{ color: "var(--foreground)" }} pulse={livePulses?.lastPrice}>{formatVnd(activeReadout.close)}</RealtimeValue></span>
               {activeReadout.change !== null && activeReadout.changePercent !== null && (
                 <span
                   title="Bar change: close − open"
@@ -495,15 +498,19 @@ export function TradingChart({
                         : "var(--subtle-foreground)",
                   }}
                 >
-                  {activeReadout.change > 0 ? "+" : ""}
-                  {formatVnd(activeReadout.change)} (
-                  {activeReadout.changePercent > 0 ? "+" : ""}
-                  {(activeReadout.changePercent * 100).toFixed(2)}%)
+                  <RealtimeValue pulse={livePulses?.priceChange}>
+                    {activeReadout.change > 0 ? "+" : ""}
+                    {formatVnd(activeReadout.change)}
+                  </RealtimeValue>{" "}(
+                  <RealtimeValue pulse={livePulses?.priceChangePercent}>
+                    {activeReadout.changePercent > 0 ? "+" : ""}
+                    {(activeReadout.changePercent * 100).toFixed(2)}%
+                  </RealtimeValue>)
                 </span>
               )}
 
               {activeReadout.volume !== null && (
-                <span>V <strong style={{ color: "var(--foreground)" }}>{formatVol(activeReadout.volume)}</strong></span>
+                <span>V <RealtimeValue as="strong" style={{ color: "var(--foreground)" }} pulse={livePulses?.totalVolume}>{formatVol(activeReadout.volume)}</RealtimeValue></span>
               )}
             </div>
           )}

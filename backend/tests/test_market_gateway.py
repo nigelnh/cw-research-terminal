@@ -179,6 +179,11 @@ def test_market_rest_health_zero_credentials():
     data = response.json()
     assert data["status"] == "ok"
     assert "max_subscriptions" in data
+    assert "feed_fresh" in data
+    assert "signalr_decode_error_count" in data
+    assert "signalr_reconnect_count" in data
+    assert "market_cache_counters" in data
+    assert "realtime_universe" in data
     # Verify no secret keywords exist in health payload
     assert "password" not in json.dumps(data).lower()
     assert "token" not in json.dumps(data).lower()
@@ -256,4 +261,3 @@ async def test_websocket_manager_safe_send_prunes_dead_sockets():
     await manager._safe_send(dead_ws, json.dumps({"type": "test"}))
 
     assert dead_ws not in manager._active_connections
-

@@ -88,45 +88,10 @@ async def get_default_universe():
     quant analytics. Each item is re-resolved against the live registry so a symbol whose
     verification later regresses is dropped rather than shown stale.
     """
-    import json
-    from pathlib import Path
+    from app.instruments.research_universe import resolve_default_research_universe
 
-    from app.instruments.instrument_schemas import MetadataVerificationStatus
-    from app.instruments.providers.canonical_provider import get_vietnam_today
-
-    raw = json.loads((Path(__file__).parent / "data" / "default_research_universe.json").read_text())
-    if not instrument_registry._is_initialized:
-        await instrument_registry.initialize()
-
-    today = get_vietnam_today()
-    resolved: list[dict] = []
-    for item in raw.get("items", []):
-        sym = str(item.get("symbol", "")).strip().upper()
-        if not sym:
-            continue
-        entry = {"symbol": sym, "instrument_type": item.get("instrument_type", "STOCK")}
-        if entry["instrument_type"] == "CW":
-            spec = await instrument_registry.get_instrument(sym)
-            if (spec is None
-                or spec.status != InstrumentLifecycleStatus.ACTIVE
-                or spec.metadata_verification != MetadataVerificationStatus.VERIFIED_CURRENT
-                or (spec.last_trading_date and spec.last_trading_date < today)):
-                continue  # Do not seed expired, stopped-trading or unverified contracts.
-            entry.update(
-                underlying_symbol=spec.underlying_symbol,
-                issuer=spec.issuer,
-                strike_price=spec.effective_strike,
-                exercise_ratio=spec.effective_ratio,
-                maturity_date=spec.maturity_date,
-                last_trading_date=spec.last_trading_date,
-                metadata_verification=spec.metadata_verification.value,
-                data_quality=spec.data_quality.value if spec.data_quality else None,
-            )
-        else:
-            entry["underlying_symbol"] = item.get("underlying_symbol")
-        resolved.append(entry)
-
-    return {"known_through": raw.get("known_through"), "items": resolved}
+    universe = await resolve_default_research_universe(instrument_registry)
+    return {"known_through": universe.known_through, "items": list(universe.items)}
 
 
 @instruments_router.get("/metrics/coverage", response_model=CoverageMetrics)

@@ -32,6 +32,18 @@ export const QUOTE_COLUMNS = [
   { key: "issuer", label: "ISSUER" },
 ] as const;
 export type QuoteColumnKey = (typeof QUOTE_COLUMNS)[number]["key"];
+export const QUOTE_COLUMN_PULSE_FIELD: Partial<Record<QuoteColumnKey, string>> = {
+  bid: "bidPrice",
+  ask: "askPrice",
+  last: "lastPrice",
+  tradingValue: "tradingValue",
+  change: "priceChange",
+  chgPct: "priceChangePercent",
+  vol: "totalVolume",
+  ivBid: "ivBid",
+  ivTrade: "ivTrade",
+  ivAsk: "ivAsk",
+};
 export const QUOTE_COLUMN_HINTS: Partial<Record<QuoteColumnKey, string>> = {
   tradingValue: "Session traded value (VND)",
   lastTradingDate: "Last trading date (YYYY-MM-DD)",
@@ -46,6 +58,7 @@ export interface QuoteTableValues {
   ask: number | null;
   last: number | null;
   tradingValue: number | null;
+  change?: number | null;
   chgPct: number | null;
   vol: number | null;
   strike: number | null;
@@ -84,8 +97,11 @@ export function quoteCell(
         color: key === "ivTrade" ? "var(--t-85)" : muted,
       };
     case "change": {
-      const amount =
-        row.last !== null && row.ref !== null ? row.last - row.ref : null;
+      const amount = typeof row.change === "number"
+        ? row.change
+        : row.last !== null && row.ref !== null
+          ? row.last - row.ref
+          : null;
       return {
         text:
           amount === null

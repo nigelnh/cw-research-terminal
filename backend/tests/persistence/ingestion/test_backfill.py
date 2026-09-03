@@ -11,6 +11,7 @@ from app.market_data.market_schemas import (
     HistoricalTransportError,
 )
 from app.persistence.database import session_scope
+from app.persistence.ingestion.trading_calendar import last_completed_session_date
 from app.persistence.ingestion.service import InvalidRequestError
 from app.persistence.models import IngestionRun, IngestionState, Instrument, MarketBar
 from app.persistence.repositories.instrument_repository import InstrumentRepository, InstrumentUpsert
@@ -76,7 +77,7 @@ async def test_multi_chunk_backfill_covers_whole_range(ingestion_service, fake_p
     assert res.status == "SUCCEEDED"
     # ingestion persists exactly what the provider returned (every weekday the fake seeded);
     # it does not second-guess the vendor with our approximate holiday calendar.
-    end = _TODAY - timedelta(days=1)
+    end = min(_TODAY - timedelta(days=1), last_completed_session_date())
     weekdays = sum(1 for i in range((end - frm).days + 1) if (frm + timedelta(days=i)).weekday() < 5)
     assert await _bar_count(iid) == weekdays
 
@@ -304,6 +305,26 @@ async def test_forming_current_bar_is_dropped_by_default(ingestion_service, fake
         ).scalar_one()
     assert latest is not None and latest <= last_completed_session_date()
     assert res.streams[0].chunks[0].dropped_incomplete >= 0
+
+
+async def test_daily_backfill_after_completed_session_is_noop(
+    ingestion_service, fake_provider, monkeypatch
+):
+    await _seed_stock("HPG")
+    monkeypatch.setattr(
+        "app.persistence.ingestion.service.last_completed_session_date",
+        lambda: _TODAY - timedelta(days=10),
+    )
+    res = await ingestion_service.backfill(
+        ["HPG"],
+        timeframe="1D",
+        adjusted=True,
+        from_date=_TODAY - timedelta(days=2),
+        to_date=_TODAY,
+    )
+    assert res.status == "SUCCEEDED"
+    assert res.streams[0].chunks == []
+    assert fake_provider.calls == []
 
 
 @pytest.mark.parametrize(

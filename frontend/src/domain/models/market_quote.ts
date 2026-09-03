@@ -3,6 +3,22 @@
  * Decoupled from any exchange or gateway-specific schema.
  */
 
+export type RealtimeDirection = "up" | "down";
+
+export interface RealtimePulse {
+  /** Monotonic per-field counter. A changed value retriggers the CSS animation. */
+  sequence: number;
+  direction: RealtimeDirection;
+  /** Wall-clock creation time prevents a later-mounted surface replaying an old flash. */
+  startedAt?: number;
+}
+
+/**
+ * Transient presentation metadata produced only by incremental realtime patches.
+ * Full snapshots deliberately omit it so hydration/reconnects never flash as trades.
+ */
+export type RealtimePulseMap = Partial<Record<string, RealtimePulse>>;
+
 export interface MarketQuote {
   symbol: string;
   instrumentType?: "STOCK" | "CW" | "INDEX";
@@ -50,4 +66,6 @@ export interface MarketQuote {
   exchangeTimestamp: number | null;
   sourceTimestamp: number | null;
   receivedTimestamp: number;
+
+  realtimePulses?: RealtimePulseMap;
 }

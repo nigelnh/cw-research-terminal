@@ -4,9 +4,39 @@ from datetime import datetime, timezone
 import threading
 
 from app.market_data.market_schemas import CanonicalQuote
-from app.market_data.market_session import market_session
+from app.market_data.market_session import VN_TZ, market_session
 
 logger = logging.getLogger(__name__)
+
+
+_INTRADAY_FIELDS = (
+    "last_price",
+    "open_price",
+    "high_price",
+    "low_price",
+    "average_price",
+    "price_change",
+    "price_change_percent",
+    "total_volume",
+    "trading_value",
+    "traded_quantity",
+    "bid1_price",
+    "bid1_quantity",
+    "ask1_price",
+    "ask1_quantity",
+    "bid2_price",
+    "bid2_quantity",
+    "ask2_price",
+    "ask2_quantity",
+    "bid3_price",
+    "bid3_quantity",
+    "ask3_price",
+    "ask3_quantity",
+    "underlying_price",
+    "iv_bid",
+    "iv_trade",
+    "iv_ask",
+)
 
 
 class MarketState:
@@ -53,8 +83,16 @@ class MarketState:
         with self._lock:
             existing = self._quotes.get(sym)
             if existing:
-                existing_ts = existing.received_timestamp or existing.source_timestamp or 0
-                incoming_ts = quote.received_timestamp or quote.source_timestamp or 0
+                existing_ts = max(
+                    existing.received_timestamp or 0,
+                    existing.source_timestamp or 0,
+                    existing.reference_timestamp or 0,
+                )
+                incoming_ts = max(
+                    quote.received_timestamp or 0,
+                    quote.source_timestamp or 0,
+                    quote.reference_timestamp or 0,
+                )
                 if existing_ts >= incoming_ts:
                     return False
             self._quotes[sym] = quote.model_copy()
@@ -70,6 +108,164 @@ class MarketState:
     def get_all_quotes(self) -> Dict[str, CanonicalQuote]:
         with self._lock:
             return {k: v.model_copy() for k, v in self._quotes.items()}
+
+    @staticmethod
+    def _explicit_event_session_date(raw_event: Dict[str, Any]) -> Optional[str]:
+        for key in ("TradingDate", "Timestamp"):
+            value = raw_event.get(key)
+            if value:
+                candidate = str(value).strip()[:10]
+                if len(candidate) == 10 and candidate[4:5] == "-" and candidate[7:8] == "-":
+                    return candidate
+        return None
+
+    @classmethod
+    def _event_session_date(cls, raw_event: Dict[str, Any]) -> str:
+        explicit = cls._explicit_event_session_date(raw_event)
+        if explicit is not None:
+            return explicit
+        return market_session.get_vn_now().date().isoformat()
+
+    @staticmethod
+    def _quote_market_session_date(quote: CanonicalQuote) -> Optional[str]:
+        if quote.market_session_date:
+            return quote.market_session_date
+        for value in (quote.provider_trading_date, quote.provider_timestamp):
+            if value:
+                candidate = str(value).strip()[:10]
+                if len(candidate) == 10 and candidate[4:5] == "-" and candidate[7:8] == "-":
+                    return candidate
+        if quote.source_timestamp:
+            return datetime.fromtimestamp(quote.source_timestamp / 1000.0, tz=VN_TZ).date().isoformat()
+        return None
+
+    @classmethod
+    def _prepare_intraday_session(
+        cls, quote: CanonicalQuote, session_date: str, diff: Dict[str, Any]
+    ) -> bool:
+        """Reset session-scoped state once before accepting a new-day event.
+
+        Reference metadata has its own session marker and may be refreshed before
+        the first tick.  Therefore it cannot be used to decide whether last trade,
+        volume, or book values belong to the incoming event's session.
+        """
+        current_session = cls._quote_market_session_date(quote)
+        if current_session and current_session > session_date:
+            # A delayed callback from a retired stream must not roll current state
+            # back to an older session.
+            return False
+        if current_session and current_session < session_date:
+            for field_name in _INTRADAY_FIELDS:
+                if getattr(quote, field_name) is not None:
+                    setattr(quote, field_name, None)
+                    diff[field_name] = None
+            quote.provider_trading_date = None
+            quote.provider_timestamp = None
+            if quote.source_timestamp is not None:
+                quote.source_timestamp = None
+                diff["source_timestamp"] = None
+        if quote.market_session_date != session_date:
+            quote.market_session_date = session_date
+            diff["market_session_date"] = session_date
+        return True
+
+    @staticmethod
+    def _expire_reference_metadata(
+        quote: CanonicalQuote, session_date: str, diff: Dict[str, Any]
+    ) -> None:
+        """Remove bands that cannot be proven to belong to the incoming tick's session."""
+        has_reference = any(
+            value is not None
+            for value in (quote.reference_price, quote.ceiling_price, quote.floor_price)
+        )
+        if not has_reference or quote.reference_session_date == session_date:
+            return
+        for field_name in ("reference_price", "ceiling_price", "floor_price"):
+            if getattr(quote, field_name) is not None:
+                setattr(quote, field_name, None)
+                diff[field_name] = None
+        # Change is defined against the session reference.  Keeping yesterday's
+        # signed values while the new reference is unresolved would publish a
+        # plausible-looking but invalid movement for the new trading day.
+        for field_name in ("price_change", "price_change_percent"):
+            if getattr(quote, field_name) is not None:
+                setattr(quote, field_name, None)
+                diff[field_name] = None
+        quote.reference_session_date = None
+        quote.reference_timestamp = None
+        diff["reference_session_date"] = None
+        diff["reference_timestamp"] = None
+
+    def apply_reference_metadata(
+        self,
+        symbol: str,
+        *,
+        session_date: str,
+        reference_price: Optional[float] = None,
+        ceiling_price: Optional[float] = None,
+        floor_price: Optional[float] = None,
+        observed_timestamp: Optional[int] = None,
+    ) -> Tuple[CanonicalQuote, Dict[str, Any]]:
+        """Merge current-session static price metadata without touching trade/book state.
+
+        A newer session always replaces older bands. Older-session data is rejected. A
+        reference-only quote receives no trade timestamp, so it cannot make the resolver
+        classify an instrument as live.
+        """
+        sym = symbol.strip().upper()
+        if not sym:
+            raise ValueError("Missing symbol")
+        if len(session_date) != 10:
+            raise ValueError("session_date must be YYYY-MM-DD")
+        now_ms = observed_timestamp or int(datetime.now(timezone.utc).timestamp() * 1000)
+        values = {
+            "reference_price": reference_price,
+            "ceiling_price": ceiling_price,
+            "floor_price": floor_price,
+        }
+        diff: Dict[str, Any] = {}
+        with self._lock:
+            q = self._quotes.get(sym)
+            if q is None:
+                q = CanonicalQuote(
+                    symbol=sym,
+                    instrument_type=self._determine_instrument_type(sym),
+                    received_timestamp=0,
+                )
+                self._quotes[sym] = q
+            if q.reference_session_date and q.reference_session_date > session_date:
+                return q.model_copy(), diff
+            if q.reference_session_date != session_date:
+                self._expire_reference_metadata(q, session_date, diff)
+            for field_name, value in values.items():
+                if value is None:
+                    continue
+                normalized = float(value)
+                if getattr(q, field_name) != normalized:
+                    setattr(q, field_name, normalized)
+                    diff[field_name] = normalized
+            if not any(getattr(q, name) is not None for name in values):
+                return q.model_copy(), diff
+            if q.reference_session_date != session_date:
+                q.reference_session_date = session_date
+                diff["reference_session_date"] = session_date
+            q.reference_timestamp = now_ms
+            diff["reference_timestamp"] = now_ms
+
+            # Some live payloads omit change even when they contain a last trade. Fill only
+            # missing values; an explicit upstream change remains authoritative.
+            if (
+                q.last_price is not None
+                and q.reference_price not in (None, 0)
+                and self._quote_market_session_date(q) == session_date
+            ):
+                if q.price_change is None:
+                    q.price_change = q.last_price - q.reference_price
+                    diff["price_change"] = q.price_change
+                if q.price_change_percent is None:
+                    q.price_change_percent = (q.last_price - q.reference_price) / q.reference_price
+                    diff["price_change_percent"] = q.price_change_percent
+            return q.model_copy(), diff
 
     def get_snapshots(self, symbols: List[str], display_eligible_only: bool = True) -> List[Dict[str, Any]]:
         is_eligible = market_session.is_trading_active() if display_eligible_only else True
@@ -163,6 +359,8 @@ class MarketState:
 
         trading_date = raw_event.get("TradingDate")
         ts_str = raw_event.get("Timestamp")
+        reference_session_date = self._event_session_date(raw_event)
+        has_explicit_session = self._explicit_event_session_date(raw_event) is not None
 
         # Parse source timestamp in ms
         source_ts = None
@@ -187,6 +385,11 @@ class MarketState:
                 self._quotes[sym] = CanonicalQuote(symbol=sym, instrument_type=inst_type)
 
             q = self._quotes[sym]
+            if not has_explicit_session:
+                reference_session_date = self._quote_market_session_date(q) or reference_session_date
+            if not self._prepare_intraday_session(q, reference_session_date, diff):
+                return q.model_copy(), diff
+            self._expire_reference_metadata(q, reference_session_date, diff)
 
             if match_price is not None and q.last_price != float(match_price):
                 q.last_price = float(match_price)
@@ -203,6 +406,13 @@ class MarketState:
             if floor_price is not None and q.floor_price != float(floor_price):
                 q.floor_price = float(floor_price)
                 diff["floor_price"] = q.floor_price
+
+            if any(value is not None for value in (ref_price, ceil_price, floor_price)):
+                if q.reference_session_date != reference_session_date:
+                    q.reference_session_date = reference_session_date
+                    diff["reference_session_date"] = reference_session_date
+                q.reference_timestamp = now_ms
+                diff["reference_timestamp"] = now_ms
 
             if open_price is not None and q.open_price != float(open_price):
                 q.open_price = float(open_price)
@@ -290,6 +500,8 @@ class MarketState:
         a3_vol = get_field("Best3AskVolume", "AskVol3")
 
         ts_str = raw_event.get("Timestamp")
+        reference_session_date = self._event_session_date(raw_event)
+        has_explicit_session = self._explicit_event_session_date(raw_event) is not None
         source_ts = None
         if ts_str:
             try:
@@ -305,6 +517,11 @@ class MarketState:
                 self._quotes[sym] = CanonicalQuote(symbol=sym, instrument_type=inst_type)
 
             q = self._quotes[sym]
+            if not has_explicit_session:
+                reference_session_date = self._quote_market_session_date(q) or reference_session_date
+            if not self._prepare_intraday_session(q, reference_session_date, diff):
+                return q.model_copy(), diff
+            self._expire_reference_metadata(q, reference_session_date, diff)
 
             # Level 1
             if b1_prc is not None and q.bid1_price != float(b1_prc):

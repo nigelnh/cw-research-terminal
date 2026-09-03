@@ -52,6 +52,15 @@ class CanonicalQuote(BaseModel):
     provider_trading_date: Optional[str] = None
     provider_timestamp: Optional[str] = None
     source_timestamp: Optional[int] = None  # epoch ms
+    # Session of the most recently accepted trade/book event.  This is separate
+    # from reference_session_date because bands can be refreshed before the first
+    # live tick of a new day.
+    market_session_date: Optional[str] = None
+    # Trading-session metadata is refreshed separately from the live trade/book stream.
+    # Keeping its own session and observation timestamp prevents a reference-only quote
+    # from being mistaken for a fresh trade while still allowing Redis warm restores.
+    reference_session_date: Optional[str] = None
+    reference_timestamp: Optional[int] = None  # epoch ms
     received_timestamp: int = Field(default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
 
     def to_wire_snapshot_row(self, display_eligible: bool = True) -> Dict[str, Any]:
@@ -142,6 +151,9 @@ class CanonicalQuote(BaseModel):
             "LastTradingDate": self.last_trading_date,
             "MaturityDate": self.maturity_date,
             "_ts_source": self.source_timestamp,
+            "_market_session_date": self.market_session_date,
+            "_ts_reference": self.reference_timestamp,
+            "_reference_session_date": self.reference_session_date,
             "ExchangeTime": self.source_timestamp,
             "is_realtime_eligible": display_eligible,
         }
@@ -196,6 +208,9 @@ class CanonicalQuote(BaseModel):
             "iv_trade": ("Vol2", to_wire_iv),
             "iv_bid": ("Vol3", to_wire_iv),
             "source_timestamp": ("_ts_source", lambda v: v),
+            "market_session_date": ("_market_session_date", lambda v: v),
+            "reference_timestamp": ("_ts_reference", lambda v: v),
+            "reference_session_date": ("_reference_session_date", lambda v: v),
         }
 
         for field_name, (wire_key, transform_fn) in mapping.items():
@@ -302,6 +317,14 @@ class MarketHealthResponse(BaseModel):
     redis_enabled: bool = False
     redis_connected: bool = False
     market_cache_available: bool = False
+    market_cache_counters: Dict[str, int] = Field(default_factory=dict)
+    feed_fresh: bool = False
+    last_trade_tick_at: Optional[str] = None
+    last_book_tick_at: Optional[str] = None
+    last_tick_at: Optional[str] = None
+    signalr_decode_error_count: int = 0
+    signalr_reconnect_count: int = 0
+    realtime_universe: Dict[str, Any] = Field(default_factory=dict)
     market_session: str = "UNKNOWN"
     market_session_active: bool = False
     quote_display_eligible: bool = False
@@ -312,6 +335,8 @@ class StockProfile(BaseModel):
     name: Optional[str] = None
     short_name: Optional[str] = None
     exchange: Optional[str] = None
+    source: Optional[str] = None
+    availability: Literal["AVAILABLE", "PARTIAL", "UNAVAILABLE"] = "UNAVAILABLE"
 
 
 class StockProfilesResponse(BaseModel):

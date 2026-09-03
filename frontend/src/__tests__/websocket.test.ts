@@ -109,6 +109,40 @@ describe("BackendWebSocketClient - Correctness, Routing & Lifecycle Tests", () =
     expect(client.getCoveredWarrant("CHPG2401")?.quote.lastPrice).toBe(1380);
   });
 
+  it("4b. Out-of-order stock patches and snapshots cannot rewind the quote", () => {
+    client.handleIncomingMessage({
+      type: "snapshot",
+      row: {
+        Symbol: "HPG",
+        InstrumentType: "STOCK",
+        Traded: 22.1,
+        _ts_source: 5000,
+      },
+    });
+    client.handleIncomingMessage({
+      type: "patch",
+      symbol: "HPG",
+      patch: { Traded: 22.3, _ts_source: 5050 },
+    });
+    client.handleIncomingMessage({
+      type: "patch",
+      symbol: "HPG",
+      patch: { Traded: 22.2, _ts_source: 5020 },
+    });
+    client.handleIncomingMessage({
+      type: "snapshot",
+      row: {
+        Symbol: "HPG",
+        InstrumentType: "STOCK",
+        Traded: 22.15,
+        _ts_source: 5040,
+      },
+    });
+
+    expect(client.getQuote("HPG")?.lastPrice).toBe(22_300);
+    expect(client.getQuote("HPG")?.sourceTimestamp).toBe(5050);
+  });
+
   it("5. Reconnect after disconnect: cleanly updates state transitions", () => {
     const states: string[] = [];
     client.onConnectionStateChange((state) => states.push(state));
@@ -197,5 +231,25 @@ describe("BackendWebSocketClient - Correctness, Routing & Lifecycle Tests", () =
     const parsed = JSON.parse(sentMessages[0]);
     expect(parsed.type).toBe("subscribe");
     expect(parsed.symbols).toEqual(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"]);
+  });
+
+  it("11. Sends a heartbeat and stops it on disconnect", () => {
+    vi.useFakeTimers();
+    const mockWs: any = {
+      readyState: 1,
+      send: vi.fn(),
+      close: vi.fn(),
+    };
+    (client as any).ws = mockWs;
+    (client as any).startHeartbeat();
+
+    vi.advanceTimersByTime(20_000);
+    expect(mockWs.send).toHaveBeenCalledWith(JSON.stringify({ type: "ping" }));
+
+    client.disconnect();
+    const calls = mockWs.send.mock.calls.length;
+    vi.advanceTimersByTime(40_000);
+    expect(mockWs.send).toHaveBeenCalledTimes(calls);
+    vi.useRealTimers();
   });
 });

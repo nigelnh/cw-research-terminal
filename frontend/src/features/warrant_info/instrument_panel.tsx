@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { RealtimePulse } from "@/domain/models";
 import type { SelectedInstrumentView } from "@/data/selected_instrument";
 import type { DashboardRow } from "@/data/query/use_dashboard_data";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
@@ -7,8 +8,9 @@ import { useWatchlist } from "@/data/watchlist";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
 import { TradingChart } from "@/components/common/trading_chart";
 import { DASH, fmtIV, fmtPrice, dteDisplay } from "@/components/common/grid_table";
+import { RealtimeValue } from "@/components/common/realtime_value";
 
-import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, quoteCell, type QuoteTableValues } from "@/components/common/quote_columns";
+import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, QUOTE_COLUMN_PULSE_FIELD, quoteCell, type QuoteTableValues } from "@/components/common/quote_columns";
 import { useWatchlistLayout } from "@/components/common/watchlist_layout";
 
 interface InstrumentPanelProps {
@@ -32,6 +34,7 @@ function MetricRow({
   size = 13,
   compact = false,
   title,
+  pulse,
 }: {
   label: string;
   value: React.ReactNode;
@@ -39,6 +42,7 @@ function MetricRow({
   size?: number;
   compact?: boolean;
   title?: string;
+  pulse?: RealtimePulse;
 }) {
   return (
     <div
@@ -52,7 +56,9 @@ function MetricRow({
       }}
     >
       <span style={{ ...LABEL, fontSize: compact ? 11 : size }}>{label}</span>
-      <span style={{ fontSize: compact ? 11 : size, color }}>{value}</span>
+      <span style={{ fontSize: compact ? 11 : size, color }}>
+        <RealtimeValue pulse={pulse} style={{ color }}>{value}</RealtimeValue>
+      </span>
     </div>
   );
 }
@@ -353,7 +359,11 @@ export function InstrumentPanel({
             }).map(key => {
               const column = QUOTE_COLUMNS.find(c => c.key === key)!;
               const cell = quoteCell(stats, key);
-              return <MetricRow key={key} label={column.label} value={cell.text} color={cell.color} compact title={QUOTE_COLUMN_HINTS[key]} />;
+              const pulseField = QUOTE_COLUMN_PULSE_FIELD[key];
+              const pulse = pulseField
+                ? (cw?.realtimePulses?.[pulseField] ?? q?.realtimePulses?.[pulseField])
+                : undefined;
+              return <MetricRow key={key} label={column.label} value={cell.text} color={cell.color} compact title={QUOTE_COLUMN_HINTS[key]} pulse={pulse} />;
             })}
             {conflicting && (
               <div
@@ -410,19 +420,19 @@ export function InstrumentPanel({
             <>
               <div className="mono" style={{ width: 220, flexShrink: 0, overflowY: "auto" }}>
                 <h3 className="instrument-section-heading">OPTIONS ANALYTICS</h3>
-                <MetricRow label="IV_BID" color="var(--t-85)" compact value={fmtIV(pick("ivBid"))} />
-                <MetricRow label="IV_TRD" color="var(--t-85)" compact value={fmtIV(pick("ivTrade"))} />
-                <MetricRow label="IV_ASK" color="var(--t-85)" compact value={fmtIV(pick("ivAsk"))} />
-                <MetricRow label="HV22" color="var(--t-85)" compact value={fmtIV(pick("historicalVolatility"))} />
+                <MetricRow label="IV_BID" color="var(--t-85)" compact value={fmtIV(pick("ivBid"))} pulse={cw?.realtimePulses?.ivBid} />
+                <MetricRow label="IV_TRD" color="var(--t-85)" compact value={fmtIV(pick("ivTrade"))} pulse={cw?.realtimePulses?.ivTrade} />
+                <MetricRow label="IV_ASK" color="var(--t-85)" compact value={fmtIV(pick("ivAsk"))} pulse={cw?.realtimePulses?.ivAsk} />
+                <MetricRow label="HV22" color="var(--t-85)" compact value={fmtIV(pick("historicalVolatility"))} pulse={cw?.realtimePulses?.historicalVolatility} />
                 <MetricRow label="MONEYNESS S/K" color="var(--t-85)" compact
-                  value={pick("moneynessRatio") !== null ? pick("moneynessRatio")!.toFixed(3) : DASH} />
+                  value={pick("moneynessRatio") !== null ? pick("moneynessRatio")!.toFixed(3) : DASH} pulse={cw?.realtimePulses?.moneynessRatio} />
                 <MetricRow label="MONEYNESS" color="var(--t-85)" compact value={moneynessCat ?? DASH} />
-                <MetricRow label="THEO_PRC" color="var(--t-85)" compact value={fmtPrice(pick("theoreticalPrice"))} />
-                <MetricRow label="DELTA" color="var(--t-85)" compact value={greek(pick("delta"), 4)} />
-                <MetricRow label="GAMMA" color="var(--t-85)" compact value={greek(pick("gamma"), 6)} />
-                <MetricRow label="THETA/DAY" color="var(--t-85)" compact value={greek(pick("theta"), 2)} />
-                <MetricRow label="VEGA /1%" color="var(--t-85)" compact value={greek(pick("vega"), 2)} />
-                <MetricRow label="RHO /1%" color="var(--t-85)" compact value={greek(pick("rho"), 2)} />
+                <MetricRow label="THEO_PRC" color="var(--t-85)" compact value={fmtPrice(pick("theoreticalPrice"))} pulse={cw?.realtimePulses?.theoreticalPrice} />
+                <MetricRow label="DELTA" color="var(--t-85)" compact value={greek(pick("delta"), 4)} pulse={cw?.realtimePulses?.delta} />
+                <MetricRow label="GAMMA" color="var(--t-85)" compact value={greek(pick("gamma"), 6)} pulse={cw?.realtimePulses?.gamma} />
+                <MetricRow label="THETA/DAY" color="var(--t-85)" compact value={greek(pick("theta"), 2)} pulse={cw?.realtimePulses?.theta} />
+                <MetricRow label="VEGA /1%" color="var(--t-85)" compact value={greek(pick("vega"), 2)} pulse={cw?.realtimePulses?.vega} />
+                <MetricRow label="RHO /1%" color="var(--t-85)" compact value={greek(pick("rho"), 2)} pulse={cw?.realtimePulses?.rho} />
               </div>
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
                 {marketSessionActive ? (

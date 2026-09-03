@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     FIINQUANT_MAX_REALTIME_SYMBOLS: int = Field(default=33, description="Maximum realtime subscription capacity")
     FIINQUANT_ENABLED: bool = Field(default=True, description="Enable live FiinQuant upstream connection")
     FIINQUANT_DEBOUNCE_MS: int = Field(default=300, description="Subscription debounce delay in milliseconds")
+    FIINQUANT_FEED_FRESHNESS_SECONDS: float = Field(
+        default=30.0,
+        description="Maximum age of the latest current-stream trade/book tick while HOSE is open",
+    )
 
     # Trading calendar (Step 13C). Optional JSON to add/remove HOSE closure dates without a
     # code change, e.g. {"extra_closures": ["2026-07-01"], "force_open": ["2026-05-03"]}.
@@ -423,8 +427,8 @@ class Settings(BaseSettings):
     WS_MAX_CONNECTIONS_PER_IP: int = Field(default=8, description="Max concurrent /ws/market connections from one client key")
     WS_MAX_SYMBOLS_PER_CLIENT: int = Field(
         default=40,
-        description="Structural cap on symbols in one subscribe frame. The provider still enforces "
-        "FIINQUANT_MAX_REALTIME_SYMBOLS as the true realtime capacity.",
+        description="Cap on eligible realtime delivery interests retained by one websocket client. "
+        "Out-of-universe watchlist symbols do not consume this budget.",
     )
     WS_MAX_MESSAGE_BYTES: int = Field(default=16 * 1024, description="Max size of one inbound websocket text frame")
     WS_MESSAGE_BURST: int = Field(default=30, description="Max inbound messages per WS_MESSAGE_WINDOW_SECONDS per connection")

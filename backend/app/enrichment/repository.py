@@ -123,6 +123,17 @@ async def get_company_profile(session: AsyncSession, symbol: str) -> CompanyProf
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def get_company_profiles(
+    session: AsyncSession, symbols: list[str]
+) -> dict[str, CompanyProfile]:
+    """Batch profile lookup used by market-data fallbacks; never contacts upstream."""
+    clean = sorted({symbol.strip().upper() for symbol in symbols if symbol and symbol.strip()})
+    if not clean:
+        return {}
+    stmt = select(CompanyProfile).where(CompanyProfile.symbol.in_(clean))
+    return {row.symbol: row for row in (await session.execute(stmt)).scalars().all()}
+
+
 # --------------------------------------------------------------------- unified feed
 @dataclass(slots=True)
 class FeedRow:
