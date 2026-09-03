@@ -185,6 +185,9 @@ export function AppHeader({
   onFilterChange,
   marketSessionActive,
 }: AppHeaderProps) {
+  const [draft, setDraft] = useState(filter);
+  useEffect(() => setDraft(filter), [filter]);
+
   return (
     <header
       className="terminal-header"
@@ -223,8 +226,18 @@ export function AppHeader({
       </div>
 
       <input
-        value={filter}
-        onChange={(e) => onFilterChange(e.target.value)}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return;
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const query = e.currentTarget.value.trim();
+            setDraft(query);
+            onFilterChange(query);
+          }
+          if (e.key === "Escape") { e.preventDefault(); setDraft(filter); }
+        }}
         placeholder="/ filter or jump to symbol"
         aria-label="Filter or jump to symbol"
         className="focus-ring terminal-header-search"

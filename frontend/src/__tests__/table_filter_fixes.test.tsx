@@ -116,6 +116,28 @@ afterEach(() => {
 });
 
 describe("Targeted watchlist columns", () => {
+  it("keeps typing and suggestion selection separate from the submitted watchlist search", () => {
+    const page = render(<PersonalDashboard />);
+    const input = page.getByRole("combobox", { name: "Search watchlist symbols" });
+    const order = () => [...page.container.querySelectorAll("tbody tr")].map(row => row.getAttribute("data-symbol"));
+    const original = order();
+    fireEvent.change(input, { target: { value: "VPB" } });
+    expect(order()).toEqual(original);
+    expect(page.container.querySelectorAll(".is-search-match")).toHaveLength(0);
+    fireEvent.click(page.getAllByRole("option")[0]);
+    expect(order()).toEqual(original);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(order()).toEqual(["VPB", "CVPB2615", "HPG", "CHPG2602"]);
+    expect(page.container.querySelectorAll(".is-search-match")).toHaveLength(2);
+    fireEvent.change(input, { target: { value: "HPG" } });
+    expect(order()[0]).toBe("VPB");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(order()[0]).toBe("HPG");
+    fireEvent.click(page.getByRole("button", { name: "Clear watchlist search" }));
+    expect(order()).toEqual(original);
+    expect(page.queryByRole("listbox")).toBeNull();
+  });
+
   it("inserts the amount beside trade price in an older saved layout, preserving later custom placement", () => {
     const oldOrder = ["symbol", "ref", "last", "bid", "ivBid", "ask"];
     expect(columnOrder(oldOrder).slice(0, 7)).toEqual([

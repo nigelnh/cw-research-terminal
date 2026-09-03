@@ -41,19 +41,22 @@ export function prioritizeWatchlist<T extends { symbol: string; kind: "stock" | 
   return { rows: [...orphans.filter(row => matches.has(row.symbol)), ...grouped, ...orphans.filter(row => !matches.has(row.symbol))], highlighted };
 }
 
-export function WatchlistSymbolSearch({ options, value, onChange }: {
+export function WatchlistSymbolSearch({ options, value, onSubmit, scope = "watchlist" }: {
   options: WatchlistSearchOption[];
   value: string;
-  onChange: (value: string) => void;
+  onSubmit: (value: string) => void;
+  scope?: "watchlist" | "research";
 }) {
+  const [draft, setDraft] = useState(value);
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(-1);
   const anchor = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const id = useId();
-  const suggestions = searchSuggestions(options, value);
-  const activeIndex = Math.min(active, Math.max(0, suggestions.length - 1));
-  const shown = open && value.trim().length > 0;
+  const suggestions = searchSuggestions(options, draft);
+  const activeIndex = Math.min(active, suggestions.length - 1);
+  const shown = open && draft.trim().length > 0;
+  useEffect(() => setDraft(value), [value]);
   useEffect(() => {
     if (!open) return;
     const close = (event: PointerEvent) => { if (!anchor.current?.contains(event.target as Node)) setOpen(false); };
@@ -61,38 +64,44 @@ export function WatchlistSymbolSearch({ options, value, onChange }: {
     return () => document.removeEventListener("pointerdown", close);
   }, [open]);
   useEffect(() => {
-    if (shown) anchor.current?.querySelector(`[data-option-index="${activeIndex}"]`)?.scrollIntoView?.({ block: "nearest" });
+    if (shown && activeIndex >= 0) anchor.current?.querySelector(`[data-option-index="${activeIndex}"]`)?.scrollIntoView?.({ block: "nearest" });
   }, [activeIndex, shown]);
-  const choose = (symbol: string) => { onChange(symbol); setOpen(false); input.current?.focus(); };
+  const choose = (symbol: string) => { setDraft(symbol); setActive(-1); setOpen(false); input.current?.focus(); };
   return <div className="watchlist-search" ref={anchor} onBlur={event => {
     if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
   }}>
     <div className="watchlist-search-control">
       <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>
-      <input ref={input} role="combobox" aria-label="Search watchlist symbols" placeholder="Search symbol"
-        value={value} aria-autocomplete="list" aria-expanded={shown} aria-controls={shown ? id : undefined}
-        aria-activedescendant={shown && suggestions.length > 0 ? `${id}-${activeIndex}` : undefined}
-        onChange={event => { onChange(event.target.value); setActive(0); setOpen(Boolean(event.target.value.trim())); }}
+      <input ref={input} role="combobox" aria-label={`Search ${scope} symbols`} placeholder="Search symbol" title="Press Enter to search"
+        value={draft} aria-autocomplete="list" aria-expanded={shown} aria-controls={shown ? id : undefined}
+        aria-activedescendant={shown && activeIndex >= 0 ? `${id}-${activeIndex}` : undefined}
+        onChange={event => { setDraft(event.target.value); setActive(-1); setOpen(Boolean(event.target.value.trim())); }}
         onKeyDown={event => {
+          if (event.nativeEvent.isComposing) return;
           if (event.key === "Escape") { event.preventDefault(); setOpen(false); }
-          if (value.trim() && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+          if (draft.trim() && suggestions.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
             event.preventDefault(); setOpen(true);
-            setActive(current => !shown ? (event.key === "ArrowDown" ? 0 : Math.max(0, suggestions.length - 1)) : Math.max(0, Math.min(suggestions.length - 1, current + (event.key === "ArrowDown" ? 1 : -1))));
+            setActive(current => !shown || current < 0 ? (event.key === "ArrowDown" ? 0 : suggestions.length - 1) : Math.max(0, Math.min(suggestions.length - 1, current + (event.key === "ArrowDown" ? 1 : -1))));
           }
-          if (event.key === "Enter" && shown && suggestions.length > 0) { event.preventDefault(); choose(suggestions[activeIndex].symbol); }
+          if (event.key === "Enter") {
+            event.preventDefault();
+            const query = shown && activeIndex >= 0 ? suggestions[activeIndex].symbol : event.currentTarget.value.trim();
+            choose(query);
+            onSubmit(query);
+          }
         }} />
-      {value && <button type="button" aria-label="Clear watchlist search" className="focus-ring" onClick={() => { onChange(""); setActive(0); setOpen(false); input.current?.focus(); }}>
+      {(draft || value) && <button type="button" aria-label={`Clear ${scope} search`} className="focus-ring" onClick={() => { choose(""); onSubmit(""); }}>
         <svg aria-hidden="true" viewBox="0 0 20 20" stroke="currentColor" strokeWidth="1.5"><path d="m5 5 10 10M15 5 5 15" /></svg>
       </button>}
     </div>
-    {shown && <div className="watchlist-search-results" role="listbox" id={id} aria-label="Watchlist matches">
+    {shown && <div className="watchlist-search-results" role="listbox" id={id} aria-label={`${scope === "research" ? "Research" : "Watchlist"} matches`}>
       {suggestions.map((option, index) => <div key={option.symbol} id={`${id}-${index}`} role="option" aria-selected={index === activeIndex}
         data-option-index={index} className="watchlist-search-option" onMouseDown={event => event.preventDefault()} onClick={() => choose(option.symbol)}>
         <span className="mono" style={{ color: option.kind === "stock" ? "var(--accent)" : "var(--t-92)" }}>{option.symbol}</span>
         <span className="watchlist-search-name" title={option.name || option.underlying || undefined}>{option.name || option.underlying || ""}</span>
         <span className="watchlist-search-kind">{option.kind === "stock" ? "Stock" : "CW"}{option.exchange ? ` · ${option.exchange}` : ""}</span>
       </div>)}
-      {!suggestions.length && <div className="watchlist-search-empty">No matching symbols in this watchlist.</div>}
+      {!suggestions.length && <div className="watchlist-search-empty">No matching symbols in this {scope === "research" ? "registry" : "watchlist"}.</div>}
     </div>}
   </div>;
 }
