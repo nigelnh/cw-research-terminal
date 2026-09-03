@@ -29,6 +29,7 @@ class DataSource(str, Enum):
     SNAPSHOT_SEED = "SNAPSHOT_SEED"          # instrument_snapshots seeded from EOD bars (no book)
     EOD_BARS = "EOD_BARS"                    # market_bars daily close/OHLC/volume
     PRIOR_CLOSE = "PRIOR_CLOSE"              # previous trading session's close (used as reference)
+    SESSION_REFERENCE = "SESSION_REFERENCE"  # provider snapshot: prior close + session bands
     QUANT_LIVE = "QUANT_LIVE"               # LiveQuantEngine, current session
     QUANT_EOD = "QUANT_EOD"                 # LiveQuantEngine recomputed for a completed session
     NONE = "NONE"                            # no source
