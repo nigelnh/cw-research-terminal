@@ -44,6 +44,8 @@ export interface MarketOverviewData {
   market_phase?: string;
   availability?: string;
   stale?: boolean;
+  refreshing?: boolean;
+  cache_age_seconds?: number;
 }
 
 export function useMarketOverview() {
@@ -51,7 +53,8 @@ export function useMarketOverview() {
     queryKey: queryKeys.marketOverview,
     queryFn: ({ signal }) => backendClient.getMarketOverview(signal),
     staleTime: 60_000,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: (query) => query.state.data?.refreshing ? 2_000
+      : query.state.data?.availability === "UNAVAILABLE" ? 15_000 : 5 * 60_000,
     retry: 1,
   });
 }

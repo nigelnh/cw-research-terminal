@@ -3,10 +3,14 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarketOverviewStrip } from "@/features/watchlist/market_overview_strip";
 
+const state = vi.hoisted(() => ({ empty: false, refreshing: false }));
 vi.mock("@/data/query/use_market_overview", () => ({
   useMarketOverview: () => ({
     isLoading: false,
-    data: {
+    data: state.empty ? {
+      indices: [], top_stock_volume: [], top_cw_volume: [],
+      availability: "UNAVAILABLE", refreshing: state.refreshing,
+    } : {
       indices: ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"].map((symbol) => ({
         symbol, value: 1831.56, change: 3.2, change_percent: 0.18,
         volume: 1000000, trading_value: 2000000000, advancing: 12,
@@ -20,9 +24,28 @@ vi.mock("@/data/query/use_market_overview", () => ({
     },
   }),
 }));
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  state.empty = false;
+  state.refreshing = false;
+});
 
 describe("market overview strip", () => {
+  it("shows bounded background updating state without fabricated index values", () => {
+    state.empty = true;
+    state.refreshing = true;
+    render(<MarketOverviewStrip />);
+    expect(screen.getByText("MARKET OVERVIEW UPDATING…")).toBeTruthy();
+    expect(screen.queryAllByRole("article")).toHaveLength(0);
+    expect(screen.queryByText("LOADING MARKET OVERVIEW…")).toBeNull();
+  });
+
+  it("shows unavailable when refresh has failed", () => {
+    state.empty = true;
+    render(<MarketOverviewStrip />);
+    expect(screen.getByText("MARKET OVERVIEW UNAVAILABLE")).toBeTruthy();
+  });
+
   it("keeps requested index order and separates the two ranking scopes", () => {
     render(<MarketOverviewStrip />);
     const cards = screen.getAllByRole("article");

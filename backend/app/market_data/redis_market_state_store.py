@@ -27,6 +27,7 @@ class RedisMarketStateStore(MarketStateStore):
 
     KEY_PREFIX = "cw_research:market_state:v1"
     HISTORY_PREFIX = "cw_research:dashboard_history:v1"
+    OVERVIEW_KEY = "cw_research:market_overview:v1"
 
     def __init__(
         self,
@@ -297,6 +298,24 @@ class RedisMarketStateStore(MarketStateStore):
             )
         except Exception as exc:
             logger.warning("Dashboard history cache write failed for %s: %s", symbol, type(exc).__name__)
+
+    async def load_market_overview(self) -> Optional[Dict[str, Any]]:
+        if not self.is_available() or self._client is None:
+            return None
+        try:
+            raw = await self._client.get(self.OVERVIEW_KEY)
+            return json.loads(raw) if raw else None
+        except Exception as exc:
+            logger.warning("Market overview cache read failed: %s", type(exc).__name__)
+            return None
+
+    async def save_market_overview(self, payload: Dict[str, Any]) -> None:
+        if not self.is_available() or self._client is None:
+            return
+        try:
+            await self._client.set(self.OVERVIEW_KEY, json.dumps(payload), ex=7 * 86400)
+        except Exception as exc:
+            logger.warning("Market overview cache write failed: %s", type(exc).__name__)
 
     def enqueue_save(self, symbol: str, quote: CanonicalQuote) -> None:
         """Buffers quote for asynchronous batch writing without blocking."""
