@@ -27,7 +27,7 @@ from app.persistence.ingestion.chunking import BackfillPlan, generate_chunks, pl
 from app.persistence.ingestion.locks import stream_lock
 from app.persistence.ingestion.mapping import map_history
 from app.persistence.ingestion.retry import RetryPolicy, call_with_retry, classify, is_retryable
-from app.persistence.ingestion.trading_calendar import last_completed_session_date
+from app.persistence.ingestion.trading_calendar import expected_trading_days, last_completed_session_date
 from app.persistence.market_time import VN_TZ, normalize_price_basis, normalize_timeframe
 from app.persistence.repositories.ingestion_repository import IngestionRepository
 from app.persistence.repositories.instrument_repository import InstrumentRepository, InstrumentUpsert
@@ -269,9 +269,37 @@ class IngestionService:
                 else date.max
             )
             covered_hi = state.last_bar_ts.astimezone(VN_TZ).date()
-            remaining = tuple(
-                c for c in plan.chunks if not (c.start >= covered_lo and c.end <= covered_hi)
-            )
+            # But `covered_hi` alone is not trustworthy for the last few days: `last_bar_ts`
+            # gets stamped through `requested_ceiling` below even when the provider returned
+            # nothing for a trailing day - "covered" there can mean "confirmed no trading" OR
+            # "FiinQuant hasn't published this session's final bar yet" (routinely hours
+            # after close, worse for the ADJUSTED series - see HISTORY_RECENT_RETRY_DAYS),
+            # and cursor timestamps alone can't tell those apart. Recheck actual row presence
+            # for just the recent tail before trusting it there, so a chunk a concurrent
+            # holder just ACTUALLY filled still resume-skips (the single-flight guarantee -
+            # test_20_concurrent_cache_misses_produce_one_fill_lifecycle) while a day that's
+            # still genuinely missing keeps retrying instead of being skipped forever.
+            recent_floor = today - timedelta(days=settings.HISTORY_RECENT_RETRY_DAYS)
+            recent_gaps: set[date] = set()
+            if covered_hi >= recent_floor:
+                recheck_from = max(covered_lo, recent_floor)
+                async with self._sm() as session:
+                    recent_rows = await MarketBarRepository(session).get_bars(
+                        instrument_id=instrument_id, timeframe=tf, price_basis=price_basis,
+                        start=datetime(recheck_from.year, recheck_from.month, recheck_from.day, tzinfo=VN_TZ),
+                        end=datetime(covered_hi.year, covered_hi.month, covered_hi.day, tzinfo=VN_TZ) + timedelta(days=1),
+                    )
+                present = {r.session_date for r in recent_rows}
+                recent_gaps = {
+                    d for d in expected_trading_days(recheck_from, covered_hi) if d not in present
+                }
+
+            def _covered(c) -> bool:
+                if not (c.start >= covered_lo and c.end <= covered_hi):
+                    return False
+                return not any(recent_floor <= d <= c.end for d in recent_gaps)
+
+            remaining = tuple(c for c in plan.chunks if not _covered(c))
             return _replace_chunks(plan, remaining)
 
         # incremental: window derived from persisted coverage + a timeframe safety overlap
