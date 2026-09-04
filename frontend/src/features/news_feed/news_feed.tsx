@@ -34,7 +34,7 @@ function newsFilterActive(f: NewsFilterState): boolean {
 const TH: React.CSSProperties = {
   padding: "5px 8px",
   textAlign: "left",
-  color: "var(--t-50)",
+  color: "var(--t-92)",
   fontWeight: 500,
   whiteSpace: "nowrap",
   userSelect: "none",
@@ -146,7 +146,7 @@ function FeedRow({
           verticalAlign: "top",
         }}
       >
-        <td style={{ ...TD, paddingTop: 8, color: "var(--t-50)", whiteSpace: "nowrap" }}>{fmtTime(item.published_at)}</td>
+        <td style={{ ...TD, paddingTop: 8, color: "var(--t-92)", whiteSpace: "nowrap" }}>{fmtTime(item.published_at)}</td>
         <td style={{ ...TD, paddingTop: 8, whiteSpace: "nowrap" }}>
           {item.symbol ? (
             <button
@@ -180,7 +180,7 @@ function FeedRow({
           {item.summary && <div style={{ marginTop: 4, color: "var(--t-70)" }}>{item.summary}</div>}
           {hasOriginal && <div style={{ marginTop: 4, color: "var(--t-55)", fontSize: 10.5 }}><span style={{ color: "var(--t-42)" }}>Original (Vietnamese): </span>{item.title}</div>}
         </td>
-        <td style={{ ...TD, paddingTop: 8, whiteSpace: "nowrap", color: "var(--t-50)" }}>{item.source}</td>
+        <td style={{ ...TD, paddingTop: 8, whiteSpace: "nowrap", color: "var(--t-92)" }}>{item.source}</td>
         <td style={{ ...TD, paddingTop: 8, textAlign: "center" }}>
           {item.source_url ? (
             <a
@@ -262,11 +262,7 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
           <NewsFilterDropdown symbolOptions={symbolOptions} value={nf} onChange={setNf} />
         </span>
       </div>
-      {!isLoading && !isError && <p style={{ fontSize: 11, color: "var(--t-46)", marginBottom: 14 }}>
-        {`${items.length}${hasNextPage ? "+" : ""} item${items.length === 1 ? "" : "s"} · shown near the stated date — timing only, not causation`}
-      </p>}
-
-      <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+      <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, marginTop: 14 }}>
         <colgroup><col style={{ width: 96 }} /><col style={{ width: 72 }} /><col style={{ width: 96 }} /><col /><col style={{ width: 90 }} /><col style={{ width: 40 }} /></colgroup>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>

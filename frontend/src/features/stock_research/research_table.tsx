@@ -121,7 +121,7 @@ export function ResearchTable<T extends { symbol: string }>({
           }}
           style={{ height: 27, cursor: "pointer", background: selectedSymbol === row.symbol || matches.has(row.symbol) ? "var(--panel-3)" : id === "warrants" ? "var(--panel-2)" : "transparent" }}>
           <PinCell symbol={row.symbol} fill={grid.pinFill(row.symbol)} onToggle={grid.togglePin} />
-          {orderedColumns.map(column => <td key={column.key} style={{ padding: "0 8px", textAlign: column.align ?? "right", color: typeof column.color === "function" ? column.color(row) : column.color ?? "var(--t-60)" }}>
+          {orderedColumns.map(column => <td key={column.key} style={{ padding: "0 8px", textAlign: column.align ?? "right", color: typeof column.color === "function" ? column.color(row) : column.color ?? "var(--t-92)" }}>
             {column.render(row)}
           </td>)}
           {actions(row)}
