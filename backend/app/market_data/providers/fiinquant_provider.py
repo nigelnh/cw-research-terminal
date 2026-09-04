@@ -1664,6 +1664,9 @@ class FiinQuantProvider(MarketDataProvider):
     # HOSE daily price limit; a constituent within this of its reference move counts as
     # at-ceiling / at-floor without a per-ticker band lookup.
     _HOSE_LIMIT = 0.0699
+    # HOSE continuous session opens 09:00 ICT; mirrors the frontend's own SESSION_OPEN_MIN
+    # (market_overview_strip.tsx) - used only to sanity-check a cached sparkline's start.
+    _SESSION_OPEN_MIN = 9 * 60
 
     def _cache_ttl(self, active_ttl: float, *, settled: bool = True) -> float:
         """TTL for a cache that only needs refreshing while the market can move: short and
@@ -1821,6 +1824,30 @@ class FiinQuantProvider(MarketDataProvider):
         rows.sort(key=lambda x: x["volume"], reverse=True)
         return breadth, rows[:5]
 
+    def _sparkline_settled(self, cache: Dict[str, Any]) -> bool:
+        """False if any index's chart is missing its early bars - a fetch that raced a
+        FiinQuant hiccup and came back starting well after 09:00 ICT, e.g. from ~11:05
+        instead (confirmed live: production served exactly this, frozen for the rest of
+        the closed stretch once the overview-cache TTL stretch made it "settled" by the
+        stock-leaders check alone). >20 min of slack covers a merely-late opening tick
+        without falsely flagging a genuinely complete session."""
+        for item in cache.get("indices", []):
+            sparkline = item.get("sparkline") or []
+            if not sparkline:
+                continue
+            first = sparkline[0]
+            ts = first.get("timestamp") if isinstance(first, dict) else None
+            if not ts:
+                continue
+            try:
+                parsed = datetime.fromisoformat(ts)
+                first_minutes = parsed.hour * 60 + parsed.minute
+            except (ValueError, TypeError):
+                continue
+            if first_minutes > self._SESSION_OPEN_MIN + 20:
+                return False
+        return True
+
     async def get_market_overview(self, cw_symbols: List[str]) -> Dict[str, Any]:
         """Read the four index cards and HOSE volume leaders without new streams.
 
@@ -1828,13 +1855,14 @@ class FiinQuantProvider(MarketDataProvider):
         account, so breadth + the stock volume leaders are maintained on their own slow
         background cadence (`_refresh_index_breadth`). Payload cached ~15 s in-session,
         and effectively until the next session opens outside it (see ``_cache_ttl``) -
-        unless the cached payload still lacks stock leaders because that sweep hadn't
-        finished when it was built, in which case it stays on the short TTL until it does.
+        unless the cached payload still lacks stock leaders, or an index chart is missing
+        its early bars, because a sweep/fetch hadn't finished or hiccuped when it was
+        built - in which case it stays on the short TTL until a clean result lands.
         """
         self._ensure_breadth_refresh()
         settled = bool(self._overview_cache) and (
             self._overview_cache.get("components", {}).get("top_stock_volume") == "AVAILABLE"
-        )
+        ) and self._sparkline_settled(self._overview_cache)
         ttl = self._cache_ttl(15.0, settled=settled)
         if (
             self._overview_cache

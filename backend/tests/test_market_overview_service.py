@@ -13,14 +13,21 @@ from app.market_data.market_overview_service import MarketOverviewService
 pytestmark = pytest.mark.asyncio
 
 
-def overview(*, settled: bool = True):
+def overview(*, settled: bool = True, sparkline_start: str | None = None):
     """A settled payload (the default) mirrors a provider result where the background
     breadth/stock-leaders sweep has already completed - the normal, common case, and what
     every off-session-TTL test other than the one dedicated to the unsettled case wants.
-    `top_stock_volume` is left empty either way since only `components` drives the check."""
+    `top_stock_volume` is left empty either way since only `components` drives the check.
+
+    `sparkline_start`, when given, adds a one-point sparkline to the index starting at that
+    ICT timestamp - only the chart-completeness test needs this; every other caller leaves
+    it unset so the index carries no sparkline at all (trivially chart-settled)."""
+    index = {"symbol": "VNINDEX", "value": 1200, "as_of": "2026-09-03",
+             "session_date": "2026-09-03", "stale": False}
+    if sparkline_start is not None:
+        index["sparkline"] = [{"timestamp": sparkline_start, "value": 1200, "reference": 1190}]
     return {
-        "indices": [{"symbol": "VNINDEX", "value": 1200, "as_of": "2026-09-03",
-                     "session_date": "2026-09-03", "stale": False}],
+        "indices": [index],
         "top_stock_volume": [], "top_cw_volume": [], "source": "FIINQUANT",
         "availability": "AVAILABLE", "as_of": "2026-09-03",
         "components": {"top_stock_volume": "AVAILABLE" if settled else "UNAVAILABLE"},
@@ -160,6 +167,47 @@ async def test_ttl_stays_short_until_stock_leaders_settle(monkeypatch):
 
     provider = SimpleNamespace(get_market_overview=AsyncMock(side_effect=[
         overview(settled=False), overview(settled=True),
+    ]))
+    service = MarketOverviewService()
+    service.configure(provider, store())
+    service._seconds_to_next_session = lambda: 6 * 3600  # e.g. overnight
+    try:
+        await service.get([])
+        await _settle(service)
+        assert provider.get_market_overview.await_count == 1
+
+        # A bit over a minute passes - past the short (unsettled) TTL, but nowhere near
+        # even the old fixed 300s TTL, let alone the stretched off-session one.
+        service._cached_at -= 65
+        task_before = service._refresh_task
+        await service.get([])
+        await _settle(service)
+        assert service._refresh_task is not task_before  # retried anyway - it wasn't settled
+        assert provider.get_market_overview.await_count == 2
+
+        # Now settled: a later request survives a real multi-hour gap without refetching.
+        service._cached_at -= 3600
+        task_before = service._refresh_task
+        await service.get([])
+        await _settle(service)
+        assert service._refresh_task is task_before
+        assert provider.get_market_overview.await_count == 2
+    finally:
+        await service.close()
+
+
+async def test_ttl_stays_short_until_the_chart_covers_the_open(monkeypatch):
+    """A payload whose intraday fetch hiccuped and came back starting well after 09:00
+    (confirmed live: production served a chart starting ~11:05, missing the whole morning)
+    must NOT get the long off-session TTL either - same trap as stock leaders, different
+    field, both gated in `_ttl_seconds` via `_sparkline_settled`. Should keep retrying on
+    the short TTL until a chart covering the open lands."""
+    from app.market_data.market_session import market_session
+    monkeypatch.setattr(market_session, "is_trading_active", lambda: False)
+
+    provider = SimpleNamespace(get_market_overview=AsyncMock(side_effect=[
+        overview(sparkline_start="2026-09-03T11:05:00+07:00"),
+        overview(sparkline_start="2026-09-03T09:00:00+07:00"),
     ]))
     service = MarketOverviewService()
     service.configure(provider, store())

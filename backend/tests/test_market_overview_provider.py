@@ -317,6 +317,53 @@ async def test_overview_cache_stays_short_lived_until_stock_leaders_settle():
 
 
 @pytest.mark.asyncio
+async def test_overview_cache_stays_short_lived_until_the_chart_covers_the_open(monkeypatch):
+    """An overview whose intraday fetch hiccuped and came back starting well after 09:00
+    (confirmed live: production served a chart starting ~11:05, missing the whole morning)
+    must NOT get the long off-session TTL either - same trap as stock leaders, different
+    field. Should keep retrying on the short TTL until a chart covering the open lands."""
+    from datetime import datetime
+    from app.market_data.market_session import market_session, VN_TZ
+    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 2, 15, 5, tzinfo=VN_TZ))
+
+    class LateOpenSession(_Session):
+        calls = 0
+        starts_at_open = False
+
+        def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
+            LateOpenSession.calls += 1
+            if by == "5m":
+                start = "09:00" if LateOpenSession.starts_at_open else "11:05"
+                return _Result([{"ticker": symbol, "timestamp": f"2026-09-02 {start}",
+                                 "close": 101, "volume": 7, "value": 700} for symbol in tickers])
+            return super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
+
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = LateOpenSession()
+    provider._is_connected = True
+    provider._market_is_active = lambda: False
+    provider._seconds_to_next_session = lambda: 6 * 3600
+    await provider._refresh_index_breadth()  # settle stock leaders so only the chart matters
+
+    first = await provider.get_market_overview([])
+    assert first["indices"][0]["sparkline"][0]["timestamp"] == "2026-09-02T11:05:00+07:00"
+    calls_after_first = LateOpenSession.calls
+
+    # A clean fetch (covering the open) lands moments later.
+    LateOpenSession.starts_at_open = True
+    provider._overview_cache_at -= 20  # only a few seconds pass
+    second = await provider.get_market_overview([])
+    assert LateOpenSession.calls > calls_after_first  # retried, did not wait for next session
+    assert second["indices"][0]["sparkline"][0]["timestamp"] == "2026-09-02T09:00:00+07:00"
+
+    # Now that it's settled, a later request survives a real multi-hour gap without refetching.
+    calls_after_second = LateOpenSession.calls
+    provider._overview_cache_at -= 3600
+    await provider.get_market_overview([])
+    assert LateOpenSession.calls == calls_after_second
+
+
+@pytest.mark.asyncio
 async def test_overview_cache_still_rebuilds_once_the_next_session_is_close():
     """The stretched TTL is bounded by the real next-session time, not infinite."""
     class CountingSession(_Session):
