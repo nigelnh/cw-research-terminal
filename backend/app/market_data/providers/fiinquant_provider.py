@@ -205,6 +205,13 @@ class FiinQuantProvider(MarketDataProvider):
         self._overview_lock = asyncio.Lock()
         self._overview_cache: Optional[Dict[str, Any]] = None
         self._overview_cache_at: float = 0.0
+        # Index breadth is computed from ~430 constituents (MarketBreadth is not licensed);
+        # the SDK issues one HTTP request per ticker, so it is refreshed on its own slow
+        # cadence in the background and never blocks the overview payload.
+        self._breadth_cache: Dict[str, Dict[str, int]] = {}
+        self._stock_leaders_cache: List[Dict[str, Any]] = []
+        self._breadth_cache_at: float = 0.0
+        self._breadth_task: Optional[asyncio.Task] = None
         self._stock_profile_lock = asyncio.Lock()
         self._stock_profile_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
         self._reference_lock = asyncio.Lock()
@@ -411,6 +418,9 @@ class FiinQuantProvider(MarketDataProvider):
             if self._reconnect_task is not None and not self._reconnect_task.done():
                 self._reconnect_task.cancel()
                 self._reconnect_task = None
+            if self._breadth_task is not None and not self._breadth_task.done():
+                self._breadth_task.cancel()
+                self._breadth_task = None
             await self._retire_streams_locked()
             self._session = None
             self._active_symbols = []
@@ -1650,14 +1660,138 @@ class FiinQuantProvider(MarketDataProvider):
             finally:
                 self._tame_sdk_side_effects()
 
+    _INDEX_GROUPS = ("VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND")
+    # HOSE daily price limit; a constituent within this of its reference move counts as
+    # at-ceiling / at-floor without a per-ticker band lookup.
+    _HOSE_LIMIT = 0.0699
+
+    def _ensure_breadth_refresh(self) -> None:
+        """Kick a background breadth recompute if the cache is stale and none is running."""
+        ttl = 90.0 if self._market_is_active() else 900.0
+        if time.monotonic() - self._breadth_cache_at < ttl:
+            return
+        if self._breadth_task is not None and not self._breadth_task.done():
+            return
+        try:
+            self._breadth_task = asyncio.get_running_loop().create_task(
+                self._refresh_index_breadth()
+            )
+        except RuntimeError:
+            pass
+
+    async def _refresh_index_breadth(self) -> None:
+        try:
+            breadth, leaders = await asyncio.to_thread(self._compute_index_breadth)
+        except Exception as exc:  # noqa: BLE001 - breadth is optional, never fatal
+            logger.warning("FiinQuant index breadth refresh failed: %s", exc)
+            return
+        if breadth:
+            self._breadth_cache = breadth
+            self._stock_leaders_cache = leaders
+            self._breadth_cache_at = time.monotonic()
+
+    def _compute_index_breadth(self) -> tuple[Dict[str, Dict[str, int]], List[Dict[str, Any]]]:
+        """Per-group advancing/declining/unchanged/ceiling/floor + the top-volume stock
+        leaders, both from one `PriceStatistics().get_overview` sweep of the HOSE
+        constituents (the SDK issues one request per ticker — hence background-only).
+        `percentPriceChange` gives direction; VWAP = totalMatchValue / totalMatchVolume.
+        """
+        if not self._session:
+            return {}, []
+        vn_today = market_session.get_vn_now().date().isoformat()
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+            members: Dict[str, set] = {}
+            for grp in self._INDEX_GROUPS:
+                try:
+                    value = self._session.TickerList(ticker=grp)
+                    members[grp] = {str(x).strip().upper() for x in value if str(x).strip()}
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("FiinQuant %s constituents unavailable: %s", grp, exc)
+                    members[grp] = set()
+            universe = sorted(set().union(*members.values())) if members else []
+            if not universe:
+                return {}, []
+            stats: Dict[str, Dict[str, Any]] = {}
+            for start in range(0, len(universe), 100):
+                try:
+                    raw = self._session.PriceStatistics().get_overview(
+                        tickers=universe[start:start + 100], time_filter="Daily",
+                        from_date=vn_today, to_date=vn_today,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("FiinQuant get_overview batch failed: %s", exc)
+                    continue
+                if hasattr(raw, "get_data"):
+                    raw = raw.get_data()
+                rows = raw.to_dict(orient="records") if hasattr(raw, "to_dict") else list(raw or [])
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    tk = str(row.get("ticker") or row.get("Ticker") or "").upper()
+                    if tk:
+                        stats[tk] = row
+
+        def fnum(row: Dict[str, Any], *names: str) -> Optional[float]:
+            for name in names:
+                v = row.get(name)
+                if isinstance(v, (int, float)):
+                    return float(v)
+            return None
+
+        breadth: Dict[str, Dict[str, int]] = {}
+        for grp, syms in members.items():
+            up = down = flat = ceil_n = floor_n = 0
+            for s in syms:
+                p = fnum(stats.get(s, {}), "percentPriceChange")
+                if p is None:
+                    continue
+                if p >= self._HOSE_LIMIT:
+                    ceil_n += 1
+                elif p <= -self._HOSE_LIMIT:
+                    floor_n += 1
+                if p > 0:
+                    up += 1
+                elif p < 0:
+                    down += 1
+                else:
+                    flat += 1
+            breadth[grp] = {
+                "totalStockUpPrice": up, "totalStockDownPrice": down,
+                "totalStockNoChangePrice": flat, "totalStockOverCeiling": ceil_n,
+                "totalStockUnderFloor": floor_n,
+            }
+
+        leaders: List[Dict[str, Any]] = []
+        for tk, row in stats.items():
+            vol = fnum(row, "totalMatchVolume")
+            val = fnum(row, "totalMatchValue")
+            if not vol or vol <= 0:
+                continue
+            p = fnum(row, "percentPriceChange")
+            leaders.append({
+                "symbol": tk, "volume": vol,
+                "price": round(val / vol) if val else None,
+                "reference": None, "ceiling": None, "floor": None,
+                "market_state": (
+                    "CEILING" if p is not None and p >= self._HOSE_LIMIT
+                    else "FLOOR" if p is not None and p <= -self._HOSE_LIMIT
+                    else "UP" if p and p > 0 else "DOWN" if p and p < 0
+                    else "REFERENCE" if p == 0 else "UNAVAILABLE"
+                ),
+                "as_of": str(row.get("timestamp") or ""),
+            })
+        leaders.sort(key=lambda x: x["volume"], reverse=True)
+        return breadth, leaders[:5]
+
     async def get_market_overview(self, cw_symbols: List[str]) -> Dict[str, Any]:
         """Read the four index cards and HOSE volume leaders without new streams.
 
-        This uses the documented ``realtime=False`` snapshot path (no ``MarketBreadth`` —
-        that API is not on this account; breadth is computed from constituents here), so
-        the 33-symbol SignalR subscription budget remains exclusively available to the
-        user's watchlist. Cached ~15 s in-session, five minutes outside it.
+        Snapshot reads only (no stream mutations). ``MarketBreadth`` is not on this
+        account, so breadth is maintained on its own slow background cadence
+        (`_refresh_index_breadth`). Payload cached ~15 s in-session, 5 min outside it.
         """
+        self._ensure_breadth_refresh()
         ttl = 15.0 if self._market_is_active() else 300.0
         if (
             self._overview_cache
@@ -1707,15 +1841,6 @@ class FiinQuantProvider(MarketDataProvider):
                     return [dict(x) for x in value if isinstance(x, dict)]
                 return [dict(value)] if isinstance(value, dict) else []
 
-            def ticker_list(group: str) -> List[str]:
-                value = self._session.TickerList(ticker=group)
-                if isinstance(value, str):
-                    value = [value]
-                try:
-                    return sorted({str(x).strip().upper() for x in value if str(x).strip()})
-                except TypeError:
-                    return []
-
             def fetch_rows(tickers: List[str], *, by: str, period: int | None = None,
                            from_date: str | None = None, to_date: str | None = None) -> List[Dict[str, Any]]:
                 rows: List[Dict[str, Any]] = []
@@ -1762,25 +1887,18 @@ class FiinQuantProvider(MarketDataProvider):
             def build() -> Dict[str, Any]:
                 captured = io.StringIO()
                 unavailable_components: set[str] = set()
-                stocks: List[str] = []
                 clean_cws = sorted({s.strip().upper() for s in cw_symbols if s.strip()})
                 daily: List[Dict[str, Any]] = []
                 intraday: List[Dict[str, Any]] = []
-                group_members: Dict[str, set] = {}
                 bands: List[Dict[str, Any]] = []
                 with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
                     try:
-                        stocks = ticker_list("VNINDEX")
-                    except Exception as exc:
-                        unavailable_components.add("stock_universe")
-                        logger.warning("FiinQuant VNINDEX constituents unavailable: %s", exc)
-                    try:
-                        # `period=2` truncates to the host clock and returns YESTERDAY only.
-                        # An explicit yesterday->today range with `lasted=True` returns the
-                        # prior close (reference) AND today's live forming bar.
+                        # Only the 4 index symbols + the watched CWs — the ~430 HOSE
+                        # constituents (breadth + stock leaders) are a separate background
+                        # sweep because the SDK issues one request per ticker.
                         vn_today = market_session.get_vn_now().date()
                         daily = actual_prices(fetch_rows(
-                            sorted(set(index_symbols + stocks + clean_cws)), by="1d",
+                            sorted(set(index_symbols + clean_cws)), by="1d",
                             from_date=(vn_today - timedelta(days=6)).isoformat(),
                             to_date=vn_today.isoformat(),
                         ))
@@ -1801,25 +1919,15 @@ class FiinQuantProvider(MarketDataProvider):
                     except Exception as exc:
                         unavailable_components.add("intraday")
                         logger.warning("FiinQuant overview intraday snapshot unavailable: %s", exc)
-                    # `MarketBreadth` is not licensed on this account — breadth is computed
-                    # from each index group's constituents (close vs prior close vs bands).
-                    group_members["VNINDEX"] = set(stocks)
-                    for grp in ("VN30", "VNFINLEAD", "VNDIAMOND"):
-                        try:
-                            group_members[grp] = set(ticker_list(grp))
-                        except Exception as exc:
-                            unavailable_components.add("breadth")
-                            logger.warning("FiinQuant %s constituents unavailable: %s", grp, exc)
-                            group_members[grp] = set()
                     index_dates = [stamp(r)[:10] for r in daily + intraday if key(r) in index_symbols]
                     session_date = max(index_dates or [stamp(r)[:10] for r in daily], default="")
                     try:
-                        bands = fetch_price_bands(stocks + clean_cws, session_date) if session_date else []
+                        bands = fetch_price_bands(clean_cws, session_date) if session_date else []
                     except Exception as exc:
                         unavailable_components.add("bands")
                         logger.warning("FiinQuant price bands unavailable for overview: %s", exc)
                         bands = []
-                if not stocks:
+                if not self._stock_leaders_cache:
                     unavailable_components.add("stock_universe")
                 if not daily:
                     unavailable_components.add("daily")
@@ -1840,36 +1948,9 @@ class FiinQuantProvider(MarketDataProvider):
                     if symbol and (symbol not in bands_by or stamp(row) > stamp(bands_by[symbol])):
                         bands_by[symbol] = row
 
-                def constituent_breadth(members: set) -> Dict[str, int]:
-                    up = down = flat = at_ceiling = at_floor = 0
-                    for c in members:
-                        c_bars = sorted(daily_by.get(c, []), key=stamp)
-                        today_c = [r for r in c_bars if stamp(r)[:10] == session_date]
-                        prior_c = [r for r in c_bars if stamp(r)[:10] < session_date]
-                        px = num(today_c[-1], "close", "Close") if today_c else None
-                        ref = num(prior_c[-1], "close", "Close") if prior_c else None
-                        if px is None or ref is None:
-                            continue
-                        band = bands_by.get(c, {})
-                        c_ceil = num(band, "ceilingValue", "ceilingPrice", "CeilingPrice")
-                        c_floor = num(band, "floorValue", "floorPrice", "FloorPrice")
-                        if c_ceil is not None and px >= c_ceil:
-                            at_ceiling += 1
-                        if c_floor is not None and px <= c_floor:
-                            at_floor += 1
-                        if px > ref:
-                            up += 1
-                        elif px < ref:
-                            down += 1
-                        else:
-                            flat += 1
-                    return {
-                        "totalStockUpPrice": up, "totalStockDownPrice": down,
-                        "totalStockNoChangePrice": flat, "totalStockOverCeiling": at_ceiling,
-                        "totalStockUnderFloor": at_floor,
-                    }
-
-                breadth_by = {g: constituent_breadth(m) for g, m in group_members.items()}
+                # Breadth is maintained on its own background cadence (see
+                # `_refresh_index_breadth`) because it costs ~430 per-ticker requests.
+                breadth_by = dict(self._breadth_cache)
                 if not any(sum(b.values()) for b in breadth_by.values()):
                     unavailable_components.add("breadth")
 
@@ -1973,7 +2054,7 @@ class FiinQuantProvider(MarketDataProvider):
                     if index_states == {"UNAVAILABLE"} and not daily
                     else "PARTIAL"
                 )
-                stock_leaders = leaders(stocks)
+                stock_leaders = list(self._stock_leaders_cache)  # background HOSE sweep
                 cw_leaders = leaders(clean_cws)
                 return {
                     "indices": indices,
