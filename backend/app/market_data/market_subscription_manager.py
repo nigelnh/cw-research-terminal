@@ -190,15 +190,30 @@ class SubscriptionManager:
         return len(updates)
 
     def _reference_metadata_complete(self, session_date: str) -> bool:
+        """Whether every universe symbol has all the reference metadata THIS SOURCE
+        (`provider.get_session_reference_data`) can actually supply.
+
+        Ceiling/floor is excluded for CWs: the provider has no CW band endpoint, so those
+        two fields can never arrive here — a CW's displayed bands come from the snapshot
+        resolver deriving them from the underlying instead (`_derive_cw_bands`), a separate
+        path this loop doesn't feed. Counting a structurally-unfillable field as "missing"
+        would keep this retrying every `_REFERENCE_RETRY_COOLDOWN_SECONDS` forever, 24/7,
+        hammering the provider for a universe that is one-third CWs.
+        """
         symbols = self.get_server_universe_symbols() or self.get_desired_symbols()
-        return bool(symbols) and all(
-            (quote := self.state.get_quote(symbol)) is not None
-            and quote.reference_session_date == session_date
-            and all(getattr(quote, field) is not None for field in (
-                "reference_price", "ceiling_price", "floor_price",
-            ))
-            for symbol in symbols
-        )
+
+        def complete(symbol: str) -> bool:
+            quote = self.state.get_quote(symbol)
+            if quote is None or quote.reference_session_date != session_date:
+                return False
+            fields = (
+                ("reference_price",)
+                if self.state.determine_instrument_type(symbol) == "CW"
+                else ("reference_price", "ceiling_price", "floor_price")
+            )
+            return all(getattr(quote, field) is not None for field in fields)
+
+        return bool(symbols) and all(complete(symbol) for symbol in symbols)
 
     async def _attempt_reference_refresh(self, target: date) -> None:
         session_date = target.isoformat()
