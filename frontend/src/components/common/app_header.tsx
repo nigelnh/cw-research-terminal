@@ -22,6 +22,7 @@ interface AppHeaderProps {
   filter: string;
   onFilterChange: (value: string) => void;
   marketSessionActive: boolean;
+  marketPhase?: string;
   gatewayState?: GatewayConnectionState;
   upstreamFeedState?: UpstreamFeedState;
   searchOptions?: GlobalSearchOption[];
@@ -194,6 +195,7 @@ export function AppHeader({
   filter,
   onFilterChange,
   marketSessionActive,
+  marketPhase,
   gatewayState = "CONNECTED",
   upstreamFeedState = marketSessionActive ? "CONNECTED" : "UNKNOWN",
   searchOptions = [],
@@ -213,7 +215,9 @@ export function AppHeader({
   const jump = (option: GlobalSearchOption) => {
     setDraft(option.symbol); setSearchOpen(false); onJump?.(option);
   };
-  const sessionLabel = marketSessionActive ? "OPEN" : "CLOSED";
+  const sessionLabel = ({ PRE_OPEN: "PRE-OPEN", ATO: "ATO", LUNCH_BREAK: "LUNCH BREAK",
+    ATC: "ATC", POST_CLOSE_NEGOTIATED: "NEGOTIATED", CLOSED: "CLOSED", UNKNOWN: "SYNCING" } as Record<string, string>)[marketPhase ?? ""]
+    ?? (marketSessionActive ? "OPEN" : "CLOSED");
   const feedLabel = gatewayState === "RECONNECTING" || upstreamFeedState === "RECONNECTING"
       ? "RECONNECTING"
       : upstreamFeedState === "STALE"
@@ -221,7 +225,7 @@ export function AppHeader({
         : gatewayState === "ERROR" || gatewayState === "DISCONNECTED" || upstreamFeedState === "DISCONNECTED" || upstreamFeedState === "ERROR"
           ? "OFFLINE"
           : upstreamFeedState === "CONNECTED"
-            ? marketSessionActive ? "LIVE" : "READY"
+            ? marketSessionActive ? "LIVE" : null
             : "CONNECTING";
   const feedTone = feedLabel === "LIVE"
     ? "var(--up)"
@@ -317,10 +321,10 @@ export function AppHeader({
           />
           {sessionLabel}
         </span>
-        <span aria-label={`Market feed ${feedLabel.toLowerCase()}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {feedLabel && <span aria-label={`Market feed ${feedLabel.toLowerCase()}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ width: 6, height: 6, background: feedTone }} aria-hidden />
           {feedLabel}
-        </span>
+        </span>}
         <SignInControl />
       </div>
     </header>

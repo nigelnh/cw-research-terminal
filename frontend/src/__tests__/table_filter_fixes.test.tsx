@@ -26,6 +26,7 @@ const fixture = vi.hoisted(() => {
     floorPrice: 10,
     bidPrice: 25,
     askPrice: 35,
+    priceChange: -10,
     priceChangePercent: -0.25,
     tradedQuantity: 1234567 as number | null,
     tradingValue: 987654321 as number | null,

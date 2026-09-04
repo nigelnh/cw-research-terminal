@@ -3,6 +3,7 @@ import { renderMarkup } from "./test_fixtures/render_markup";
 import { InstrumentPanel } from "../features/warrant_info/instrument_panel";
 import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/models/watchlist";
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
+import { mapRawSnapshotToQuote } from "../data/backend/mappers/map_snapshot";
 
 describe("InstrumentPanel — bottom split panel", () => {
   beforeEach(() => {
@@ -98,5 +99,22 @@ describe("InstrumentPanel — bottom split panel", () => {
     for (const label of ["IV_BID", "IV_TRD", "IV_ASK", "STRIKE", "RATIO", "LAST_TRD_DATE", "DTE", "ISSUER"]) {
       expect(html).not.toContain(label);
     }
+  });
+
+  it("6. STATS uses the resolved dashboard quote and its explicit change, not a reference-only WS object", () => {
+    const quote = mapRawSnapshotToQuote({ Symbol: "HPG", Traded: 21.65, Ref: 21.6,
+      change: -0.45, ChangePercent: -0.0204, Total_Vol: 9472000 });
+    const html = renderMarkup(<InstrumentPanel
+      instrument={{ symbol: "HPG", instrumentType: "STOCK",
+        quote: mapRawSnapshotToQuote({ Symbol: "HPG", Ref: 21.6 }) }}
+      dashRow={{ symbol: "HPG", quote, analytics: null, trackedRealtime: true,
+        displayState: "LAST_SESSION", provenance: {
+          quote: { state: "LAST_SESSION", source: "SNAPSHOT_FINAL" },
+          book: { state: "UNAVAILABLE", source: "NONE" },
+        } }} marketSessionActive={false} onClose={vi.fn()} />);
+    expect(html).toContain("21,650");
+    expect(html).toContain("9,472,000");
+    expect(html).toContain("−450");
+    expect(html).not.toContain("+50");
   });
 });

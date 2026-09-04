@@ -22,6 +22,7 @@ export interface FieldProvenance {
 export interface RowProvenance {
   quote: FieldProvenance;
   book: FieldProvenance;
+  reference?: FieldProvenance;
   analytics?: FieldProvenance;
 }
 

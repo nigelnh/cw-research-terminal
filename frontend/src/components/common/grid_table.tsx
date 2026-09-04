@@ -96,7 +96,7 @@ export function fmtChg(pct: number | null | undefined): { text: string; color: s
 export interface PriceColorRef {
   /** prior-session reference price (raw VND). */
   ref: number | null | undefined;
-  /** backend ceiling price when known — exact match wins over the ±7% heuristic. */
+  /** Verified session ceiling; CW bands must never be inferred from a stock percentage. */
   ceiling?: number | null;
   /** backend floor price when known. */
   floor?: number | null;
@@ -122,10 +122,6 @@ export function priceColor(
   }
   if (typeof r.ceiling === "number" && v >= r.ceiling) return MARKET_COLOR.ceiling;
   if (typeof r.floor === "number" && v <= r.floor) return MARKET_COLOR.floor;
-  const ceiling = refNum * 1.07;
-  const floor = refNum * 0.93;
-  if (v >= ceiling - 0.5) return MARKET_COLOR.ceiling;
-  if (v <= floor + 0.5) return MARKET_COLOR.floor;
   if (v > refNum) return MARKET_COLOR.up;
   if (v < refNum) return MARKET_COLOR.down;
   return MARKET_COLOR.flat;

@@ -249,10 +249,13 @@ class MarketSnapshotResolver:
         # ---- A. LIVE ------------------------------------------------- #
         live = market_state.get_quote(sym)
         live_sd = market_state._quote_market_session_date(live) if live is not None else None
+        display_session = reference_session_date(now)
+        new_session_pending = display_session > latest_session
         memory_ok = (
             live is not None and live_sd is not None
             and live_sd <= now.date().isoformat()
             and live_sd >= latest_session.isoformat()
+            and (not new_session_pending or live_sd == display_session.isoformat())
             and (snapshot is None or live_sd >= snapshot.session_date.isoformat())
             and cal.is_trading_day(date.fromisoformat(live_sd))
             and any(
@@ -314,6 +317,21 @@ class MarketSnapshotResolver:
                 )
             if diag:
                 row.diag = {"chosen": "LIVE", "trace": trace}
+            return row
+
+        # At 08:00 stop exposing yesterday's trade/book as today's values. A current
+        # checkpoint may still hydrate the new session after a restart; otherwise wait
+        # for real observations (including book-only ATO), with independently dated bands.
+        if new_session_pending and (snapshot is None or snapshot.session_date < display_session):
+            self._overlay_current_reference(row, live, now=now, trace=trace)
+            row.quote_prov = FieldProvenance(
+                DataTemporalState.UNAVAILABLE, DataSource.NONE, session_date=display_session.isoformat(),
+                note="awaiting a trade in the new session (08:00 ICT rollover)")
+            row.book_prov = FieldProvenance(
+                DataTemporalState.UNAVAILABLE, DataSource.NONE, session_date=display_session.isoformat(),
+                note="awaiting an order book in the new session")
+            if diag:
+                row.diag = {"chosen": "AWAITING_SESSION", "trace": trace}
             return row
 
         # ---- B. LAST_SESSION snapshot ------------------------------- #
