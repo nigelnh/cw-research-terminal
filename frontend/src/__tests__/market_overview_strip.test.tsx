@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MarketOverviewStrip } from "@/features/watchlist/market_overview_strip";
+import { MarketOverviewStrip, Sparkline } from "@/features/watchlist/market_overview_strip";
 
 const state = vi.hoisted(() => ({ empty: false, refreshing: false }));
 vi.mock("@/data/query/use_market_overview", () => ({
@@ -31,6 +31,20 @@ afterEach(() => {
 });
 
 describe("market overview strip", () => {
+  it("renders a single real observation and keeps missing intraday buckets as gaps", () => {
+    const { container, rerender } = render(<Sparkline direction={1} reference={100}
+      values={[{ timestamp: "2026-09-04T09:15:00+07:00", value: 101 }]} />);
+    expect(container.querySelector("circle")).not.toBeNull();
+    expect(screen.queryByText("NO INTRADAY SERIES")).toBeNull();
+    rerender(<Sparkline direction={1} reference={100} values={[
+      { timestamp: "2026-09-04T09:15:00+07:00", value: 101 },
+      { timestamp: "2026-09-04T09:20:00+07:00", value: 102 },
+      { timestamp: "2026-09-04T09:35:00+07:00", value: 103 },
+      { timestamp: "2026-09-04T09:40:00+07:00", value: 104 },
+    ]} />);
+    expect(container.querySelectorAll("polyline")).toHaveLength(2);
+    expect(container.querySelector("line")?.getAttribute("y1")).toBe("30");
+  });
   it("shows bounded background updating state without fabricated index values", () => {
     state.empty = true;
     state.refreshing = true;

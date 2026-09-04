@@ -408,16 +408,11 @@ export function PersonalDashboard({
               {r.conflicting && <span title="Conflicting metadata — quant withheld" style={{ marginLeft: 5, color: "var(--down)" }}>◆</span>}
               {!r.trackedRealtime && <span className="untracked-realtime-mark" aria-label="Not tracked realtime" />}
             </td>
-          ) : <td key={column.key} title={QUOTE_COLUMN_HINTS[column.key]} style={{ ...TD, color: cell.color }}>
-            {r.kind === "stock" && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : (
-              <RealtimeValue
-                pulse={r.pulses?.[QUOTE_COLUMN_PULSE_FIELD[column.key] ?? ""]}
-                style={{ color: cell.color }}
-              >
-                {cell.text}
-              </RealtimeValue>
-            )}
-          </td>;
+          ) : <RealtimeValue as="td" key={column.key} title={QUOTE_COLUMN_HINTS[column.key]}
+            pulse={r.pulses?.[QUOTE_COLUMN_PULSE_FIELD[column.key] ?? ""]}
+            style={{ ...TD, color: cell.color }}>
+            {r.kind === "stock" && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : cell.text}
+          </RealtimeValue>;
         })}
         <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
       </tr>

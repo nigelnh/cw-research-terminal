@@ -149,19 +149,20 @@ textarea::placeholder {
 .realtime-flash {
   display: inline-block;
   border-radius: 1px;
-  animation-duration: 600ms;
+  animation-duration: 1200ms;
   animation-timing-function: ease-out;
   animation-fill-mode: both;
 }
+td.realtime-flash { display: table-cell; border-radius: 0; }
 .realtime-flash-up { animation-name: realtime-flash-up; }
 .realtime-flash-down { animation-name: realtime-flash-down; }
 @keyframes realtime-flash-up {
-  from { background-color: color-mix(in srgb, var(--up) 38%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--up) 18%, transparent); }
-  to { background-color: transparent; box-shadow: 0 0 0 2px transparent; }
+  0%, 35% { background-color: color-mix(in srgb, var(--up) 42%, transparent); }
+  to { background-color: transparent; }
 }
 @keyframes realtime-flash-down {
-  from { background-color: color-mix(in srgb, var(--down) 38%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--down) 18%, transparent); }
-  to { background-color: transparent; box-shadow: 0 0 0 2px transparent; }
+  0%, 35% { background-color: color-mix(in srgb, var(--down) 42%, transparent); }
+  to { background-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
   .realtime-flash { animation: none; box-shadow: none; }

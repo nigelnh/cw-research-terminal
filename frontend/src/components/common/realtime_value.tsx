@@ -1,29 +1,33 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { RealtimePulse } from "@/domain/models";
 
+export const REALTIME_FLASH_DURATION_MS = 1200;
+
 export function RealtimeValue({
   pulse,
   children,
   className = "",
   style,
   as = "span",
+  title,
 }: {
   pulse?: RealtimePulse;
   children: ReactNode;
   className?: string;
   style?: CSSProperties;
-  as?: "span" | "strong" | "small";
+  as?: "span" | "strong" | "small" | "td";
+  title?: string;
 }) {
   const [, expirePulse] = useState(0);
   useEffect(() => {
     if (pulse?.startedAt === undefined) return;
-    const remaining = 600 - (Date.now() - pulse.startedAt);
+    const remaining = REALTIME_FLASH_DURATION_MS - (Date.now() - pulse.startedAt);
     if (remaining <= 0) return;
     const timer = window.setTimeout(() => expirePulse((value) => value + 1), remaining + 1);
     return () => window.clearTimeout(timer);
   }, [pulse?.sequence, pulse?.startedAt]);
   const activePulse =
-    pulse && (pulse.startedAt === undefined || Date.now() - pulse.startedAt <= 600)
+    pulse && (pulse.startedAt === undefined || Date.now() - pulse.startedAt <= REALTIME_FLASH_DURATION_MS)
       ? pulse
       : undefined;
   const flash = activePulse
@@ -37,6 +41,7 @@ export function RealtimeValue({
       data-flash-direction={activePulse?.direction}
       data-flash-sequence={activePulse?.sequence}
       style={style}
+      title={title}
     >
       {children}
     </Tag>
