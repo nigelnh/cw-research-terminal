@@ -100,3 +100,7 @@ server/archive/
 
 # local recovery / ops scratch — never commit
 scratchpad/
+
+# Claude Code: share skills, keep per-machine settings + locks local
+.claude/settings.local.json
+.claude/*.lock
