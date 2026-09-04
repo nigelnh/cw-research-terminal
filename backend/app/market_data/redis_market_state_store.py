@@ -27,7 +27,7 @@ class RedisMarketStateStore(MarketStateStore):
 
     KEY_PREFIX = "cw_research:market_state:v1"
     HISTORY_PREFIX = "cw_research:dashboard_history:v1"
-    OVERVIEW_KEY = "cw_research:market_overview:v1"
+    OVERVIEW_KEY = "cw_research:market_overview:v2"
 
     def __init__(
         self,

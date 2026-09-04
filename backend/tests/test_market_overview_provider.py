@@ -80,6 +80,59 @@ async def test_overview_uses_snapshot_reads_without_changing_stream_subscription
 
 
 @pytest.mark.asyncio
+async def test_overview_ignores_preopen_zero_reset_and_normalizes_vietnam_time():
+    class ResetSession(_Session):
+        def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
+            result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
+            result.rows.extend({"ticker": symbol, "timestamp": "2026-09-03 08:22",
+                                "close": 0, "volume": 0, "value": 0} for symbol in tickers)
+            return result
+
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = ResetSession()
+    provider._is_connected = True
+    result = await provider.get_market_overview(["CAAA2601"])
+    for item in result["indices"] + result["top_stock_volume"] + result["top_cw_volume"]:
+        assert item["as_of"] == "2026-09-02T00:00:00+07:00"
+        assert item.get("value", item.get("price")) == 102
+    assert result["top_cw_volume"][0]["market_state"] == "UP"
+
+
+@pytest.mark.asyncio
+async def test_overview_does_not_fill_current_rankings_with_other_session_prices():
+    class GappedSession(_Session):
+        def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
+            result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
+            result.rows = [row for row in result.rows
+                           if not (row["ticker"] == "CAAA2601" and row["timestamp"] == "2026-09-02")]
+            for row in result.rows:
+                if row["ticker"] == "AAA":
+                    row["volume"] = 0  # a legitimate observed zero is retained
+            return result
+
+        def MarketBreadth(self):
+            class NextSessionBreadth(_Breadth):
+                def get(self, tickers):
+                    result = super().get(tickers)
+                    for row in result.rows:
+                        row["tradingDate"] = "2026-09-03T08:00:00+07:00"
+                    return result
+            return NextSessionBreadth()
+
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = GappedSession()
+    provider._is_connected = True
+    result = await provider.get_market_overview(["CAAA2601"])
+    assert result["top_cw_volume"] == []
+    assert result["components"]["top_cw_volume"] == "UNAVAILABLE"
+    assert result["components"]["breadth"] == "UNAVAILABLE"
+    assert next(row for row in result["top_stock_volume"] if row["symbol"] == "AAA")["volume"] == 0
+    for item in result["indices"]:
+        assert item["advancing"] is None
+        assert item["provenance"]["breadth"]["availability"] == "UNAVAILABLE"
+
+
+@pytest.mark.asyncio
 async def test_stock_profiles_are_normalized_cached_and_do_not_consume_stream_slots():
     provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
     provider._session = _Session()
