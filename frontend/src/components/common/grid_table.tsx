@@ -26,16 +26,6 @@ export function fmtVol(v: number | null | undefined): string {
   return v.toLocaleString("en-US");
 }
 
-/** Session traded value (raw VND) as a compact T / B / M amount. */
-export function fmtAmount(v: number | null | undefined): string {
-  if (v === null || v === undefined || Number.isNaN(v) || v <= 0) return DASH;
-  const abs = Math.abs(v);
-  if (abs >= 1e12) return `${(v / 1e12).toFixed(2)}T`;
-  if (abs >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-  return v.toLocaleString("en-US", { maximumFractionDigits: 0 });
-}
-
 /** Decimal fraction (0.214) -> "21.4%". */
 export function fmtIV(v: number | null | undefined, dp = 1): string {
   if (v === null || v === undefined || Number.isNaN(v)) return DASH;
@@ -232,7 +222,7 @@ export function useSortPin<T>(
 const HEAD_STYLE: React.CSSProperties = {
   cursor: "pointer",
   padding: "5px 8px",
-  color: "var(--t-50)",
+  color: "var(--t-92)",
   fontWeight: 500,
   userSelect: "none",
   whiteSpace: "nowrap",

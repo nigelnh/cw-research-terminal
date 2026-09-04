@@ -276,17 +276,17 @@ select:focus-visible,
 .index-card-main { gap: 6px; font-size: 10.5px; }
 .index-card-main strong { color: var(--t-92); font-size: 11px; }
 .index-card-main small, .index-card-breadth small { font-size: 8.5px; }
-.index-card-line { color: var(--t-60); font-size: 9px; }
+.index-card-line { color: var(--t-92); font-size: 9px; }
 .index-card-breadth { font-size: 9.5px; }
 .overview-direction-icon { width: 1em; height: 1em; vertical-align: -0.12em; }
 .leader-panel { display: flex; flex-direction: column; }
 .leader-title { height: 24px; padding: 4px 8px; display: flex; align-items: center; border-bottom: 1px solid var(--border-row); min-width: 0; flex: none; }
 .leader-title span { display: block; color: var(--t-92); font-size: 10.5px; white-space: nowrap; }
 .leader-head, .leader-row { display: grid; grid-template-columns: minmax(60px, 1fr) minmax(62px, .9fr) minmax(52px, .72fr); align-items: center; position: relative; }
-.leader-head { height: 20px; padding: 0 6px; border-bottom: 1px solid var(--border-row); color: var(--t-46); font-size: 8px; }
+.leader-head { height: 20px; padding: 0 6px; border-bottom: 1px solid var(--border-row); color: var(--t-92); font-size: 8px; }
 .leader-head span:not(:first-child), .leader-row span:not(:first-of-type) { text-align: right; }
 .leader-rows { flex: 1; min-height: 0; display: grid; grid-template-rows: repeat(5, minmax(0, 1fr)); }
-.leader-row { min-height: 0; padding: 0 6px; color: var(--t-66); font-size: 8.5px; overflow: hidden; }
+.leader-row { min-height: 0; padding: 0 6px; color: var(--t-92); font-size: 8.5px; overflow: hidden; }
 .leader-row i { position: absolute; inset: 2px auto 2px 0; z-index: 0; background: color-mix(in oklch, var(--accent) 8%, transparent); }
 .leader-row span { position: relative; z-index: 1; white-space: nowrap; }
 .leader-row b { font-weight: 500; }

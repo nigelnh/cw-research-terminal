@@ -83,7 +83,7 @@ describe("incremental realtime feedback", () => {
         bid: null,
         ask: null,
         last: after.lastPrice,
-        tradingValue: null,
+        tradedQuantity: null,
         change: after.priceChange,
         chgPct: null,
         vol: null,

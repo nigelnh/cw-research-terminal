@@ -32,11 +32,11 @@ const CW_COLUMNS: ResearchColumn<RegistryRow>[] = [
   { key: "symbol", label: "SYMBOL", align: "left", value: r => r.symbol, render: r => r.symbol, color: "var(--t-92)" },
   { key: "issuer", label: "ISSUER", align: "left", value: r => r.issuer, render: r => r.issuer ?? DASH },
   { key: "und", label: "UNDERLYING", align: "left", value: r => r.underlying, render: r => r.underlying ?? DASH },
-  { key: "strike", label: "STRIKE", value: r => r.strike, render: r => fmtPrice(r.strike), color: "var(--t-80)" },
-  { key: "ratio", label: "RATIO", value: r => r.ratio, render: r => fmtRatio(r.ratio), color: "var(--t-50)" },
-  { key: "lastTradingDate", label: "LAST_TRD_DATE", value: r => r.lastTradingDate, render: r => r.lastTradingDate ?? DASH, color: "var(--t-50)" },
-  { key: "maturity", label: "MATURITY", value: r => r.maturity, render: r => r.maturity ?? DASH, color: "var(--t-50)" },
-  { key: "dte", label: "DTE", value: r => r.dte, render: r => r.dteText, color: "var(--t-46)" },
+  { key: "strike", label: "STRIKE", value: r => r.strike, render: r => fmtPrice(r.strike), color: "var(--t-92)" },
+  { key: "ratio", label: "RATIO", value: r => r.ratio, render: r => fmtRatio(r.ratio), color: "var(--t-92)" },
+  { key: "lastTradingDate", label: "LAST_TRD_DATE", value: r => r.lastTradingDate, render: r => r.lastTradingDate ?? DASH, color: "var(--t-92)" },
+  { key: "maturity", label: "MATURITY", value: r => r.maturity, render: r => r.maturity ?? DASH, color: "var(--t-92)" },
+  { key: "dte", label: "DTE", value: r => r.dte, render: r => r.dteText, color: "var(--t-92)" },
   { key: "status", label: "STATUS", value: r => r.tracked ? "TRACKED" : "REFERENCE", render: r => r.tracked ? "TRACKED" : "REFERENCE", color: r => r.tracked ? "var(--accent)" : "var(--t-46)" },
 ];
 const STOCK_COLUMNS: ResearchColumn<StockRegistryRow>[] = [
