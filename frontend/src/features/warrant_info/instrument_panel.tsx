@@ -189,7 +189,7 @@ export function InstrumentPanel({
   });
 
   const cw = instrument?.cw;
-  const q = instrument?.quote ?? cw?.quote ?? dashRow?.quote;
+  const q = dashRow?.quote ?? instrument?.quote ?? cw?.quote;
   const an = dashRow?.analytics ?? null;
 
   const ref = q?.referencePrice ?? null;
@@ -260,6 +260,7 @@ export function InstrumentPanel({
     symbol: instrument?.symbol ?? "", ref, ceiling: q?.ceilingPrice ?? null, floor: q?.floorPrice ?? null,
     bid: q?.bidPrice ?? null, ask: q?.askPrice ?? null, last: q?.lastPrice ?? null,
     tradedQuantity: q?.tradedQuantity ?? null,
+    change: q?.priceChange ?? null,
     issuer: isCW ? instrument?.issuer ?? null : null,
     chgPct: typeof q?.priceChangePercent === "number" ? q.priceChangePercent * 100 : null,
     vol: q?.totalVolume ?? null, strike: isCW ? instrument?.strikePrice ?? null : null,
@@ -298,7 +299,7 @@ export function InstrumentPanel({
       >
         {(
           <>
-            <span className="heading" style={{ fontSize: 13, color: "var(--accent)", fontWeight: 700 }}>
+            <span className="heading" style={{ fontSize: 13, color: quoteCell(stats, "symbol").color, fontWeight: 700 }}>
               {instrument.symbol}
             </span>
             <span style={{ fontSize: 13, color: "var(--t-50)" }}>{kindLine}</span>

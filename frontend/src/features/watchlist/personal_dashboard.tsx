@@ -403,7 +403,7 @@ export function PersonalDashboard({
         {columns.map(column => {
           const cell = quoteCell(r, column.key);
           return column.key === "symbol" ? (
-            <td key={column.key} title={r.trackedRealtime ? undefined : "Not tracked in the fixed realtime universe"} style={{ padding: "0 8px", paddingLeft: r.kind === "cw" ? "calc(8px + 1ch)" : 8, color: r.kind === "cw" ? "var(--t-92)" : "var(--accent)", whiteSpace: "nowrap" }}>
+            <td key={column.key} title={r.trackedRealtime ? undefined : "Not tracked in the fixed realtime universe"} style={{ padding: "0 8px", paddingLeft: r.kind === "cw" ? "calc(8px + 1ch)" : 8, color: cell.color, whiteSpace: "nowrap" }}>
               {r.symbol}
               {r.conflicting && <span title="Conflicting metadata — quant withheld" style={{ marginLeft: 5, color: "var(--down)" }}>◆</span>}
               {!r.trackedRealtime && <span className="untracked-realtime-mark" aria-label="Not tracked realtime" />}

@@ -2,13 +2,14 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { MarketQuote } from "@/domain/models";
 import {
-  quoteTimestamp,
   type DisplayState,
   type RowProvenance,
 } from "@/domain/temporal";
 import { backendClient } from "@/data/backend/backend_client";
 import { mapRawSnapshotToQuote } from "@/data/backend/mappers/map_snapshot";
 import { useResearchMarket } from "@/data/use_research_market";
+import { resolveDashboardQuote } from "./resolve_dashboard_quote";
+export { isQuoteTimestampEligible } from "./resolve_dashboard_quote";
 
 export interface DashboardRow {
   symbol: string;
@@ -37,15 +38,6 @@ interface UseDashboardDataResult {
   refetch: () => unknown;
 }
 
-export function isQuoteTimestampEligible(
-  stamp: string | null,
-  now = Date.now(),
-): boolean {
-  if (!stamp) return false;
-  const age = now - new Date(stamp).getTime();
-  return Number.isFinite(age) && age >= 0 && age <= 180_000;
-}
-
 const EMPTY_META: DashboardMeta = {
   asOf: null,
   marketSession: "UNKNOWN",
@@ -65,7 +57,7 @@ const EMPTY_META: DashboardMeta = {
  * query refetches when `marketSessionActive` flips).
  */
 export function useDashboardData(symbols: string[]): UseDashboardDataResult {
-  const { quotes, marketSessionActive, isRealtimeTracked } = useResearchMarket();
+  const { quotes, marketSessionActive, marketPhase, isRealtimeTracked } = useResearchMarket();
   const qc = useQueryClient();
 
   const sortedKey = [...new Set(symbols.map((s) => s.toUpperCase()))].sort();
@@ -74,7 +66,7 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
     enabled: sortedKey.length > 0,
     queryFn: ({ signal }) => backendClient.getDashboardRows(sortedKey, signal),
     staleTime: 30_000,
-    refetchInterval: marketSessionActive ? false : 5 * 60_000, // idle refresh while closed
+    refetchInterval: marketSessionActive ? 30_000 : 5 * 60_000,
   });
   const analyticsQuery = useQuery({
     queryKey: ["dashboard-analytics", sortedKey],
@@ -90,7 +82,26 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
   useEffect(() => {
     qc.invalidateQueries({ queryKey: ["dashboard-rows"] });
     qc.invalidateQueries({ queryKey: ["dashboard-analytics"] });
-  }, [marketSessionActive, qc]);
+  }, [marketSessionActive, marketPhase, qc]);
+
+  // 08:00 is a data rollover, not a trading-phase change. Refresh open overnight tabs
+  // even if there are no new ticks; the server calendar decides weekends/holidays.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      const now = Date.now();
+      const day = new Date(now + 7 * 3600_000).toISOString().slice(0, 10);
+      let next = Date.parse(`${day}T08:00:00+07:00`);
+      if (next <= now) next += 86400_000;
+      timer = setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ["dashboard-rows"] });
+        qc.invalidateQueries({ queryKey: ["dashboard-analytics"] });
+        schedule();
+      }, next - now);
+    };
+    schedule();
+    return () => clearTimeout(timer);
+  }, [qc]);
 
   const data = query.data;
   const fallbackBySymbol = new Map<string, any>();
@@ -123,44 +134,10 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
         ? { analytics: { ...analyticsFallback.provenance } }
         : {}),
     };
-    const tradeAsOf = quoteTimestamp(live);
-    const bookAsOf = live?.bookTimestamp && Number.isFinite(live.bookTimestamp)
-      ? new Date(live.bookTimestamp).toISOString() : null;
-    const correctSession = !!live?.marketSessionDate && live.marketSessionDate === data?.as_of?.slice(0, 10);
-    const tradeLive = marketSessionActive && correctSession && isQuoteTimestampEligible(tradeAsOf);
-    const bookLive = marketSessionActive && correctSession && isQuoteTimestampEligible(bookAsOf);
-    const quote = { ...fallbackQuote };
-    if (live && tradeLive) {
-      Object.assign(quote, {
-        lastPrice: live.lastPrice, openPrice: live.openPrice, highPrice: live.highPrice,
-        lowPrice: live.lowPrice, averagePrice: live.averagePrice,
-        tradedQuantity: live.tradedQuantity, totalVolume: live.totalVolume,
-        tradingValue: live.tradingValue, priceChange: live.priceChange,
-        priceChangePercent: live.priceChangePercent, tradeTimestamp: live.tradeTimestamp,
-        sourceTimestamp: live.sourceTimestamp,
-      });
-      provenance.quote = { state: "LIVE", source: "LIVE_FEED", asOf: tradeAsOf,
-        sessionDate: live.marketSessionDate };
-    }
-    if (live && bookLive) {
-      Object.assign(quote, {
-        bidPrice: live.bidPrice, bidQuantity: live.bidQuantity,
-        askPrice: live.askPrice, askQuantity: live.askQuantity,
-        bid2Price: live.bid2Price, bid2Quantity: live.bid2Quantity,
-        ask2Price: live.ask2Price, ask2Quantity: live.ask2Quantity,
-        bid3Price: live.bid3Price, bid3Quantity: live.bid3Quantity,
-        ask3Price: live.ask3Price, ask3Quantity: live.ask3Quantity,
-        bookTimestamp: live.bookTimestamp,
-      });
-      provenance.book = { state: "LIVE", source: "LIVE_FEED", asOf: bookAsOf,
-        sessionDate: live.marketSessionDate };
-    }
-    const anyLive = tradeLive || bookLive;
+    const resolved = resolveDashboardQuote(fallbackQuote, live, provenance, marketSessionActive);
     return {
       symbol: sym,
-      quote,
-      provenance,
-      displayState: (tradeLive && bookLive ? "LIVE" : anyLive ? "MIXED" : fb?.displayState ?? "UNAVAILABLE") as DisplayState,
+      ...resolved,
       analytics: analyticsFallback?.analytics ?? fb?.analytics ?? null,
       trackedRealtime: Boolean(fb?.tracked_realtime ?? isRealtimeTracked(sym)),
     };
