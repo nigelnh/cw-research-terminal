@@ -53,6 +53,12 @@ def _wire(sessionmaker_, monkeypatch):
         value = 0.35
         source_label = "HV_22"
     monkeypatch.setattr(live_quant_engine, "_historical_vol_getter", lambda s: _HV())
+    # No live/warm-cache quote for any symbol by default - a deterministic baseline for the
+    # IV_BID/IV_ASK-from-last-known-book enrichment. `_market_state_getter` is shared,
+    # process-wide state on the `live_quant_engine` singleton (other test files wire it to
+    # the real `market_state` singleton via the app lifespan); pinning it here stops that
+    # from leaking into these tests via cross-test/cross-file ordering.
+    monkeypatch.setattr(live_quant_engine, "_market_state_getter", lambda sym: None)
     yield
 
 
@@ -67,7 +73,35 @@ async def test_aligned_session_produces_analytics(sessionmaker_):
     assert a.model_inputs is not None and a.model_inputs.underlying_price == 22000.0
     assert a.iv_trade is not None            # CW last + underlying close both known
     assert a.greeks is not None and a.greeks.delta is not None
-    assert a.iv_bid is None and a.iv_ask is None  # no EOD order book
+    assert a.iv_bid is None and a.iv_ask is None  # no last-known book for this symbol (see _wire)
+
+
+async def test_eod_analytics_seeds_iv_bid_ask_from_last_known_book(sessionmaker_, monkeypatch):
+    """IV_TRADE/moneyness/Greeks use the session's own close for temporal correctness, but
+    IV_BID/IV_ASK have no EOD equivalent - a daily bar carries no order book. They're seeded
+    from the most recently observed bid1/ask1 instead: the same last-known book already
+    shown in the dashboard's own BID_PRC/ASK_PRC columns (live-tick state, warm-cache-
+    restored across a restart), via the market-state getter - not necessarily from this
+    exact session's own close."""
+    await instrument_registry.initialize(current_date="2026-08-28")
+    await _bar(sessionmaker_, "CVPB2615", "CW", "RAW", _D, 900.0)
+    await _bar(sessionmaker_, "VPB", "STOCK", "ADJUSTED", _D, 22000.0)
+
+    from app.market_data.market_schemas import CanonicalQuote
+
+    last_book = CanonicalQuote(symbol="CVPB2615", instrument_type="CW",
+                                bid1_price=880.0, ask1_price=920.0)
+    monkeypatch.setattr(
+        live_quant_engine, "_market_state_getter",
+        lambda sym: last_book if sym == "CVPB2615" else None,
+    )
+
+    a = await live_quant_engine.compute_eod_analytics("CVPB2615", _D, sessionmaker=sessionmaker_)
+    assert a.is_available is True
+    assert a.iv_trade is not None             # still driven by the session's own CW close
+    assert a.iv_bid is not None                # now seeded from the last-known bid1
+    assert a.iv_ask is not None                # now seeded from the last-known ask1
+    assert a.iv_mid is not None                # midpoint IV needs both bid and ask
 
 
 async def test_missing_underlying_leg_is_eod_input_missing(sessionmaker_):
