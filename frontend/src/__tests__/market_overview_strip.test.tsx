@@ -45,6 +45,17 @@ describe("market overview strip", () => {
     expect(container.querySelectorAll("polyline")).toHaveLength(2);
     expect(container.querySelector("line")?.getAttribute("y1")).toBe("30");
   });
+
+  it("maps the intraday path onto a fixed 09:00-15:00 ICT x-axis", () => {
+    const { container } = render(<Sparkline direction={1} reference={100} values={[
+      { timestamp: "2026-09-04T09:00:00+07:00", value: 100 },
+      { timestamp: "2026-09-04T12:00:00+07:00", value: 105 },
+    ]} />);
+    // the >7.5min gaps make each bar its own segment -> two circles at fixed x
+    const cx = [...container.querySelectorAll("circle")].map(c => Number(c.getAttribute("cx")));
+    expect(cx[0]).toBeCloseTo(0, 1);      // 09:00 -> left edge
+    expect(cx[1]).toBeCloseTo(50, 1);     // 12:00 -> half-way through the 6h session
+  });
   it("shows bounded background updating state without fabricated index values", () => {
     state.empty = true;
     state.refreshing = true;
@@ -75,6 +86,8 @@ describe("market overview strip", () => {
     expect(screen.getByText("22,100").style.color).toBe("var(--down)");
     expect(document.querySelectorAll(".overview-direction-icon")).toHaveLength(8);
     expect(screen.getAllByText("(1)")[0].style.color).toBe("var(--price-ceiling)");
+    // the POLLED / PARTIAL status row was removed from the card
+    expect(screen.queryByText(/POLLED|PARTIAL/)).toBeNull();
   });
 
   it("can render the compact index-only variant", () => {
