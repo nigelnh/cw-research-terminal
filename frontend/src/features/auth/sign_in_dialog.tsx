@@ -57,6 +57,9 @@ export function SignInDialog({ onClose }: { onClose: () => void }) {
         alignItems: "center",
         justifyContent: "center",
         padding: 16,
+        // The control mounts inside `.terminal-header-end`, which sets
+        // `white-space: nowrap`; reset it or the copy never wraps.
+        whiteSpace: "normal",
         background: "rgba(2, 6, 12, 0.55)",
         backdropFilter: "blur(2px)",
       }}
