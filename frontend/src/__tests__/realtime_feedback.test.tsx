@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { RealtimeValue } from "@/components/common/realtime_value";
+import { act, render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { RealtimeValue, REALTIME_FLASH_DURATION_MS } from "@/components/common/realtime_value";
 import { quoteCell } from "@/components/common/quote_columns";
 import { MARKET_COLOR, priceColor } from "@/components/common/grid_table";
 import { BackendWebSocketClient } from "@/data/backend/backend_websocket_client";
@@ -23,6 +23,23 @@ const snapshot = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("incremental realtime feedback", () => {
+  it("flashes the table cell itself for 1200ms and cleans up after expiry", () => {
+    vi.useFakeTimers();
+    try {
+      const { container, unmount } = render(<table><tbody><tr>
+        <RealtimeValue as="td" title="Traded price" style={{ padding: "8px" }}
+          pulse={{ sequence: 1, direction: "up", startedAt: Date.now() }}>21,700</RealtimeValue>
+      </tr></tbody></table>);
+      expect(container.querySelector("td.realtime-flash-up")?.textContent).toBe("21,700");
+      expect(container.querySelector("td span")).toBeNull();
+      act(() => vi.advanceTimersByTime(1000));
+      expect(container.querySelector("td.realtime-flash-up")).not.toBeNull();
+      act(() => vi.advanceTimersByTime(201));
+      expect(container.querySelector(".realtime-flash")).toBeNull();
+      expect(REALTIME_FLASH_DURATION_MS).toBe(1200);
+      unmount();
+    } finally { vi.useRealTimers(); }
+  });
   it("uses the same five-state price classifier for stock and CW rows", () => {
     const bands = { ref: 100, ceiling: 107, floor: 93 };
     const states = [
@@ -228,7 +245,7 @@ describe("incremental realtime feedback", () => {
 
   it("does not replay an expired pulse when a value surface mounts later", () => {
     const page = render(
-      <RealtimeValue pulse={{ sequence: 4, direction: "up", startedAt: Date.now() - 601 }}>
+      <RealtimeValue pulse={{ sequence: 4, direction: "up", startedAt: Date.now() - REALTIME_FLASH_DURATION_MS - 1 }}>
         22,100
       </RealtimeValue>,
     );

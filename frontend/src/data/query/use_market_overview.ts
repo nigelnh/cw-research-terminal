@@ -19,8 +19,10 @@ export interface IndexOverview {
   session_date?: string | null;
   availability?: "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
   stale?: boolean;
+  update_mode?: "POLLED";
+  partial_reasons?: string[];
   sparkline: Array<number | { timestamp: string; value: number; reference?: number | null }>;
-  provenance?: Record<string, { source: string; as_of?: string | null; session_date?: string | null; availability?: string }>;
+  provenance?: Record<string, { source: string; as_of?: string | null; session_date?: string | null; availability?: string; timeframe?: string }>;
 }
 export interface VolumeLeader {
   symbol: string;
@@ -53,8 +55,15 @@ export function useMarketOverview() {
     queryKey: queryKeys.marketOverview,
     queryFn: ({ signal }) => backendClient.getMarketOverview(signal),
     staleTime: 60_000,
-    refetchInterval: (query) => query.state.data?.refreshing ? 2_000
-      : query.state.data?.availability === "UNAVAILABLE" ? 15_000 : 5 * 60_000,
+    refetchInterval: (query) => overviewRefetchInterval(query.state.data),
     retry: 1,
   });
+}
+
+export function overviewRefetchInterval(data?: MarketOverviewData): number {
+  if (data?.refreshing) return 2_000;
+  if (!data || data.availability === "UNAVAILABLE") return 15_000;
+  // Backend refreshes a single shared snapshot every 60s in-session; polling
+  // five minutes apart left every visible tab stale between refreshes.
+  return data.market_session_active ? 15_000 : 60_000;
 }

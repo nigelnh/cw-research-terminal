@@ -60,4 +60,10 @@ Không đổi secret, không bật crawl, không mở thêm SignalR stream, khô
 
 ## Production
 
-Kết quả deployment và kiểm tra domain production được ghi sau khi cả backend/frontend hoàn tất.
+- PR #27 đã merge thành `21a3b7f`, backend Railway `feca8e66-beaa-47a2-9286-5141efe5ae09`
+  SUCCESS và frontend Vercel `dpl_FPwGNY2aK8sgGb7DJuuzLNjZBT7B` Ready.
+- Domain production được kiểm tra lúc 09:31 ICT bằng hai tab HPG/CHPG2617 và reload:
+  READY không còn; OPEN/LIVE; Watchlist/STATS cùng giá, volume và change; SYMBOL cùng màu
+  TRD_PRC; không page error/HTTP 5xx. HPG 21.700, volume 1.028.600, TRD_AMT 300, +100/+0,46%.
+- Health: Redis connected, 288 writes/84 restores, zero write/restore errors; feed LIVE,
+  30/30 subscriptions, decode/reconnect/quant failure counters bằng 0 tại thời điểm kiểm tra.
