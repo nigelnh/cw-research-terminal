@@ -21,13 +21,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from time import monotonic
 from typing import Any, Optional
 from weakref import WeakValueDictionary
 
 from app.core.config import settings
+from app.instruments.instrument_registry import instrument_registry
 from app.market_data import trading_calendar as cal
 from app.market_data.market_schemas import HistoricalBar
 from app.market_data.market_session import market_session
@@ -176,7 +177,65 @@ class MarketSnapshotResolver:
                 for sym in clean
             )
         )
+        await self._derive_cw_bands(rows)
         return rows
+
+    @staticmethod
+    def _round_tick(value: float, tick: float = 10.0) -> float:
+        return round(value / tick) * tick
+
+    async def _derive_cw_bands(self, rows: list[ResolvedRow]) -> None:
+        """FiinQuant ``get_ceilingfloor`` returns no rows for covered warrants, so a CW's
+        session limit is reconstructed from the underlying's limit move divided by the
+        conversion ratio (the HOSE rule). Only when every input is present."""
+        by_symbol = {r.symbol: r for r in rows}
+        for row in rows:
+            if row.instrument_type != "CW":
+                continue
+            cw_ref = row.values.get("reference_price")
+            if (
+                cw_ref is None
+                or row.values.get("ceiling_price") is not None
+                or row.values.get("floor_price") is not None
+            ):
+                continue
+
+            und = (row.underlying_symbol or "").upper()
+            spec = None
+            if not und:
+                spec = await instrument_registry.get_instrument(row.symbol)
+                und = (spec.underlying_symbol or "").upper() if spec else ""
+            if not und:
+                continue
+
+            u_row = by_symbol.get(und)
+            u_ref = u_row.values.get("reference_price") if u_row else None
+            u_ceil = u_row.values.get("ceiling_price") if u_row else None
+            u_floor = u_row.values.get("floor_price") if u_row else None
+            if u_ref is None or u_ceil is None or u_floor is None:
+                q = market_state.get_quote(und)
+                if q is not None:
+                    u_ref = u_ref if u_ref is not None else q.reference_price
+                    u_ceil = u_ceil if u_ceil is not None else q.ceiling_price
+                    u_floor = u_floor if u_floor is not None else q.floor_price
+            if u_ref is None or u_ceil is None or u_floor is None:
+                continue
+
+            if spec is None:
+                spec = await instrument_registry.get_instrument(row.symbol)
+            ratio = getattr(spec, "effective_ratio", None) if spec is not None else None
+            if not ratio or ratio <= 0:
+                continue
+
+            up_move = (u_ceil - u_ref) / ratio
+            dn_move = (u_ref - u_floor) / ratio
+            row.values["ceiling_price"] = self._round_tick(cw_ref + up_move)
+            row.values["floor_price"] = max(10.0, self._round_tick(cw_ref - dn_move))
+            if row.reference_prov.state != DataTemporalState.UNAVAILABLE:
+                row.reference_prov = replace(
+                    row.reference_prov,
+                    note="bands derived from the underlying limit ÷ conversion ratio",
+                )
 
     async def resolve_analytics_rows(
         self, symbols: list[str], *, now: Optional[datetime] = None
