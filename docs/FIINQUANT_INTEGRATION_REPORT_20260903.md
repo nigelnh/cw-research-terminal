@@ -60,6 +60,10 @@ they do not create a last trade, trade timestamp, last-match quantity, or candle
   is warmed at startup; history-derived prices keep `EOD_BARS` provenance rather than being
   relabelled as observed trades. Same-session snapshot upserts preserve known values when a
   later partial checkpoint contains null, while legitimate zero values remain writable.
+- Market Overview has a separate Redis snapshot and single-flight background refresh.
+  Cold HTTP reads wait at most two seconds for provider computation; a slow refresh does
+  not block warm reads or other tabs. Cache age and original observation timestamps stay
+  separate, and stale cached values are explicitly labelled rather than marked live.
 
 ## Availability and fail-closed behaviour
 
@@ -77,8 +81,8 @@ they do not create a last trade, trade timestamp, last-match quantity, or candle
 
 | Check | Result |
 |---|---|
-| Backend test suite | 1,183 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
-| Frontend test suite | 36 files; 280 tests passed |
+| Backend test suite | 1,191 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
+| Frontend test suite | 36 files; 282 tests passed |
 | Backend byte-code compilation | Passed |
 | Frontend typecheck and production build | Passed; Vite reported the existing large-chunk/deprecated-option warnings |
 | Browser — Dashboard | Rendered on the allowed local origin; explicit `CLOSED`, `OFFLINE`, and overview-unavailable states; no error overlay |
@@ -90,11 +94,29 @@ The browser run intentionally used no market-data fixture. Expected HTTP 503 res
 from provider-backed endpoints were visible because no local FiinQuant credentials are
 configured; the UI degraded without fabricating values.
 
+## Production reload verification — 2026-09-04 ICT
+
+Production was deployed with explicit user authorization. The authenticated Railway
+backend reports Redis and PostgreSQL connected, FiinQuant READY, the 30-symbol server-owned
+universe restored, and Alembic revision `0007_fiinquant_semantics` applied. Redis read/write
+and restore error counters were zero at verification.
+
+Headless Chrome opened two tabs on the production Vercel domain, then reloaded both
+simultaneously. Each received 30 rows with 30 positive prices. The dashboard responses
+arrived in 286 ms and 445 ms on reload, versus the previously observed 13–15 seconds.
+The UI displayed HPG 21,650 / volume 9,472,000 and CHPG2617 440 / volume 631,100.
+No JavaScript page errors, non-aborted network failures, or error overlays were observed.
+These were explicitly LAST_SESSION values during PRE_OPEN, not live executions.
+
+After a backend restart, historical fallback cache reads recovered legacy book-only CW
+snapshots without direct provider history calls. A pre-open feed reset with zero prices
+no longer overwrites the last actual trade or creates a false −100% move.
+
 ## Remaining live validation
 
-Credentialed FiinQuant validation was not run on this machine because no FiinQuant secrets
-are configured. After credentials are supplied through environment/secret storage, compare
-FiinQuant with a second source at the same session, timestamp, unit, and definition. Record
+FiinQuant secrets remain absent locally; the reload checks above used the already-configured
+production backend without exposing credentials. A full live comparison against a second
+source at the same session, timestamp, unit, and definition remains outstanding. Record
 scope differences for volume/value rather than modifying data to force agreement. Validate
 at least one actual match, one book-only update, one lunch snapshot, ATC, the 15:00 close,
 and a reconnect/backfill cycle.

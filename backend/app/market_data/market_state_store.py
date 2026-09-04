@@ -67,6 +67,12 @@ class MarketStateStore(ABC):
     ) -> None:
         pass
 
+    async def load_market_overview(self) -> Optional[Dict[str, Any]]:
+        return None
+
+    async def save_market_overview(self, payload: Dict[str, Any]) -> None:
+        pass
+
     @abstractmethod
     async def delete(self, symbol: str) -> None:
         """Removes a symbol from the cache."""
