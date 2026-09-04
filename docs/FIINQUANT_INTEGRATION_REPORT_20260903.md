@@ -28,6 +28,9 @@ timestamps are independent, so a newer book/reference event cannot make an old t
 live. Provider `MarketStatus` is retained as an opaque value until its code meanings are
 verified.
 
+FiinQuant pre-open `Close/OHLC=0` resets are not executions: zero totals remain valid, but
+they do not create a last trade, trade timestamp, last-match quantity, or candle.
+
 ## Session, persistence, chart, and analytics
 
 - HOSE phases are resolved in Asia/Ho_Chi_Minh time: pre-open, ATO (09:00–09:15), morning
@@ -74,7 +77,7 @@ verified.
 
 | Check | Result |
 |---|---|
-| Backend test suite | 1,181 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
+| Backend test suite | 1,183 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
 | Frontend test suite | 36 files; 280 tests passed |
 | Backend byte-code compilation | Passed |
 | Frontend typecheck and production build | Passed; Vite reported the existing large-chunk/deprecated-option warnings |
