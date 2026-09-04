@@ -69,7 +69,7 @@ verified.
 
 | Check | Result |
 |---|---|
-| Backend test suite | 1,176 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
+| Backend test suite | 1,177 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
 | Frontend test suite | 36 files; 280 tests passed |
 | Backend byte-code compilation | Passed |
 | Frontend typecheck and production build | Passed; Vite reported the existing large-chunk/deprecated-option warnings |

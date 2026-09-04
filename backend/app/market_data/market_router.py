@@ -156,7 +156,12 @@ async def get_dashboard_rows(
         raise HTTPException(status_code=400, detail="At least one symbol is required.")
 
     now = cal._as_vn(None)
-    rows = await market_snapshot_resolver.resolve_rows(syms, now=now, diag=debug)
+    rows = await market_snapshot_resolver.resolve_rows(
+        syms,
+        now=now,
+        diag=debug,
+        enrich_snapshot_history=False,
+    )
     tracked = set(subscription_manager.get_active_symbols())
     in_server_universe = getattr(subscription_manager, "is_in_server_universe", None)
     wire_rows = []

@@ -141,7 +141,12 @@ class MarketSnapshotResolver:
         self._sm = sessionmaker
 
     async def resolve_rows(
-        self, symbols: list[str], *, now: Optional[datetime] = None, diag: bool = False
+        self,
+        symbols: list[str],
+        *,
+        now: Optional[datetime] = None,
+        diag: bool = False,
+        enrich_snapshot_history: bool = True,
     ) -> list[ResolvedRow]:
         now = now or datetime.now(cal.VN_TZ)
         clean = list(dict.fromkeys(s.strip().upper() for s in symbols if s and s.strip()))
@@ -158,6 +163,7 @@ class MarketSnapshotResolver:
                 self._resolve_one(
                     sym, now=now, latest_session=latest_session,
                     session_active=session_active, snapshot=snapshots.get(sym), diag=diag,
+                    enrich_snapshot_history=enrich_snapshot_history,
                 )
                 for sym in clean
             )
@@ -226,7 +232,7 @@ class MarketSnapshotResolver:
 
     async def _resolve_one(
         self, sym: str, *, now: datetime, latest_session: date, session_active: bool,
-        snapshot, diag: bool,
+        snapshot, diag: bool, enrich_snapshot_history: bool,
     ) -> ResolvedRow:
         inst_type = market_state._determine_instrument_type(sym)
         row = ResolvedRow(symbol=sym, instrument_type=inst_type)
@@ -355,6 +361,13 @@ class MarketSnapshotResolver:
         # current display session. Overlay only those three fields so a closed-session
         # row can still classify its prices without exposing stale intraday data.
         self._overlay_current_reference(row, live, now=now, trace=trace)
+        # The dashboard reload path prefers an observed persisted snapshot immediately.
+        # Missing optional OHLC/reference fields remain null with truthful provenance;
+        # they must not turn a ready quote into a multi-second history dependency.
+        if snapshot is not None and not enrich_snapshot_history:
+            if diag:
+                row.diag = {"chosen": "SNAPSHOT_FAST", "trace": trace}
+            return row
         if snapshot_complete or (snapshot is not None and snapshot.session_date > latest_session):
             if diag:
                 row.diag = {"chosen": "SNAPSHOT", "trace": trace}
