@@ -1618,7 +1618,8 @@ class FiinQuantProvider(MarketDataProvider):
                 except TypeError:
                     return []
 
-            def fetch_rows(tickers: List[str], *, by: str, period: int) -> List[Dict[str, Any]]:
+            def fetch_rows(tickers: List[str], *, by: str, period: int | None = None,
+                           from_date: str | None = None, to_date: str | None = None) -> List[Dict[str, Any]]:
                 rows: List[Dict[str, Any]] = []
                 for start in range(0, len(tickers), 100):
                     result = self._session.Fetch_Trading_Data(
@@ -1627,8 +1628,10 @@ class FiinQuantProvider(MarketDataProvider):
                         fields=["close", "volume", "value"],
                         adjusted=False,
                         by=by,
-                        period=period,
                         lasted=True,
+                        **({"period": period} if period is not None else {
+                            "from_date": from_date, "to_date": to_date,
+                        }),
                     )
                     rows.extend(records(result))
                 return rows
@@ -1681,7 +1684,16 @@ class FiinQuantProvider(MarketDataProvider):
                         unavailable_components.add("daily")
                         logger.warning("FiinQuant overview daily snapshot unavailable: %s", exc)
                     try:
-                        intraday = actual_prices(fetch_rows(index_symbols, by="5m", period=48))
+                        # SDK period mode derives timeTo from datetime.now() in the
+                        # host timezone. On UTC hosts that cuts a 09:xx ICT session
+                        # off at 02:xx. Query the observed session in explicit ICT,
+                        # including the latest incomplete bar, without another stream.
+                        index_day = max((stamp(r)[:10] for r in daily if key(r) in index_symbols),
+                                        default=market_session.get_vn_now().date().isoformat())
+                        end = min(f"{index_day} 15:00", market_session.get_vn_now().strftime("%Y-%m-%d %H:%M"))
+                        if end >= f"{index_day} 09:00":
+                            intraday = actual_prices(fetch_rows(index_symbols, by="5m",
+                                from_date=f"{index_day} 09:00", to_date=end))
                     except Exception as exc:
                         unavailable_components.add("intraday")
                         logger.warning("FiinQuant overview intraday snapshot unavailable: %s", exc)
@@ -1732,7 +1744,7 @@ class FiinQuantProvider(MarketDataProvider):
                     prior_bars = [row for row in bars if stamp(row)[:10] < latest_day]
                     latest = session_bars[-1] if session_bars else {}
                     previous = prior_bars[-1] if prior_bars else {}
-                    current = intraday_bars[-1] if intraday_bars else latest
+                    current = max([latest, *intraday_bars], key=stamp)
                     close, reference = num(current, "close", "Close"), num(previous, "close", "Close")
                     change = close - reference if close is not None and reference is not None else None
                     pct = change / reference * 100 if change is not None and reference else None
@@ -1752,6 +1764,13 @@ class FiinQuantProvider(MarketDataProvider):
                         "unchanged": num(b, "totalStockNoChangePrice"), "declining": num(b, "totalStockDownPrice"),
                         "floor": num(b, "totalStockUnderFloor"), "as_of": stamp(current) or stamp(b),
                         "session_date": latest_day or None,
+                        "update_mode": "POLLED",
+                        "partial_reasons": [reason for reason, missing in (
+                            ("PRICE_UNAVAILABLE", close is None),
+                            ("REFERENCE_UNAVAILABLE", reference is None),
+                            ("INTRADAY_UNAVAILABLE", not intraday_bars),
+                            ("BREADTH_UNAVAILABLE", not b),
+                        ) if missing],
                         "sparkline": [{"timestamp": stamp(x), "value": num(x, "close", "Close"),
                                        "reference": reference} for x in intraday_bars
                                       if num(x, "close", "Close") is not None],
@@ -1764,6 +1783,9 @@ class FiinQuantProvider(MarketDataProvider):
                             "breadth": {"source": "FIINQUANT", "as_of": stamp(b) or None,
                                         "session_date": stamp(b)[:10] or latest_day or None,
                                         "availability": "AVAILABLE" if b else "UNAVAILABLE"},
+                            "sparkline": {"source": "FIINQUANT", "as_of": stamp(intraday_bars[-1]) if intraday_bars else None,
+                                          "session_date": latest_day or None, "timeframe": "5m",
+                                          "availability": "AVAILABLE" if intraday_bars else "UNAVAILABLE"},
                         },
                         "availability": card_state,
                     })

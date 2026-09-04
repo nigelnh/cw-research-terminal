@@ -57,6 +57,58 @@ class _Session:
 
 
 @pytest.mark.asyncio
+async def test_overview_queries_intraday_in_explicit_ict_not_sdk_host_clock(monkeypatch):
+    from datetime import datetime
+    from app.market_data.market_session import market_session, VN_TZ
+    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 2, 9, 28, tzinfo=VN_TZ))
+
+    class MorningSession(_Session):
+        def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
+            if by == "5m":
+                assert "period" not in kwargs
+                assert kwargs["from_date"] == "2026-09-02 09:00"
+                assert kwargs["to_date"] == "2026-09-02 09:28"
+                assert kwargs["lasted"] is True
+                assert kwargs["realtime"] is False
+                return _Result([{"ticker": symbol, "timestamp": "2026-09-02 09:20",
+                                 "close": 101, "volume": 7, "value": 700} for symbol in tickers])
+            result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
+            for row in result.rows:
+                if row["timestamp"] == "2026-09-02":
+                    row["timestamp"] = "2026-09-02 09:27"
+            return result
+
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = MorningSession()
+    provider._is_connected = True
+    result = await provider.get_market_overview([])
+    for item in result["indices"]:
+        assert item["value"] == 102  # newer daily snapshot beats older 5m close
+        assert item["as_of"] == "2026-09-02T09:27:00+07:00"
+        assert item["sparkline"] == [{"timestamp": "2026-09-02T09:20:00+07:00", "value": 101, "reference": 100}]
+        assert item["update_mode"] == "POLLED"
+        assert item["provenance"]["sparkline"]["timeframe"] == "5m"
+
+
+@pytest.mark.asyncio
+async def test_overview_after_hours_queries_the_observed_session_not_today(monkeypatch):
+    from datetime import datetime
+    from app.market_data.market_session import market_session, VN_TZ
+    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 3, 8, 30, tzinfo=VN_TZ))
+
+    class OvernightSession(_Session):
+        def Fetch_Trading_Data(self, *, by, **kwargs):
+            if by == "5m":
+                assert kwargs["from_date"] == "2026-09-02 09:00"
+                assert kwargs["to_date"] == "2026-09-02 15:00"
+            return super().Fetch_Trading_Data(by=by, **kwargs)
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = OvernightSession()
+    provider._is_connected = True
+    await provider.get_market_overview([])
+
+
+@pytest.mark.asyncio
 async def test_overview_uses_snapshot_reads_without_changing_stream_subscriptions():
     provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
     provider._session = _Session()
@@ -243,6 +295,8 @@ async def test_overview_returns_partial_payload_when_optional_reads_fail():
     assert result["components"]["breadth"] == "UNAVAILABLE"
     assert result["indices"][0]["value"] == 102
     assert result["indices"][0]["availability"] == "PARTIAL"
+    assert result["indices"][0]["partial_reasons"] == ["INTRADAY_UNAVAILABLE", "BREADTH_UNAVAILABLE"]
+    assert result["indices"][0]["sparkline"] == []
     assert result["top_cw_volume"][0]["symbol"] == "CAAA2601"
 
 
