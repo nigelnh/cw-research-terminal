@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from typing import Any, Iterable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -121,7 +121,14 @@ class SnapshotRepository:
             values["quality"] = row.quality if _QUALITY_RANK.get(row.quality, 0) >= _QUALITY_RANK.get(same.quality, 0) else same.quality
 
         update_cols: dict[str, Any] = {
-            k: getattr(pg_insert(InstrumentSnapshot).excluded, k)
+            k: (
+                func.coalesce(
+                    getattr(pg_insert(InstrumentSnapshot).excluded, k),
+                    getattr(InstrumentSnapshot, k),
+                )
+                if InstrumentSnapshot.__table__.c[k].nullable
+                else getattr(pg_insert(InstrumentSnapshot).excluded, k)
+            )
             for k in values
             if k not in ("symbol", "session_date")
         }

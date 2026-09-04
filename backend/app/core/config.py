@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     SNAPSHOT_ENABLED: bool = Field(default=True, description="Persist last-valid realtime snapshots (needs DATABASE_ENABLED)")
     SNAPSHOT_CHECKPOINT_INTERVAL_SECONDS: int = Field(default=90, description="Min seconds between per-symbol snapshot checkpoints")
     DASHBOARD_FALLBACK_GAPFILL: bool = Field(default=True, description="Allow the dashboard fallback resolver one controlled EOD gap-fill for a missing latest-session bar")
+    DASHBOARD_HISTORY_CACHE_TTL_SECONDS: int = Field(default=21600, description="TTL for session- and price-basis-scoped dashboard history fallback cache")
 
     # Redis Warm Market State Cache Configuration
     REDIS_ENABLED: bool = Field(default=True, description="Enable Redis warm market state cache")

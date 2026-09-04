@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -180,7 +181,9 @@ async def lifespan(app: FastAPI):
         from app.market_data.market_snapshot_resolver import market_snapshot_resolver
         from app.market_data.snapshot_checkpointer import SnapshotCheckpointer
 
-        market_snapshot_resolver.configure(persistence_db.get_sessionmaker())
+        market_snapshot_resolver.configure(
+            persistence_db.get_sessionmaker(), store=subscription_manager.store
+        )
         _snapshot_checkpointer = SnapshotCheckpointer(
             persistence_db.get_sessionmaker(),
             subscription_manager.get_active_symbols,
@@ -241,6 +244,22 @@ async def lifespan(app: FastAPI):
         return sorted(seen)
 
     historical_volatility_service.start_periodic_refresh(_hv_refresh_symbols)
+
+    # Warm only the fixed server-owned universe, before accepting browser reloads. Legacy
+    # book-only snapshots can recover actual closes from the session-scoped Redis history
+    # cache (or one bounded FiinQuant read), without making any value look live.
+    if _persistence_ready:
+        try:
+            await asyncio.wait_for(
+                market_snapshot_resolver.resolve_rows(
+                    subscription_manager.get_server_universe_symbols(),
+                    enrich_snapshot_history=False,
+                ),
+                timeout=10.0,
+            )
+            logger.info("Dashboard snapshot/history warm-up complete for server universe.")
+        except Exception as exc:
+            logger.warning("Dashboard warm-up incomplete (non-fatal): %s", type(exc).__name__)
 
     yield
     # Shutdown: stop ingestion first (no new ticks), then drain the analytics scheduler,

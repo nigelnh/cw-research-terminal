@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 import logging
 
-from app.market_data.market_schemas import CanonicalQuote
+from app.market_data.market_schemas import CanonicalQuote, HistoricalBar
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,17 @@ class MarketStateStore(ABC):
         Thread-safe non-blocking enqueue operation.
         Buffers latest quote for background coalesced writing without blocking event loop or callbacks.
         """
+        pass
+
+    async def load_dashboard_history(
+        self, symbol: str, price_basis: str, session_date: str
+    ) -> Optional[List[HistoricalBar]]:
+        """Optional, separately-namespaced completed-session history cache."""
+        return None
+
+    async def save_dashboard_history(
+        self, symbol: str, price_basis: str, session_date: str, bars: List[HistoricalBar]
+    ) -> None:
         pass
 
     @abstractmethod
