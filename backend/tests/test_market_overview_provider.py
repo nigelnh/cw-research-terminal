@@ -248,8 +248,38 @@ async def test_breadth_refresh_is_background_only_and_never_blocks_the_payload()
 
 @pytest.mark.asyncio
 async def test_overview_cache_survives_a_multihour_gap_outside_trading_hours():
-    """Nothing changes until the market reopens, so the overview must not re-hit FiinQuant
-    on some short fixed timer while closed - only once the next session actually nears."""
+    """Nothing changes until the market reopens, so a SETTLED overview (background breadth
+    sweep already done) must not re-hit FiinQuant on some short fixed timer while closed -
+    only once the next session actually nears."""
+    class CountingSession(_Session):
+        calls = 0
+        def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
+            CountingSession.calls += 1
+            return super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
+
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = CountingSession()
+    provider._is_connected = True
+    provider._market_is_active = lambda: False
+    provider._seconds_to_next_session = lambda: 6 * 3600  # e.g. overnight, next open in 6h
+    await provider._refresh_index_breadth()  # settle stock leaders before the first build
+
+    await provider.get_market_overview(["CAAA2601"])
+    calls_after_first = CountingSession.calls
+    assert calls_after_first > 0
+
+    # An hour "passes" - the old fixed 300s TTL would have forced a rebuild well before now.
+    provider._overview_cache_at -= 3600
+    await provider.get_market_overview(["CAAA2601"])
+    assert CountingSession.calls == calls_after_first  # still served from cache
+
+
+@pytest.mark.asyncio
+async def test_overview_cache_stays_short_lived_until_stock_leaders_settle():
+    """An overview built before the background breadth sweep finishes (stock leaders still
+    empty) must NOT get the long off-session TTL - otherwise "Top Stock Trading Volume"
+    would stay stuck empty for the rest of a closed weekend, since nothing would ever ask
+    FiinQuant for it again. It should keep retrying on the short TTL until it settles."""
     class CountingSession(_Session):
         calls = 0
         def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
@@ -262,14 +292,28 @@ async def test_overview_cache_survives_a_multihour_gap_outside_trading_hours():
     provider._market_is_active = lambda: False
     provider._seconds_to_next_session = lambda: 6 * 3600  # e.g. overnight, next open in 6h
 
-    await provider.get_market_overview(["CAAA2601"])
+    # No _refresh_index_breadth() yet - stock leaders are empty, same as right after a
+    # cold restart, before the background sweep has had a chance to finish.
+    first = await provider.get_market_overview(["CAAA2601"])
+    assert first["components"]["top_stock_volume"] == "UNAVAILABLE"
     calls_after_first = CountingSession.calls
-    assert calls_after_first > 0
 
-    # An hour "passes" - the old fixed 300s TTL would have forced a rebuild well before now.
+    # The background sweep finishes moments later (as it does in prod, ~20-30s in).
+    await provider._refresh_index_breadth()
+
+    # Only a few seconds pass - the old fixed 300s TTL, and a naively-stretched off-session
+    # TTL, would BOTH still be serving the incomplete cached snapshot right now.
+    provider._overview_cache_at -= 20
+    second = await provider.get_market_overview(["CAAA2601"])
+    assert CountingSession.calls > calls_after_first  # retried, did not wait for next session
+    assert second["components"]["top_stock_volume"] == "AVAILABLE"
+    assert second["top_stock_volume"][0]["symbol"] == "AAA"
+
+    # Now that it's settled, a later request survives a real multi-hour gap without refetching.
+    calls_after_second = CountingSession.calls
     provider._overview_cache_at -= 3600
     await provider.get_market_overview(["CAAA2601"])
-    assert CountingSession.calls == calls_after_first  # still served from cache
+    assert CountingSession.calls == calls_after_second
 
 
 @pytest.mark.asyncio
@@ -286,6 +330,7 @@ async def test_overview_cache_still_rebuilds_once_the_next_session_is_close():
     provider._is_connected = True
     provider._market_is_active = lambda: False
     provider._seconds_to_next_session = lambda: 10.0  # market opens very soon
+    await provider._refresh_index_breadth()  # settle stock leaders before the first build
 
     await provider.get_market_overview(["CAAA2601"])
     calls_after_first = CountingSession.calls

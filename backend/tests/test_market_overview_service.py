@@ -13,12 +13,17 @@ from app.market_data.market_overview_service import MarketOverviewService
 pytestmark = pytest.mark.asyncio
 
 
-def overview():
+def overview(*, settled: bool = True):
+    """A settled payload (the default) mirrors a provider result where the background
+    breadth/stock-leaders sweep has already completed - the normal, common case, and what
+    every off-session-TTL test other than the one dedicated to the unsettled case wants.
+    `top_stock_volume` is left empty either way since only `components` drives the check."""
     return {
         "indices": [{"symbol": "VNINDEX", "value": 1200, "as_of": "2026-09-03",
                      "session_date": "2026-09-03", "stale": False}],
         "top_stock_volume": [], "top_cw_volume": [], "source": "FIINQUANT",
         "availability": "AVAILABLE", "as_of": "2026-09-03",
+        "components": {"top_stock_volume": "AVAILABLE" if settled else "UNAVAILABLE"},
     }
 
 
@@ -107,6 +112,14 @@ async def test_unavailable_refresh_preserves_last_good_snapshot():
     cache.save_market_overview.assert_not_called()
 
 
+async def _settle(service: MarketOverviewService) -> None:
+    """Await any refresh `get()` just scheduled, so a following assertion on
+    `await_count`/task-identity reflects what actually ran rather than a task that was
+    merely created and hasn't had a chance to execute yet."""
+    if service._refresh_task is not None:
+        await service._refresh_task
+
+
 async def test_ttl_extends_through_the_closed_stretch_but_not_past_the_next_session(monkeypatch):
     """Outside trading hours nothing can change until the market reopens, so a request an
     hour after the last fetch must still be served from cache - but not forever: once the
@@ -120,17 +133,58 @@ async def test_ttl_extends_through_the_closed_stretch_but_not_past_the_next_sess
     service._seconds_to_next_session = lambda: 6 * 3600  # e.g. overnight
     try:
         await service.get([])
-        await service._refresh_task
+        await _settle(service)
         assert provider.get_market_overview.await_count == 1
 
         service._cached_at -= 3600  # an hour passes - the old fixed 300s TTL would refresh
+        task_before = service._refresh_task
         await service.get([])
+        await _settle(service)
+        assert service._refresh_task is task_before  # no new refresh was even scheduled
         assert provider.get_market_overview.await_count == 1  # still cached
 
         service._seconds_to_next_session = lambda: 10.0  # next session now very close
         await service.get([])
-        await service._refresh_task
+        await _settle(service)
         assert provider.get_market_overview.await_count == 2  # rebuilt
+    finally:
+        await service.close()
+
+
+async def test_ttl_stays_short_until_stock_leaders_settle(monkeypatch):
+    """A payload built before the background breadth/stock-leaders sweep finished must NOT
+    get the long off-session TTL - otherwise "Top Stock Trading Volume" would stay stuck
+    empty for the rest of a closed weekend, since nothing would ever re-ask the provider."""
+    from app.market_data.market_session import market_session
+    monkeypatch.setattr(market_session, "is_trading_active", lambda: False)
+
+    provider = SimpleNamespace(get_market_overview=AsyncMock(side_effect=[
+        overview(settled=False), overview(settled=True),
+    ]))
+    service = MarketOverviewService()
+    service.configure(provider, store())
+    service._seconds_to_next_session = lambda: 6 * 3600  # e.g. overnight
+    try:
+        await service.get([])
+        await _settle(service)
+        assert provider.get_market_overview.await_count == 1
+
+        # A bit over a minute passes - past the short (unsettled) TTL, but nowhere near
+        # even the old fixed 300s TTL, let alone the stretched off-session one.
+        service._cached_at -= 65
+        task_before = service._refresh_task
+        await service.get([])
+        await _settle(service)
+        assert service._refresh_task is not task_before  # retried anyway - it wasn't settled
+        assert provider.get_market_overview.await_count == 2
+
+        # Now settled: a later request survives a real multi-hour gap without refetching.
+        service._cached_at -= 3600
+        task_before = service._refresh_task
+        await service.get([])
+        await _settle(service)
+        assert service._refresh_task is task_before
+        assert provider.get_market_overview.await_count == 2
     finally:
         await service.close()
 
