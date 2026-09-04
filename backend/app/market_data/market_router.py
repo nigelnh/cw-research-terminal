@@ -21,6 +21,7 @@ from app.market_data.market_state import market_state
 from app.market_data.market_subscription_manager import subscription_manager
 from app.market_data.history_read_service import HistoryRequestError, history_read_service
 from app.market_data.market_snapshot_resolver import market_snapshot_resolver
+from app.market_data.market_overview_service import market_overview_service
 from app.instruments.instrument_registry import instrument_registry
 from app.market_data import trading_calendar as cal
 
@@ -274,9 +275,7 @@ async def get_market_overview():
     """Market-wide research strip; cached provider reads, no subscription mutations."""
     try:
         active_cws = await instrument_registry.search(active_only=True)
-        return await subscription_manager.provider.get_market_overview(
-            [item.symbol for item in active_cws]
-        )
+        return await market_overview_service.get([item.symbol for item in active_cws])
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc))
     except Exception as exc:
