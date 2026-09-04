@@ -95,6 +95,9 @@ class PostgresHistoricalBarSource:
                 date=r.session_date.isoformat(),
                 open=r.open, high=r.high, low=r.low, close=r.close,
                 volume=float(r.volume), adjusted=(r.price_basis == "ADJUSTED"),
+                value=r.trading_value,
+                price_basis=r.price_basis,
+                session_date=r.session_date.isoformat(),
             )
             for r in rows
         ]

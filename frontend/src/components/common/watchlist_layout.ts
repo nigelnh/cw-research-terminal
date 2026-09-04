@@ -46,12 +46,13 @@ export function completeOrder<T extends string>(
   ];
 }
 
-/** Add the new amount beside trade price while preserving saved custom orders. */
+/** Keep recent-match quantity beside trade price and migrate the old value-column id. */
 export function columnOrder(preferred: readonly string[]): QuoteColumnKey[] {
-  const columns = completeOrder(defaults.columns, preferred);
-  if (!preferred.includes("tradingValue")) {
-    columns.splice(columns.indexOf("tradingValue"), 1);
-    columns.splice(columns.indexOf("last") + 1, 0, "tradingValue");
+  const migrated = preferred.map((id) => id === "tradingValue" ? "tradedQuantity" : id);
+  const columns = completeOrder(defaults.columns, migrated);
+  if (!migrated.includes("tradedQuantity")) {
+    columns.splice(columns.indexOf("tradedQuantity"), 1);
+    columns.splice(columns.indexOf("last") + 1, 0, "tradedQuantity");
   }
   if (!preferred.includes("issuer")) {
     columns.splice(columns.indexOf("issuer"), 1);

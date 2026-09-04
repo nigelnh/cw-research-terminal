@@ -23,7 +23,7 @@ export function instrumentTypeOf(
     return declared;
   const symbol = String(raw.Symbol ?? existing?.symbol ?? "").toUpperCase();
   if (
-    ["VNINDEX", "VN30", "HNXINDEX", "HNX30", "UPCOM", "UPCOMINDEX"].includes(
+    ["VNINDEX", "VN30", "VN30INDEX", "VNFINLEAD", "VNDIAMOND", "HNXINDEX", "HNX30", "UPCOM", "UPCOMINDEX"].includes(
       symbol,
     )
   )
@@ -109,6 +109,14 @@ export function mapRawSnapshotToQuote(raw: any): MarketQuote {
         ? Number(raw.Exchange_Time)
         : null,
     sourceTimestamp: raw._ts_source ? Number(raw._ts_source) : null,
+    tradeTimestamp: raw._ts_trade ? Number(raw._ts_trade) : (raw._ts_source ? Number(raw._ts_source) : null),
+    bookTimestamp: raw._ts_book ? Number(raw._ts_book) : null,
+    referenceTimestamp: raw._ts_reference ? Number(raw._ts_reference) : null,
+    tradeReceivedTimestamp: raw._received_trade ? Number(raw._received_trade) : null,
+    bookReceivedTimestamp: raw._received_book ? Number(raw._received_book) : null,
+    marketSessionDate: raw._market_session_date ?? null,
+    referenceSessionDate: raw._reference_session_date ?? null,
+    providerMarketStatus: raw._provider_market_status ?? null,
     receivedTimestamp: Date.now(),
   };
 }

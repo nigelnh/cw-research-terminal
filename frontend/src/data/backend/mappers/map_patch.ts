@@ -97,8 +97,18 @@ export function applyRawPatchToQuote(
   // Timestamps
   if (patch.ExchangeTime !== undefined)
     q.exchangeTimestamp = Number(patch.ExchangeTime);
-  if (patch._ts_source !== undefined)
+  if (patch._ts_source !== undefined) {
     q.sourceTimestamp = Number(patch._ts_source);
+    if (patch._ts_trade === undefined) q.tradeTimestamp = Number(patch._ts_source);
+  }
+  if (patch._ts_trade !== undefined) q.tradeTimestamp = Number(patch._ts_trade);
+  if (patch._ts_book !== undefined) q.bookTimestamp = Number(patch._ts_book);
+  if (patch._ts_reference !== undefined) q.referenceTimestamp = Number(patch._ts_reference);
+  if (patch._received_trade !== undefined) q.tradeReceivedTimestamp = Number(patch._received_trade);
+  if (patch._received_book !== undefined) q.bookReceivedTimestamp = Number(patch._received_book);
+  if (patch._market_session_date !== undefined) q.marketSessionDate = patch._market_session_date;
+  if (patch._reference_session_date !== undefined) q.referenceSessionDate = patch._reference_session_date;
+  if (patch._provider_market_status !== undefined) q.providerMarketStatus = patch._provider_market_status;
 
   const touched: string[] = [];
   const fieldByWireKey: Record<string, string> = {

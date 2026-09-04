@@ -15,7 +15,12 @@ export interface IndexOverview {
   declining: number | null;
   floor: number | null;
   as_of: string | null;
-  sparkline: number[];
+  reference?: number | null;
+  session_date?: string | null;
+  availability?: "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
+  stale?: boolean;
+  sparkline: Array<number | { timestamp: string; value: number; reference?: number | null }>;
+  provenance?: Record<string, { source: string; as_of?: string | null; session_date?: string | null; availability?: string }>;
 }
 export interface VolumeLeader {
   symbol: string;
@@ -36,6 +41,9 @@ export interface MarketOverviewData {
   stock_scope: string;
   cw_scope: string;
   source: string;
+  market_phase?: string;
+  availability?: string;
+  stale?: boolean;
 }
 
 export function useMarketOverview() {

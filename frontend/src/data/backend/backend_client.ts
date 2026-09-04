@@ -207,6 +207,28 @@ export class BackendClient {
     );
   }
 
+  /** CW analytics companion read; intentionally independent from quote hydration. */
+  async getDashboardAnalytics(
+    symbols: string[],
+    signal?: AbortSignal,
+  ): Promise<{
+    rows: Array<{
+      Symbol: string;
+      analytics: Record<string, any> | null;
+      provenance: Record<string, any>;
+    }>;
+    as_of: string;
+    market_session: string;
+    market_session_active: boolean;
+    latest_completed_session: string;
+  }> {
+    return this.get<any>(
+      "/api/market/dashboard/analytics",
+      { symbols: symbols.map((s) => s.toUpperCase()).join(",") },
+      signal,
+    );
+  }
+
   async getStockProfiles(symbols: string[], signal?: AbortSignal): Promise<{ items: Array<{ symbol: string; name: string | null; short_name: string | null; exchange: string | null }> }> {
     return this.get("/api/market/stock-profiles", { symbols: symbols.join(",") }, signal);
   }

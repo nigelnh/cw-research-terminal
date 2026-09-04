@@ -17,9 +17,9 @@ from datetime import datetime
 from typing import Optional
 
 from app.market_data import trading_calendar as _cal
-from app.market_data.trading_calendar import VN_TZ, MarketSessionStatus
+from app.market_data.trading_calendar import VN_TZ, MarketPhase, MarketSessionStatus
 
-__all__ = ["MarketSession", "MarketSessionStatus", "VN_TZ", "market_session"]
+__all__ = ["MarketSession", "MarketSessionStatus", "MarketPhase", "VN_TZ", "market_session"]
 
 
 class MarketSession:
@@ -42,6 +42,9 @@ class MarketSession:
 
     def is_trading_active(self, dt: Optional[datetime] = None) -> bool:
         return _cal.is_trading_active(dt)
+
+    def get_market_phase(self, dt: Optional[datetime] = None) -> MarketPhase:
+        return _cal.market_phase(dt)
 
     def seconds_until_next_trading_session(self, dt: Optional[datetime] = None) -> float:
         return _cal.seconds_until_next_trading_session(dt)

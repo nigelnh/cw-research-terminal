@@ -6,9 +6,9 @@
  */
 
 export type DataTemporalState =
-  "LIVE" | "LAST_SESSION" | "HISTORICAL" | "DERIVED" | "UNAVAILABLE";
+  "LIVE" | "SESSION_SNAPSHOT" | "LAST_SESSION" | "HISTORICAL" | "DERIVED" | "UNAVAILABLE";
 
-export type DisplayState = "LIVE" | "LAST_SESSION" | "MIXED" | "UNAVAILABLE";
+export type DisplayState = "LIVE" | "SESSION_SNAPSHOT" | "LAST_SESSION" | "MIXED" | "UNAVAILABLE";
 
 export interface FieldProvenance {
   state: DataTemporalState;
@@ -27,11 +27,12 @@ export interface RowProvenance {
 
 export function quoteTimestamp(
   q?: {
+    tradeTimestamp?: number | null;
     exchangeTimestamp?: number | null;
     sourceTimestamp?: number | null;
   } | null,
 ): string | null {
-  const ts = q?.exchangeTimestamp ?? q?.sourceTimestamp;
+  const ts = q?.tradeTimestamp ?? q?.exchangeTimestamp ?? q?.sourceTimestamp;
   if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) return null;
   const value = new Date(ts);
   return Number.isFinite(value.getTime()) ? value.toISOString() : null;
@@ -72,6 +73,8 @@ export function temporalLabel(state: DisplayState): string {
       return "Live";
     case "LAST_SESSION":
       return "Last session";
+    case "SESSION_SNAPSHOT":
+      return "Session snapshot";
     case "MIXED":
       return "Live / last session";
     case "UNAVAILABLE":

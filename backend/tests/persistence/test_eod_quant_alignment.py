@@ -47,6 +47,7 @@ def _wire(sessionmaker_, monkeypatch):
 
     monkeypatch.setattr(settings, "DATABASE_ENABLED", True)
     live_quant_engine._eod_cache.clear()  # noqa: SLF001
+    live_quant_engine._eod_close_cache.clear()  # noqa: SLF001
     # HV getter: a fixed estimate so Greeks/theo are computable deterministically.
     class _HV:
         value = 0.35

@@ -47,7 +47,8 @@ export function parseBarTimestampMs(dateStr: string): number {
   if (dateStr.length === 10 && dateStr.includes("-")) {
     return new Date(`${dateStr}T00:00:00Z`).getTime();
   }
-  const parsed = new Date(dateStr.replace(" ", "T")).getTime();
+  const normalized = dateStr.replace(" ", "T");
+  const parsed = new Date(/[+-]\d\d:\d\d$|Z$/.test(normalized) ? normalized : `${normalized}+07:00`).getTime();
   return isNaN(parsed) ? new Date(dateStr).getTime() : parsed;
 }
 
@@ -78,6 +79,7 @@ export function aggregateDailyToWeekly(bars: HistoricalBar[]): HistoricalBar[] {
     if (valid.length === 0) continue;
 
     // Open from first trading day of the week, Close from last trading day
+    valid.sort((a, b) => a.date.localeCompare(b.date));
     const firstBar = valid[0];
     const lastBar = valid[valid.length - 1];
 
@@ -130,6 +132,7 @@ export function aggregateDailyToMonthly(bars: HistoricalBar[]): HistoricalBar[] 
     );
     if (valid.length === 0) continue;
 
+    valid.sort((a, b) => a.date.localeCompare(b.date));
     const firstBar = valid[0];
     const lastBar = valid[valid.length - 1];
 
@@ -186,6 +189,7 @@ export function aggregateIntradayBars(
     );
     if (valid.length === 0) continue;
 
+    valid.sort((a, b) => a.date.localeCompare(b.date));
     const firstBar = valid[0];
     const lastBar = valid[valid.length - 1];
 

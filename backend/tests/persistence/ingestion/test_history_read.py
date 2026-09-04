@@ -126,7 +126,8 @@ async def test_wire_shape_is_unchanged(history_service):
     await _set_cursor(iid, lo, hi)
     bars = await history_service.get_history("HPG", timeframe="1D", from_date=lo.isoformat(), to_date=hi.isoformat(), adjusted=True)
     b = bars[0].model_dump()
-    assert set(b) == {"date", "open", "high", "low", "close", "volume", "adjusted"}
+    assert set(b) == {"date", "open", "high", "low", "close", "volume", "value",
+                      "adjusted", "price_basis", "source", "session_date"}
     assert isinstance(b["date"], str) and isinstance(b["close"], float)
 
 

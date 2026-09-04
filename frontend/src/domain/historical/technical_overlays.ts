@@ -27,27 +27,19 @@ export function calculateEMA(bars: HistoricalBar[], period: number): OverlayPoin
   const k = 2 / (period + 1);
   const result: OverlayPoint[] = [];
 
-  // Calculate initial SMA for first `period` bars
-  let sum = 0;
-  let validInitialCount = 0;
-  for (let i = 0; i < period; i++) {
-    if (bars[i].close !== null && !isNaN(bars[i].close!)) {
-      sum += bars[i].close!;
-      validInitialCount++;
-    }
-  }
-
-  if (validInitialCount === 0) return [];
-  let prevEma = sum / validInitialCount;
+  // Seed only from a complete period. Missing prices remain gaps.
+  const seed = bars.slice(0, period).map((bar) => bar.close);
+  if (seed.some((close) => close === null || !Number.isFinite(close))) return [];
+  let prevEma = (seed as number[]).reduce((sum, close) => sum + close, 0) / period;
   result.push({ time: bars[period - 1].date, value: prevEma });
 
   // Calculate subsequent EMAs
   for (let i = period; i < bars.length; i++) {
     const close = bars[i].close;
-    if (close !== null && !isNaN(close)) {
+    if (close !== null && Number.isFinite(close)) {
       prevEma = close * k + prevEma * (1 - k);
       result.push({ time: bars[i].date, value: prevEma });
-    }
+    } else break;
   }
 
   return result;
@@ -63,9 +55,17 @@ export function calculateVWAP(bars: HistoricalBar[]): OverlayPoint[] {
 
   let cumVolume = 0;
   let cumTypicalVol = 0;
+  let activeSession = "";
   const result: OverlayPoint[] = [];
 
   for (const b of bars) {
+    const isIntraday = b.date.length > 10;
+    const session = b.sessionDate || b.date.slice(0, 10);
+    if (isIntraday && session !== activeSession) {
+      activeSession = session;
+      cumVolume = 0;
+      cumTypicalVol = 0;
+    }
     if (
       b.high !== null &&
       b.low !== null &&
@@ -117,20 +117,21 @@ export function calculateNormalizedRelative(
     if (b.date && b.close !== null) undMap.set(b.date, b.close);
   }
 
-  // Collect all unique sorted dates
+  // A valid relative series needs a shared timestamp baseline. Non-overlapping
+  // observations stay gaps and are never rebased independently.
   const allDates = Array.from(new Set([...cwMap.keys(), ...undMap.keys()])).sort();
-  if (allDates.length === 0) return [];
-
-  // Find baseline values (first valid price in the series)
-  const baseCw = validCw.length > 0 ? validCw[0].close! : null;
-  const baseUnd = validUnd.length > 0 ? validUnd[0].close! : null;
+  const baselineDate = allDates.find((d) => cwMap.has(d) && undMap.has(d));
+  if (!baselineDate) return [];
+  const baseCw = cwMap.get(baselineDate)!;
+  const baseUnd = undMap.get(baselineDate)!;
 
   return allDates.map((date) => {
     const cwPrice = cwMap.get(date);
     const undPrice = undMap.get(date);
 
-    const normCw = cwPrice !== undefined && baseCw ? (cwPrice / baseCw) * 100 : null;
-    const normUnd = undPrice !== undefined && baseUnd ? (undPrice / baseUnd) * 100 : null;
+    const beforeBaseline = date < baselineDate;
+    const normCw = !beforeBaseline && cwPrice !== undefined && baseCw ? (cwPrice / baseCw) * 100 : null;
+    const normUnd = !beforeBaseline && undPrice !== undefined && baseUnd ? (undPrice / baseUnd) * 100 : null;
 
     return {
       time: date,

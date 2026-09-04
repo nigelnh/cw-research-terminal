@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.market_data.market_schemas import CanonicalQuote
 from app.market_data.market_state import MarketState, market_state
+from app.market_data.market_session import market_session
 from app.market_data.market_state_store import NullMarketStateStore
 from app.market_data.redis_market_state_store import RedisMarketStateStore
 from app.market_data.market_subscription_manager import SubscriptionManager, subscription_manager
@@ -473,7 +474,7 @@ async def test_backend_restart_warm_cache_restoration_and_overwrite():
         "Ticker": "HPG",
         "Close": 21900.0,
         "TotalMatchVolume": 1050000,
-        "Timestamp": "2026-08-26T10:00:00",
+            "Timestamp": market_session.get_vn_now().replace(hour=10, minute=0, second=0, microsecond=0).isoformat(),
     }
     updated_quote, diff = market_state.apply_trade_event(new_trade)
     assert updated_quote.last_price == 21900.0

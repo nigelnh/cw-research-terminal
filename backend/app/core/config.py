@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     # Live analytics scheduler: max Covered Warrants whose analytics may be recomputed concurrently.
     # Per-symbol work is already single-flighted; this bounds the global fan-out.
     QUANT_MAX_CONCURRENT_COMPUTES: int = Field(default=8, description="Max concurrent live CW analytics recomputations")
+    QUANT_EOD_CACHE_TTL_SECONDS: int = Field(default=21600, description="Process-local TTL for completed-session CW analytics")
+    QUANT_EOD_UNAVAILABLE_CACHE_TTL_SECONDS: int = Field(default=60, description="Short TTL for unavailable EOD analytics so newly-ingested bars can be retried")
     # Moneyness (S/K) categorical band for the UI label ONLY. The raw numeric moneyness is
     # always reported unrounded-by-category; this tolerance around parity (1.0) decides the
     # ITM / ATM / OTM label. 0.03 = classify |S/K - 1| <= 3% as ATM. Does not touch BSM inputs.
