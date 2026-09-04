@@ -58,6 +58,25 @@ describe("display session merge", () => {
       _ts_trade: at("09:15:00") }), newer, true, at("09:17:00"));
     expect(result.quote.lastPrice).toBe(21600);
   });
+  it("keeps a CW's underlying-derived bands when a live reference update carries none", () => {
+    // The REST snapshot resolver derives CW ceiling/floor from the underlying's limit move
+    // (the provider has no CW band endpoint); `live` - the realtime market_state quote -
+    // never carries them, only referencePrice. A merge that blindly copies the whole
+    // reference group from `live` nulls the bands out the moment referencePrice refreshes.
+    const cwFallback = mapRawSnapshotToQuote({ Symbol: "CHPG2617", Traded: 0.43, Ref: 0.44,
+      Ceil: 1.85, Floor: 0.35, Total_Vol: 265100 });
+    const cwSource: RowProvenance = {
+      quote: { state: "LAST_SESSION", source: "SNAPSHOT_FINAL", sessionDate: "2026-09-03" },
+      book: { state: "LAST_SESSION", source: "SNAPSHOT_FINAL", sessionDate: "2026-09-03" },
+      reference: { state: "DERIVED", source: "SESSION_REFERENCE", sessionDate: "2026-09-04" },
+    };
+    const cwLive = mapRawSnapshotToQuote({ Symbol: "CHPG2617",
+      _reference_session_date: "2026-09-04", Ref: 0.44 });
+    const result = resolveDashboardQuote(cwFallback, cwLive, cwSource, false, at("10:00:00"));
+    expect(result.quote.referencePrice).toBe(440);
+    expect(result.quote.ceilingPrice).toBe(1850);
+    expect(result.quote.floorPrice).toBe(350);
+  });
 });
 
 describe("stock and CW symbol colors", () => {
