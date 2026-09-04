@@ -150,8 +150,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { ok: false, message: "Enter a valid email address." };
     }
     const { error } = await supabase.auth.signInWithOtp({
+      // Land back on a clean app URL (no stray query string from the current view).
       email: trimmed,
-      options: { emailRedirectTo: window.location.href },
+      options: { emailRedirectTo: window.location.origin + window.location.pathname },
     });
     if (error) return { ok: false, message: error.message };
     return { ok: true, message: "Check your email for a sign-in link." };
