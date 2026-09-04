@@ -32,22 +32,56 @@ afterEach(() => {
 
 describe("market overview strip", () => {
   it("renders a single real observation and keeps missing intraday buckets as gaps", () => {
-    const { container, rerender } = render(<Sparkline direction={1} reference={100}
+    const { container, rerender } = render(<Sparkline reference={100}
       values={[{ timestamp: "2026-09-04T09:15:00+07:00", value: 101 }]} />);
     expect(container.querySelector("circle")).not.toBeNull();
     expect(screen.queryByText("NO INTRADAY SERIES")).toBeNull();
-    rerender(<Sparkline direction={1} reference={100} values={[
+    rerender(<Sparkline reference={100} values={[
       { timestamp: "2026-09-04T09:15:00+07:00", value: 101 },
       { timestamp: "2026-09-04T09:20:00+07:00", value: 102 },
       { timestamp: "2026-09-04T09:35:00+07:00", value: 103 },
       { timestamp: "2026-09-04T09:40:00+07:00", value: 104 },
     ]} />);
     expect(container.querySelectorAll("polyline")).toHaveLength(2);
-    expect(container.querySelector("line")?.getAttribute("y1")).toBe("30");
+    // the reference line always sits dead center (y 5..30 plot area -> mid 17.5),
+    // regardless of where the data falls, so it reads at a glance
+    expect(container.querySelector("line")?.getAttribute("y1")).toBe("17.5");
+  });
+
+  it("keeps the reference line centered even when the whole session trades on one side of it", () => {
+    const { container } = render(<Sparkline reference={100} values={[
+      { timestamp: "2026-09-04T09:15:00+07:00", value: 140 },
+      { timestamp: "2026-09-04T09:20:00+07:00", value: 180 },
+    ]} />);
+    expect(container.querySelector("line")?.getAttribute("y1")).toBe("17.5");
+  });
+
+  it("colors the path green above the reference and red at/below it, splitting exactly at the crossing", () => {
+    const { container } = render(<Sparkline reference={100} values={[
+      { timestamp: "2026-09-04T09:15:00+07:00", value: 110 }, // above
+      { timestamp: "2026-09-04T09:20:00+07:00", value: 90 },  // below
+    ]} />);
+    const lines = [...container.querySelectorAll("polyline")];
+    expect(lines).toHaveLength(2);
+    expect(lines[0].getAttribute("stroke")).toBe("var(--up)");
+    expect(lines[1].getAttribute("stroke")).toBe("var(--down)");
+    // both segments share the interpolated crossing point (continuous line, clean join)
+    const end0points = lines[0].getAttribute("points")?.trim().split(" ") ?? [];
+    const end0 = end0points[end0points.length - 1];
+    const start1 = lines[1].getAttribute("points")?.trim().split(" ")[0];
+    expect(end0).toBe(start1);
+  });
+
+  it("a value exactly at the reference counts as the up (green) side", () => {
+    const { container } = render(<Sparkline reference={100} values={[
+      { timestamp: "2026-09-04T09:15:00+07:00", value: 100 },
+      { timestamp: "2026-09-04T09:20:00+07:00", value: 105 },
+    ]} />);
+    expect(container.querySelector("polyline")?.getAttribute("stroke")).toBe("var(--up)");
   });
 
   it("maps the intraday path onto a fixed 09:00-15:00 ICT x-axis", () => {
-    const { container } = render(<Sparkline direction={1} reference={100} values={[
+    const { container } = render(<Sparkline reference={100} values={[
       { timestamp: "2026-09-04T09:00:00+07:00", value: 100 },
       { timestamp: "2026-09-04T12:00:00+07:00", value: 105 },
     ]} />);
@@ -58,7 +92,7 @@ describe("market overview strip", () => {
   });
 
   it("bridges the 11:30-13:00 lunch break instead of leaving a gap", () => {
-    const { container } = render(<Sparkline direction={1} reference={100} values={[
+    const { container } = render(<Sparkline reference={100} values={[
       { timestamp: "2026-09-04T11:25:00+07:00", value: 101 },
       { timestamp: "2026-09-04T11:30:00+07:00", value: 102 },
       { timestamp: "2026-09-04T13:00:00+07:00", value: 103 },

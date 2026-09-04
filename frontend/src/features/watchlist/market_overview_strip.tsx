@@ -49,10 +49,13 @@ function ictMinutes(ts: string): number | null {
 
 /**
  * Intraday index path on a **fixed 09:00–15:00 ICT axis**, drawn only up to the latest
- * observed 5-minute bar (the rest of the axis stays empty). A dashed line marks the
- * session reference so direction reads at a glance.
+ * observed 5-minute bar (the rest of the axis stays empty). The Y domain is centered on
+ * the session reference so its dashed line sits in the vertical middle of the chart; the
+ * path itself is colored per-point against that reference — green while above it, red
+ * at/below it — with the color flipping exactly where the line crosses (interpolated, not
+ * just at the nearest sample).
  */
-export function Sparkline({ values, direction, reference }: { values: IndexOverview["sparkline"]; direction: number | null; reference?: number | null }) {
+export function Sparkline({ values, reference }: { values: IndexOverview["sparkline"]; reference?: number | null }) {
   const points = values.map((item, index) => {
     if (typeof item === "number") {
       // Legacy plain-number series: spread evenly across the session window.
@@ -70,28 +73,67 @@ export function Sparkline({ values, direction, reference }: { values: IndexOverv
   if (!points.length) return <div className="overview-spark-empty">NO INTRADAY SERIES</div>;
   const seriesValues = points.map(p => p.value);
   const ref = points.find(p => p.reference != null)?.reference ?? reference ?? null;
-  const domain = ref == null ? seriesValues : [...seriesValues, ref];
-  const min = Math.min(...domain), max = Math.max(...domain), span = max - min || 1;
+  // Symmetric around the reference (not a plain min/max fit) so its line always lands
+  // exactly in the middle, regardless of which way the session has been trending.
+  let min: number, max: number;
+  if (ref != null) {
+    const spread = Math.max(...seriesValues.map(v => Math.abs(v - ref)), 1e-6);
+    min = ref - spread;
+    max = ref + spread;
+  } else {
+    min = Math.min(...seriesValues);
+    max = Math.max(...seriesValues);
+  }
+  const span = max - min || 1;
   const y = (v: number) => 30 - ((v - min) / span) * 25;
-  const segments: string[][] = [[]];
+  const colorFor = (v: number) => ref == null ? "var(--t-60)" : v >= ref ? "var(--up)" : "var(--down)";
+
+  // First split on time gaps (a missing 5m bucket breaks the line, except the lunch break,
+  // which is bridged), then split each of those further at every reference crossing.
+  const timeSegments: (typeof points)[] = [[]];
   points.forEach((p, i) => {
-    // A missing 5m bucket breaks the line — EXCEPT the 11:30–13:00 lunch break, which is
-    // bridged (a near-flat connector) so the morning and afternoon paths read as one session.
     const prev = points[i - 1];
     const isLunchBridge = prev && prev.min <= LUNCH_START_MIN + 5 && p.min >= LUNCH_END_MIN - 5;
-    if (i > 0 && p.min - prev.min > 7.5 && !isLunchBridge) segments.push([]);
-    segments[segments.length - 1].push(`${points.length === 1 ? 50 : p.x},${y(p.value)}`);
+    if (i > 0 && p.min - prev.min > 7.5 && !isLunchBridge) timeSegments.push([]);
+    timeSegments[timeSegments.length - 1].push(p);
   });
+  const colorSegments: { pts: string; color: string; isPoint?: boolean }[] = [];
+  for (const seg of timeSegments) {
+    if (seg.length === 1) {
+      const p = seg[0];
+      colorSegments.push({
+        pts: `${points.length === 1 ? 50 : p.x},${y(p.value)}`,
+        color: colorFor(p.value), isPoint: true,
+      });
+      continue;
+    }
+    let run: string[] = [`${seg[0].x},${y(seg[0].value)}`];
+    let runColor = colorFor(seg[0].value);
+    for (let i = 1; i < seg.length; i++) {
+      const prev = seg[i - 1], p = seg[i];
+      const curColor = colorFor(p.value);
+      if (curColor !== runColor && ref != null) {
+        const t = (ref - prev.value) / (p.value - prev.value);
+        const crossing = `${prev.x + t * (p.x - prev.x)},${y(ref)}`;
+        run.push(crossing);
+        colorSegments.push({ pts: run.join(" "), color: runColor });
+        run = [crossing];
+        runColor = curColor;
+      }
+      run.push(`${p.x},${y(p.value)}`);
+    }
+    colorSegments.push({ pts: run.join(" "), color: runColor });
+  }
   const referenceY = ref == null ? null : y(ref);
   const hourTicks = [10, 11, 13, 14]
     .map(h => `M${((h * 60 - SESSION_OPEN_MIN) / SESSION_SPAN_MIN) * 100} 0V30`)
     .join("");
   return <svg className="overview-spark" role="img" aria-label="Intraday index path" viewBox="0 0 100 32" preserveAspectRatio="none">
     <path className="overview-spark-grid" d={hourTicks} stroke="var(--border-32)" strokeWidth="0.4" fill="none" />
-    {referenceY != null && <line x1="0" y1={referenceY} x2="100" y2={referenceY} stroke="var(--border-32)" strokeDasharray="2 2" />}
-    {segments.map((pts, i) => pts.length === 1
-      ? <circle key={i} cx={pts[0].split(",")[0]} cy={pts[0].split(",")[1]} r="1" fill={tone(direction)} />
-      : <polyline key={i} points={pts.join(" ")} fill="none" stroke={tone(direction)} strokeWidth="1.3" vectorEffect="non-scaling-stroke" />)}
+    {referenceY != null && <line x1="0" y1={referenceY} x2="100" y2={referenceY} stroke="var(--t-46)" strokeDasharray="2 2" />}
+    {colorSegments.map((seg, i) => seg.isPoint
+      ? <circle key={i} cx={seg.pts.split(",")[0]} cy={seg.pts.split(",")[1]} r="1" fill={seg.color} />
+      : <polyline key={i} points={seg.pts} fill="none" stroke={seg.color} strokeWidth="1.3" vectorEffect="non-scaling-stroke" />)}
   </svg>;
 }
 
@@ -115,7 +157,7 @@ function IndexCard({ item }: { item: IndexOverview }) {
   ].filter(Boolean).join(" ");
   return <article className="index-card mono" aria-label={`${item.symbol} index overview`}>
     <div className="overview-spark-wrap">
-      <Sparkline values={item.sparkline || []} direction={item.change} reference={item.reference} />
+      <Sparkline values={item.sparkline || []} reference={item.reference} />
       {tag && <span className={`overview-spark-tag${item.stale ? " is-stale" : ""}`} title={tagTitle}>{tag}</span>}
     </div>
     <div className="index-card-main">
