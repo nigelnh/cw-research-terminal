@@ -17,6 +17,15 @@ class _PriceStatistics:
     def get_ceilingfloor(self, tickers, from_date, to_date):
         return _Result([{"ticker": symbol, "timestamp": from_date, "ceilingValue": 110, "floorValue": 90} for symbol in tickers])
 
+    def get_overview(self, tickers, time_filter, from_date, to_date):
+        # AAA up ~2%, BBB down ~2% (drives constituent breadth + volume leaders).
+        return _Result([{
+            "ticker": s, "timestamp": f"{from_date} 10:00",
+            "totalMatchVolume": 20.0 if s == "AAA" else 15.0,
+            "totalMatchValue": 2000.0 if s == "AAA" else 1500.0,
+            "percentPriceChange": 0.02 if s == "AAA" else -0.02,
+        } for s in tickers])
+
 
 class _BasicInfor:
     def __init__(self, tickers): self.tickers = tickers
@@ -109,15 +118,16 @@ async def test_overview_uses_snapshot_reads_without_changing_stream_subscription
     provider._market_is_active = lambda: False
     before = provider.get_active_subscriptions()
 
+    await provider._refresh_index_breadth()  # the slow HOSE sweep runs in the background
     result = await provider.get_market_overview(["CAAA2601"])
 
     assert provider.get_active_subscriptions() == before
     assert [item["symbol"] for item in result["indices"]] == ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"]
     assert result["indices"][0]["value"] == 102
     assert result["indices"][0]["change_percent"] == pytest.approx(2)
-    # VN30 constituents AAA + BBB both closed 102 vs a 100 prior close.
-    assert result["indices"][0]["advancing"] == 2
-    assert result["indices"][0]["declining"] == 0
+    # VN30 group = {AAA up, BBB down} from get_overview's percentPriceChange.
+    assert result["indices"][0]["advancing"] == 1
+    assert result["indices"][0]["declining"] == 1
     assert result["indices"][0]["provenance"]["breadth"]["source"] == "DERIVED_CONSTITUENTS"
     assert result["top_stock_volume"][0]["symbol"] == "AAA"
     assert result["top_stock_volume"][0]["market_state"] == "UP"
@@ -147,32 +157,45 @@ async def test_overview_ignores_preopen_zero_reset_and_normalizes_vietnam_time()
 
 
 @pytest.mark.asyncio
-async def test_overview_does_not_fill_current_rankings_with_other_session_prices():
+async def test_overview_omits_a_cw_ranking_row_with_no_current_session_trade():
     class GappedSession(_Session):
         def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
             result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
-            result.rows = [
-                row for row in result.rows
-                if not (row["ticker"] == "CAAA2601" and row["timestamp"] == "2026-09-02")
-                # No prior close for the index constituents -> breadth cannot be computed.
-                and not (row["ticker"] in ("AAA", "BBB") and row["timestamp"] == "2026-09-01")
-            ]
-            for row in result.rows:
-                if row["ticker"] == "AAA":
-                    row["volume"] = 0  # a legitimate observed zero is retained
+            result.rows = [row for row in result.rows
+                           if not (row["ticker"] == "CAAA2601" and row["timestamp"] == "2026-09-02")]
             return result
 
     provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
     provider._session = GappedSession()
     provider._is_connected = True
+    # Breadth / stock leaders are the slow background sweep — never refreshed here.
     result = await provider.get_market_overview(["CAAA2601"])
     assert result["top_cw_volume"] == []
     assert result["components"]["top_cw_volume"] == "UNAVAILABLE"
     assert result["components"]["breadth"] == "UNAVAILABLE"
-    assert next(row for row in result["top_stock_volume"] if row["symbol"] == "AAA")["volume"] == 0
+    assert result["top_stock_volume"] == []
     for item in result["indices"]:
         assert item["advancing"] is None
         assert item["provenance"]["breadth"]["availability"] == "UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_breadth_refresh_is_background_only_and_never_blocks_the_payload():
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = _Session()
+    provider._is_connected = True
+    provider._market_is_active = lambda: False
+
+    first = await provider.get_market_overview(["CAAA2601"])
+    assert first["indices"][0]["advancing"] is None          # not computed yet
+    assert first["top_stock_volume"] == []
+
+    await provider._refresh_index_breadth()
+    provider._overview_cache_at = 0.0                          # force a rebuild
+    second = await provider.get_market_overview(["CAAA2601"])
+    assert second["indices"][0]["advancing"] == 1             # VN30: AAA up
+    assert second["indices"][0]["declining"] == 1             # VN30: BBB down
+    assert second["top_stock_volume"][0]["symbol"] == "AAA"
 
 
 @pytest.mark.asyncio
