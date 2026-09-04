@@ -18,7 +18,7 @@ Comprehensive Quantitative Engine Unit Tests for Covered Warrants:
 
 import pytest
 import math
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -45,7 +45,7 @@ from app.instruments.instrument_schemas import (
     LifecycleEvidenceLevel,
     MetadataVerificationStatus,
 )
-from app.market_data.market_schemas import CanonicalQuote
+from app.market_data.market_schemas import CanonicalQuote, HistoricalBar
 
 client = TestClient(app)
 VN_TZ = timezone(timedelta(hours=7))
@@ -762,6 +762,58 @@ def test_rest_api_quant_calculate():
     assert abs(data["rho"] - 13.67) < 0.02
     assert data["impliedVolatility"] is not None
     assert abs(data["impliedVolatility"] - 0.2591) < 0.001
+
+
+@pytest.mark.asyncio
+async def test_eod_close_gap_fills_when_postgres_lacks_todays_bar(monkeypatch):
+    """FiinQuant routinely lags publishing a session's final bar for hours after the
+    close - a plain DB-only read used to fail EOD_INPUT_MISSING even when the provider
+    already had the close (confirmed live in prod). `_eod_close` must go through the same
+    Postgres-first-with-gap-fill path the dashboard's own EOD fallback already uses."""
+    import app.market_data.history_read_service as hrs
+
+    calls = []
+
+    async def fake_get_history(symbol, *, timeframe, from_date, to_date, adjusted):
+        calls.append((symbol, timeframe, from_date, to_date, adjusted))
+        return [
+            HistoricalBar(date="2026-09-03", open=21500, high=21700, low=21400, close=21600,
+                          volume=1000, session_date="2026-09-03"),
+            # The session actually asked for - only reachable via the gap-fill, not a raw
+            # DB read (this is the bar that "just landed" upstream).
+            HistoricalBar(date="2026-09-04", open=21600, high=21900, low=21550, close=21700,
+                          volume=1200, session_date="2026-09-04"),
+        ]
+
+    monkeypatch.setattr(hrs.history_read_service, "get_history", fake_get_history)
+
+    close = await LiveQuantEngine._eod_close(
+        None, "HPG", date(2026, 9, 4), price_basis="ADJUSTED",
+    )
+
+    assert close == 21700.0
+    assert len(calls) == 1
+    symbol, timeframe, _from_date, to_date, adjusted = calls[0]
+    assert symbol == "HPG"
+    assert timeframe == "1d"
+    assert to_date == "2026-09-04"
+    assert adjusted is True  # ADJUSTED price_basis -> adjusted=True
+
+
+@pytest.mark.asyncio
+async def test_eod_close_stays_none_when_the_session_is_genuinely_absent(monkeypatch):
+    import app.market_data.history_read_service as hrs
+
+    async def fake_get_history(symbol, **kwargs):
+        return [HistoricalBar(date="2026-09-03", open=21500, high=21700, low=21400,
+                              close=21600, volume=1000, session_date="2026-09-03")]
+
+    monkeypatch.setattr(hrs.history_read_service, "get_history", fake_get_history)
+
+    close = await LiveQuantEngine._eod_close(
+        None, "HPG", date(2026, 9, 4), price_basis="RAW",
+    )
+    assert close is None
 
 
 def test_rest_api_get_warrant_analytics():

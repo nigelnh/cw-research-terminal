@@ -7,11 +7,41 @@ import copy
 import logging
 import math
 import time
+from datetime import datetime
 from typing import Any, Callable
 
 from app.market_data.market_session import market_session
 
 logger = logging.getLogger(__name__)
+
+# HOSE continuous session opens 09:00 ICT; mirrors the frontend's own SESSION_OPEN_MIN
+# (market_overview_strip.tsx) and the provider's identical constant.
+_SESSION_OPEN_MIN = 9 * 60
+
+
+def _sparkline_settled(cache: dict[str, Any]) -> bool:
+    """False if any index's chart is missing its early bars - a fetch that raced a
+    FiinQuant hiccup and came back starting well after 09:00 ICT (confirmed live:
+    production served exactly this - a chart starting ~11:05 instead of 09:00 - frozen for
+    the rest of the closed stretch once the off-session TTL stretch made it "settled" by
+    the stock-leaders check alone). >20 min of slack covers a merely-late opening tick
+    without falsely flagging a genuinely complete session."""
+    for item in cache.get("indices", []):
+        sparkline = item.get("sparkline") or []
+        if not sparkline:
+            continue
+        first = sparkline[0]
+        ts = first.get("timestamp") if isinstance(first, dict) else None
+        if not ts:
+            continue
+        try:
+            parsed = datetime.fromisoformat(ts)
+            first_minutes = parsed.hour * 60 + parsed.minute
+        except (ValueError, TypeError):
+            continue
+        if first_minutes > _SESSION_OPEN_MIN + 20:
+            return False
+    return True
 
 
 class MarketOverviewService:
@@ -35,16 +65,17 @@ class MarketOverviewService:
         stretch (lunch, evening, weekend, holiday) — the overview cannot change until the
         next session opens, so there is nothing new to fetch in the meantime.
 
-        Except: if the cached payload still lacks stock leaders (the provider's background
-        sweep hadn't finished when it was built), stay on the short TTL instead - a
-        59-hour-stale "Top Stock Trading Volume" panel for the rest of a closed weekend
-        would otherwise never self-correct, since nothing re-asks the provider for it.
+        Except: if the cached payload still lacks stock leaders, or an index chart is
+        missing its early bars (the provider's background sweep hadn't finished, or an
+        intraday fetch hiccuped, when it was built), stay on the short TTL instead - a
+        multi-day-stale panel for the rest of a closed weekend would otherwise never
+        self-correct, since nothing re-asks the provider for it.
         """
         if market_session.is_trading_active():
             return 60.0
         settled = bool(self._cache) and (
             self._cache.get("components", {}).get("top_stock_volume") == "AVAILABLE"
-        )
+        ) and _sparkline_settled(self._cache)
         if not settled:
             return 60.0
         try:
