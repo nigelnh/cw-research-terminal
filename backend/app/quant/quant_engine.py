@@ -275,9 +275,12 @@ class LiveQuantEngine:
         Both legs are read for the SAME ``session_date`` from ``market_bars``: the CW close
         (RAW) and the underlying close (ADJUSTED). T / DTE / lifecycle are evaluated at
         15:00 ICT of that date. Produces IV-trade (CW last + underlying close are known),
-        Greeks, theoretical value, moneyness, DTE. IV-bid / IV-ask / spread are UNAVAILABLE
-        - there is no persisted end-of-day order book. HV uses the latest available HV_22
-        estimate (documented approximation - HV_22 moves negligibly in one session).
+        Greeks, theoretical value, moneyness, DTE. IV-bid / IV-ask / IV-mid have no EOD
+        equivalent - a daily bar carries no order book - so they're seeded from the most
+        recently observed bid1/ask1 instead (via the market-state getter, the same
+        last-known book already shown in the dashboard's BID_PRC/ASK_PRC columns), not
+        necessarily from this exact session's own close. HV uses the latest available
+        HV_22 estimate (documented approximation - HV_22 moves negligibly in one session).
         """
         cw_sym = cw_symbol.strip().upper()
         cache_key = (cw_sym, session_date.isoformat())
@@ -377,6 +380,18 @@ class LiveQuantEngine:
                                   market_session_date=session_text)
         und_state = CanonicalQuote(symbol=und_sym, instrument_type="STOCK", last_price=und_close,
                                    market_session_date=session_text)
+        # IV_TRADE/moneyness/Greeks use the session's own close (above) for temporal
+        # correctness. IV_BID/IV_ASK have no EOD equivalent - a daily bar carries no order
+        # book - so there is nothing session-aligned to use; seed them from the most
+        # recently observed book instead, the same last-known bid1/ask1 already shown in
+        # the dashboard's own BID_PRC/ASK_PRC columns (live-tick state, warm-cache-restored
+        # across a restart), rather than leaving IV_BID/IV_ASK blank. `compute_warrant_
+        # analytics` already guards a non-positive/missing price down to None per side.
+        if self._market_state_getter:
+            last_book = self._market_state_getter(cw_sym)
+            if last_book:
+                cw_state.bid1_price = last_book.bid1_price
+                cw_state.ask1_price = last_book.ask1_price
         return await self.compute_warrant_analytics(
             cw_sym, spec=spec, cw_state=cw_state, und_state=und_state, as_of=as_of,
             max_hv_as_of=session_date,
