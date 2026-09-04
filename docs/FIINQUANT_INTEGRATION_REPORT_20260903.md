@@ -52,6 +52,11 @@ verified.
   independently from `/api/market/dashboard/analytics`, so slow EOD quant work cannot blank
   ready persisted prices. Multi-tab EOD requests are single-flighted; unavailable results
   have a short TTL so a newly ingested daily bar can recover without a process restart.
+- Legacy book-only snapshots recover actual historical closes through a separate Redis
+  namespace keyed by symbol, price basis, and completed session. The bounded server universe
+  is warmed at startup; history-derived prices keep `EOD_BARS` provenance rather than being
+  relabelled as observed trades. Same-session snapshot upserts preserve known values when a
+  later partial checkpoint contains null, while legitimate zero values remain writable.
 
 ## Availability and fail-closed behaviour
 
@@ -69,7 +74,7 @@ verified.
 
 | Check | Result |
 |---|---|
-| Backend test suite | 1,177 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
+| Backend test suite | 1,181 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
 | Frontend test suite | 36 files; 280 tests passed |
 | Backend byte-code compilation | Passed |
 | Frontend typecheck and production build | Passed; Vite reported the existing large-chunk/deprecated-option warnings |
