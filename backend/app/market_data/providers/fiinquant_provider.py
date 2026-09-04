@@ -1668,27 +1668,35 @@ class FiinQuantProvider(MarketDataProvider):
     def _ensure_breadth_refresh(self) -> None:
         """Kick a background breadth recompute if the cache is stale and none is running."""
         ttl = 90.0 if self._market_is_active() else 900.0
-        if time.monotonic() - self._breadth_cache_at < ttl:
+        if self._breadth_cache_at and time.monotonic() - self._breadth_cache_at < ttl:
             return
         if self._breadth_task is not None and not self._breadth_task.done():
             return
         try:
-            self._breadth_task = asyncio.get_running_loop().create_task(
-                self._refresh_index_breadth()
-            )
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            pass
+            return
+        logger.info("FiinQuant index breadth sweep: scheduling background refresh")
+        self._breadth_task = loop.create_task(self._refresh_index_breadth())
 
     async def _refresh_index_breadth(self) -> None:
+        started = time.monotonic()
         try:
             breadth, leaders = await asyncio.to_thread(self._compute_index_breadth)
         except Exception as exc:  # noqa: BLE001 - breadth is optional, never fatal
-            logger.warning("FiinQuant index breadth refresh failed: %s", exc)
+            logger.warning("FiinQuant index breadth refresh failed: %s: %s", type(exc).__name__, exc)
             return
         if breadth:
             self._breadth_cache = breadth
             self._stock_leaders_cache = leaders
             self._breadth_cache_at = time.monotonic()
+            logger.info(
+                "FiinQuant index breadth sweep done in %.1fs: %s",
+                time.monotonic() - started,
+                {g: b.get("totalStockUpPrice", 0) for g, b in breadth.items()},
+            )
+        else:
+            logger.warning("FiinQuant index breadth sweep returned no data")
 
     def _compute_index_breadth(self) -> tuple[Dict[str, Dict[str, int]], List[Dict[str, Any]]]:
         """Per-group advancing/declining/unchanged/ceiling/floor + the top-volume stock
