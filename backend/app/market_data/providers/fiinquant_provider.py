@@ -1682,13 +1682,13 @@ class FiinQuantProvider(MarketDataProvider):
     async def _refresh_index_breadth(self) -> None:
         started = time.monotonic()
         try:
-            breadth, leaders = await asyncio.to_thread(self._compute_index_breadth)
+            breadth, stock_leaders = await asyncio.to_thread(self._compute_index_breadth)
         except Exception as exc:  # noqa: BLE001 - breadth is optional, never fatal
             logger.warning("FiinQuant index breadth refresh failed: %s: %s", type(exc).__name__, exc)
             return
         if breadth:
             self._breadth_cache = breadth
-            self._stock_leaders_cache = leaders
+            self._stock_leaders_cache = stock_leaders
             self._breadth_cache_at = time.monotonic()
             logger.info(
                 "FiinQuant index breadth sweep done in %.1fs: %s",
@@ -1698,11 +1698,14 @@ class FiinQuantProvider(MarketDataProvider):
         else:
             logger.warning("FiinQuant index breadth sweep returned no data")
 
-    def _compute_index_breadth(self) -> tuple[Dict[str, Dict[str, int]], List[Dict[str, Any]]]:
+    def _compute_index_breadth(
+        self,
+    ) -> tuple[Dict[str, Dict[str, int]], List[Dict[str, Any]]]:
         """Per-group advancing/declining/unchanged/ceiling/floor + the top-volume stock
-        leaders, both from one `PriceStatistics().get_overview` sweep of the HOSE
-        constituents (the SDK issues one request per ticker — hence background-only).
-        `percentPriceChange` gives direction; VWAP = totalMatchValue / totalMatchVolume.
+        leaders, from one `PriceStatistics().get_overview` sweep of the HOSE constituents
+        (the SDK issues one request per ticker — hence background-only). `get_overview` is
+        a session-total endpoint so the leaders stay populated after the close, unlike the
+        1d bar fetch. `percentPriceChange` gives direction; VWAP = value / volume.
         """
         if not self._session:
             return {}, []
@@ -1722,6 +1725,8 @@ class FiinQuantProvider(MarketDataProvider):
                 return {}, []
             stats: Dict[str, Dict[str, Any]] = {}
             for start in range(0, len(universe), 100):
+                if not self._session:  # session retired mid-sweep (reconnect / shutdown)
+                    break
                 try:
                     raw = self._session.PriceStatistics().get_overview(
                         tickers=universe[start:start + 100], time_filter="Daily",
@@ -1770,14 +1775,13 @@ class FiinQuantProvider(MarketDataProvider):
                 "totalStockUnderFloor": floor_n,
             }
 
-        leaders: List[Dict[str, Any]] = []
-        for tk, row in stats.items():
+        def leader_row(tk: str, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             vol = fnum(row, "totalMatchVolume")
             val = fnum(row, "totalMatchValue")
             if not vol or vol <= 0:
-                continue
+                return None
             p = fnum(row, "percentPriceChange")
-            leaders.append({
+            return {
                 "symbol": tk, "volume": vol,
                 "price": round(val / vol) if val else None,
                 "reference": None, "ceiling": None, "floor": None,
@@ -1788,16 +1792,21 @@ class FiinQuantProvider(MarketDataProvider):
                     else "REFERENCE" if p == 0 else "UNAVAILABLE"
                 ),
                 "as_of": str(row.get("timestamp") or ""),
-            })
-        leaders.sort(key=lambda x: x["volume"], reverse=True)
-        return breadth, leaders[:5]
+            }
+
+        rows = [
+            row for tk in stats
+            for row in (leader_row(tk, stats[tk]),) if row is not None
+        ]
+        rows.sort(key=lambda x: x["volume"], reverse=True)
+        return breadth, rows[:5]
 
     async def get_market_overview(self, cw_symbols: List[str]) -> Dict[str, Any]:
         """Read the four index cards and HOSE volume leaders without new streams.
 
         Snapshot reads only (no stream mutations). ``MarketBreadth`` is not on this
-        account, so breadth is maintained on its own slow background cadence
-        (`_refresh_index_breadth`). Payload cached ~15 s in-session, 5 min outside it.
+        account, so breadth + the stock volume leaders are maintained on their own slow
+        background cadence (`_refresh_index_breadth`). Payload cached ~15 s in-session.
         """
         self._ensure_breadth_refresh()
         ttl = 15.0 if self._market_is_active() else 300.0
@@ -1914,12 +1923,16 @@ class FiinQuantProvider(MarketDataProvider):
                         unavailable_components.add("daily")
                         logger.warning("FiinQuant overview daily snapshot unavailable: %s", exc)
                     try:
-                        # SDK period mode derives timeTo from datetime.now() in the
-                        # host timezone. On UTC hosts that cuts a 09:xx ICT session
-                        # off at 02:xx. Query the observed session in explicit ICT,
-                        # including the latest incomplete bar, without another stream.
-                        index_day = max((stamp(r)[:10] for r in daily if key(r) in index_symbols),
-                                        default=market_session.get_vn_now().date().isoformat())
+                        # Target the OBSERVED session (rolls at 08:00 ICT), not the newest
+                        # daily bar — FiinQuant lags the daily bar after the close, but the
+                        # session's 5m buckets are still there. Query in explicit ICT so the
+                        # SDK's host-clock `to` truncation doesn't cut a 09:xx session.
+                        from app.market_data.session_reference import reference_session_date
+                        index_day = max(
+                            [reference_session_date(market_session.get_vn_now()).isoformat(),
+                             *(stamp(r)[:10] for r in daily if key(r) in index_symbols)],
+                            default=market_session.get_vn_now().date().isoformat(),
+                        )
                         end = min(f"{index_day} 15:00", market_session.get_vn_now().strftime("%Y-%m-%d %H:%M"))
                         if end >= f"{index_day} 09:00":
                             intraday = actual_prices(fetch_rows(index_symbols, by="5m",
@@ -1974,6 +1987,15 @@ class FiinQuantProvider(MarketDataProvider):
                     previous = prior_bars[-1] if prior_bars else {}
                     current = max([latest, *intraday_bars], key=stamp)
                     close, reference = num(current, "close", "Close"), num(previous, "close", "Close")
+                    # FiinQuant can lag the index daily bar after the close; the 5m buckets
+                    # for the session are still there, so sum them for VOL / VAL.
+                    session_volume = num(latest, "volume", "Volume")
+                    session_value = num(latest, "value", "Value")
+                    if session_volume is None and intraday_bars:
+                        vols = [num(x, "volume", "Volume") for x in intraday_bars]
+                        vals = [num(x, "value", "Value") for x in intraday_bars]
+                        session_volume = sum(v for v in vols if v is not None) or None
+                        session_value = sum(v for v in vals if v is not None) or None
                     change = close - reference if close is not None and reference is not None else None
                     pct = change / reference * 100 if change is not None and reference else None
                     b = breadth_by.get(symbol, {})
@@ -1987,7 +2009,7 @@ class FiinQuantProvider(MarketDataProvider):
                     )
                     indices.append({
                         "symbol": symbol, "value": close, "change": change, "change_percent": pct,
-                        "volume": num(latest, "volume", "Volume"), "trading_value": num(latest, "value", "Value"),
+                        "volume": session_volume, "trading_value": session_value,
                         "reference": reference,
                         "advancing": num(b, "totalStockUpPrice"), "ceiling": num(b, "totalStockOverCeiling"),
                         "unchanged": num(b, "totalStockNoChangePrice"), "declining": num(b, "totalStockDownPrice"),
@@ -2024,9 +2046,16 @@ class FiinQuantProvider(MarketDataProvider):
                     for symbol in universe:
                         bars = sorted(daily_by.get(symbol, []), key=stamp)
                         session_bars = [row for row in bars if stamp(row)[:10] == session_date]
-                        if not session_bars: continue
-                        prior_bars = [row for row in bars if stamp(row)[:10] < session_date]
-                        row = session_bars[-1]; previous = prior_bars[-1] if prior_bars else {}
+                        # After the close FiinQuant lags the CW daily bar; fall back to the
+                        # most recent one so the panel shows the last session, never empty.
+                        if not session_bars:
+                            session_bars = bars[-1:]
+                        if not session_bars:
+                            continue
+                        row = session_bars[-1]
+                        row_day = stamp(row)[:10]
+                        prior_bars = [b for b in bars if stamp(b)[:10] < row_day]
+                        previous = prior_bars[-1] if prior_bars else {}
                         volume = num(row, "volume", "Volume")
                         if volume is None: continue
                         price, reference = num(row, "close", "Close"), num(previous, "close", "Close")
@@ -2062,7 +2091,10 @@ class FiinQuantProvider(MarketDataProvider):
                     if index_states == {"UNAVAILABLE"} and not daily
                     else "PARTIAL"
                 )
-                stock_leaders = list(self._stock_leaders_cache)  # background HOSE sweep
+                # Stock leaders: background get_overview sweep (session totals, survive the
+                # close). CW leaders: the local 1d fetch (get_overview omits CWs), which
+                # falls back to the most recent bar per CW so the panel is never empty.
+                stock_leaders = list(self._stock_leaders_cache)
                 cw_leaders = leaders(clean_cws)
                 return {
                     "indices": indices,

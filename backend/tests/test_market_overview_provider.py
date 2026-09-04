@@ -157,10 +157,13 @@ async def test_overview_ignores_preopen_zero_reset_and_normalizes_vietnam_time()
 
 
 @pytest.mark.asyncio
-async def test_overview_omits_a_cw_ranking_row_with_no_current_session_trade():
+async def test_cw_ranking_falls_back_to_the_last_session_after_the_close():
+    """FiinQuant lags the CW 1d bar after the close; the panel shows the last session
+    (tagged with its real as_of) instead of going empty."""
     class GappedSession(_Session):
         def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
             result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
+            # No current-session (2026-09-02) row for the CW — only the prior day.
             result.rows = [row for row in result.rows
                            if not (row["ticker"] == "CAAA2601" and row["timestamp"] == "2026-09-02")]
             return result
@@ -168,15 +171,15 @@ async def test_overview_omits_a_cw_ranking_row_with_no_current_session_trade():
     provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
     provider._session = GappedSession()
     provider._is_connected = True
-    # Breadth / stock leaders are the slow background sweep — never refreshed here.
     result = await provider.get_market_overview(["CAAA2601"])
-    assert result["top_cw_volume"] == []
-    assert result["components"]["top_cw_volume"] == "UNAVAILABLE"
+    assert result["top_cw_volume"][0]["symbol"] == "CAAA2601"
+    assert result["top_cw_volume"][0]["as_of"] == "2026-09-01T00:00:00+07:00"
+    assert result["components"]["top_cw_volume"] == "AVAILABLE"
+    # Breadth / stock leaders are the slow background sweep — never refreshed here.
     assert result["components"]["breadth"] == "UNAVAILABLE"
     assert result["top_stock_volume"] == []
     for item in result["indices"]:
         assert item["advancing"] is None
-        assert item["provenance"]["breadth"]["availability"] == "UNAVAILABLE"
 
 
 @pytest.mark.asyncio

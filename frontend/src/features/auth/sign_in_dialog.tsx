@@ -30,6 +30,19 @@ export function SignInDialog({ onClose }: { onClose: () => void }) {
     setBusy(false);
   };
 
+  const field: React.CSSProperties = {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "8px 10px",
+    borderRadius: 3,
+    border: "1px solid var(--border-strong)",
+    background: "var(--panel-2)",
+    color: "var(--t-92)",
+    fontFamily: "var(--font-mono)",
+    fontSize: 12,
+    outline: "none",
+  };
+
   return (
     <div
       role="dialog"
@@ -43,6 +56,10 @@ export function SignInDialog({ onClose }: { onClose: () => void }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding: 16,
+        // The control mounts inside `.terminal-header-end`, which sets
+        // `white-space: nowrap`; reset it or the copy never wraps.
+        whiteSpace: "normal",
         background: "rgba(2, 6, 12, 0.55)",
         backdropFilter: "blur(2px)",
       }}
@@ -50,20 +67,34 @@ export function SignInDialog({ onClose }: { onClose: () => void }) {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: "320px",
-          borderRadius: "10px",
+          width: "100%",
+          maxWidth: 340,
+          boxSizing: "border-box",
           border: "1px solid var(--border-strong)",
-          background: "var(--background)",
-          padding: "22px",
+          background: "var(--panel)",
+          padding: 20,
           display: "flex",
           flexDirection: "column",
-          gap: "14px",
+          gap: 12,
         }}
       >
-        <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--foreground)" }}>Sign in</div>
-        <p style={{ fontSize: "12px", color: "var(--muted-foreground)", margin: 0, lineHeight: 1.5 }}>
-          Sign in only to keep your watchlist across devices. The dashboard, research and market
-          data stay open either way.
+        <div
+          className="heading"
+          style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.06em", color: "var(--t-92)" }}
+        >
+          Sign in
+        </div>
+        <p
+          className="mono"
+          style={{
+            fontSize: 11,
+            lineHeight: 1.6,
+            color: "var(--t-55)",
+            margin: 0,
+          }}
+        >
+          Sign in only to keep your watchlist across devices. The dashboard, research and
+          market data stay open either way.
         </p>
 
         {googleEnabled && (
@@ -71,55 +102,52 @@ export function SignInDialog({ onClose }: { onClose: () => void }) {
             <button
               type="button"
               onClick={() => void signInWithGoogle()}
-              className="focus-ring"
+              className="heading focus-ring"
               style={{
-                padding: "9px 12px",
-                borderRadius: "6px",
+                padding: "8px 12px",
+                borderRadius: 3,
                 border: "1px solid var(--border-strong)",
-                background: "var(--card)",
-                color: "var(--foreground)",
-                fontSize: "13px",
+                background: "var(--panel-2)",
+                color: "var(--t-92)",
+                fontSize: 11,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
                 cursor: "pointer",
               }}
             >
               Continue with Google
             </button>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ flex: 1, height: "1px", background: "var(--border)" }} />
-              <span style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>OR</span>
-              <span style={{ flex: 1, height: "1px", background: "var(--border)" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+              <span className="mono" style={{ fontSize: 9, color: "var(--t-46)" }}>OR</span>
+              <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
             </div>
           </>
         )}
 
-        <form onSubmit={submitEmail} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <form onSubmit={submitEmail} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <input
             type="email"
             required
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={{
-              padding: "9px 12px",
-              borderRadius: "6px",
-              border: "1px solid var(--border-strong)",
-              background: "var(--input, var(--card))",
-              color: "var(--foreground)",
-              fontSize: "13px",
-            }}
+            style={field}
           />
           <button
             type="submit"
             disabled={busy}
-            className="focus-ring"
+            className="heading focus-ring"
             style={{
-              padding: "9px 12px",
-              borderRadius: "6px",
-              border: "1px solid var(--primary)",
-              background: "transparent",
-              color: "var(--primary)",
-              fontSize: "13px",
+              padding: "8px 12px",
+              borderRadius: 3,
+              border: "1px solid var(--border-strong)",
+              background: "var(--panel-active)",
+              color: "var(--t-92)",
+              fontSize: 11,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
               cursor: busy ? "default" : "pointer",
               opacity: busy ? 0.6 : 1,
             }}
@@ -130,10 +158,12 @@ export function SignInDialog({ onClose }: { onClose: () => void }) {
 
         {message && (
           <p
+            className="mono"
             style={{
               margin: 0,
-              fontSize: "12px",
-              color: message.ok ? "var(--up)" : "var(--destructive)",
+              fontSize: 11,
+              lineHeight: 1.5,
+              color: message.ok ? "var(--up)" : "var(--down)",
             }}
           >
             {message.text}
