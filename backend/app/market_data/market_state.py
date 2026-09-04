@@ -122,6 +122,16 @@ class MarketState:
         Never overwrites a newer live quote in memory.
         """
         sym = quote.symbol.upper()
+        quote = quote.model_copy()
+        if quote.last_price is not None and quote.last_price <= 0:
+            # Older cache versions could mistake a pre-open Close=0 reset for a match.
+            # Security/index prices must be positive; zero quantities/value remain valid.
+            for name in (
+                "last_price", "open_price", "high_price", "low_price", "average_price",
+                "price_change", "price_change_percent", "traded_quantity",
+                "trade_timestamp", "trade_received_timestamp", "source_timestamp",
+            ):
+                setattr(quote, name, None)
         with self._lock:
             existing = self._quotes.get(sym)
             if existing:
@@ -444,6 +454,19 @@ class MarketState:
             tot_vol = _integer(tot_vol)
             traded_qty = _integer(traded_qty)
             tot_val = _number(tot_val)
+
+            # FiinQuant emits Close/OHLC=0 at the pre-open session reset before any
+            # execution. This is not a zero-priced trade. Keep real zero totals, but do
+            # not create a last match, trade timestamp, TRD_AMT, or -100% price change.
+            if match_price is not None and match_price <= 0:
+                match_price = None
+                open_price = high_price = low_price = avg_price = None
+                change = change_pct = traded_qty = None
+            else:
+                open_price = open_price if open_price is None or open_price > 0 else None
+                high_price = high_price if high_price is None or high_price > 0 else None
+                low_price = low_price if low_price is None or low_price > 0 else None
+                avg_price = avg_price if avg_price is None or avg_price > 0 else None
 
             if match_price is not None and q.last_price != match_price:
                 q.last_price = match_price
