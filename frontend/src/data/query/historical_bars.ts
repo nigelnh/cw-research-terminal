@@ -36,9 +36,11 @@ export function resolveDataset(timeframe: string): {
 export function sliceBars(bars: HistoricalBar[], timeframe: string): HistoricalBar[] {
   if (!bars || bars.length === 0) return [];
   const tf = timeframe.toUpperCase();
+  const latest = bars.reduce((max, bar) => bar.date > max ? bar.date : max, "").slice(0, 10);
 
   const sliceByDays = (days: number, minTail: number): HistoricalBar[] => {
-    const cutoff = new Date(Date.now() - days * 86400000).toISOString().split("T")[0];
+    const anchor = new Date(`${latest}T00:00:00+07:00`).getTime();
+    const cutoff = new Date(anchor - days * 86400000).toLocaleDateString("sv-SE", { timeZone: "Asia/Ho_Chi_Minh" });
     const filtered = bars.filter((b) => b.date >= cutoff);
     return filtered.length > 0 ? filtered : bars.slice(-minTail);
   };
@@ -46,7 +48,9 @@ export function sliceBars(bars: HistoricalBar[], timeframe: string): HistoricalB
   if (tf === "1M") return sliceByDays(30, 22);
   if (tf === "3M") return sliceByDays(90, 66);
   if (tf === "6M") return sliceByDays(180, 130);
-  // 1D, 5D, 1Y, MAX, ALL -> whole returned dataset
+  if (tf === "1D") return bars.filter((bar) => bar.date.slice(0, 10) === latest);
+  if (tf === "5D") return sliceByDays(7, 5 * 48);
+  // 1Y, MAX, ALL -> whole returned dataset
   return bars;
 }
 

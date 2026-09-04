@@ -31,6 +31,8 @@ class SnapshotRow:
     quality: str           # FINAL | INTRADAY_CHECKPOINT | SEED
     instrument_type: str
     reference_price: float | None = None
+    ceiling_price: float | None = None
+    floor_price: float | None = None
     last_price: float | None = None
     price_change: float | None = None
     price_change_percent: float | None = None
@@ -39,7 +41,11 @@ class SnapshotRow:
     low_price: float | None = None
     average_price: float | None = None
     total_volume: int | None = None
+    traded_quantity: int | None = None
     trading_value: float | None = None
+    trade_timestamp: datetime | None = None
+    book_timestamp: datetime | None = None
+    reference_timestamp: datetime | None = None
     bid1_price: float | None = None
     bid1_quantity: int | None = None
     ask1_price: float | None = None

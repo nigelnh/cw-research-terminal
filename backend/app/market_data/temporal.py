@@ -15,6 +15,7 @@ from typing import Any
 
 class DataTemporalState(str, Enum):
     LIVE = "LIVE"                  # fresh tick during an active session
+    SESSION_SNAPSHOT = "SESSION_SNAPSHOT"  # current-session value while matching is paused
     LAST_SESSION = "LAST_SESSION"  # final / most-recent value from the last completed session
     HISTORICAL = "HISTORICAL"      # persisted daily bar older than the last completed session
     DERIVED = "DERIVED"            # computed from other stated values (e.g. change vs prior close)
@@ -41,6 +42,7 @@ class DisplayState(str, Enum):
     LAST_SESSION = "LAST_SESSION"
     MIXED = "MIXED"              # some groups live, some last-session (e.g. transition minute)
     UNAVAILABLE = "UNAVAILABLE"  # nothing legitimate to show
+    SESSION_SNAPSHOT = "SESSION_SNAPSHOT"
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,8 @@ def derive_display_state(groups: list[FieldProvenance]) -> DisplayState:
         return DisplayState.UNAVAILABLE
     if states == {DataTemporalState.LIVE}:
         return DisplayState.LIVE
+    if states == {DataTemporalState.SESSION_SNAPSHOT}:
+        return DisplayState.SESSION_SNAPSHOT
     if DataTemporalState.LIVE in states:
         return DisplayState.MIXED
     return DisplayState.LAST_SESSION

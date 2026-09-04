@@ -31,10 +31,16 @@ logger = logging.getLogger(__name__)
 
 def _quote_fingerprint(q: CanonicalQuote) -> tuple:
     return (
-        q.last_price, q.reference_price, q.price_change, q.total_volume,
+        q.last_price, q.reference_price, q.ceiling_price, q.floor_price,
+        q.price_change, q.total_volume, q.traded_quantity, q.trading_value,
         q.bid1_price, q.ask1_price, q.bid1_quantity, q.ask1_quantity,
         q.open_price, q.high_price, q.low_price, q.underlying_price,
+        q.trade_timestamp, q.book_timestamp, q.reference_timestamp,
     )
+
+
+def _dt_ms(value: int | None) -> datetime | None:
+    return datetime.fromtimestamp(value / 1000.0, tz=cal.VN_TZ) if value else None
 
 
 def _row_from_quote(sym: str, q: CanonicalQuote, *, session_date: date, source: str, quality: str) -> SnapshotRow:
@@ -46,6 +52,8 @@ def _row_from_quote(sym: str, q: CanonicalQuote, *, session_date: date, source: 
         quality=quality,
         instrument_type=q.instrument_type,
         reference_price=q.reference_price,
+        ceiling_price=q.ceiling_price,
+        floor_price=q.floor_price,
         last_price=q.last_price,
         price_change=q.price_change,
         price_change_percent=q.price_change_percent,
@@ -54,7 +62,11 @@ def _row_from_quote(sym: str, q: CanonicalQuote, *, session_date: date, source: 
         low_price=q.low_price,
         average_price=q.average_price,
         total_volume=q.total_volume,
+        traded_quantity=q.traded_quantity,
         trading_value=q.trading_value,
+        trade_timestamp=_dt_ms(q.trade_timestamp or q.source_timestamp),
+        book_timestamp=_dt_ms(q.book_timestamp),
+        reference_timestamp=_dt_ms(q.reference_timestamp),
         bid1_price=q.bid1_price, bid1_quantity=q.bid1_quantity,
         ask1_price=q.ask1_price, ask1_quantity=q.ask1_quantity,
         bid2_price=q.bid2_price, bid2_quantity=q.bid2_quantity,
@@ -99,9 +111,11 @@ class SnapshotCheckpointer:
                 await asyncio.wait_for(self._task, timeout=5.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._task.cancel()
-        # Best-effort final flush on graceful shutdown.
+        # A midday shutdown is a checkpoint, not a market close.
         try:
-            await self.checkpoint(final=True, reason="shutdown")
+            now = datetime.now(cal.VN_TZ)
+            final = cal.is_trading_day(now.date()) and now.time() >= cal.AFTERNOON_END
+            await self.checkpoint(final=final, reason="shutdown")
         except Exception as e:  # noqa: BLE001
             logger.warning("Snapshot final flush on shutdown failed: %s", e)
 
@@ -152,6 +166,10 @@ class SnapshotCheckpointer:
             q = quotes.get(sym)
             if q is None:
                 continue
+            quote_session = q.market_session_date
+            if quote_session != session_date.isoformat():
+                # Never stamp an old warm-cache quote as today's checkpoint/final.
+                continue
             fp = _quote_fingerprint(q)
             if not final:
                 if self._last_fp.get(sym) == fp:
@@ -160,9 +178,6 @@ class SnapshotCheckpointer:
                 if loop_time is not None and last_at and (loop_time - last_at) < self._interval:
                     continue
             rows.append(_row_from_quote(sym, q, session_date=session_date, source=source, quality=quality))
-            self._last_fp[sym] = fp
-            if loop_time is not None:
-                self._last_written_at[sym] = loop_time
 
         if not rows:
             return 0
@@ -177,6 +192,12 @@ class SnapshotCheckpointer:
             self._counters["errors"] += 1
             logger.warning("Snapshot checkpoint write failed (%s): %s", reason, e)
             return 0
+
+        for r in rows:
+            q = quotes[r.symbol]
+            self._last_fp[r.symbol] = _quote_fingerprint(q)
+            if loop_time is not None:
+                self._last_written_at[r.symbol] = loop_time
 
         self._counters["checkpoints"] += 1
         self._counters["rows_written"] += written

@@ -109,6 +109,7 @@ class MarketBar(Base):
     low: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
     close: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
     volume: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    trading_value: Mapped[float | None] = mapped_column(Numeric(24, 4), nullable=True)
 
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     ingestion_run_id: Mapped[int | None] = mapped_column(
@@ -158,6 +159,8 @@ class InstrumentSnapshot(Base):
     instrument_type: Mapped[str] = mapped_column(String(8), nullable=False)
 
     reference_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    ceiling_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
+    floor_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
     last_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
     price_change: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
     price_change_percent: Mapped[float | None] = mapped_column(Numeric(20, 8), nullable=True)
@@ -166,7 +169,11 @@ class InstrumentSnapshot(Base):
     low_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
     average_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
     total_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    traded_quantity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     trading_value: Mapped[float | None] = mapped_column(Numeric(24, 4), nullable=True)
+    trade_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    book_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reference_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     bid1_price: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
     bid1_quantity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

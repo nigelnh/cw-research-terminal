@@ -359,6 +359,7 @@ async def root_health():
         "signalr_reconnect_count": health_data.get("reconnect_count", 0),
         "market_session": sess_status,
         "market_session_active": sess_active,
+        "market_phase": market_session.get_market_phase().value,
         "quote_display_eligible": sess_active,
         "redis_enabled": store_health.get("redis_enabled", False),
         "redis_connected": store_health.get("redis_connected", False),

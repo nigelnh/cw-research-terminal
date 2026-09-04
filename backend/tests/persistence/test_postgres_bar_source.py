@@ -5,7 +5,7 @@ HistoricalVolatilityService without any change to that service or LiveQuantEngin
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -72,5 +72,6 @@ async def test_history_volatility_service_consumes_postgres_source(db, sessionma
     assert est.value > 0
     assert est.window == svc.window
     assert est.source_label == f"HV_{svc.window}"
-    # the pure in-memory read LiveQuantEngine relies on now returns the same object
-    assert svc.get_estimate("FPT") is est
+    # The estimate retains the final bar date; this deliberately old fixture is stale.
+    assert est.as_of == date(2026, 2, 13)
+    assert svc.get_estimate("FPT") is None

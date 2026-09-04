@@ -43,7 +43,7 @@ export function isQuoteTimestampEligible(
 ): boolean {
   if (!stamp) return false;
   const age = now - new Date(stamp).getTime();
-  return Number.isFinite(age) && age >= 0 && age <= 86400_000;
+  return Number.isFinite(age) && age >= 0 && age <= 180_000;
 }
 
 const EMPTY_META: DashboardMeta = {
@@ -76,11 +76,20 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
     staleTime: 30_000,
     refetchInterval: marketSessionActive ? false : 5 * 60_000, // idle refresh while closed
   });
+  const analyticsQuery = useQuery({
+    queryKey: ["dashboard-analytics", sortedKey],
+    enabled: sortedKey.length > 0,
+    queryFn: ({ signal }) => backendClient.getDashboardAnalytics(sortedKey, signal),
+    // Live analytics arrive over WS. This read is the independently hydrated EOD/current
+    // cache and may finish later without delaying the quote table.
+    staleTime: marketSessionActive ? 30_000 : 5 * 60_000,
+  });
 
   // Refetch immediately when the session transitions (closed -> open must not keep showing
   // last-session, open -> closed must fill the fallback).
   useEffect(() => {
     qc.invalidateQueries({ queryKey: ["dashboard-rows"] });
+    qc.invalidateQueries({ queryKey: ["dashboard-analytics"] });
   }, [marketSessionActive, qc]);
 
   const data = query.data;
@@ -88,49 +97,72 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
   for (const row of data?.rows ?? []) {
     fallbackBySymbol.set(String(row.Symbol).toUpperCase(), row);
   }
+  const analyticsBySymbol = new Map<string, any>();
+  for (const row of analyticsQuery.data?.rows ?? []) {
+    analyticsBySymbol.set(String(row.Symbol).toUpperCase(), row);
+  }
 
   const getRow = (symbol: string): DashboardRow | undefined => {
     const sym = symbol.toUpperCase();
     const live = quotes.get(sym);
     const fb = fallbackBySymbol.get(sym);
+    const analyticsFallback = analyticsBySymbol.get(sym);
 
-    // Live wins only while the session is active AND we actually have a fresh tick.
-    const liveUsable =
-      marketSessionActive &&
-      !!live &&
-      live.lastPrice != null &&
-      isQuoteTimestampEligible(quoteTimestamp(live));
-
-    if (liveUsable && live) {
-      return {
-        symbol: sym,
-        quote: live,
-        provenance: {
-          quote: {
-            state: "LIVE",
-            source: "LIVE_FEED",
-            asOf: quoteTimestamp(live),
-            sessionDate: null,
-          },
-          book: { state: "LIVE", source: "LIVE_FEED" },
-        },
-        displayState: "LIVE",
-        analytics: fb?.analytics ?? null,
-        trackedRealtime: isRealtimeTracked(sym),
-      };
+    if (!fb && !live) return undefined;
+    const fallbackQuote = mapRawSnapshotToQuote(fb ?? { Symbol: sym });
+    const sourceProvenance = (fb?.provenance ?? {
+      quote: { state: "UNAVAILABLE", source: "NONE" },
+      book: { state: "UNAVAILABLE", source: "NONE" },
+    }) as RowProvenance;
+    const provenance: RowProvenance = {
+      ...sourceProvenance,
+      quote: { ...sourceProvenance.quote },
+      book: { ...sourceProvenance.book },
+      ...(sourceProvenance.analytics ? { analytics: { ...sourceProvenance.analytics } } : {}),
+      ...(analyticsFallback?.provenance
+        ? { analytics: { ...analyticsFallback.provenance } }
+        : {}),
+    };
+    const tradeAsOf = quoteTimestamp(live);
+    const bookAsOf = live?.bookTimestamp && Number.isFinite(live.bookTimestamp)
+      ? new Date(live.bookTimestamp).toISOString() : null;
+    const correctSession = !!live?.marketSessionDate && live.marketSessionDate === data?.as_of?.slice(0, 10);
+    const tradeLive = marketSessionActive && correctSession && isQuoteTimestampEligible(tradeAsOf);
+    const bookLive = marketSessionActive && correctSession && isQuoteTimestampEligible(bookAsOf);
+    const quote = { ...fallbackQuote };
+    if (live && tradeLive) {
+      Object.assign(quote, {
+        lastPrice: live.lastPrice, openPrice: live.openPrice, highPrice: live.highPrice,
+        lowPrice: live.lowPrice, averagePrice: live.averagePrice,
+        tradedQuantity: live.tradedQuantity, totalVolume: live.totalVolume,
+        tradingValue: live.tradingValue, priceChange: live.priceChange,
+        priceChangePercent: live.priceChangePercent, tradeTimestamp: live.tradeTimestamp,
+        sourceTimestamp: live.sourceTimestamp,
+      });
+      provenance.quote = { state: "LIVE", source: "LIVE_FEED", asOf: tradeAsOf,
+        sessionDate: live.marketSessionDate };
     }
-
-    if (!fb) return undefined;
+    if (live && bookLive) {
+      Object.assign(quote, {
+        bidPrice: live.bidPrice, bidQuantity: live.bidQuantity,
+        askPrice: live.askPrice, askQuantity: live.askQuantity,
+        bid2Price: live.bid2Price, bid2Quantity: live.bid2Quantity,
+        ask2Price: live.ask2Price, ask2Quantity: live.ask2Quantity,
+        bid3Price: live.bid3Price, bid3Quantity: live.bid3Quantity,
+        ask3Price: live.ask3Price, ask3Quantity: live.ask3Quantity,
+        bookTimestamp: live.bookTimestamp,
+      });
+      provenance.book = { state: "LIVE", source: "LIVE_FEED", asOf: bookAsOf,
+        sessionDate: live.marketSessionDate };
+    }
+    const anyLive = tradeLive || bookLive;
     return {
       symbol: sym,
-      quote: mapRawSnapshotToQuote(fb),
-      provenance: (fb.provenance ?? {
-        quote: { state: "UNAVAILABLE", source: "NONE" },
-        book: { state: "UNAVAILABLE", source: "NONE" },
-      }) as RowProvenance,
-      displayState: (fb.displayState ?? "UNAVAILABLE") as DisplayState,
-      analytics: fb.analytics ?? null,
-      trackedRealtime: Boolean(fb.tracked_realtime),
+      quote,
+      provenance,
+      displayState: (tradeLive && bookLive ? "LIVE" : anyLive ? "MIXED" : fb?.displayState ?? "UNAVAILABLE") as DisplayState,
+      analytics: analyticsFallback?.analytics ?? fb?.analytics ?? null,
+      trackedRealtime: Boolean(fb?.tracked_realtime ?? isRealtimeTracked(sym)),
     };
   };
 
@@ -149,6 +181,6 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
     meta,
     isLoading: query.isLoading,
     isError: query.isError,
-    refetch: query.refetch,
+    refetch: () => Promise.all([query.refetch(), analyticsQuery.refetch()]),
   };
 }

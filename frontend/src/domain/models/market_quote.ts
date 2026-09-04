@@ -65,6 +65,14 @@ export interface MarketQuote {
   // Timestamps
   exchangeTimestamp: number | null;
   sourceTimestamp: number | null;
+  tradeTimestamp?: number | null;
+  bookTimestamp?: number | null;
+  referenceTimestamp?: number | null;
+  tradeReceivedTimestamp?: number | null;
+  bookReceivedTimestamp?: number | null;
+  marketSessionDate?: string | null;
+  referenceSessionDate?: string | null;
+  providerMarketStatus?: string | null;
   receivedTimestamp: number;
 
   realtimePulses?: RealtimePulseMap;

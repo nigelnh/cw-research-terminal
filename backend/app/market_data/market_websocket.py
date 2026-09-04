@@ -78,6 +78,7 @@ class MarketConnectionManager:
         feed_fresh = health.get("feed_fresh")
         sess_status = market_session.get_session_status().value
         sess_active = market_session.is_trading_active()
+        phase = market_session.get_market_phase().value
         session_date = market_session.get_vn_now().date().isoformat()
         universe_health = subscription_manager.get_universe_health()
         return {
@@ -95,6 +96,7 @@ class MarketConnectionManager:
             "market_session": sess_status,
             "market_session_date": session_date,
             "market_session_active": sess_active,
+            "market_phase": phase,
             "cache_available": subscription_manager.store.is_available(),
             "quote_display_eligible": sess_active,
             "subscription_count": len(subscription_manager.get_active_symbols()),

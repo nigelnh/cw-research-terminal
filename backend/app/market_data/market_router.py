@@ -64,6 +64,7 @@ async def market_health():
         realtime_universe=universe_health,
         market_session=sess_status,
         market_session_active=sess_active,
+        market_phase=market_session.get_market_phase().value,
         quote_display_eligible=sess_active,
     )
 
@@ -173,8 +174,29 @@ async def get_dashboard_rows(
         "as_of": now.isoformat(),
         "market_session": cal.session_status(now).value,
         "market_session_active": cal.is_trading_active(now),
+        "market_phase": cal.market_phase(now).value,
         "latest_completed_session": cal.latest_completed_trading_session(now).isoformat(),
         "calendar_confidence": cal.calendar_confidence(now.date()),
+    }
+
+
+@market_router.get("/dashboard/analytics")
+async def get_dashboard_analytics(
+    symbols: str = Query(..., description="Comma-separated symbols"),
+):
+    """CW analytics companion read that never blocks the dashboard quote snapshot."""
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:_MAX_DASHBOARD_SYMBOLS]
+    if not syms:
+        raise HTTPException(status_code=400, detail="At least one symbol is required.")
+
+    now = cal._as_vn(None)
+    rows = await market_snapshot_resolver.resolve_analytics_rows(syms, now=now)
+    return {
+        "rows": rows,
+        "as_of": now.isoformat(),
+        "market_session": cal.session_status(now).value,
+        "market_session_active": cal.is_trading_active(now),
+        "latest_completed_session": cal.latest_completed_trading_session(now).isoformat(),
     }
 
 
@@ -270,6 +292,7 @@ async def get_symbol_diagnostics(symbol: str):
         "as_of": now.isoformat(),
         "latest_completed_session": cal.latest_completed_trading_session(now).isoformat(),
         "market_session": cal.session_status(now).value,
+        "market_phase": cal.market_phase(now).value,
         "decision": r.diag,
         "provenance": {
             "quote": r.quote_prov.to_wire(),

@@ -37,6 +37,7 @@ def _to_row(m: MarketBar) -> BarRow:
         volume=int(m.volume),
         source=m.source,
         updated_at=m.updated_at,
+        trading_value=float(m.trading_value) if m.trading_value is not None else None,
     )
 
 
@@ -92,6 +93,7 @@ class MarketBarRepository:
                     "low": b.low,
                     "close": b.close,
                     "volume": int(b.volume),
+                    "trading_value": b.trading_value,
                     "source": b.source,
                     "ingestion_run_id": ingestion_run_id,
                 }
@@ -117,6 +119,7 @@ class MarketBarRepository:
                     "low": stmt.excluded.low,
                     "close": stmt.excluded.close,
                     "volume": stmt.excluded.volume,
+                    "trading_value": stmt.excluded.trading_value,
                     "session_date": stmt.excluded.session_date,
                     "source": stmt.excluded.source,
                     "ingestion_run_id": stmt.excluded.ingestion_run_id,
