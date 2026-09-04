@@ -229,6 +229,10 @@ async def test_breadth_refresh_is_background_only_and_never_blocks_the_payload()
     provider._session = _Session()
     provider._is_connected = True
     provider._market_is_active = lambda: False
+    # Off-session the overview TTL stretches to the next session open (real wall-clock
+    # value) - pin it small so "force a rebuild" below is deterministic regardless of
+    # when this test happens to run.
+    provider._seconds_to_next_session = lambda: 1.0
 
     first = await provider.get_market_overview(["CAAA2601"])
     assert first["indices"][0]["advancing"] is None          # not computed yet
@@ -240,6 +244,55 @@ async def test_breadth_refresh_is_background_only_and_never_blocks_the_payload()
     assert second["indices"][0]["advancing"] == 1             # VN30: AAA up
     assert second["indices"][0]["declining"] == 1             # VN30: BBB down
     assert second["top_stock_volume"][0]["symbol"] == "AAA"
+
+
+@pytest.mark.asyncio
+async def test_overview_cache_survives_a_multihour_gap_outside_trading_hours():
+    """Nothing changes until the market reopens, so the overview must not re-hit FiinQuant
+    on some short fixed timer while closed - only once the next session actually nears."""
+    class CountingSession(_Session):
+        calls = 0
+        def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
+            CountingSession.calls += 1
+            return super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
+
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = CountingSession()
+    provider._is_connected = True
+    provider._market_is_active = lambda: False
+    provider._seconds_to_next_session = lambda: 6 * 3600  # e.g. overnight, next open in 6h
+
+    await provider.get_market_overview(["CAAA2601"])
+    calls_after_first = CountingSession.calls
+    assert calls_after_first > 0
+
+    # An hour "passes" - the old fixed 300s TTL would have forced a rebuild well before now.
+    provider._overview_cache_at -= 3600
+    await provider.get_market_overview(["CAAA2601"])
+    assert CountingSession.calls == calls_after_first  # still served from cache
+
+
+@pytest.mark.asyncio
+async def test_overview_cache_still_rebuilds_once_the_next_session_is_close():
+    """The stretched TTL is bounded by the real next-session time, not infinite."""
+    class CountingSession(_Session):
+        calls = 0
+        def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
+            CountingSession.calls += 1
+            return super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
+
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = CountingSession()
+    provider._is_connected = True
+    provider._market_is_active = lambda: False
+    provider._seconds_to_next_session = lambda: 10.0  # market opens very soon
+
+    await provider.get_market_overview(["CAAA2601"])
+    calls_after_first = CountingSession.calls
+
+    provider._overview_cache_at -= 3600  # far older than the 10s-away next session
+    await provider.get_market_overview(["CAAA2601"])
+    assert CountingSession.calls > calls_after_first  # rebuilt
 
 
 @pytest.mark.asyncio

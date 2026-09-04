@@ -1665,9 +1665,23 @@ class FiinQuantProvider(MarketDataProvider):
     # at-ceiling / at-floor without a per-ticker band lookup.
     _HOSE_LIMIT = 0.0699
 
+    def _cache_ttl(self, active_ttl: float) -> float:
+        """TTL for a cache that only needs refreshing while the market can move: short and
+        fixed in-session, but stretched to cover the whole closed stretch (lunch, evening,
+        weekend, holiday) outside it — nothing changes until trading resumes, so there is
+        nothing new to fetch. Mirrors ``_compute_reconnect_delay``'s reasoning, but without
+        that method's 300s ceiling: a data cache (unlike a connection health check) has no
+        reason to poll while closed at all."""
+        if self._market_is_active():
+            return active_ttl
+        try:
+            return max(active_ttl, float(self._seconds_to_next_session()))
+        except Exception:  # noqa: BLE001 - never let a calendar bug wedge the cache
+            return active_ttl
+
     def _ensure_breadth_refresh(self) -> None:
         """Kick a background breadth recompute if the cache is stale and none is running."""
-        ttl = 90.0 if self._market_is_active() else 900.0
+        ttl = self._cache_ttl(90.0)
         if self._breadth_cache_at and time.monotonic() - self._breadth_cache_at < ttl:
             return
         if self._breadth_task is not None and not self._breadth_task.done():
@@ -1806,10 +1820,11 @@ class FiinQuantProvider(MarketDataProvider):
 
         Snapshot reads only (no stream mutations). ``MarketBreadth`` is not on this
         account, so breadth + the stock volume leaders are maintained on their own slow
-        background cadence (`_refresh_index_breadth`). Payload cached ~15 s in-session.
+        background cadence (`_refresh_index_breadth`). Payload cached ~15 s in-session,
+        and effectively until the next session opens outside it (see ``_cache_ttl``).
         """
         self._ensure_breadth_refresh()
-        ttl = 15.0 if self._market_is_active() else 300.0
+        ttl = self._cache_ttl(15.0)
         if (
             self._overview_cache
             and self._session

@@ -7,7 +7,7 @@ import copy
 import logging
 import math
 import time
-from typing import Any
+from typing import Any, Callable
 
 from app.market_data.market_session import market_session
 
@@ -25,6 +25,21 @@ class MarketOverviewService:
         self._load_lock = asyncio.Lock()
         self._refresh_task: asyncio.Task | None = None
         self._retry_at = 0.0
+        # Injectable for deterministic tests, mirrors the provider's own off-session TTL.
+        self._seconds_to_next_session: Callable[[], float] = (
+            market_session.seconds_until_next_trading_session
+        )
+
+    def _ttl_seconds(self) -> float:
+        """60s while trading is active; otherwise stretched to cover the whole closed
+        stretch (lunch, evening, weekend, holiday) — the overview cannot change until the
+        next session opens, so there is nothing new to fetch in the meantime."""
+        if market_session.is_trading_active():
+            return 60.0
+        try:
+            return max(60.0, float(self._seconds_to_next_session()))
+        except Exception:  # noqa: BLE001 - never let a calendar bug wedge the cache
+            return 300.0
 
     def configure(self, provider, store) -> None:
         self._provider, self._store = provider, store
@@ -100,7 +115,7 @@ class MarketOverviewService:
             }
         result = copy.deepcopy(self._cache)
         age = max(0.0, time.time() - self._cached_at)
-        ttl = 60 if market_session.is_trading_active() else 300
+        ttl = self._ttl_seconds()
         stale = age >= ttl or bool(result.get("stale"))
         result.update({
             "refreshing": refreshing, "cache_age_seconds": round(age, 3),
@@ -118,7 +133,7 @@ class MarketOverviewService:
             from app.market_data.market_subscription_manager import subscription_manager
             self.configure(subscription_manager.provider, subscription_manager.store)
         await self._load()
-        ttl = 60 if market_session.is_trading_active() else 300
+        ttl = self._ttl_seconds()
         if self._cache is None or time.time() - self._cached_at >= ttl:
             self.start_refresh(symbols)
         if self._cache is None and self._refresh_task is not None:
