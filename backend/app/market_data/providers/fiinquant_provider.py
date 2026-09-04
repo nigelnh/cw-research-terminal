@@ -1665,14 +1665,20 @@ class FiinQuantProvider(MarketDataProvider):
     # at-ceiling / at-floor without a per-ticker band lookup.
     _HOSE_LIMIT = 0.0699
 
-    def _cache_ttl(self, active_ttl: float) -> float:
+    def _cache_ttl(self, active_ttl: float, *, settled: bool = True) -> float:
         """TTL for a cache that only needs refreshing while the market can move: short and
         fixed in-session, but stretched to cover the whole closed stretch (lunch, evening,
         weekend, holiday) outside it — nothing changes until trading resumes, so there is
         nothing new to fetch. Mirrors ``_compute_reconnect_delay``'s reasoning, but without
         that method's 300s ceiling: a data cache (unlike a connection health check) has no
-        reason to poll while closed at all."""
-        if self._market_is_active():
+        reason to poll while closed at all.
+
+        ``settled=False`` caps this at ``active_ttl`` regardless of session state — for a
+        cached result that's known incomplete (e.g. built before the background breadth /
+        stock-leaders sweep finished), stretching the TTL would strand that gap for the
+        entire closed stretch instead of the few seconds a retry actually needs.
+        """
+        if self._market_is_active() or not settled:
             return active_ttl
         try:
             return max(active_ttl, float(self._seconds_to_next_session()))
@@ -1821,10 +1827,15 @@ class FiinQuantProvider(MarketDataProvider):
         Snapshot reads only (no stream mutations). ``MarketBreadth`` is not on this
         account, so breadth + the stock volume leaders are maintained on their own slow
         background cadence (`_refresh_index_breadth`). Payload cached ~15 s in-session,
-        and effectively until the next session opens outside it (see ``_cache_ttl``).
+        and effectively until the next session opens outside it (see ``_cache_ttl``) -
+        unless the cached payload still lacks stock leaders because that sweep hadn't
+        finished when it was built, in which case it stays on the short TTL until it does.
         """
         self._ensure_breadth_refresh()
-        ttl = self._cache_ttl(15.0)
+        settled = bool(self._overview_cache) and (
+            self._overview_cache.get("components", {}).get("top_stock_volume") == "AVAILABLE"
+        )
+        ttl = self._cache_ttl(15.0, settled=settled)
         if (
             self._overview_cache
             and self._session

@@ -312,6 +312,40 @@ async def test_redis_market_state_store_staleness_rejection():
 
 
 @pytest.mark.asyncio
+async def test_default_ttl_and_staleness_survive_a_weekend_without_a_new_tick():
+    """The 24h defaults used to quietly erase the whole watchlist on any restart landing
+    more than a day after Friday's last write - not just an ordinary ~66h weekend gap, and
+    especially Tet, when HOSE can close for ~9 consecutive days. Uses the real
+    `settings.MARKET_STATE_CACHE_TTL_SECONDS` / `MARKET_STATE_MAX_STALENESS_SECONDS`
+    defaults (no override), so this pins the actual production configuration."""
+    mock_client = MockRedisClient()
+    store = RedisMarketStateStore(enabled=True, redis_client=mock_client)
+    await store.initialize()
+
+    # Friday's last tick before the close, restored on a hypothetical Monday-morning
+    # restart ~70 hours later - well past the old 24h defaults, comfortably inside a
+    # normal weekend.
+    friday_close_ts = int((time.time() - 70 * 3600) * 1000)
+    quote = CanonicalQuote(
+        symbol="HPG", last_price=21850.0,
+        received_timestamp=friday_close_ts, source_timestamp=friday_close_ts,
+    )
+    await store.save("HPG", quote)
+
+    key = "cw_research:market_state:v1:HPG"
+    assert mock_client.ttls[key] > 9 * 86400  # comfortably survives a ~9-day Tet closure
+
+    loaded = await store.load("HPG")
+    assert loaded is not None
+    assert loaded.last_price == 21850.0
+
+    loaded_many = await store.load_many(["HPG"])
+    assert loaded_many["HPG"].last_price == 21850.0
+
+    await store.close()
+
+
+@pytest.mark.asyncio
 async def test_redis_failure_graceful_degradation():
     mock_client = MockRedisClient()
     store = RedisMarketStateStore(
