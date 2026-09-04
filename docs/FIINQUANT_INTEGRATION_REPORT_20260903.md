@@ -81,7 +81,7 @@ they do not create a last trade, trade timestamp, last-match quantity, or candle
 
 | Check | Result |
 |---|---|
-| Backend test suite | 1,191 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
+| Backend test suite | 1,194 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
 | Frontend test suite | 36 files; 282 tests passed |
 | Backend byte-code compilation | Passed |
 | Frontend typecheck and production build | Passed; Vite reported the existing large-chunk/deprecated-option warnings |
@@ -111,6 +111,11 @@ These were explicitly LAST_SESSION values during PRE_OPEN, not live executions.
 After a backend restart, historical fallback cache reads recovered legacy book-only CW
 snapshots without direct provider history calls. A pre-open feed reset with zero prices
 no longer overwrites the last actual trade or creates a false −100% move.
+
+The separate enrichment workflow had an invalid job-level `if` referencing `secrets`,
+which caused GitHub validation failures on pushes without starting any jobs. The guard
+now uses a job environment presence flag and step-level conditions. Manual-only triggers
+are retained; no schedule, secret changes, or production crawl was activated by this fix.
 
 ## Remaining live validation
 
