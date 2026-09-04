@@ -183,6 +183,47 @@ async def test_cw_ranking_falls_back_to_the_last_session_after_the_close():
 
 
 @pytest.mark.asyncio
+async def test_cw_leader_color_survives_a_week_long_quiet_stretch(monkeypatch):
+    """A thinly-traded CW can go well over a week between prints. If the daily-bar
+    lookback is too short, the leaders panel finds a "current" bar but no PRIOR one to
+    compare against, so `market_state` falls to UNAVAILABLE and the row renders with no
+    color at all (the bug this pins: live prod showed 4/5 CW leaders uncolored)."""
+    from datetime import datetime
+    from app.market_data.market_session import market_session, VN_TZ
+    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 4, 20, 0, tzinfo=VN_TZ))
+
+    class SparseSession(_Session):
+        def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
+            result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
+            if by != "1d":
+                return result
+            # CAAA2601 last traded 2026-08-20, then not again until 2026-09-03 - an
+            # 11-day gap. A 6-day lookback from "today" (2026-09-04) would miss the
+            # 08-20 print entirely and leave no prior close to compare against.
+            result.rows = [row for row in result.rows if row["ticker"] != "CAAA2601"]
+            result.rows += [
+                # 100 -> 105: up, but clear of the mock's ceiling/floor (110/90) so this
+                # exercises the plain price-vs-reference UP branch, not CEILING.
+                {"ticker": "CAAA2601", "timestamp": "2026-08-20", "close": 100, "volume": 500, "value": 50_000},
+                {"ticker": "CAAA2601", "timestamp": "2026-09-03", "close": 105, "volume": 900, "value": 99_000},
+            ]
+            from_date = kwargs.get("from_date")
+            if from_date:
+                result.rows = [row for row in result.rows if row["timestamp"] >= from_date]
+            return result
+
+    provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
+    provider._session = SparseSession()
+    provider._is_connected = True
+    result = await provider.get_market_overview(["CAAA2601"])
+    row = result["top_cw_volume"][0]
+    assert row["symbol"] == "CAAA2601"
+    assert row["price"] == 105
+    assert row["reference"] == 100
+    assert row["market_state"] == "UP"
+
+
+@pytest.mark.asyncio
 async def test_breadth_refresh_is_background_only_and_never_blocks_the_payload():
     provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
     provider._session = _Session()
