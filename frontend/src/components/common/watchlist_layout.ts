@@ -46,13 +46,13 @@ export function completeOrder<T extends string>(
   ];
 }
 
-/** Keep session traded value beside trade price and migrate saved column ids. */
+/** Keep recent-match quantity beside trade price and migrate the old value-column id. */
 export function columnOrder(preferred: readonly string[]): QuoteColumnKey[] {
-  const migrated = preferred.map((id) => (id === "tradedQuantity" ? "tradingValue" : id));
+  const migrated = preferred.map((id) => id === "tradingValue" ? "tradedQuantity" : id);
   const columns = completeOrder(defaults.columns, migrated);
-  if (!migrated.includes("tradingValue")) {
-    columns.splice(columns.indexOf("tradingValue"), 1);
-    columns.splice(columns.indexOf("last") + 1, 0, "tradingValue");
+  if (!migrated.includes("tradedQuantity")) {
+    columns.splice(columns.indexOf("tradedQuantity"), 1);
+    columns.splice(columns.indexOf("last") + 1, 0, "tradedQuantity");
   }
   if (!preferred.includes("issuer")) {
     columns.splice(columns.indexOf("issuer"), 1);

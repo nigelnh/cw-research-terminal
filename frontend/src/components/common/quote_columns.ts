@@ -1,6 +1,5 @@
 import {
   DASH,
-  fmtAmount,
   fmtChg,
   fmtIV,
   fmtPrice,
@@ -20,7 +19,7 @@ export const QUOTE_COLUMNS = [
   { key: "bid", label: "BID_PRC" },
   { key: "ivTrade", label: "IV_TRD" },
   { key: "last", label: "TRD_PRC" },
-  { key: "tradingValue", label: "TRD_AMT" },
+  { key: "tradedQuantity", label: "TRD_AMT" },
   { key: "change", label: "+/-" },
   { key: "chgPct", label: "%CHG" },
   { key: "ivAsk", label: "IV_ASK" },
@@ -37,7 +36,7 @@ export const QUOTE_COLUMN_PULSE_FIELD: Partial<Record<QuoteColumnKey, string>> =
   bid: "bidPrice",
   ask: "askPrice",
   last: "lastPrice",
-  tradingValue: "tradingValue",
+  tradedQuantity: "tradedQuantity",
   change: "priceChange",
   chgPct: "priceChangePercent",
   vol: "totalVolume",
@@ -46,7 +45,7 @@ export const QUOTE_COLUMN_PULSE_FIELD: Partial<Record<QuoteColumnKey, string>> =
   ivAsk: "ivAsk",
 };
 export const QUOTE_COLUMN_HINTS: Partial<Record<QuoteColumnKey, string>> = {
-  tradingValue: "Session traded value (turnover, VND)",
+  tradedQuantity: "Quantity of the most recent match",
   lastTradingDate: "Last trading date (YYYY-MM-DD)",
 };
 export interface QuoteTableValues {
@@ -58,8 +57,7 @@ export interface QuoteTableValues {
   bid: number | null;
   ask: number | null;
   last: number | null;
-  /** Session traded value (turnover, raw VND). */
-  tradingValue?: number | null;
+  tradedQuantity?: number | null;
   change?: number | null;
   chgPct: number | null;
   vol: number | null;
@@ -94,10 +92,7 @@ export function quoteCell(
     case "ivBid":
     case "ivTrade":
     case "ivAsk":
-      return {
-        text: fmtIV(row[key]),
-        color: key === "ivTrade" ? "var(--t-85)" : muted,
-      };
+      return { text: fmtIV(row[key]), color: "var(--t-92)" };
     case "change": {
       const amount = typeof row.change === "number"
         ? row.change
@@ -122,18 +117,18 @@ export function quoteCell(
     case "chgPct":
       return fmtChg(row.chgPct);
     case "vol":
-      return { text: fmtVol(row.vol), color: muted };
-    case "tradingValue":
-      return { text: fmtAmount(row.tradingValue), color: muted };
+      return { text: fmtVol(row.vol), color: "var(--t-92)" };
+    case "tradedQuantity":
+      return { text: fmtVol(row.tradedQuantity), color: muted };
     case "strike":
-      return { text: fmtPrice(row.strike), color: "var(--t-60)" };
+      return { text: fmtPrice(row.strike), color: "var(--t-92)" };
     case "ratio":
-      return { text: fmtRatio(row.ratio), color: muted };
+      return { text: fmtRatio(row.ratio), color: "var(--t-92)" };
     case "lastTradingDate":
-      return { text: row.lastTradingDate?.slice(0, 10) || DASH, color: muted };
+      return { text: row.lastTradingDate?.slice(0, 10) || DASH, color: "var(--t-92)" };
     case "issuer":
-      return { text: row.issuer || DASH, color: muted };
+      return { text: row.issuer || DASH, color: "var(--t-92)" };
     case "dte":
-      return { text: row.dteText, color: "var(--t-46)" };
+      return { text: row.dteText, color: "var(--t-92)" };
   }
 }

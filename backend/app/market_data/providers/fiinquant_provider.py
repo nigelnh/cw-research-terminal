@@ -1913,10 +1913,14 @@ class FiinQuantProvider(MarketDataProvider):
                         # Only the 4 index symbols + the watched CWs — the ~430 HOSE
                         # constituents (breadth + stock leaders) are a separate background
                         # sweep because the SDK issues one request per ticker.
+                        # 20 days, not 6: a thinly-traded CW can go a week+ between prints
+                        # (confirmed live — some only show one bar in a 6-day window), and
+                        # the CW-leaders `reference` lookup needs a PRIOR bar to exist in
+                        # the fetched range or it falls through to UNAVAILABLE (no color).
                         vn_today = market_session.get_vn_now().date()
                         daily = actual_prices(fetch_rows(
                             sorted(set(index_symbols + clean_cws)), by="1d",
-                            from_date=(vn_today - timedelta(days=6)).isoformat(),
+                            from_date=(vn_today - timedelta(days=20)).isoformat(),
                             to_date=vn_today.isoformat(),
                         ))
                     except Exception as exc:

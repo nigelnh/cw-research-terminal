@@ -29,7 +29,6 @@ const fixture = vi.hoisted(() => {
     priceChange: -10,
     priceChangePercent: -0.25,
     tradedQuantity: 1234567 as number | null,
-    tradingValue: 987654321 as number | null,
   };
   const specs = new Map([
     [
@@ -141,23 +140,22 @@ describe("Targeted watchlist columns", () => {
     expect(page.queryByRole("listbox")).toBeNull();
   });
 
-  it("migrates the saved TRD_AMT column id and keeps it beside trade price", () => {
+  it("migrates the old amount column to last-match quantity", () => {
     const oldOrder = ["symbol", "ref", "last", "bid", "ivBid", "ask"];
     expect(columnOrder(oldOrder).slice(0, 7)).toEqual([
-      "symbol", "ref", "last", "tradingValue", "bid", "ivBid", "ask",
+      "symbol", "ref", "last", "tradedQuantity", "bid", "ivBid", "ask",
     ]);
-    // a saved layout that still names the old id resolves to the value column
-    expect(columnOrder(["tradedQuantity", ...oldOrder]).slice(0, 7)).toEqual([
-      "tradingValue", ...oldOrder,
+    expect(columnOrder(["tradingValue", ...oldOrder]).slice(0, 7)).toEqual([
+      "tradedQuantity", ...oldOrder,
     ]);
   });
 
-  it.each([987654321, 0, null])("shows session traded value in the table and STATS: %s", (amount) => {
-    const original = fixture.quote.tradingValue;
-    fixture.quote.tradingValue = amount;
+  it.each([1234567, 0, null])("uses provider MatchVolume in both table and STATS: %s", (amount) => {
+    const original = fixture.quote.tradedQuantity;
+    fixture.quote.tradedQuantity = amount;
     try {
       const page = render(<><PersonalDashboard /><InstrumentPanel instrument={{ symbol: "CHPG2602", instrumentType: "CW", quote: fixture.quote as any }} marketSessionActive={false} onClose={() => {}} /></>);
-      const expected = !amount ? "—" : "987.7M";
+      const expected = amount === null ? "—" : amount.toLocaleString("en-US");
       const header = page.getByRole("columnheader", { name: "TRD_AMT" });
       const headers = page.getAllByRole("columnheader");
       const cells = within(page.getByText("CHPG2602", { selector: "td" }).closest("tr")!).getAllByRole("cell");
@@ -165,9 +163,9 @@ describe("Targeted watchlist columns", () => {
       const stats = page.getByText("STATS").parentElement!;
       expect(within(stats).getByText("TRD_AMT").nextElementSibling?.textContent).toBe(expected);
       expect(within(stats).queryByText("ISSUER")).toBeNull();
-      expect(header.title).toContain("turnover");
+      expect(header.title).toContain("most recent match");
     } finally {
-      fixture.quote.tradingValue = original;
+      fixture.quote.tradedQuantity = original;
     }
   });
 
@@ -218,7 +216,7 @@ describe("Targeted watchlist columns", () => {
       "25",
       "23.0%",
       "30",
-      "987.7M",
+      "1,234,567",
       "−10",
       "-25.00%",
       "25.0%",
