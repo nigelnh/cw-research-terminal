@@ -452,13 +452,29 @@ class LiveQuantEngine:
 
     @staticmethod
     async def _eod_close(sessionmaker, symbol: str, session_date: "date", *, price_basis: str) -> Optional[float]:
-        from datetime import timedelta as _td
+        """The session's close: a direct PostgreSQL read via the caller's own
+        ``sessionmaker`` first, then one controlled gap-fill on a miss.
 
+        FiinQuant routinely lags publishing a session's *final* daily bar for hours after
+        the close (sometimes into the next calendar day) - a plain DB read done right after
+        close, before this app's own bar ever landed, used to fail with EOD_INPUT_MISSING
+        even though the exact same day's close was already sitting in FiinQuant the whole
+        time. On a miss (and only then), this falls back to
+        ``history_read_service.get_history`` - the same Postgres-first-with-gap-fill path
+        the dashboard's own EOD fallback already uses for this exact situation
+        (`DASHBOARD_FALLBACK_GAPFILL`) - reused here rather than re-implemented, including
+        its rate-limit/cooldown/concurrency protections around the on-demand provider call.
+
+        The direct read stays first rather than going straight to the service: that service
+        owns its own engine, wired once at app startup, so it cannot see a caller's own
+        isolated session (e.g. a test's disposable database) - skipping straight to it would
+        silently ignore whatever DB the caller actually asked to read.
+        """
         from app.persistence.market_time import VN_TZ as _PVN_TZ
         from app.persistence.repositories.market_bar_repository import MarketBarRepository
 
         start = datetime.combine(session_date, dtime(0, 0), tzinfo=_PVN_TZ)
-        end = start + _td(days=1)
+        end = start + timedelta(days=1)
         try:
             async with sessionmaker() as session:
                 bars = await MarketBarRepository(session).get_bars(
@@ -466,9 +482,25 @@ class LiveQuantEngine:
                     start=start, end=end, ascending=True, limit=2,
                 )
         except Exception:  # noqa: BLE001
-            return None
+            bars = []
         for b in bars:
             if b.session_date == session_date and b.close:
+                return float(b.close)
+
+        from app.market_data.history_read_service import history_read_service
+
+        session_iso = session_date.isoformat()
+        try:
+            filled = await history_read_service.get_history(
+                symbol, timeframe="1d",
+                from_date=(session_date - timedelta(days=20)).isoformat(),
+                to_date=session_iso,
+                adjusted=price_basis.strip().upper() == "ADJUSTED",
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        for b in filled:
+            if (b.session_date or b.date[:10]) == session_iso and b.close:
                 return float(b.close)
         return None
 
