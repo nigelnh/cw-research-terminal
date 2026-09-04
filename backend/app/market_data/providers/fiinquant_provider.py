@@ -1644,6 +1644,20 @@ class FiinQuantProvider(MarketDataProvider):
                     rows.extend(records(value))
                 return rows
 
+            def key(row: Dict[str, Any]) -> str:
+                return str(first(row, "ticker", "Ticker") or "").upper()
+
+            def stamp(row: Dict[str, Any]) -> str:
+                return timestamp(first(row, "timestamp", "TradingDate", "tradingDate")) or ""
+
+            def num(row: Dict[str, Any], *names: str) -> Optional[float]:
+                return number(row, *names)
+
+            def actual_prices(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                # Pre-open OHLC=0 resets are not executed prices. Keep legitimate
+                # zero volume/value on positive-price observations unchanged.
+                return [row for row in rows if (num(row, "close", "Close") or 0) > 0 and stamp(row)]
+
             def build() -> Dict[str, Any]:
                 captured = io.StringIO()
                 unavailable_components: set[str] = set()
@@ -1660,14 +1674,14 @@ class FiinQuantProvider(MarketDataProvider):
                         unavailable_components.add("stock_universe")
                         logger.warning("FiinQuant VNINDEX constituents unavailable: %s", exc)
                     try:
-                        daily = fetch_rows(
+                        daily = actual_prices(fetch_rows(
                             sorted(set(index_symbols + stocks + clean_cws)), by="1d", period=2
-                        )
+                        ))
                     except Exception as exc:
                         unavailable_components.add("daily")
                         logger.warning("FiinQuant overview daily snapshot unavailable: %s", exc)
                     try:
-                        intraday = fetch_rows(index_symbols, by="5m", period=48)
+                        intraday = actual_prices(fetch_rows(index_symbols, by="5m", period=48))
                     except Exception as exc:
                         unavailable_components.add("intraday")
                         logger.warning("FiinQuant overview intraday snapshot unavailable: %s", exc)
@@ -1676,8 +1690,8 @@ class FiinQuantProvider(MarketDataProvider):
                     except Exception as exc:
                         unavailable_components.add("breadth")
                         logger.warning("FiinQuant market breadth unavailable: %s", exc)
-                    daily_dates = [str(r.get("timestamp") or r.get("TradingDate") or "")[:10] for r in daily]
-                    session_date = max((d for d in daily_dates if d), default="")
+                    index_dates = [stamp(r)[:10] for r in daily + intraday if key(r) in index_symbols]
+                    session_date = max(index_dates or [stamp(r)[:10] for r in daily], default="")
                     try:
                         bands = fetch_price_bands(stocks + clean_cws, session_date) if session_date else []
                     except Exception as exc:
@@ -1694,19 +1708,6 @@ class FiinQuantProvider(MarketDataProvider):
                     unavailable_components.add("breadth")
                 if not bands:
                     unavailable_components.add("bands")
-
-                def key(row: Dict[str, Any]) -> str:
-                    return str(row.get("ticker") or row.get("Ticker") or "").upper()
-                def stamp(row: Dict[str, Any]) -> str:
-                    return str(row.get("timestamp") or row.get("TradingDate") or row.get("tradingDate") or "")
-                def num(row: Dict[str, Any], *names: str) -> Optional[float]:
-                    for name in names:
-                        value = row.get(name)
-                        try:
-                            return float(value) if value is not None else None
-                        except (TypeError, ValueError):
-                            pass
-                    return None
 
                 daily_by: Dict[str, List[Dict[str, Any]]] = {}
                 for row in daily:
@@ -1725,11 +1726,8 @@ class FiinQuantProvider(MarketDataProvider):
                 for symbol in index_symbols:
                     bars = sorted(daily_by.get(symbol, []), key=stamp)
                     intraday_bars = sorted(intra_by.get(symbol, []), key=stamp)
-                    if intraday_bars:
-                        latest_day = stamp(intraday_bars[-1])[:10]
-                        intraday_bars = [x for x in intraday_bars if stamp(x)[:10] == latest_day]
-                    else:
-                        latest_day = stamp(bars[-1])[:10] if bars else ""
+                    latest_day = session_date
+                    intraday_bars = [x for x in intraday_bars if stamp(x)[:10] == latest_day]
                     session_bars = [row for row in bars if stamp(row)[:10] == latest_day]
                     prior_bars = [row for row in bars if stamp(row)[:10] < latest_day]
                     latest = session_bars[-1] if session_bars else {}
@@ -1739,6 +1737,8 @@ class FiinQuantProvider(MarketDataProvider):
                     change = close - reference if close is not None and reference is not None else None
                     pct = change / reference * 100 if change is not None and reference else None
                     b = breadth_by.get(symbol, {})
+                    if stamp(b)[:10] != latest_day:
+                        b = {}  # missing/unverified or other-session breadth is not this card's breadth
                     card_state = (
                         "AVAILABLE" if close is not None and bool(b) and bool(intraday_bars)
                         else "PARTIAL" if close is not None or bool(b)
@@ -1772,12 +1772,16 @@ class FiinQuantProvider(MarketDataProvider):
                     out = []
                     for symbol in universe:
                         bars = sorted(daily_by.get(symbol, []), key=stamp)
-                        if not bars: continue
-                        row = bars[-1]; previous = bars[-2] if len(bars) > 1 else {}
+                        session_bars = [row for row in bars if stamp(row)[:10] == session_date]
+                        if not session_bars: continue
+                        prior_bars = [row for row in bars if stamp(row)[:10] < session_date]
+                        row = session_bars[-1]; previous = prior_bars[-1] if prior_bars else {}
                         volume = num(row, "volume", "Volume")
                         if volume is None: continue
                         price, reference = num(row, "close", "Close"), num(previous, "close", "Close")
                         band_row = bands_by.get(symbol, {})
+                        if stamp(band_row)[:10] != session_date:
+                            band_row = {}
                         ceiling = num(band_row, "ceilingValue")
                         floor = num(band_row, "floorValue")
                         def same(a: Optional[float], b: Optional[float]) -> bool:
@@ -1799,6 +1803,7 @@ class FiinQuantProvider(MarketDataProvider):
 
                 as_of = max((x["as_of"] for x in indices if x["as_of"]), default=None)
                 index_states = {item["availability"] for item in indices}
+                breadth_states = {item["provenance"]["breadth"]["availability"] for item in indices}
                 overall = (
                     "AVAILABLE"
                     if index_states == {"AVAILABLE"} and not unavailable_components
@@ -1825,7 +1830,9 @@ class FiinQuantProvider(MarketDataProvider):
                         ),
                         "top_stock_volume": "AVAILABLE" if stock_leaders else "UNAVAILABLE",
                         "top_cw_volume": "AVAILABLE" if cw_leaders else "UNAVAILABLE",
-                        "breadth": "UNAVAILABLE" if "breadth" in unavailable_components else "AVAILABLE",
+                        "breadth": "AVAILABLE" if breadth_states == {"AVAILABLE"} else (
+                            "UNAVAILABLE" if breadth_states == {"UNAVAILABLE"} else "PARTIAL"
+                        ),
                         "bands": "UNAVAILABLE" if "bands" in unavailable_components else "AVAILABLE",
                     },
                 }
