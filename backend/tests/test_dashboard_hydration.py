@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -61,6 +62,48 @@ async def test_many_quote_fallbacks_start_concurrently(monkeypatch):
     rows = await asyncio.wait_for(task, timeout=0.25)
 
     assert [row.symbol for row in rows] == symbols
+
+
+async def test_fast_reload_returns_observed_snapshot_without_history(monkeypatch):
+    resolver = MarketSnapshotResolver()
+    snapshot = SimpleNamespace(
+        symbol="CHPG2602",
+        session_date=date(2026, 8, 28),
+        captured_at=datetime(2026, 8, 28, 15, 0, tzinfo=_VN),
+        source="SESSION_CLOSE",
+        quality="FINAL",
+        instrument_type="CW",
+        underlying_symbol="HPG",
+        reference_price=490.0,
+        last_price=440.0,
+        total_volume=631_100,
+        bid1_price=410.0,
+        ask1_price=420.0,
+        trade_timestamp=None,
+        book_timestamp=None,
+    )
+
+    async def snapshots(*args, **kwargs):
+        return {"CHPG2602": snapshot}
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("ready snapshot must not wait for daily history")
+
+    monkeypatch.setattr(resolver, "_load_snapshots", snapshots)
+    monkeypatch.setattr(resolver, "_recent_daily_bars", fail_if_called)
+
+    row = (
+        await resolver.resolve_rows(
+            ["CHPG2602"],
+            now=_CLOSED_NOW,
+            enrich_snapshot_history=False,
+        )
+    )[0]
+
+    assert row.values["last_price"] == 440.0
+    assert row.values["total_volume"] == 631_100
+    assert row.values.get("open_price") is None
+    assert row.quote_prov.source.value == "SNAPSHOT_FINAL"
 
 
 async def test_eod_analytics_singleflight_and_negative_cache(monkeypatch):
