@@ -255,7 +255,10 @@ class MarketSnapshotResolver:
             and live_sd >= latest_session.isoformat()
             and (snapshot is None or live_sd >= snapshot.session_date.isoformat())
             and cal.is_trading_day(date.fromisoformat(live_sd))
-            and any(getattr(live, f, None) is not None for f in ("last_price", "bid1_price", "ask1_price"))
+            and any(
+                getattr(live, f, None) is not None and getattr(live, f) > 0
+                for f in ("last_price", "bid1_price", "ask1_price")
+            )
         )
         if memory_ok and live is not None:
             row.instrument_type = live.instrument_type or inst_type
