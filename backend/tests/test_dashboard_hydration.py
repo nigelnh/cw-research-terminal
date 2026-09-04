@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.market_data.market_snapshot_resolver import MarketSnapshotResolver
+from app.market_data.market_schemas import HistoricalBar
 from app.quant.quant_engine import LiveQuantEngine
 from app.quant.quant_schemas import WarrantAnalytics
 
@@ -144,3 +145,39 @@ async def test_eod_analytics_singleflight_and_negative_cache(monkeypatch):
     assert calls == 1
     assert await engine.compute_eod_analytics("CHPG2602", date(2026, 8, 28)) == unavailable
     assert calls == 1
+
+
+async def test_history_fallback_reuses_shared_cache_after_resolver_restart(monkeypatch):
+    class Store:
+        cache = {}
+
+        async def load_dashboard_history(self, symbol, basis, session):
+            return self.cache.get((symbol, basis, session))
+
+        async def save_dashboard_history(self, symbol, basis, session, bars):
+            self.cache[(symbol, basis, session)] = bars
+
+    store = Store()
+    resolver = MarketSnapshotResolver()
+    resolver.configure(None, store=store)
+    calls = 0
+
+    async def fetch(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return [HistoricalBar(
+            date="2026-08-28", open=490, high=500, low=430, close=440,
+            volume=631100, price_basis="RAW", adjusted=False,
+        )]
+
+    monkeypatch.setattr(resolver, "_fetch_recent_daily_bars", fetch)
+    first = await resolver._recent_daily_bars("CHPG2602", "CW", now=_CLOSED_NOW)
+    assert calls == 1
+    assert first[0].price_basis == "RAW"
+
+    restarted = MarketSnapshotResolver()
+    restarted.configure(None, store=store)
+    monkeypatch.setattr(restarted, "_fetch_recent_daily_bars", fetch)
+    second = await restarted._recent_daily_bars("CHPG2602", "CW", now=_CLOSED_NOW)
+    assert calls == 1
+    assert second == first

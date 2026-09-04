@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.market_data.market_schemas import CanonicalQuote
+from app.market_data.market_schemas import CanonicalQuote, HistoricalBar
 from app.market_data.market_state import MarketState, market_state
 from app.market_data.market_session import market_session
 from app.market_data.market_state_store import NullMarketStateStore
@@ -82,6 +82,27 @@ class MockRedisPipeline:
                 if cmd[3]:
                     self.parent.ttls[cmd[1]] = cmd[3]
         return [True] * len(self.commands)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_history_cache_preserves_basis_session_and_missing_values():
+    store = RedisMarketStateStore(enabled=True, redis_client=MockRedisClient())
+    await store.initialize()
+    try:
+        bars = [HistoricalBar(
+            date="2026-09-03", session_date="2026-09-03", open=440, high=490,
+            low=420, close=440, volume=0, value=None, price_basis="RAW", adjusted=False,
+        )]
+        await store.save_dashboard_history("CHPG2617", "RAW", "2026-09-03", bars)
+        restored = await store.load_dashboard_history("CHPG2617", "RAW", "2026-09-03")
+        assert restored == bars
+        assert restored[0].volume == 0
+        assert restored[0].value is None
+        assert await store.load_dashboard_history("CHPG2617", "ADJUSTED", "2026-09-03") is None
+        assert await store.load_dashboard_history("CHPG2617", "RAW", "2026-09-04") is None
+        assert await store.load("CHPG2617") is None  # never enters live CanonicalQuote namespace
+    finally:
+        await store.close()
 
 
 @pytest.mark.asyncio

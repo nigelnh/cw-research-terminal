@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
@@ -6,7 +7,7 @@ import redis.asyncio as aioredis
 from redis.exceptions import RedisError
 
 from app.core.config import settings
-from app.market_data.market_schemas import CanonicalQuote
+from app.market_data.market_schemas import CanonicalQuote, HistoricalBar
 from app.market_data.market_state_store import MarketStateStore
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class RedisMarketStateStore(MarketStateStore):
     """
 
     KEY_PREFIX = "cw_research:market_state:v1"
+    HISTORY_PREFIX = "cw_research:dashboard_history:v1"
 
     def __init__(
         self,
@@ -258,6 +260,43 @@ class RedisMarketStateStore(MarketStateStore):
             self._counters["write_errors"] += 1
             logger.warning(f"Failed to save batch of {len(quotes)} quotes to Redis: {e}")
             self._mark_disconnected()
+
+    async def load_dashboard_history(
+        self, symbol: str, price_basis: str, session_date: str
+    ) -> Optional[List[HistoricalBar]]:
+        if not self.is_available() or self._client is None:
+            return None
+        key = f"{self.HISTORY_PREFIX}:{symbol.strip().upper()}:{price_basis}:{session_date}"
+        try:
+            raw = await self._client.get(key)
+            if not raw:
+                return None
+            bars = [HistoricalBar.model_validate(item) for item in json.loads(raw)]
+            if any(
+                bar.price_basis != price_basis
+                or (bar.session_date or bar.date[:10]) > session_date
+                for bar in bars
+            ):
+                return None
+            return bars
+        except Exception as exc:
+            logger.warning("Dashboard history cache read failed for %s: %s", symbol, type(exc).__name__)
+            return None
+
+    async def save_dashboard_history(
+        self, symbol: str, price_basis: str, session_date: str, bars: List[HistoricalBar]
+    ) -> None:
+        if not bars or not self.is_available() or self._client is None:
+            return
+        key = f"{self.HISTORY_PREFIX}:{symbol.strip().upper()}:{price_basis}:{session_date}"
+        try:
+            await self._client.set(
+                key,
+                json.dumps([bar.model_dump(mode="json") for bar in bars]),
+                ex=max(1, int(settings.DASHBOARD_HISTORY_CACHE_TTL_SECONDS)),
+            )
+        except Exception as exc:
+            logger.warning("Dashboard history cache write failed for %s: %s", symbol, type(exc).__name__)
 
     def enqueue_save(self, symbol: str, quote: CanonicalQuote) -> None:
         """Buffers quote for asynchronous batch writing without blocking."""

@@ -96,3 +96,32 @@ async def test_final_quality_never_downgraded(sessionmaker_):
         got = await repo.get_latest("HPG")
         assert got is not None and got.quality == "FINAL"
         assert float(got.bid1_price) == 99.0  # book from the FINAL row retained
+
+
+async def test_partial_final_write_cannot_erase_observed_trade_or_zero_quantity(sessionmaker_):
+    sd = date(2026, 9, 3)
+    trade_at = datetime(2026, 9, 3, 14, 40, tzinfo=_VN)
+    async with sessionmaker_() as s:
+        await SnapshotRepository(s).upsert(SnapshotRow(
+            symbol="CHPG2617", session_date=sd, captured_at=trade_at,
+            source="SESSION_CLOSE", quality="FINAL", instrument_type="CW",
+            last_price=440, total_volume=631100, traded_quantity=0,
+            trade_timestamp=trade_at, bid1_price=410,
+        ))
+        await s.commit()
+    async with sessionmaker_() as s:
+        await SnapshotRepository(s).upsert(SnapshotRow(
+            symbol="CHPG2617", session_date=sd,
+            captured_at=datetime(2026, 9, 3, 15, 5, tzinfo=_VN),
+            source="SESSION_CLOSE", quality="FINAL", instrument_type="CW",
+            last_price=None, total_volume=None, traded_quantity=None,
+            trade_timestamp=None, bid1_price=420,
+        ))
+        await s.commit()
+    async with sessionmaker_() as s:
+        got = await SnapshotRepository(s).get_latest("CHPG2617")
+        assert float(got.last_price) == 440
+        assert got.total_volume == 631100
+        assert got.traded_quantity == 0
+        assert got.trade_timestamp == trade_at
+        assert float(got.bid1_price) == 420

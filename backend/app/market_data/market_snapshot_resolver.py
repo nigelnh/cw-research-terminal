@@ -23,7 +23,9 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from time import monotonic
 from typing import Any, Optional
+from weakref import WeakValueDictionary
 
 from app.core.config import settings
 from app.market_data import trading_calendar as cal
@@ -136,9 +138,15 @@ class ResolvedRow:
 class MarketSnapshotResolver:
     def __init__(self, sessionmaker=None) -> None:
         self._sm = sessionmaker  # async_sessionmaker | None
+        self._store = None
+        self._history_cache: dict[tuple[str, str, str], tuple[float, list[HistoricalBar]]] = {}
+        self._history_locks: WeakValueDictionary[tuple[str, str, str], asyncio.Lock] = WeakValueDictionary()
 
-    def configure(self, sessionmaker) -> None:
+    def configure(self, sessionmaker, *, store=None) -> None:
         self._sm = sessionmaker
+        self._store = store
+        self._history_cache.clear()
+        self._history_locks.clear()
 
     async def resolve_rows(
         self,
@@ -328,6 +336,12 @@ class MarketSnapshotResolver:
                 state,
                 src, as_of, sd, stale=snap_stale,
             )
+            if row.values.get("last_price") is None:
+                row.quote_prov = FieldProvenance(
+                    DataTemporalState.UNAVAILABLE,
+                    DataSource.NONE,
+                    note="snapshot has no observed trade price",
+                )
             if row.values.get("reference_price") is not None:
                 row.reference_prov = row.quote_prov
             # Book only from a real observed snapshot (not the EOD seed).
@@ -364,7 +378,11 @@ class MarketSnapshotResolver:
         # The dashboard reload path prefers an observed persisted snapshot immediately.
         # Missing optional OHLC/reference fields remain null with truthful provenance;
         # they must not turn a ready quote into a multi-second history dependency.
-        if snapshot is not None and not enrich_snapshot_history:
+        if (
+            snapshot is not None
+            and not enrich_snapshot_history
+            and row.values.get("last_price") is not None
+        ):
             if diag:
                 row.diag = {"chosen": "SNAPSHOT_FAST", "trace": trace}
             return row
@@ -566,6 +584,50 @@ class MarketSnapshotResolver:
             )
 
     async def _recent_daily_bars(
+        self, sym: str, inst_type: str, *, now: datetime | None = None
+    ) -> list[HistoricalBar]:
+        """Session-scoped L1/Redis fallback cache, separate from live quote state.
+
+        Incomplete legacy snapshots may need an actual historical close. Those reads must
+        not hit FiinQuant again on every reload or after a backend restart. Never cache a
+        future/current incomplete session under the last-completed-session key.
+        """
+        now = now or datetime.now(cal.VN_TZ)
+        latest_session = cal.latest_completed_trading_session(now).isoformat()
+        basis = "RAW" if inst_type == "CW" else "ADJUSTED"
+        key = (sym, basis, latest_session)
+        cached = self._history_cache.get(key)
+        if cached is not None and cached[0] > monotonic():
+            return cached[1]
+        lock = self._history_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            cached = self._history_cache.get(key)
+            if cached is not None and cached[0] > monotonic():
+                return cached[1]
+            bars = None
+            if self._store is not None:
+                bars = await self._store.load_dashboard_history(sym, basis, latest_session)
+            if bars is None:
+                fetched = await self._fetch_recent_daily_bars(sym, inst_type, now=now)
+                bars = [
+                    bar.model_copy(update={
+                        "price_basis": basis,
+                        "adjusted": basis == "ADJUSTED",
+                        "session_date": bar.session_date or bar.date[:10],
+                    })
+                    for bar in fetched
+                    if bar.price_basis in (None, basis)
+                    and (bar.session_date or bar.date[:10]) <= latest_session
+                ]
+                if bars and self._store is not None:
+                    await self._store.save_dashboard_history(sym, basis, latest_session, bars)
+            ttl = settings.DASHBOARD_HISTORY_CACHE_TTL_SECONDS if bars else 30
+            if len(self._history_cache) >= 512:
+                self._history_cache.pop(next(iter(self._history_cache)), None)
+            self._history_cache[key] = (monotonic() + max(1, int(ttl)), bars)
+            return bars
+
+    async def _fetch_recent_daily_bars(
         self, sym: str, inst_type: str, *, now: datetime | None = None
     ) -> list[HistoricalBar]:
         """Last ~3 daily bars, PostgreSQL-first, one controlled gap-fill allowed."""

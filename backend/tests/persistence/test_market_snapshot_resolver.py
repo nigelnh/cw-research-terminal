@@ -209,6 +209,25 @@ async def test_eod_bars_when_no_snapshot(resolver, sessionmaker_):
     assert r.to_wire()["Bid1_Prc"] is None
 
 
+async def test_fast_path_fills_book_only_snapshot_from_history_with_truthful_provenance(
+    resolver, sessionmaker_
+):
+    await _seed_bars(sessionmaker_, "CHPG2617", {_THU: 490.0, _FRI: 440.0}, pb="RAW", itype="CW")
+    await _put_snapshot(
+        sessionmaker_, symbol="CHPG2617", session_date=_FRI,
+        captured_at=datetime(2026, 8, 28, 15, 2, tzinfo=_VN),
+        source="SESSION_CLOSE", quality="FINAL", instrument_type="CW",
+        last_price=None, bid1_price=410.0, ask1_price=420.0,
+    )
+    row = (await resolver.resolve_rows(
+        ["CHPG2617"], now=_SAT_NOW, enrich_snapshot_history=False
+    ))[0]
+    assert row.values["last_price"] == 440.0
+    assert row.values["bid1_price"] == 410.0
+    assert row.quote_prov.source.value == "EOD_BARS"
+    assert row.book_prov.source.value == "SNAPSHOT_FINAL"
+
+
 @pytest.mark.parametrize("snapshot_session", [_THU, _FRI])
 async def test_daily_bars_fill_snapshot_fields_that_are_present_but_null(
     resolver, sessionmaker_, snapshot_session
