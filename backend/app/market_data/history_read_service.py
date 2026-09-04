@@ -284,8 +284,18 @@ class HistoryReadService:
         cur_hi = state.last_bar_ts.astimezone(VN_TZ).date() if state and state.last_bar_ts else None
 
         horizon_floor = date.today() - timedelta(days=settings.INGEST_MAX_LOOKBACK_DAYS)
+        # A day this recent is always retried regardless of the cursor - see the docstring
+        # on HISTORY_RECENT_RETRY_DAYS for why "the cursor already spans it" is not reliable
+        # evidence of a confirmed gap this close to today (confirmed live: an EOD-analytics
+        # gap-fill for VPB/FPT's ADJUSTED series kept reporting "FILLED" with zero rows
+        # inserted for the current session's close, hours after FiinQuant actually published
+        # it, because an earlier fill's `requested_ceiling` had already stamped the cursor
+        # past that date the moment it was first (unsuccessfully) asked for).
+        recent_floor = date.today() - timedelta(days=settings.HISTORY_RECENT_RETRY_DAYS)
 
         def _probed(d: date) -> bool:
+            if d >= recent_floor:
+                return False
             # The provider has already been asked for this date at least once (cursor spans it).
             return cur_lo is not None and cur_hi is not None and cur_lo <= d <= cur_hi
 

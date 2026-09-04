@@ -185,6 +185,52 @@ async def test_B_missing_middle_gap_filled_without_touching_surrounding(history_
             assert float(r.close) == surviving_closes[r.session_date]
 
 
+async def test_probed_but_missing_day_retries_only_within_the_recent_window(history_service, fake_provider):
+    """A prior fill's `requested_ceiling` (ingestion/service.py._run_chunks) stamps the
+    cursor through the day it asked for even when the provider had nothing for it yet -
+    FiinQuant routinely publishes a session's final daily bar hours after close (confirmed
+    live: the ADJUSTED series lagged RAW by more than a day for some tickers). Without an
+    age-based override, that day is "probed" forever and a chart/quant read never retries
+    it even once the provider actually has it. `HISTORY_RECENT_RETRY_DAYS` bounds the
+    override so it only applies close to today - an old gap this far back must stay a
+    zero-provider-call, cursor-trusted read, or every load would re-hammer a confirmed
+    historical hole forever."""
+    lo = _CUTOFF - timedelta(days=90)
+    all_days = _weekdays(lo, _CUTOFF)
+    recent_gap = all_days[-2]                                  # a few calendar days back, always inside the window
+    old_gap = _CUTOFF - timedelta(days=settings.HISTORY_RECENT_RETRY_DAYS + 20)
+    while old_gap.weekday() >= 5:                               # snap onto a real weekday
+        old_gap -= timedelta(days=1)
+
+    # --- Recent gap: cursor already claims full coverage through cutoff (as if an earlier
+    # fill's requested_ceiling raced the publish lag), but recent_gap's bar was never
+    # actually written. The provider has it NOW - must retry and pick it up.
+    recent_iid = await _seed_instrument("HPG")
+    await _insert_bars(recent_iid, [d for d in all_days if d != recent_gap])
+    await _set_cursor(recent_iid, lo, _CUTOFF)
+    fake_provider.seed_daily("HPG", lo - timedelta(days=5), _CUTOFF)
+
+    bars = await history_service.get_history(
+        "HPG", timeframe="1D", from_date=lo.isoformat(), to_date=_CUTOFF.isoformat(), adjusted=True,
+    )
+    assert len(fake_provider.calls) == 1
+    assert recent_gap.isoformat() in [b.date for b in bars]
+
+    # --- Old gap, same shape, different symbol: this far back, the cursor is trusted -
+    # zero provider calls, the historical hole stays a hole (unchanged pre-fix behavior).
+    fake_provider.calls.clear()
+    old_iid = await _seed_instrument("FPT")
+    await _insert_bars(old_iid, [d for d in all_days if d != old_gap])
+    await _set_cursor(old_iid, lo, _CUTOFF)
+    fake_provider.seed_daily("FPT", lo - timedelta(days=5), _CUTOFF)
+
+    bars2 = await history_service.get_history(
+        "FPT", timeframe="1D", from_date=lo.isoformat(), to_date=_CUTOFF.isoformat(), adjusted=True,
+    )
+    assert fake_provider.calls == []
+    assert old_gap.isoformat() not in [b.date for b in bars2]
+
+
 async def test_C_old_range_outside_entitlement_makes_zero_provider_calls(history_service, fake_provider):
     iid = await _seed_instrument("HPG")
     await _insert_bars(iid, _weekdays(_CUTOFF - timedelta(days=20), _CUTOFF))
@@ -374,3 +420,4 @@ async def test_no_generic_500_and_no_infinite_retry_on_typed_failure(history_ser
     assert len(bars) == len(_weekdays(lo, mid))
     # retry policy is bounded: the fake recorded a small, finite number of attempts
     assert 1 <= len(fake_provider.calls) <= settings.INGEST_MAX_RETRIES + 2
+
