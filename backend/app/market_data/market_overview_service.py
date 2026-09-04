@@ -33,8 +33,19 @@ class MarketOverviewService:
     def _ttl_seconds(self) -> float:
         """60s while trading is active; otherwise stretched to cover the whole closed
         stretch (lunch, evening, weekend, holiday) — the overview cannot change until the
-        next session opens, so there is nothing new to fetch in the meantime."""
+        next session opens, so there is nothing new to fetch in the meantime.
+
+        Except: if the cached payload still lacks stock leaders (the provider's background
+        sweep hadn't finished when it was built), stay on the short TTL instead - a
+        59-hour-stale "Top Stock Trading Volume" panel for the rest of a closed weekend
+        would otherwise never self-correct, since nothing re-asks the provider for it.
+        """
         if market_session.is_trading_active():
+            return 60.0
+        settled = bool(self._cache) and (
+            self._cache.get("components", {}).get("top_stock_volume") == "AVAILABLE"
+        )
+        if not settled:
             return 60.0
         try:
             return max(60.0, float(self._seconds_to_next_session()))
