@@ -56,6 +56,18 @@ describe("market overview strip", () => {
     expect(cx[0]).toBeCloseTo(0, 1);      // 09:00 -> left edge
     expect(cx[1]).toBeCloseTo(50, 1);     // 12:00 -> half-way through the 6h session
   });
+
+  it("bridges the 11:30-13:00 lunch break instead of leaving a gap", () => {
+    const { container } = render(<Sparkline direction={1} reference={100} values={[
+      { timestamp: "2026-09-04T11:25:00+07:00", value: 101 },
+      { timestamp: "2026-09-04T11:30:00+07:00", value: 102 },
+      { timestamp: "2026-09-04T13:00:00+07:00", value: 103 },
+      { timestamp: "2026-09-04T13:05:00+07:00", value: 104 },
+    ]} />);
+    // one continuous polyline across lunch; a non-lunch 90min gap would split it in two
+    expect(container.querySelectorAll("polyline")).toHaveLength(1);
+    expect(container.querySelector("polyline")?.getAttribute("points")?.split(" ")).toHaveLength(4);
+  });
   it("shows bounded background updating state without fabricated index values", () => {
     state.empty = true;
     state.refreshing = true;
