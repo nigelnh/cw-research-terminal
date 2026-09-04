@@ -576,8 +576,13 @@ async def test_T14_repeated_close_callbacks_are_single_flighted(monkeypatch):
     for _ in range(5):
         trade.hub_connection.trigger_close()
 
-    # Wait for reconnect to complete
-    assert await _wait_until(lambda: p._stream_restart_count >= 2)
+    # The restart counter increments before the worker thread creates both streams.
+    # Observe completion, not a transient half-built ownership list.
+    assert await _wait_until(
+        lambda: p._stream_restart_count >= 2 and p._reconnect_task is None
+    )
+    assert p._stream_restart_count == 2
+    assert p._upstream_status == "CONNECTED"
     assert count_signalr_ping_threads() == len(p._owned_streams)
     # Ping thread count must be strictly <= owned streams (never multiplied)
     assert count_signalr_ping_threads() <= 2
