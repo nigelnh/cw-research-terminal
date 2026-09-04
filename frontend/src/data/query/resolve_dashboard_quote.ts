@@ -28,6 +28,18 @@ export function resolveDashboardQuote(
   const copy = (keys: readonly (keyof MarketQuote)[], from?: MarketQuote) => {
     Object.assign(quote, Object.fromEntries(keys.map(key => [key, from?.[key] ?? null])));
   };
+  // Like `copy`, but only for fields `from` actually has - never blanks a field `from`
+  // is simply silent on. Bands the live snapshot resolver derives for a CW (ceilingPrice /
+  // floorPrice from the underlying's limit, since the provider has no CW band endpoint)
+  // only ever live on `fallback`; `live` (the realtime quote) never carries them, so a
+  // blind `copy(REFERENCE, live)` would null them out the moment any live reference field
+  // (e.g. referencePrice) updates.
+  const copyDefined = (keys: readonly (keyof MarketQuote)[], from?: MarketQuote) => {
+    Object.assign(
+      quote,
+      Object.fromEntries(keys.filter(key => from?.[key] != null).map(key => [key, from![key]])),
+    );
+  };
   if (live && session && session <= today) {
     for (const [group, fields, stamp, hasObservation] of [
       ["quote", TRADE, quoteTimestamp(live), live.lastPrice !== null],
@@ -62,7 +74,7 @@ export function resolveDashboardQuote(
   if (live?.referenceSessionDate && live.referenceSessionDate <= today &&
       (!provenance.reference?.sessionDate || live.referenceSessionDate >= provenance.reference.sessionDate) &&
       (!provenance.reference?.asOf || !live.referenceTimestamp || live.referenceTimestamp >= Date.parse(provenance.reference.asOf))) {
-    copy(REFERENCE, live);
+    copyDefined(REFERENCE, live);
     provenance.reference = { state: "DERIVED", source: "SESSION_REFERENCE",
       sessionDate: live.referenceSessionDate,
       asOf: live.referenceTimestamp ? new Date(live.referenceTimestamp).toISOString() : null };
