@@ -230,6 +230,19 @@ class Settings(BaseSettings):
     HISTORY_MAX_RESULT_BARS: int = Field(
         default=6000, description="Hard cap on rows returned by a single /api/market/history request"
     )
+    HISTORY_RECENT_RETRY_DAYS: int = Field(
+        default=5,
+        description=(
+            "A missing expected trading day inside this trailing window (calendar days back "
+            "from today) is always retried on the next gap-fill, even if the ingestion "
+            "cursor already claims it was probed. FiinQuant routinely publishes a session's "
+            "final daily bar hours after close (worse for the ADJUSTED series) - a fill "
+            "attempt that races that lag advances the cursor past the day regardless "
+            "(ingestion/service.py._run_chunks' requested_ceiling), which would otherwise "
+            "permanently mark a genuinely-missing-for-now day as a confirmed non-trading "
+            "gap. Bounded to a few days so this never re-opens an old, settled gap."
+        ),
+    )
     # Historical Volatility source: when DATABASE_ENABLED, HV reads PostgreSQL via
     # PostgresHistoricalBarSource. If a symbol has fewer than this many persisted adjusted
     # daily bars, a controlled off-tick gap-fill is triggered (never inside LiveQuantEngine).
