@@ -13,16 +13,6 @@ class _Result:
         return Frame(self.rows)
 
 
-class _Breadth:
-    def get(self, tickers):
-        return _Result([{
-            "comGroupCode": symbol, "tradingDate": "2026-09-02T14:00:00+07:00",
-            "totalStockUpPrice": 10, "totalStockOverCeiling": 1,
-            "totalStockNoChangePrice": 3, "totalStockDownPrice": 8,
-            "totalStockUnderFloor": 2,
-        } for symbol in tickers])
-
-
 class _PriceStatistics:
     def get_ceilingfloor(self, tickers, from_date, to_date):
         return _Result([{"ticker": symbol, "timestamp": from_date, "ceilingValue": 110, "floorValue": 90} for symbol in tickers])
@@ -40,10 +30,13 @@ class _BasicInfor:
 class _Session:
     is_login = True
     basic_calls = 0
+    # Breadth is computed from these constituents (MarketBreadth is not licensed).
+    _GROUPS = {"VNINDEX": ["AAA", "BBB"], "VN30": ["AAA", "BBB"],
+              "VNFINLEAD": ["AAA"], "VNDIAMOND": ["BBB"]}
     def TickerList(self, ticker):
-        assert ticker == "VNINDEX"
-        return ["AAA", "BBB"]
-    def MarketBreadth(self): return _Breadth()
+        return list(self._GROUPS[ticker])
+    def MarketBreadth(self):
+        raise AssertionError("MarketBreadth is not licensed and must not be called")
     def PriceStatistics(self): return _PriceStatistics()
     def BasicInfor(self, tickers):
         self.basic_calls += 1
@@ -122,7 +115,10 @@ async def test_overview_uses_snapshot_reads_without_changing_stream_subscription
     assert [item["symbol"] for item in result["indices"]] == ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"]
     assert result["indices"][0]["value"] == 102
     assert result["indices"][0]["change_percent"] == pytest.approx(2)
-    assert result["indices"][0]["advancing"] == 10
+    # VN30 constituents AAA + BBB both closed 102 vs a 100 prior close.
+    assert result["indices"][0]["advancing"] == 2
+    assert result["indices"][0]["declining"] == 0
+    assert result["indices"][0]["provenance"]["breadth"]["source"] == "DERIVED_CONSTITUENTS"
     assert result["top_stock_volume"][0]["symbol"] == "AAA"
     assert result["top_stock_volume"][0]["market_state"] == "UP"
     assert result["top_cw_volume"][0]["symbol"] == "CAAA2601"
@@ -155,21 +151,16 @@ async def test_overview_does_not_fill_current_rankings_with_other_session_prices
     class GappedSession(_Session):
         def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
             result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
-            result.rows = [row for row in result.rows
-                           if not (row["ticker"] == "CAAA2601" and row["timestamp"] == "2026-09-02")]
+            result.rows = [
+                row for row in result.rows
+                if not (row["ticker"] == "CAAA2601" and row["timestamp"] == "2026-09-02")
+                # No prior close for the index constituents -> breadth cannot be computed.
+                and not (row["ticker"] in ("AAA", "BBB") and row["timestamp"] == "2026-09-01")
+            ]
             for row in result.rows:
                 if row["ticker"] == "AAA":
                     row["volume"] = 0  # a legitimate observed zero is retained
             return result
-
-        def MarketBreadth(self):
-            class NextSessionBreadth(_Breadth):
-                def get(self, tickers):
-                    result = super().get(tickers)
-                    for row in result.rows:
-                        row["tradingDate"] = "2026-09-03T08:00:00+07:00"
-                    return result
-            return NextSessionBreadth()
 
     provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
     provider._session = GappedSession()
@@ -281,8 +272,8 @@ async def test_overview_returns_partial_payload_when_optional_reads_fail():
                 raise RuntimeError("intraday unavailable")
             return super().Fetch_Trading_Data(by=by, **kwargs)
 
-        def MarketBreadth(self):
-            raise RuntimeError("breadth unavailable")
+        def TickerList(self, ticker):
+            raise RuntimeError("constituents unavailable")
 
     provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
     provider._session = PartialSession()

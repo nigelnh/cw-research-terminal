@@ -75,3 +75,12 @@ class MarketDataProvider(ABC):
         vendor L1 feeds omit static reference/ceiling/floor fields from incremental events.
         """
         raise NotImplementedError("session reference data is not supported by this provider")
+
+    async def get_session_trade_snapshot(
+        self, symbols: List[str], session_date: date
+    ) -> Dict[str, Dict[str, Any]]:
+        """Return today's forming 1d bar (last price + session OHLC / volume / value) per
+        symbol via the snapshot path, to seed the trade group for instruments that have
+        not yet ticked on the live stream this session.
+        """
+        raise NotImplementedError("session trade snapshot is not supported by this provider")
