@@ -182,4 +182,46 @@ describe("Live Status Semantics & Two-State Tracking", () => {
     expect(html).toContain("CLOSED");
     expect(html).toContain("RECONNECTING");
   });
+
+  it("hides the idle READY badge while retaining the closed-session label", () => {
+    const html = renderToStaticMarkup(createElement(AppHeader, {
+      activeTab: "dashboard", onTabChange: () => undefined,
+      filter: "", onFilterChange: () => undefined,
+      marketSessionActive: false, gatewayState: "CONNECTED", upstreamFeedState: "CONNECTED",
+    }));
+    expect(html).toContain("CLOSED");
+    expect(html).not.toContain("READY");
+    expect(html).not.toContain("Market feed");
+  });
+
+  it.each([
+    ["PRE_OPEN", false, "PRE-OPEN"], ["ATO", true, "ATO"],
+    ["CONTINUOUS_AM", true, "OPEN"], ["LUNCH_BREAK", false, "LUNCH BREAK"],
+    ["CONTINUOUS_PM", true, "OPEN"], ["ATC", true, "ATC"],
+    ["POST_CLOSE_NEGOTIATED", true, "NEGOTIATED"], ["CLOSED", false, "CLOSED"],
+    ["UNKNOWN", false, "SYNCING"],
+  ] as const)("renders phase %s separately from connection health", (phase, active, label) => {
+    const html = renderToStaticMarkup(createElement(AppHeader, {
+      activeTab: "dashboard", onTabChange: () => undefined,
+      filter: "", onFilterChange: () => undefined,
+      marketPhase: phase, marketSessionActive: active,
+      gatewayState: "CONNECTED", upstreamFeedState: "CONNECTED",
+    }));
+    expect(html).toContain(`Market session ${label.toLowerCase()}`);
+    expect(html).not.toContain("READY");
+  });
+
+  it.each([
+    [true, "CONNECTED", "CONNECTED", "LIVE"],
+    [false, "CONNECTED", "STALE", "STALE"],
+    [false, "DISCONNECTED", "DISCONNECTED", "OFFLINE"],
+  ] as const)("retains meaningful feed state %s / %s / %s as %s", (active, gateway, upstream, label) => {
+    const html = renderToStaticMarkup(createElement(AppHeader, {
+      activeTab: "dashboard", onTabChange: () => undefined,
+      filter: "", onFilterChange: () => undefined,
+      marketSessionActive: active, gatewayState: gateway, upstreamFeedState: upstream,
+    }));
+    expect(html).toContain(`Market feed ${label.toLowerCase()}`);
+    expect(html).toContain(label);
+  });
 });

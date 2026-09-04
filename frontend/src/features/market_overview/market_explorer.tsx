@@ -40,7 +40,9 @@ export function MarketExplorer() {
     marketSessionActive,
     dataMode,
   } = useResearchMarket();
-  const dashSymbols = useMemo(() => items.map((i) => i.symbol), [items]);
+  const dashSymbols = useMemo(() => [...new Set([
+    ...items.map((i) => i.symbol), ...(selectedSymbol ? [selectedSymbol] : []),
+  ])], [items, selectedSymbol]);
   const { getRow: getDashRow, meta: dashMeta } = useDashboardData(dashSymbols);
   const globalSearchOptions = useMemo<GlobalSearchOption[]>(() => {
     const options: GlobalSearchOption[] = [];
@@ -65,7 +67,9 @@ export function MarketExplorer() {
     return [...new Map(options.map(option => [`${option.symbol}:${option.destination}`, option])).values()];
   }, [items, activeWarrants, feedFacets]);
 
-  const selectedQuote = useQuote(selectedSymbol);
+  const rawSelectedQuote = useQuote(selectedSymbol);
+  const selectedDashRow = selectedSymbol ? getDashRow(selectedSymbol) : undefined;
+  const selectedQuote = selectedDashRow?.quote ?? rawSelectedQuote;
   const selectedCw = useCoveredWarrant(selectedSymbol);
   const watchlistItem = useMemo(
     () => items.find((i) => i.symbol.toUpperCase() === (selectedSymbol ?? "").toUpperCase()) ?? null,
@@ -83,18 +87,16 @@ export function MarketExplorer() {
     [selectedSymbol, selectedSpec, watchlistItem, selectedQuote, selectedCw],
   );
 
-  const selectedDashRow = selected?.symbol ? getDashRow(selected.symbol) : undefined;
-
   const contextEnvelope = useMemo<ResearchContextEnvelope>(() => {
     let selectedContext = null;
     if (selected) {
-      const qv = selected.quote;
+      const qv = selected.quote ?? selected.cw?.quote;
       const cw = selected.cw;
-      const lastPrice = qv?.lastPrice ?? cw?.quote?.lastPrice;
-      const bidPrice = qv?.bidPrice ?? cw?.quote?.bidPrice;
-      const askPrice = qv?.askPrice ?? cw?.quote?.askPrice;
-      const chgPct = qv?.priceChangePercent ?? cw?.quote?.priceChangePercent;
-      const volume = qv?.totalVolume ?? cw?.quote?.totalVolume;
+      const lastPrice = qv?.lastPrice;
+      const bidPrice = qv?.bidPrice;
+      const askPrice = qv?.askPrice;
+      const chgPct = qv?.priceChangePercent;
+      const volume = qv?.totalVolume;
       const underlyingPrice =
         cw?.underlyingPrice ??
         (selected.underlyingSymbol ? quotes.get(selected.underlyingSymbol)?.lastPrice ?? null : null);
@@ -201,6 +203,7 @@ export function MarketExplorer() {
       }}
     >
       <AppHeader
+        marketPhase={marketPhase}
         activeTab={activeTab}
         onTabChange={goToTab}
         filter={filter}
