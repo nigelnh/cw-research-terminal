@@ -1,10 +1,12 @@
 import logging
+import math
 from typing import Dict, List, Optional, Any, Tuple, Literal
 from datetime import datetime, timezone
 import threading
 
 from app.market_data.market_schemas import CanonicalQuote
 from app.market_data.market_session import VN_TZ, market_session
+from app.market_data.providers.fiinquant_normalization import normalize_event
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +38,47 @@ _INTRADAY_FIELDS = (
     "iv_bid",
     "iv_trade",
     "iv_ask",
+    "trade_timestamp",
+    "book_timestamp",
+    "trade_received_timestamp",
+    "book_received_timestamp",
+    "provider_market_status",
 )
+
+_INDEX_SYMBOLS = frozenset({
+    "VNINDEX", "VN30", "VN30INDEX", "VNFINLEAD", "VNDIAMOND",
+    "HNXINDEX", "HNX30", "UPCOM", "UPCOMINDEX",
+})
+
+
+def _number(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _integer(value: Any) -> Optional[int]:
+    number = _number(value)
+    return None if number is None else int(number)
+
+
+def _source_ms(*values: Any) -> Optional[int]:
+    for value in values:
+        if value is None or str(value).strip() == "":
+            continue
+        try:
+            text = str(value).strip().replace("Z", "+00:00")
+            dt = datetime.fromisoformat(text)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=VN_TZ)
+            return int(dt.timestamp() * 1000)
+        except (TypeError, ValueError, OverflowError):
+            continue
+    return None
 
 
 class MarketState:
@@ -51,7 +93,7 @@ class MarketState:
 
     def _determine_instrument_type(self, symbol: str) -> Literal["STOCK", "INDEX", "CW"]:
         sym = symbol.upper()
-        if sym in ("VNINDEX", "VN30", "HNXINDEX", "UPCOM"):
+        if sym in _INDEX_SYMBOLS:
             return "INDEX"
         elif len(sym) == 8 and sym.startswith("C"):
             return "CW"
@@ -86,11 +128,13 @@ class MarketState:
                 existing_ts = max(
                     existing.received_timestamp or 0,
                     existing.source_timestamp or 0,
+                    existing.book_timestamp or 0,
                     existing.reference_timestamp or 0,
                 )
                 incoming_ts = max(
                     quote.received_timestamp or 0,
                     quote.source_timestamp or 0,
+                    quote.book_timestamp or 0,
                     quote.reference_timestamp or 0,
                 )
                 if existing_ts >= incoming_ts:
@@ -137,6 +181,8 @@ class MarketState:
                     return candidate
         if quote.source_timestamp:
             return datetime.fromtimestamp(quote.source_timestamp / 1000.0, tz=VN_TZ).date().isoformat()
+        if quote.received_timestamp:
+            return datetime.fromtimestamp(quote.received_timestamp / 1000.0, tz=VN_TZ).date().isoformat()
         return None
 
     @classmethod
@@ -240,7 +286,9 @@ class MarketState:
             for field_name, value in values.items():
                 if value is None:
                     continue
-                normalized = float(value)
+                normalized = _number(value)
+                if normalized is None:
+                    continue
                 if getattr(q, field_name) != normalized:
                     setattr(q, field_name, normalized)
                     diff[field_name] = normalized
@@ -282,6 +330,7 @@ class MarketState:
         Merges a matching trade event from Trading_Data_Stream into canonical state.
         Returns the updated CanonicalQuote and a dictionary of updated fields for patching.
         """
+        raw_event = normalize_event(raw_event)
         sym = str(raw_event.get("Ticker", "")).upper()
         if not sym:
             raise ValueError("Missing Ticker in trade event")
@@ -296,7 +345,9 @@ class MarketState:
         if match_price is None:
             match_price = raw_event.get("Price")
 
-        ref_price = raw_event.get("ReferencePrice")
+        ref_price = raw_event.get("Reference")
+        if ref_price is None:
+            ref_price = raw_event.get("ReferencePrice")
         if ref_price is None:
             ref_price = raw_event.get("RefPrice")
 
@@ -330,7 +381,8 @@ class MarketState:
             change_pct = raw_event.get("ChangeRate")
         if change_pct is None:
             change_pct = raw_event.get("change_percent")
-        if change_pct is None and match_price is not None and ref_price is not None:
+        # Canonical percentage is a fraction, independently of vendor percent aliases.
+        if match_price is not None and ref_price is not None:
             try:
                 mp = float(match_price)
                 rp = float(ref_price)
@@ -346,8 +398,6 @@ class MarketState:
             tot_vol = raw_event.get("Total_Vol")
         if tot_vol is None:
             tot_vol = raw_event.get("total_volume")
-        if tot_vol is None:
-            tot_vol = raw_event.get("Volume")
 
         traded_qty = raw_event.get("MatchVolume")
         if traded_qty is None:
@@ -359,105 +409,120 @@ class MarketState:
 
         trading_date = raw_event.get("TradingDate")
         ts_str = raw_event.get("Timestamp")
+        provider_market_status = raw_event.get("MarketStatus")
         reference_session_date = self._event_session_date(raw_event)
         has_explicit_session = self._explicit_event_session_date(raw_event) is not None
 
         # Parse source timestamp in ms
-        source_ts = None
-        if trading_date:
-            try:
-                # e.g., 2026-08-25T09:28:23.5380000+07:00
-                dt = datetime.fromisoformat(trading_date)
-                source_ts = int(dt.timestamp() * 1000)
-            except Exception:
-                pass
-        if not source_ts and ts_str:
-            try:
-                dt = datetime.fromisoformat(ts_str)
-                source_ts = int(dt.timestamp() * 1000)
-            except Exception:
-                pass
+        source_ts = _source_ms(trading_date, ts_str)
 
         diff: Dict[str, Any] = {}
 
         with self._lock:
             if sym not in self._quotes:
-                self._quotes[sym] = CanonicalQuote(symbol=sym, instrument_type=inst_type)
+                self._quotes[sym] = CanonicalQuote(symbol=sym, instrument_type=inst_type, received_timestamp=0)
 
             q = self._quotes[sym]
+            if source_ts is not None and q.trade_timestamp is not None and source_ts < q.trade_timestamp:
+                return q.model_copy(), diff
             if not has_explicit_session:
                 reference_session_date = self._quote_market_session_date(q) or reference_session_date
             if not self._prepare_intraday_session(q, reference_session_date, diff):
                 return q.model_copy(), diff
             self._expire_reference_metadata(q, reference_session_date, diff)
 
-            if match_price is not None and q.last_price != float(match_price):
-                q.last_price = float(match_price)
+            match_price = _number(match_price)
+            ref_price = _number(ref_price)
+            ceil_price = _number(ceil_price)
+            floor_price = _number(floor_price)
+            open_price = _number(open_price)
+            high_price = _number(high_price)
+            low_price = _number(low_price)
+            avg_price = _number(avg_price)
+            change = _number(change)
+            change_pct = _number(change_pct)
+            tot_vol = _integer(tot_vol)
+            traded_qty = _integer(traded_qty)
+            tot_val = _number(tot_val)
+
+            if match_price is not None and q.last_price != match_price:
+                q.last_price = match_price
                 diff["last_price"] = q.last_price
 
-            if ref_price is not None and q.reference_price != float(ref_price):
-                q.reference_price = float(ref_price)
+            if ref_price is not None and q.reference_price != ref_price:
+                q.reference_price = ref_price
                 diff["reference_price"] = q.reference_price
 
-            if ceil_price is not None and q.ceiling_price != float(ceil_price):
-                q.ceiling_price = float(ceil_price)
+            if ceil_price is not None and q.ceiling_price != ceil_price:
+                q.ceiling_price = ceil_price
                 diff["ceiling_price"] = q.ceiling_price
 
-            if floor_price is not None and q.floor_price != float(floor_price):
-                q.floor_price = float(floor_price)
+            if floor_price is not None and q.floor_price != floor_price:
+                q.floor_price = floor_price
                 diff["floor_price"] = q.floor_price
 
             if any(value is not None for value in (ref_price, ceil_price, floor_price)):
                 if q.reference_session_date != reference_session_date:
                     q.reference_session_date = reference_session_date
                     diff["reference_session_date"] = reference_session_date
-                q.reference_timestamp = now_ms
-                diff["reference_timestamp"] = now_ms
+                q.reference_timestamp = source_ts
+                diff["reference_timestamp"] = source_ts
 
-            if open_price is not None and q.open_price != float(open_price):
-                q.open_price = float(open_price)
+            if open_price is not None and q.open_price != open_price:
+                q.open_price = open_price
                 diff["open_price"] = q.open_price
 
-            if high_price is not None and q.high_price != float(high_price):
-                q.high_price = float(high_price)
+            if high_price is not None and q.high_price != high_price:
+                q.high_price = high_price
                 diff["high_price"] = q.high_price
 
-            if low_price is not None and q.low_price != float(low_price):
-                q.low_price = float(low_price)
+            if low_price is not None and q.low_price != low_price:
+                q.low_price = low_price
                 diff["low_price"] = q.low_price
 
-            if avg_price is not None and q.average_price != float(avg_price):
-                q.average_price = float(avg_price)
+            if avg_price is not None and q.average_price != avg_price:
+                q.average_price = avg_price
                 diff["average_price"] = q.average_price
 
-            if change is not None and q.price_change != float(change):
-                q.price_change = float(change)
+            if change is not None and q.price_change != change:
+                q.price_change = change
                 diff["price_change"] = q.price_change
 
-            if change_pct is not None and q.price_change_percent != float(change_pct):
-                q.price_change_percent = float(change_pct)
+            if change_pct is not None and q.price_change_percent != change_pct:
+                q.price_change_percent = change_pct
                 diff["price_change_percent"] = q.price_change_percent
 
-            if tot_vol is not None and q.total_volume != int(tot_vol):
-                q.total_volume = int(tot_vol)
+            if tot_vol is not None and q.total_volume != tot_vol:
+                q.total_volume = tot_vol
                 diff["total_volume"] = q.total_volume
 
-            if traded_qty is not None and q.traded_quantity != int(traded_qty):
-                q.traded_quantity = int(traded_qty)
+            if traded_qty is not None and q.traded_quantity != traded_qty:
+                q.traded_quantity = traded_qty
                 diff["traded_quantity"] = q.traded_quantity
 
-            if tot_val is not None and q.trading_value != float(tot_val):
-                q.trading_value = float(tot_val)
+            if tot_val is not None and q.trading_value != tot_val:
+                q.trading_value = tot_val
                 diff["trading_value"] = q.trading_value
 
             if trading_date:
                 q.provider_trading_date = str(trading_date)
             if ts_str:
                 q.provider_timestamp = str(ts_str)
-            if source_ts:
+            if source_ts and match_price is not None:
                 q.source_timestamp = source_ts
                 diff["source_timestamp"] = source_ts
+                q.trade_timestamp = source_ts
+                diff["trade_timestamp"] = source_ts
 
+            if provider_market_status is not None:
+                status = str(provider_market_status)
+                if q.provider_market_status != status:
+                    q.provider_market_status = status
+                    diff["provider_market_status"] = status
+
+            if match_price is not None:
+                q.trade_received_timestamp = now_ms
+                diff["trade_received_timestamp"] = now_ms
             q.received_timestamp = now_ms
 
             return q.model_copy(), diff
@@ -467,6 +532,7 @@ class MarketState:
         Merges an order-book depth event from BidAsk stream into canonical state.
         Crucial: Never modifies last_price if no trade occurred.
         """
+        raw_event = normalize_event(raw_event)
         sym = str(raw_event.get("Ticker", "")).upper()
         if not sym:
             raise ValueError("Missing Ticker in BidAsk event")
@@ -478,7 +544,7 @@ class MarketState:
             for k in keys:
                 val = raw_event.get(k)
                 if val is not None:
-                    return val
+                    return _number(val)
             return None
 
         # Depth 1
@@ -502,21 +568,18 @@ class MarketState:
         ts_str = raw_event.get("Timestamp")
         reference_session_date = self._event_session_date(raw_event)
         has_explicit_session = self._explicit_event_session_date(raw_event) is not None
-        source_ts = None
-        if ts_str:
-            try:
-                dt = datetime.fromisoformat(ts_str)
-                source_ts = int(dt.timestamp() * 1000)
-            except Exception:
-                pass
+        source_ts = _source_ms(raw_event.get("TradingDate"), ts_str)
+        provider_market_status = raw_event.get("MarketStatus")
 
         diff: Dict[str, Any] = {}
 
         with self._lock:
             if sym not in self._quotes:
-                self._quotes[sym] = CanonicalQuote(symbol=sym, instrument_type=inst_type)
+                self._quotes[sym] = CanonicalQuote(symbol=sym, instrument_type=inst_type, received_timestamp=0)
 
             q = self._quotes[sym]
+            if source_ts is not None and q.book_timestamp is not None and source_ts < q.book_timestamp:
+                return q.model_copy(), diff
             if not has_explicit_session:
                 reference_session_date = self._quote_market_session_date(q) or reference_session_date
             if not self._prepare_intraday_session(q, reference_session_date, diff):
@@ -577,9 +640,17 @@ class MarketState:
             if ts_str:
                 q.provider_timestamp = str(ts_str)
             if source_ts:
-                q.source_timestamp = source_ts
-                diff["source_timestamp"] = source_ts
+                q.book_timestamp = source_ts
+                diff["book_timestamp"] = source_ts
 
+            if provider_market_status is not None:
+                status = str(provider_market_status)
+                if q.provider_market_status != status:
+                    q.provider_market_status = status
+                    diff["provider_market_status"] = status
+
+            q.book_received_timestamp = now_ms
+            diff["book_received_timestamp"] = now_ms
             q.received_timestamp = now_ms
 
             return q.model_copy(), diff

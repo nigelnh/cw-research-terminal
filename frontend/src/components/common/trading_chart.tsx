@@ -43,7 +43,6 @@ import type {
   TechnicalOverlay,
   OHLCVReadout,
 } from "@/domain/historical/types";
-import { mergeCompletedBarsWithLiveQuote } from "@/domain/historical/current_bar_builder";
 import {
   calculateEMA,
   calculateVWAP,
@@ -115,10 +114,9 @@ export function TradingChart({
   const overlayList = useMemo(() => Array.from(overlays ?? []), [overlays]);
   const overlayKey = overlayList.slice().sort().join(",");
 
-  const effectiveCwBars = useMemo(
-    () => mergeCompletedBarsWithLiveQuote(bars, liveQuote, interval),
-    [bars, liveQuote, interval],
-  );
+  // Bars are canonical backend bars. Quotes never synthesize OHLC or copy the
+  // session-total volume into an interval candle.
+  const effectiveCwBars = bars;
 
   const effectiveUndBars = useMemo(() => {
     if (!underlyingBars || underlyingBars.length === 0) return [];
@@ -126,8 +124,8 @@ export function TradingChart({
       if ("open" in b) return b as HistoricalBar;
       return { symbol: b.symbol, date: b.date, open: b.close, high: b.close, low: b.close, close: b.close, volume: 0 };
     });
-    return mergeCompletedBarsWithLiveQuote(normalizedUnd, underlyingLiveQuote, interval);
-  }, [underlyingBars, underlyingLiveQuote, interval]);
+    return normalizedUnd;
+  }, [underlyingBars]);
 
   // Fresh-every-render mirrors so the build effect (keyed on a coarse signature) can
   // read the current bars without listing the array refs as deps.
@@ -189,7 +187,8 @@ export function TradingChart({
       return Math.floor(Date.parse(`${dateStr}T00:00:00Z`) / 1000) as Time;
     }
     const isoStr = dateStr.includes("T") ? dateStr : dateStr.replace(" ", "T");
-    const parsed = Date.parse(isoStr.endsWith("Z") || isoStr.includes("+") ? isoStr : `${isoStr}Z`);
+    const hasZone = isoStr.endsWith("Z") || /[+-]\d\d:\d\d$/.test(isoStr);
+    const parsed = Date.parse(hasZone ? isoStr : `${isoStr}+07:00`);
     if (!isNaN(parsed)) return Math.floor(parsed / 1000) as Time;
     const fallback = new Date(dateStr).getTime();
     return (isNaN(fallback) ? 0 : Math.floor(fallback / 1000)) as Time;

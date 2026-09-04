@@ -7,6 +7,7 @@ for active complete warrants based on realtime market price updates.
 import asyncio
 import logging
 from datetime import date, datetime, time as dtime, timezone, timedelta
+from time import monotonic
 from typing import Callable, Dict, Optional, Set, Tuple, TYPE_CHECKING
 
 from app.core.config import settings
@@ -133,9 +134,14 @@ class LiveQuantEngine:
 
     def __init__(self):
         self._analytics_cache: Dict[str, WarrantAnalytics] = {}
-        # EOD analytics recomputed per (cw_symbol, session_date) - deterministic, so a plain
-        # cache. Cleared wholesale when it grows past a small bound.
-        self._eod_cache: Dict[Tuple[str, str], WarrantAnalytics] = {}
+        # Completed-session analytics and closes are deterministic once persisted.  Cache
+        # successful reads for hours, but negative reads only briefly so a just-finished
+        # ingestion can become visible.  The in-flight maps coalesce simultaneous browser
+        # tabs into one computation/query per key.
+        self._eod_cache: Dict[Tuple[str, str], Tuple[float, WarrantAnalytics]] = {}
+        self._eod_inflight: Dict[Tuple[str, str], asyncio.Task] = {}
+        self._eod_close_cache: Dict[Tuple[str, str, str], Tuple[float, Optional[float]]] = {}
+        self._eod_close_inflight: Dict[Tuple[str, str, str], asyncio.Task] = {}
         self._watched_cw_symbols: Set[str] = set()
         self._underlying_to_cw_map: Dict[str, Set[str]] = {}
         self._market_state_getter = None
@@ -232,6 +238,7 @@ class LiveQuantEngine:
         cw_state: Optional[CanonicalQuote] = None,
         und_state: Optional[CanonicalQuote] = None,
         as_of: Optional[datetime] = None,
+        max_hv_as_of: Optional["date"] = None,
     ) -> WarrantAnalytics:
         """Full CW analytics, then stamp the truthful contract-lifecycle state onto the
         result (even when analytics are unavailable). If the warrant is no longer tradable
@@ -243,7 +250,9 @@ class LiveQuantEngine:
         trading session: T, DTE, the lifecycle state and ``calculated_at`` are all evaluated
         at ``as_of`` instead of now. Callers must supply ``cw_state`` / ``und_state`` whose
         prices belong to that same session - see ``compute_eod_analytics``."""
-        analytics = await self._compute_warrant_analytics_inner(cw_symbol, spec, cw_state, und_state, as_of=as_of)
+        analytics = await self._compute_warrant_analytics_inner(
+            cw_symbol, spec, cw_state, und_state, as_of=as_of, max_hv_as_of=max_hv_as_of
+        )
         resolved = spec or await instrument_registry.get_instrument(cw_symbol.strip().upper())
         if resolved is not None:
             cstate, tradable = derive_contract_state(resolved.last_trading_date, resolved.maturity_date, now=as_of)
@@ -274,7 +283,57 @@ class LiveQuantEngine:
         cache_key = (cw_sym, session_date.isoformat())
         cached = self._eod_cache.get(cache_key)
         if cached is not None:
-            return cached
+            expires_at, value = cached
+            if expires_at > monotonic():
+                return value
+            self._eod_cache.pop(cache_key, None)
+
+        task = self._eod_inflight.get(cache_key)
+        if task is None:
+            task = asyncio.create_task(
+                self._compute_and_cache_eod(
+                    cache_key, cw_sym, session_date, sessionmaker=sessionmaker
+                )
+            )
+            self._eod_inflight[cache_key] = task
+            task.add_done_callback(
+                lambda done, key=cache_key: self._finish_singleflight(
+                    self._eod_inflight, key, done, label="EOD analytics"
+                )
+            )
+        try:
+            # One disconnected HTTP client must not cancel shared work needed by another tab.
+            return await asyncio.shield(task)
+        finally:
+            if task.done():
+                self._finish_singleflight(
+                    self._eod_inflight, cache_key, task, label="EOD analytics"
+                )
+
+    async def _compute_and_cache_eod(
+        self,
+        cache_key: Tuple[str, str],
+        cw_sym: str,
+        session_date: "date",
+        *,
+        sessionmaker=None,
+    ) -> WarrantAnalytics:
+        result = await self._compute_eod_analytics_uncached(
+            cw_sym, session_date, sessionmaker=sessionmaker
+        )
+        ttl = (
+            settings.QUANT_EOD_CACHE_TTL_SECONDS
+            if result.is_available
+            else settings.QUANT_EOD_UNAVAILABLE_CACHE_TTL_SECONDS
+        )
+        if len(self._eod_cache) >= 512:
+            self._eod_cache.pop(next(iter(self._eod_cache)), None)
+        self._eod_cache[cache_key] = (monotonic() + max(1, int(ttl)), result)
+        return result
+
+    async def _compute_eod_analytics_uncached(
+        self, cw_sym: str, session_date: "date", *, sessionmaker=None
+    ) -> WarrantAnalytics:
         as_of = datetime.combine(session_date, dtime(15, 0), tzinfo=VN_TZ)
         spec = await instrument_registry.get_instrument(cw_sym)
         if spec is None:
@@ -298,8 +357,10 @@ class LiveQuantEngine:
                 is_available=False, unavailable_reason="EOD_INPUT_MISSING (persistence unavailable)",
             )
 
-        cw_close = await self._eod_close(sm, cw_sym, session_date, price_basis="RAW")
-        und_close = await self._eod_close(sm, und_sym, session_date, price_basis="ADJUSTED")
+        cw_close, und_close = await asyncio.gather(
+            self._get_eod_close(sm, cw_sym, session_date, price_basis="RAW"),
+            self._get_eod_close(sm, und_sym, session_date, price_basis="ADJUSTED"),
+        )
         missing = []
         if cw_close is None:
             missing.append(f"cw@{session_date.isoformat()}")
@@ -311,15 +372,83 @@ class LiveQuantEngine:
                 is_available=False, unavailable_reason=f"EOD_INPUT_MISSING ({', '.join(missing)})",
             )
 
-        cw_state = CanonicalQuote(symbol=cw_sym, instrument_type="CW", last_price=cw_close)
-        und_state = CanonicalQuote(symbol=und_sym, instrument_type="STOCK", last_price=und_close)
-        result = await self.compute_warrant_analytics(
-            cw_sym, spec=spec, cw_state=cw_state, und_state=und_state, as_of=as_of
+        session_text = session_date.isoformat()
+        cw_state = CanonicalQuote(symbol=cw_sym, instrument_type="CW", last_price=cw_close,
+                                  market_session_date=session_text)
+        und_state = CanonicalQuote(symbol=und_sym, instrument_type="STOCK", last_price=und_close,
+                                   market_session_date=session_text)
+        return await self.compute_warrant_analytics(
+            cw_sym, spec=spec, cw_state=cw_state, und_state=und_state, as_of=as_of,
+            max_hv_as_of=session_date,
         )
-        if len(self._eod_cache) > 512:
-            self._eod_cache.clear()
-        self._eod_cache[cache_key] = result
-        return result
+
+    async def _get_eod_close(
+        self, sessionmaker, symbol: str, session_date: "date", *, price_basis: str
+    ) -> Optional[float]:
+        key = (symbol.strip().upper(), session_date.isoformat(), price_basis.strip().upper())
+        cached = self._eod_close_cache.get(key)
+        if cached is not None:
+            expires_at, value = cached
+            if expires_at > monotonic():
+                return value
+            self._eod_close_cache.pop(key, None)
+
+        task = self._eod_close_inflight.get(key)
+        if task is None:
+            task = asyncio.create_task(
+                self._load_and_cache_eod_close(
+                    key, sessionmaker, key[0], session_date, price_basis=key[2]
+                )
+            )
+            self._eod_close_inflight[key] = task
+            task.add_done_callback(
+                lambda done, close_key=key: self._finish_singleflight(
+                    self._eod_close_inflight, close_key, done, label="EOD close"
+                )
+            )
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if task.done():
+                self._finish_singleflight(
+                    self._eod_close_inflight, key, task, label="EOD close"
+                )
+
+    async def _load_and_cache_eod_close(
+        self,
+        key: Tuple[str, str, str],
+        sessionmaker,
+        symbol: str,
+        session_date: "date",
+        *,
+        price_basis: str,
+    ) -> Optional[float]:
+        value = await self._eod_close(
+            sessionmaker, symbol, session_date, price_basis=price_basis
+        )
+        ttl = (
+            settings.QUANT_EOD_CACHE_TTL_SECONDS
+            if value is not None
+            else settings.QUANT_EOD_UNAVAILABLE_CACHE_TTL_SECONDS
+        )
+        if len(self._eod_close_cache) >= 512:
+            self._eod_close_cache.pop(next(iter(self._eod_close_cache)), None)
+        self._eod_close_cache[key] = (monotonic() + max(1, int(ttl)), value)
+        return value
+
+    @staticmethod
+    def _finish_singleflight(inflight: dict, key: tuple, task: asyncio.Task, *, label: str) -> None:
+        was_owner = inflight.get(key) is task
+        if was_owner:
+            inflight.pop(key, None)
+        if task.cancelled():
+            return
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is not None and was_owner:
+            logger.warning("%s single-flight failed for %s: %s", label, key, exc)
 
     @staticmethod
     async def _eod_close(sessionmaker, symbol: str, session_date: "date", *, price_basis: str) -> Optional[float]:
@@ -350,6 +479,7 @@ class LiveQuantEngine:
         cw_state: Optional[CanonicalQuote] = None,
         und_state: Optional[CanonicalQuote] = None,
         as_of: Optional[datetime] = None,
+        max_hv_as_of: Optional["date"] = None,
     ) -> WarrantAnalytics:
         """
         Computes full quantitative analytics for a Covered Warrant.
@@ -469,6 +599,15 @@ class LiveQuantEngine:
                 unavailable_reason="UNDERLYING_SPOT_PRICE_UNAVAILABLE",
             )
 
+        expected_session = _now.date().isoformat()
+        if (cw_state and cw_state.market_session_date and cw_state.market_session_date != expected_session) or (
+            und_state and und_state.market_session_date and und_state.market_session_date != expected_session
+        ):
+            return WarrantAnalytics(
+                symbol=cw_sym, underlying_symbol=und_sym, calculated_at=now_iso,
+                is_available=False, unavailable_reason="MARKET_INPUT_SESSION_MISMATCH",
+            )
+
         K = eff_strike
         CR = eff_ratio
         r = settings.QUANT_RISK_FREE_RATE
@@ -546,7 +685,8 @@ class LiveQuantEngine:
         if self._historical_vol_getter:
             try:
                 hv_estimate = self._historical_vol_getter(und_sym)
-                if hv_estimate is not None and hv_estimate.value > 0:
+                if (hv_estimate is not None and hv_estimate.value > 0
+                        and (max_hv_as_of is None or hv_estimate.as_of <= max_hv_as_of)):
                     theo_vol = hv_estimate.value
                     theo_vol_src = hv_estimate.source_label
                     theo_price = round(bs_call_price_share(S, K, T, r, q, theo_vol) / CR, 2)
@@ -782,7 +922,11 @@ class LiveQuantEngine:
     async def shutdown(self) -> None:
         """Block new scheduling and cancel/await every engine task. Idempotent."""
         self._shutting_down = True
-        tasks = list(self._tasks)
+        tasks = list(
+            self._tasks
+            | set(self._eod_inflight.values())
+            | set(self._eod_close_inflight.values())
+        )
         for task in tasks:
             task.cancel()
         if tasks:
@@ -790,6 +934,8 @@ class LiveQuantEngine:
         self._tasks.clear()
         self._inflight.clear()
         self._pending.clear()
+        self._eod_inflight.clear()
+        self._eod_close_inflight.clear()
         logger.info("LiveQuantEngine scheduler shut down (%s).", self.stats())
 
     def stats(self) -> Dict[str, int]:
@@ -800,6 +946,9 @@ class LiveQuantEngine:
             "pending_symbols": len(self._pending),
             "tracked_tasks": len(self._tasks),
             "cached_symbols": len(self._analytics_cache),
+            "eod_cached": len(self._eod_cache),
+            "eod_inflight": len(self._eod_inflight),
+            "eod_close_cached": len(self._eod_close_cache),
             "generation": self._generation,
         }
 

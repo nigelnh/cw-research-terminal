@@ -47,7 +47,7 @@ interface StockRow {
   bid: number | null;
   ask: number | null;
   last: number | null;
-  tradingValue: number | null;
+  tradedQuantity: number | null;
   change: number | null;
   chgPct: number | null;
   vol: number | null;
@@ -64,7 +64,7 @@ interface CwRow {
   bid: number | null;
   ask: number | null;
   last: number | null;
-  tradingValue: number | null;
+  tradedQuantity: number | null;
   change: number | null;
   ref: number | null;
   ceiling: number | null;
@@ -98,7 +98,7 @@ interface UnifiedRow {
   bid: number | null;
   ask: number | null;
   last: number | null;
-  tradingValue: number | null;
+  tradedQuantity: number | null;
   change: number | null;
   chgPct: number | null;
   vol: number | null;
@@ -126,7 +126,7 @@ const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
   bid: (r) => r.bid,
   ask: (r) => r.ask,
   last: (r) => r.last,
-  tradingValue: (r) => r.tradingValue,
+  tradedQuantity: (r) => r.tradedQuantity,
   change: (r) => r.change,
   lastTradingDate: (r) => r.lastTradingDate,
   chgPct: (r) => r.chgPct,
@@ -184,7 +184,7 @@ export function PersonalDashboard({
             bid: quote?.bidPrice ?? null,
             ask: quote?.askPrice ?? null,
             last: quote?.lastPrice ?? null,
-            tradingValue: quote?.tradingValue ?? null,
+            tradedQuantity: quote?.tradedQuantity ?? null,
             change: quote?.priceChange ?? null,
             chgPct: pct,
             vol: quote?.totalVolume ?? null,
@@ -221,7 +221,7 @@ export function PersonalDashboard({
             bid: quote?.bidPrice ?? cw?.quote?.bidPrice ?? null,
             ask: quote?.askPrice ?? cw?.quote?.askPrice ?? null,
             last,
-            tradingValue: quote?.tradingValue ?? cw?.quote?.tradingValue ?? null,
+            tradedQuantity: quote?.tradedQuantity ?? cw?.quote?.tradedQuantity ?? null,
             change: quote?.priceChange ?? cw?.quote?.priceChange ?? null,
             ref: quote?.referencePrice ?? cw?.quote?.referencePrice ?? null,
             ceiling: quote?.ceilingPrice ?? cw?.quote?.ceilingPrice ?? null,
@@ -274,7 +274,7 @@ export function PersonalDashboard({
         bid: s.bid,
         ask: s.ask,
         last: s.last,
-        tradingValue: s.tradingValue,
+        tradedQuantity: s.tradedQuantity,
         change: s.change,
         chgPct: s.chgPct,
         vol: s.vol,
@@ -301,7 +301,7 @@ export function PersonalDashboard({
         bid: c.bid,
         ask: c.ask,
         last: c.last,
-        tradingValue: c.tradingValue,
+        tradedQuantity: c.tradedQuantity,
         change: c.change,
         chgPct: c.chgPct,
         vol: c.vol,

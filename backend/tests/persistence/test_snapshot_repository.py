@@ -33,6 +33,36 @@ async def test_upsert_is_idempotent(sessionmaker_):
         assert len(rows) == 1
 
 
+async def test_fiinquant_nullable_fields_round_trip_without_coercion(sessionmaker_):
+    sd = date(2026, 9, 3)
+    trade_at = datetime(2026, 9, 3, 9, 16, tzinfo=_VN)
+    book_at = datetime(2026, 9, 3, 9, 17, tzinfo=_VN)
+    reference_at = datetime(2026, 9, 3, 8, 45, tzinfo=_VN)
+    async with sessionmaker_() as s:
+        repo = SnapshotRepository(s)
+        await repo.upsert(SnapshotRow(
+            symbol="HPG", session_date=sd, captured_at=book_at,
+            source="REALTIME_CHECKPOINT", quality="INTRADAY_CHECKPOINT",
+            instrument_type="STOCK", reference_price=27_000,
+            ceiling_price=28_890, floor_price=25_110,
+            last_price=27_000, traded_quantity=0, total_volume=1_234_567,
+            trading_value=33_333_309_000,
+            trade_timestamp=trade_at, book_timestamp=book_at,
+            reference_timestamp=reference_at,
+        ))
+        await s.commit()
+        got = await repo.get_latest("HPG")
+
+        assert got is not None
+        assert float(got.ceiling_price) == 28_890
+        assert float(got.floor_price) == 25_110
+        assert got.traded_quantity == 0
+        assert float(got.trading_value) == 33_333_309_000
+        assert got.trade_timestamp == trade_at
+        assert got.book_timestamp == book_at
+        assert got.reference_timestamp == reference_at
+
+
 async def test_captured_at_only_advances(sessionmaker_):
     sd = date(2026, 8, 28)
     async with sessionmaker_() as s:

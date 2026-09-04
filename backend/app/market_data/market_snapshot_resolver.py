@@ -19,6 +19,7 @@ Prices are scaled to the gateway "thousand-VND" transport exactly like
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -43,7 +44,7 @@ _QUOTE_FIELDS = (
     "reference_price", "ceiling_price", "floor_price",
     "last_price", "price_change", "price_change_percent",
     "open_price", "high_price", "low_price", "average_price",
-    "total_volume", "trading_value", "underlying_price",
+    "total_volume", "trading_value", "traded_quantity", "underlying_price",
 )
 _BOOK_FIELDS = (
     "bid1_price", "bid1_quantity", "ask1_price", "ask1_quantity",
@@ -86,8 +87,8 @@ class ResolvedRow:
         spread = spread_pct = None
         if b is not None and a is not None and a >= b:
             spread = a - b
-            if b > 0:
-                spread_pct = round((a - b) / b * 100.0, 4)
+            if a + b > 0:
+                spread_pct = round((a - b) / ((a + b) / 2.0) * 100.0, 4)
 
         groups = [g for g in (self.quote_prov, self.book_prov, self.analytics_prov) if g is not None]
         row: dict[str, Any] = {
@@ -104,6 +105,7 @@ class ResolvedRow:
             "Low_Prc": p("low_price"),
             "Avg_Prc": p("average_price"),
             "Total_Vol": v.get("total_volume"),
+            "Traded_Qty": v.get("traded_quantity"),
             "Trading_Val": p("trading_value"),
             "Bid1_Prc": p("bid1_price"), "Bid1_Qty": v.get("bid1_quantity"),
             "Ask1_Prc": p("ask1_price"), "Ask1_Qty": v.get("ask1_quantity"),
@@ -148,15 +150,66 @@ class MarketSnapshotResolver:
 
         # Batch-load snapshots + registry underlyings once.
         snapshots = await self._load_snapshots(clean)
-        rows: list[ResolvedRow] = []
-        for sym in clean:
-            rows.append(
-                await self._resolve_one(
+        # A slow history fallback for one symbol must not hold every other ready snapshot
+        # behind it.  ``gather`` preserves input order while the DB/provider gates bound the
+        # actual I/O concurrency.
+        rows = await asyncio.gather(
+            *(
+                self._resolve_one(
                     sym, now=now, latest_session=latest_session,
                     session_active=session_active, snapshot=snapshots.get(sym), diag=diag,
                 )
+                for sym in clean
             )
+        )
         return rows
+
+    async def resolve_analytics_rows(
+        self, symbols: list[str], *, now: Optional[datetime] = None
+    ) -> list[dict[str, Any]]:
+        """Resolve CW analytics independently from price snapshots.
+
+        Dashboard quotes are the critical reload path and must never wait for EOD quant
+        database reads.  This companion read is deliberately parallel and can complete
+        later; the frontend merges rows by symbol without blanking already-rendered prices.
+        """
+        now = now or datetime.now(cal.VN_TZ)
+        clean = list(dict.fromkeys(s.strip().upper() for s in symbols if s and s.strip()))
+        latest_session = cal.latest_completed_trading_session(now)
+        session_active = cal.is_trading_active(now)
+        rows = [
+            ResolvedRow(symbol=sym, instrument_type="CW")
+            for sym in clean
+            if market_state._determine_instrument_type(sym) == "CW"
+        ]
+        await asyncio.gather(
+            *(
+                self._attach_analytics(
+                    row,
+                    row.symbol,
+                    now=now,
+                    latest_session=latest_session,
+                    session_active=session_active,
+                )
+                for row in rows
+            )
+        )
+        return [
+            {
+                "Symbol": row.symbol,
+                "analytics": row.analytics,
+                "provenance": (
+                    row.analytics_prov.to_wire()
+                    if row.analytics_prov is not None
+                    else FieldProvenance(
+                        DataTemporalState.UNAVAILABLE,
+                        DataSource.NONE,
+                        note="analytics unavailable",
+                    ).to_wire()
+                ),
+            }
+            for row in rows
+        ]
 
     # ------------------------------------------------------------------ #
     async def _load_snapshots(self, symbols: list[str]) -> dict:
@@ -179,30 +232,48 @@ class MarketSnapshotResolver:
         row = ResolvedRow(symbol=sym, instrument_type=inst_type)
         trace: list[str] = []
 
-        if inst_type == "CW":
-            await self._attach_analytics(row, sym, now=now, latest_session=latest_session,
-                                        session_active=session_active)
-
         # ---- A. LIVE ------------------------------------------------- #
         live = market_state.get_quote(sym)
-        live_ok = (
-            session_active
-            and live is not None
-            and market_session.is_display_eligible(live.received_timestamp, now)
+        live_sd = market_state._quote_market_session_date(live) if live is not None else None
+        memory_ok = (
+            live is not None and live_sd is not None
+            and live_sd <= now.date().isoformat()
+            and live_sd >= latest_session.isoformat()
+            and (snapshot is None or live_sd >= snapshot.session_date.isoformat())
+            and cal.is_trading_day(date.fromisoformat(live_sd))
+            and any(getattr(live, f, None) is not None for f in ("last_price", "bid1_price", "ask1_price"))
         )
-        if live_ok and live is not None:
+        if memory_ok and live is not None:
             row.instrument_type = live.instrument_type or inst_type
             for f in _QUOTE_FIELDS:
                 row.values[f] = getattr(live, f, None)
             for f in _BOOK_FIELDS:
                 row.values[f] = getattr(live, f, None)
             row.underlying_symbol = live.underlying_symbol
-            as_of = _iso_ms(live.received_timestamp)
-            sd = now.date().isoformat()
-            row.quote_prov = FieldProvenance(DataTemporalState.LIVE, DataSource.LIVE_FEED, as_of, sd)
-            row.book_prov = FieldProvenance(DataTemporalState.LIVE, DataSource.LIVE_FEED, as_of, sd)
-            row.is_realtime_eligible = True
-            trace.append("A:LIVE")
+            sd = live_sd
+            def group_provenance(ts, received, has_value):
+                if not has_value:
+                    return FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE,
+                                           note="no observation for this group in this session")
+                fresh = (sd == now.date().isoformat() and session_active
+                         and market_session.is_display_eligible(ts, now, max_age_seconds=180)
+                         and market_session.is_display_eligible(received, now, max_age_seconds=180))
+                state = DataTemporalState.LIVE if fresh else (
+                    DataTemporalState.SESSION_SNAPSHOT if sd > latest_session.isoformat()
+                    else DataTemporalState.LAST_SESSION)
+                return FieldProvenance(state, DataSource.LIVE_FEED, _iso_ms(ts), sd,
+                                       stale=bool(session_active and not fresh),
+                                       note=None if ts else "observation timestamp unavailable")
+            row.quote_prov = group_provenance(
+                live.trade_timestamp or live.source_timestamp or live.received_timestamp,
+                live.trade_received_timestamp or live.received_timestamp,
+                live.last_price is not None)
+            row.book_prov = group_provenance(
+                live.book_timestamp or (live.source_timestamp if live.trade_timestamp is None else None),
+                live.book_received_timestamp or (live.received_timestamp if live.book_timestamp is None else None),
+                any(getattr(live, f) is not None for f in _BOOK_FIELDS))
+            row.is_realtime_eligible = any(g.state == DataTemporalState.LIVE for g in (row.quote_prov, row.book_prov))
+            trace.append("A:MEMORY_GROUPS")
             if live.reference_session_date == sd and any(
                 row.values.get(field) is not None
                 for field in ("reference_price", "ceiling_price", "floor_price")
@@ -219,7 +290,7 @@ class MarketSnapshotResolver:
                 row.values["reference_price"] = None
                 row.values["ceiling_price"] = None
                 row.values["floor_price"] = None
-            if row.values.get("reference_price") is None:
+            if row.values.get("reference_price") is None and sd == now.date().isoformat() and sd > latest_session.isoformat():
                 await self._fill_live_reference(
                     row, sym, inst_type=inst_type, snapshot=snapshot,
                     latest_session=latest_session, now=now, trace=trace,
@@ -230,11 +301,15 @@ class MarketSnapshotResolver:
 
         # ---- B. LAST_SESSION snapshot ------------------------------- #
         snapshot_complete = False
-        if snapshot is not None:
+        if snapshot is not None and snapshot.session_date <= now.date():
             snap_session = snapshot.session_date
             snap_stale = snap_session < latest_session
-            as_of = snapshot.captured_at.isoformat() if snapshot.captured_at else None
+            trade_ts = getattr(snapshot, "trade_timestamp", None)
+            book_ts = getattr(snapshot, "book_timestamp", None)
+            as_of = trade_ts.isoformat() if trade_ts else None
             sd = snap_session.isoformat()
+            state = (DataTemporalState.SESSION_SNAPSHOT if snap_session > latest_session
+                     else DataTemporalState.HISTORICAL if snap_stale else DataTemporalState.LAST_SESSION)
             for f in _QUOTE_FIELDS:
                 row.values[f] = _num(getattr(snapshot, f, None))
             row.underlying_symbol = snapshot.underlying_symbol
@@ -244,7 +319,7 @@ class MarketSnapshotResolver:
                 else DataSource.SNAPSHOT_CHECKPOINT
             )
             row.quote_prov = FieldProvenance(
-                DataTemporalState.LAST_SESSION if not snap_stale else DataTemporalState.HISTORICAL,
+                state,
                 src, as_of, sd, stale=snap_stale,
             )
             if row.values.get("reference_price") is not None:
@@ -257,8 +332,8 @@ class MarketSnapshotResolver:
                 for f in _BOOK_FIELDS:
                     row.values[f] = _num(getattr(snapshot, f, None))
                 row.book_prov = FieldProvenance(
-                    DataTemporalState.LAST_SESSION if not snap_stale else DataTemporalState.HISTORICAL,
-                    src, as_of, sd, stale=snap_stale,
+                    state,
+                    src, book_ts.isoformat() if book_ts else None, sd, stale=snap_stale,
                 )
             else:
                 row.book_prov = FieldProvenance(
@@ -280,20 +355,27 @@ class MarketSnapshotResolver:
         # current display session. Overlay only those three fields so a closed-session
         # row can still classify its prices without exposing stale intraday data.
         self._overlay_current_reference(row, live, now=now, trace=trace)
-        if snapshot_complete:
+        if snapshot_complete or (snapshot is not None and snapshot.session_date > latest_session):
             if diag:
                 row.diag = {"chosen": "SNAPSHOT", "trace": trace}
             return row
 
         # ---- C. HISTORICAL / EOD bars ------------------------------ #
         bars = await self._recent_daily_bars(sym, inst_type, now=now)
+        bars = [b for b in bars if (_parse_date(b.date) or now.date()) <= latest_session]
         if bars:
-            last_bar = bars[-1]
-            prev_close = bars[-2].close if len(bars) >= 2 else None
+            target_session = row.quote_prov.session_date
+            eligible_bars = ([b for b in bars if _parse_date(b.date).isoformat() <= target_session]
+                             if target_session else bars)
+            if not eligible_bars:
+                eligible_bars = bars
+            last_bar = eligible_bars[-1]
+            prev_close = eligible_bars[-2].close if len(eligible_bars) >= 2 else None
             bar_session = _parse_date(last_bar.date)
             bar_stale = bar_session is not None and bar_session < latest_session
             sd = bar_session.isoformat() if bar_session else None
             as_of = f"{sd}T15:00:00+07:00" if sd else None
+
 
             # Only fill fields the snapshot didn't already provide.
             def _fill(key: str, value: Optional[float]) -> None:
@@ -304,6 +386,7 @@ class MarketSnapshotResolver:
             _fill("high_price", last_bar.high)
             _fill("low_price", last_bar.low)
             _fill("total_volume", int(last_bar.volume) if last_bar.volume is not None else None)
+            _fill("trading_value", last_bar.value)
             if row.values.get("reference_price") is None:
                 _fill("reference_price", prev_close)
                 if prev_close is not None:
@@ -321,7 +404,8 @@ class MarketSnapshotResolver:
                     )
             resolved_close = row.values.get("last_price")
             resolved_reference = row.values.get("reference_price")
-            if resolved_close is not None and resolved_reference not in (None, 0):
+            if (resolved_close is not None and resolved_reference not in (None, 0)
+                    and row.reference_prov.session_date == sd):
                 if row.values.get("price_change") is None:
                     row.values["price_change"] = round(resolved_close - resolved_reference, 4)
                 if row.values.get("price_change_percent") is None:
@@ -450,6 +534,11 @@ class MarketSnapshotResolver:
             )
         except Exception as e:  # noqa: BLE001
             logger.info("resolver: EOD analytics for %s failed: %s", sym, e)
+            row.analytics_prov = FieldProvenance(
+                DataTemporalState.UNAVAILABLE,
+                DataSource.NONE,
+                note="EOD analytics temporarily unavailable",
+            )
             return
         if eod is not None and eod.is_available:
             row.analytics = _analytics_wire(eod)
@@ -471,6 +560,7 @@ class MarketSnapshotResolver:
 
         to_d = (now or datetime.now(cal.VN_TZ)).date()
         from_d = to_d - timedelta(days=20)
+        # CW prices must remain RAW. Underlying series use ADJUSTED consistently with HV.
         adjusted = inst_type != "CW"
         try:
             if settings.DASHBOARD_FALLBACK_GAPFILL:

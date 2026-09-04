@@ -52,6 +52,10 @@ MORNING_END = time(11, 30, 0)
 AFTERNOON_START = time(13, 0, 0)
 AFTERNOON_END = time(15, 0, 0)
 
+ATO_END = time(9, 15, 0)
+ATC_START = time(14, 30, 0)
+ATC_END = time(14, 45, 0)
+
 
 class MarketSessionStatus(str, Enum):
     MORNING_SESSION = "MORNING_SESSION"        # 09:00 - 11:30
@@ -61,6 +65,19 @@ class MarketSessionStatus(str, Enum):
     CLOSED_POST_MARKET = "CLOSED_POST_MARKET"  # trading day, after 15:00
     CLOSED_WEEKEND = "CLOSED_WEEKEND"          # Saturday / Sunday
     CLOSED_HOLIDAY = "CLOSED_HOLIDAY"          # weekday exchange holiday
+
+
+class MarketPhase(str, Enum):
+    """Fine-grained HOSE phase, additive to the legacy coarse session status."""
+
+    PRE_OPEN = "PRE_OPEN"
+    ATO = "ATO"
+    CONTINUOUS_AM = "CONTINUOUS_AM"
+    LUNCH_BREAK = "LUNCH_BREAK"
+    CONTINUOUS_PM = "CONTINUOUS_PM"
+    ATC = "ATC"
+    POST_CLOSE_NEGOTIATED = "POST_CLOSE_NEGOTIATED"
+    CLOSED = "CLOSED"
 
 
 # --------------------------------------------------------------------------- #
@@ -260,6 +277,33 @@ def session_status(dt: Optional[datetime] = None) -> MarketSessionStatus:
     if AFTERNOON_START <= t < AFTERNOON_END:
         return MarketSessionStatus.AFTERNOON_SESSION
     return MarketSessionStatus.CLOSED_POST_MARKET
+
+
+def market_phase(dt: Optional[datetime] = None) -> MarketPhase:
+    """Expected HOSE phase from the exchange calendar.
+
+    Provider ``MarketStatus`` remains a separately reported observation: undocumented
+    vendor status codes are never translated into these values.
+    """
+    cur = _as_vn(dt)
+    if not is_trading_day(cur.date()):
+        return MarketPhase.CLOSED
+    t = cur.time()
+    if t < MORNING_START:
+        return MarketPhase.PRE_OPEN
+    if t < ATO_END:
+        return MarketPhase.ATO
+    if t < MORNING_END:
+        return MarketPhase.CONTINUOUS_AM
+    if t < AFTERNOON_START:
+        return MarketPhase.LUNCH_BREAK
+    if t < ATC_START:
+        return MarketPhase.CONTINUOUS_PM
+    if t < ATC_END:
+        return MarketPhase.ATC
+    if t < AFTERNOON_END:
+        return MarketPhase.POST_CLOSE_NEGOTIATED
+    return MarketPhase.CLOSED
 
 
 def is_trading_active(dt: Optional[datetime] = None) -> bool:

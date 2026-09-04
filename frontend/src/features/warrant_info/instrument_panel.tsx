@@ -177,7 +177,7 @@ export function InstrumentPanel({
     symbol: symbol ?? undefined,
     timeframe: "6M",
     interval: "1D",
-    adjusted: true,
+    adjusted: false,
     enabled: hasInstrument && !isIndex,
   });
 
@@ -259,7 +259,7 @@ export function InstrumentPanel({
   const stats: QuoteTableValues = {
     symbol: instrument?.symbol ?? "", ref, ceiling: q?.ceilingPrice ?? null, floor: q?.floorPrice ?? null,
     bid: q?.bidPrice ?? null, ask: q?.askPrice ?? null, last: q?.lastPrice ?? null,
-    tradingValue: q?.tradingValue ?? null,
+    tradedQuantity: q?.tradedQuantity ?? null,
     issuer: isCW ? instrument?.issuer ?? null : null,
     chgPct: typeof q?.priceChangePercent === "number" ? q.priceChangePercent * 100 : null,
     vol: q?.totalVolume ?? null, strike: isCW ? instrument?.strikePrice ?? null : null,

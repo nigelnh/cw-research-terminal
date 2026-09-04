@@ -44,6 +44,7 @@ def get_market_status() -> Dict[str, Any]:
     return {
         "market_session": sess_status,
         "market_session_active": sess_active,
+        "market_phase": market_session.get_market_phase().value,
         "quote_display_eligible": quote_eligible,
         "gateway_connected": True,
         "authenticated": bool(health.get("authenticated", True)),
@@ -70,7 +71,9 @@ def get_quote(symbol: str) -> Dict[str, Any]:
     sym_clean = symbol.strip().upper()
     quote = market_state.get_quote(sym_clean)
     sess_status = market_session.get_session_status().value
-    quote_eligible = market_session.is_display_eligible(quote.received_timestamp if quote else None)
+    quote_eligible = market_session.is_display_eligible(
+        (quote.trade_received_timestamp or quote.received_timestamp) if quote else None
+    )
     inst_type = quote.instrument_type if quote else None
 
     if not quote:
@@ -91,8 +94,9 @@ def get_quote(symbol: str) -> Dict[str, Any]:
         diff = quote.ask1_price - quote.bid1_price
         if diff >= 0:
             spread = diff
-            if quote.bid1_price > 0:
-                spread_pct = diff / quote.bid1_price
+            midpoint = (quote.bid1_price + quote.ask1_price) / 2.0
+            if midpoint > 0:
+                spread_pct = diff / midpoint
 
     data_source = "REDIS_WARM_CACHE" if getattr(quote, "is_restored_from_cache", False) else "FIINQUANT_REALTIME"
     cache_state = "REDIS_RESTORED" if getattr(quote, "is_restored_from_cache", False) else "LIVE"
@@ -109,6 +113,7 @@ def get_quote(symbol: str) -> Dict[str, Any]:
         "low_price": quote.low_price,
         "average_price": quote.average_price,
         "total_volume": quote.total_volume,
+        "traded_quantity": quote.traded_quantity,
         "trading_value": quote.trading_value,
         "bid1_price": quote.bid1_price,
         "bid1_quantity": quote.bid1_quantity,
@@ -117,8 +122,13 @@ def get_quote(symbol: str) -> Dict[str, Any]:
         "spread": spread,
         "spread_percent": spread_pct,
         "source_timestamp": quote.source_timestamp,
+        "trade_timestamp": quote.trade_timestamp,
+        "book_timestamp": quote.book_timestamp,
+        "reference_timestamp": quote.reference_timestamp,
+        "provider_market_status": quote.provider_market_status,
         "received_timestamp": quote.received_timestamp,
         "market_session": sess_status,
+        "market_phase": market_session.get_market_phase().value,
         "quote_display_eligible": quote_eligible,
         "data_source": data_source,
         "cache_state": cache_state,

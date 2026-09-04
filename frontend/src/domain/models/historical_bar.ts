@@ -12,6 +12,10 @@ export interface HistoricalBar {
   volume: number | null;
   referencePrice?: number | null;
   value?: number | null;
+  priceBasis?: "RAW" | "ADJUSTED" | null;
+  source?: string | null;
+  sessionDate?: string | null;
+  complete?: boolean;
 }
 
 export interface UnderlyingClosePoint {

@@ -51,7 +51,12 @@ class CanonicalQuote(BaseModel):
     # Timestamps
     provider_trading_date: Optional[str] = None
     provider_timestamp: Optional[str] = None
-    source_timestamp: Optional[int] = None  # epoch ms
+    source_timestamp: Optional[int] = None  # compatibility alias: latest trade timestamp
+    trade_timestamp: Optional[int] = None  # epoch ms, only advanced by a real trade event
+    book_timestamp: Optional[int] = None  # epoch ms, only advanced by order-book events
+    trade_received_timestamp: Optional[int] = None
+    book_received_timestamp: Optional[int] = None
+    provider_market_status: Optional[str] = None
     # Session of the most recently accepted trade/book event.  This is separate
     # from reference_session_date because bands can be refreshed before the first
     # live tick of a new day.
@@ -151,9 +156,14 @@ class CanonicalQuote(BaseModel):
             "LastTradingDate": self.last_trading_date,
             "MaturityDate": self.maturity_date,
             "_ts_source": self.source_timestamp,
+            "_ts_trade": self.trade_timestamp,
+            "_ts_book": self.book_timestamp,
+            "_received_trade": self.trade_received_timestamp,
+            "_received_book": self.book_received_timestamp,
             "_market_session_date": self.market_session_date,
             "_ts_reference": self.reference_timestamp,
             "_reference_session_date": self.reference_session_date,
+            "_provider_market_status": self.provider_market_status,
             "ExchangeTime": self.source_timestamp,
             "is_realtime_eligible": display_eligible,
         }
@@ -208,6 +218,11 @@ class CanonicalQuote(BaseModel):
             "iv_trade": ("Vol2", to_wire_iv),
             "iv_bid": ("Vol3", to_wire_iv),
             "source_timestamp": ("_ts_source", lambda v: v),
+            "trade_timestamp": ("_ts_trade", lambda v: v),
+            "book_timestamp": ("_ts_book", lambda v: v),
+            "trade_received_timestamp": ("_received_trade", lambda v: v),
+            "book_received_timestamp": ("_received_book", lambda v: v),
+            "provider_market_status": ("_provider_market_status", lambda v: v),
             "market_session_date": ("_market_session_date", lambda v: v),
             "reference_timestamp": ("_ts_reference", lambda v: v),
             "reference_session_date": ("_reference_session_date", lambda v: v),
@@ -230,6 +245,10 @@ class HistoricalBar(BaseModel):
     low: float
     close: float
     volume: float
+    value: Optional[float] = Field(default=None, description="Total traded value in VND")
+    price_basis: Optional[Literal["RAW", "ADJUSTED"]] = None
+    source: str = "FIINQUANT"
+    session_date: Optional[str] = None
     adjusted: bool = Field(default=True, description="Whether prices are adjusted for corporate actions")
 
 
@@ -327,6 +346,7 @@ class MarketHealthResponse(BaseModel):
     realtime_universe: Dict[str, Any] = Field(default_factory=dict)
     market_session: str = "UNKNOWN"
     market_session_active: bool = False
+    market_phase: str = "UNKNOWN"
     quote_display_eligible: bool = False
 
 

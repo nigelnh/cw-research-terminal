@@ -22,9 +22,9 @@ def synthetic_closes(n: int = 40, base: float = 22000.0) -> List[float]:
     ]
 
 
-def make_daily_bars(closes: List[float], start: str = "2026-01-05") -> List[HistoricalBar]:
+def make_daily_bars(closes: List[float], start: str | None = None) -> List[HistoricalBar]:
     """Build a list of daily `HistoricalBar` from a close series (adjusted)."""
-    d = date.fromisoformat(start)
+    d = date.fromisoformat(start) if start else date.today() - timedelta(days=len(closes) - 1)
     bars: List[HistoricalBar] = []
     for c in closes:
         c = float(c)
