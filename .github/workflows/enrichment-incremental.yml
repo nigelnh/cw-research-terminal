@@ -12,7 +12,7 @@ name: Research enrichment — incremental crawl
 # ACTIVATION GATE (needs the repo owner):
 #   1. Add repo secret PRODUCTION_DATABASE_URL  (the Railway Postgres URL).
 #   2. Uncomment the `schedule:` block below.
-# Until then this workflow is manual-only (workflow_dispatch) and the job is skipped
+# Until then this workflow is manual-only (workflow_dispatch) and crawl steps are skipped
 # when the secret is absent.
 
 on:
@@ -28,23 +28,34 @@ concurrency:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    if: ${{ secrets.PRODUCTION_DATABASE_URL != '' }}
+    # GitHub does not allow secrets in job/step `if` expressions. Expose only a
+    # presence flag to step guards; the actual URL stays scoped to the crawl steps.
+    env:
+      HAS_PRODUCTION_DATABASE: ${{ secrets.PRODUCTION_DATABASE_URL != '' }}
     timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
     steps:
+      - name: Skip when database secret is absent
+        if: ${{ env.HAS_PRODUCTION_DATABASE != 'true' }}
+        working-directory: .
+        run: echo 'PRODUCTION_DATABASE_URL is not configured; enrichment skipped.'
       - uses: actions/checkout@v4
+        if: ${{ env.HAS_PRODUCTION_DATABASE == 'true' }}
       - uses: actions/setup-python@v5
+        if: ${{ env.HAS_PRODUCTION_DATABASE == 'true' }}
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt
+        if: ${{ env.HAS_PRODUCTION_DATABASE == 'true' }}
       - name: Incremental crawl (rolling overlap)
+        if: ${{ env.HAS_PRODUCTION_DATABASE == 'true' }}
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
         run: python -m app.enrichment.cli enrich-incremental
       - name: Coverage report
-        if: always()
+        if: ${{ always() && env.HAS_PRODUCTION_DATABASE == 'true' }}
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
         run: python -m app.enrichment.cli coverage

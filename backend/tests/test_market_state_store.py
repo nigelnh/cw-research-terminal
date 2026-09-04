@@ -85,6 +85,28 @@ class MockRedisPipeline:
 
 
 @pytest.mark.asyncio
+async def test_overview_redis_cache_preserves_observation_time_across_restart():
+    redis = MockRedisClient()
+    first = RedisMarketStateStore(enabled=True, redis_client=redis)
+    await first.initialize()
+    saved = {"cached_at": 1234.5, "payload": {
+        "indices": [{"symbol": "VNINDEX", "value": 1200, "volume": 0,
+                     "trading_value": None, "as_of": "2026-09-03"}],
+        "top_stock_volume": [], "top_cw_volume": [],
+    }}
+    await first.save_market_overview(saved)
+    await first.close()
+    restarted = RedisMarketStateStore(enabled=True, redis_client=redis)
+    await restarted.initialize()
+    try:
+        assert await restarted.load_market_overview() == saved
+        assert redis.ttls[first.OVERVIEW_KEY] == 7 * 86400
+        assert await restarted.load("VNINDEX") is None
+    finally:
+        await restarted.close()
+
+
+@pytest.mark.asyncio
 async def test_dashboard_history_cache_preserves_basis_session_and_missing_values():
     store = RedisMarketStateStore(enabled=True, redis_client=MockRedisClient())
     await store.initialize()

@@ -21,6 +21,7 @@ from app.ai.attachment_router import attachment_router
 from app.market_data.market_router import market_router
 from app.market_data.market_websocket import ws_router
 from app.market_data.market_subscription_manager import subscription_manager
+from app.market_data.market_overview_service import market_overview_service
 from app.instruments.instrument_router import instruments_router
 from app.instruments.instrument_registry import instrument_registry
 from app.instruments.research_universe import resolve_default_research_universe
@@ -261,10 +262,15 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Dashboard warm-up incomplete (non-fatal): %s", type(exc).__name__)
 
+    market_overview_service.configure(subscription_manager.provider, subscription_manager.store)
+    overview_cws = await instrument_registry.search(active_only=True)
+    market_overview_service.start_refresh([item.symbol for item in overview_cws])
+
     yield
     # Shutdown: stop ingestion first (no new ticks), then drain the analytics scheduler,
     # then background refreshers.
     logger.info("Shutting down CW Research Terminal Backend...")
+    await market_overview_service.close()
     try:
         await subscription_manager.shutdown()
     except Exception as e:
