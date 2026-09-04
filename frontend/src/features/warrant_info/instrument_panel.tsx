@@ -259,7 +259,7 @@ export function InstrumentPanel({
   const stats: QuoteTableValues = {
     symbol: instrument?.symbol ?? "", ref, ceiling: q?.ceilingPrice ?? null, floor: q?.floorPrice ?? null,
     bid: q?.bidPrice ?? null, ask: q?.askPrice ?? null, last: q?.lastPrice ?? null,
-    tradingValue: q?.tradingValue ?? null,
+    tradedQuantity: q?.tradedQuantity ?? null,
     change: q?.priceChange ?? null,
     issuer: isCW ? instrument?.issuer ?? null : null,
     chgPct: typeof q?.priceChangePercent === "number" ? q.priceChangePercent * 100 : null,
