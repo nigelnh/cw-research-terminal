@@ -6,6 +6,7 @@ from typing import Set, List, Dict, Any, Callable, Optional, Tuple, TYPE_CHECKIN
 
 from app.core.config import settings
 from app.market_data.market_session import market_session, VN_TZ
+from app.market_data.live_bar_builder import live_bar_builder
 from app.market_data.market_state import MarketState, market_state
 from app.market_data.market_schemas import CanonicalQuote
 from app.market_data.market_state_store import MarketStateStore, NullMarketStateStore
@@ -121,6 +122,14 @@ class SubscriptionManager:
                         listener(wire_msg)
                     except Exception as err:
                         logger.warning(f"Error broadcasting patch to listener: {err}")
+
+            if event_type == "trade" and self._patch_listeners:
+                for bar_msg in live_bar_builder.on_trade(quote.symbol, raw_data):
+                    for listener in self._patch_listeners:
+                        try:
+                            listener(bar_msg)
+                        except Exception as err:
+                            logger.warning("Error broadcasting bar patch: %s", err)
 
             # Non-blocking async warm cache persistence
             try:

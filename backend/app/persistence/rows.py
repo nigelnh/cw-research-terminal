@@ -41,6 +41,7 @@ class BarRow:
     volume: int
     source: str
     updated_at: datetime
+    trading_value: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,7 @@ class BarUpsert:
     price_basis: str
     source: str
     session_date: date | None = None
+    trading_value: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

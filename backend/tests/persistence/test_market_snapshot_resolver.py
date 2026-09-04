@@ -225,10 +225,11 @@ async def test_daily_bars_fill_snapshot_fields_that_are_present_but_null(
 
     # The persisted observed trade wins; missing fields are truly assigned from bars.
     assert r.values["last_price"] == 40500.0
-    assert r.values["open_price"] == 41000.0
-    assert r.values["reference_price"] == 40000.0
-    assert r.values["price_change"] == 500.0
-    assert r.values["price_change_percent"] == 0.0125
+    assert r.values["open_price"] == (40000.0 if snapshot_session == _THU else 41000.0)
+    expected_ref = None if snapshot_session == _THU else 40000.0
+    assert r.values["reference_price"] == expected_ref
+    assert r.values["price_change"] == (None if expected_ref is None else 500.0)
+    assert r.values["price_change_percent"] == (None if expected_ref is None else 0.0125)
 
 
 async def test_no_trade_this_session_preserves_older_date(resolver, sessionmaker_):

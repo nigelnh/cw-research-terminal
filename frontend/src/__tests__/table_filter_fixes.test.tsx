@@ -27,7 +27,8 @@ const fixture = vi.hoisted(() => {
     bidPrice: 25,
     askPrice: 35,
     priceChangePercent: -0.25,
-    tradingValue: 1234567 as number | null,
+    tradedQuantity: 1234567 as number | null,
+    tradingValue: 987654321 as number | null,
   };
   const specs = new Map([
     [
@@ -139,19 +140,19 @@ describe("Targeted watchlist columns", () => {
     expect(page.queryByRole("listbox")).toBeNull();
   });
 
-  it("inserts the amount beside trade price in an older saved layout, preserving later custom placement", () => {
+  it("migrates the old amount column to last-match quantity", () => {
     const oldOrder = ["symbol", "ref", "last", "bid", "ivBid", "ask"];
     expect(columnOrder(oldOrder).slice(0, 7)).toEqual([
-      "symbol", "ref", "last", "tradingValue", "bid", "ivBid", "ask",
+      "symbol", "ref", "last", "tradedQuantity", "bid", "ivBid", "ask",
     ]);
     expect(columnOrder(["tradingValue", ...oldOrder]).slice(0, 7)).toEqual([
-      "tradingValue", ...oldOrder,
+      "tradedQuantity", ...oldOrder,
     ]);
   });
 
-  it.each([1234567, 0, null])("uses the provider's traded value in both the table and STATS: %s", (amount) => {
-    const original = fixture.quote.tradingValue;
-    fixture.quote.tradingValue = amount;
+  it.each([1234567, 0, null])("uses provider MatchVolume in both table and STATS: %s", (amount) => {
+    const original = fixture.quote.tradedQuantity;
+    fixture.quote.tradedQuantity = amount;
     try {
       const page = render(<><PersonalDashboard /><InstrumentPanel instrument={{ symbol: "CHPG2602", instrumentType: "CW", quote: fixture.quote as any }} marketSessionActive={false} onClose={() => {}} /></>);
       const expected = amount === null ? "—" : amount.toLocaleString("en-US");
@@ -162,9 +163,9 @@ describe("Targeted watchlist columns", () => {
       const stats = page.getByText("STATS").parentElement!;
       expect(within(stats).getByText("TRD_AMT").nextElementSibling?.textContent).toBe(expected);
       expect(within(stats).queryByText("ISSUER")).toBeNull();
-      expect(header.title).toContain("VND");
+      expect(header.title).toContain("most recent match");
     } finally {
-      fixture.quote.tradingValue = original;
+      fixture.quote.tradedQuantity = original;
     }
   });
 

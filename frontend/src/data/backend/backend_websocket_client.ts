@@ -12,6 +12,7 @@ import {
   applyRawPatchToQuote,
 } from "./mappers";
 import { mergeRealtimePulses } from "./mappers/realtime_pulse";
+import { acceptLiveBarMessage } from "./live_bar_store";
 
 type GatewayStateHandler = (state: GatewayConnectionState) => void;
 type UpstreamFeedStateHandler = (state: UpstreamFeedState) => void;
@@ -69,6 +70,7 @@ export class BackendWebSocketClient {
 
   private marketSession: string = "UNKNOWN";
   private marketSessionActive: boolean = false;
+  private marketPhase: string = "UNKNOWN";
 
   constructor(wsUrl?: string) {
     this.wsUrl = normalizeWsUrl(
@@ -94,6 +96,10 @@ export class BackendWebSocketClient {
 
   public isMarketSessionActive(): boolean {
     return this.marketSessionActive;
+  }
+
+  public getMarketPhase(): string {
+    return this.marketPhase;
   }
 
   public onMarketSessionChange(
@@ -412,9 +418,12 @@ export class BackendWebSocketClient {
     existingQuote: MarketQuote | undefined,
     incomingSourceTs?: number | null,
     incomingServerTs?: number | null,
+    group: "trade" | "book" | "reference" = "trade",
   ): boolean {
     if (!existingQuote) return false;
-    const currentSourceTs = existingQuote.sourceTimestamp;
+    const currentSourceTs = group === "book" ? existingQuote.bookTimestamp
+      : group === "reference" ? existingQuote.referenceTimestamp
+      : existingQuote.tradeTimestamp ?? existingQuote.sourceTimestamp;
 
     // 1. Compare source timestamps if present
     if (incomingSourceTs && currentSourceTs) {
@@ -474,6 +483,7 @@ export class BackendWebSocketClient {
 
         if (msg.market_session) {
           this.marketSession = String(msg.market_session);
+          this.marketPhase = String(msg.market_phase ?? "UNKNOWN");
           this.marketSessionActive = Boolean(msg.market_session_active);
           this.sessionListeners.forEach((fn) =>
             fn({
@@ -559,7 +569,12 @@ export class BackendWebSocketClient {
         if (patchSessionKey) this.sessionBaselineKey = patchSessionKey;
 
         // Stale tick rejection check
-        if (this.isEventStale(existingQuote, incomingSourceTs, msg.ts)) {
+        const group = msg.patch._ts_book !== undefined ? "book"
+          : msg.patch._ts_reference !== undefined && msg.patch._ts_trade === undefined ? "reference"
+          : "trade";
+        const groupTs = group === "book" ? msg.patch._ts_book
+          : group === "reference" ? msg.patch._ts_reference : incomingSourceTs;
+        if (this.isEventStale(existingQuote, groupTs, msg.ts, group)) {
           return;
         }
 
@@ -604,6 +619,11 @@ export class BackendWebSocketClient {
           this.cwListeners.forEach((fn) => fn(updatedCw));
         }
         this.pulseReadySymbols.add(sym);
+        break;
+      }
+
+      case "bar_patch": {
+        acceptLiveBarMessage(msg);
         break;
       }
 

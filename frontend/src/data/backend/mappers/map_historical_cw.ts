@@ -14,6 +14,9 @@ export function mapRawCWDataToHistoricalBar(item: any): HistoricalBar {
     volume: typeof item.volume === "number" ? item.volume : (typeof item.Volume === "number" ? item.Volume : null),
     referencePrice: typeof item.ref_price === "number" ? item.ref_price : (typeof item.referencePrice === "number" ? item.referencePrice : null),
     value: typeof item.total_match_val === "number" ? item.total_match_val : (typeof item.value === "number" ? item.value : null),
+    priceBasis: item.price_basis ?? (item.adjusted === true ? "ADJUSTED" : item.adjusted === false ? "RAW" : null),
+    source: item.source ?? null,
+    sessionDate: item.session_date ?? null,
   };
 }
 

@@ -10,6 +10,7 @@ export interface ResearchMarketState {
   gatewayState: GatewayConnectionState;
   upstreamFeedState: UpstreamFeedState;
   marketSession: string;
+  marketPhase: string;
   marketSessionActive: boolean;
   dataMode: "live" | "hybrid";
   isDemo: boolean;
@@ -40,6 +41,7 @@ export function useResearchMarket() {
     gatewayState: ws.getGatewayState(),
     upstreamFeedState: ws.getUpstreamFeedState(),
     marketSession: ws.getMarketSession(),
+    marketPhase: ws.getMarketPhase(),
     marketSessionActive: ws.isMarketSessionActive(),
     dataMode: config.dataMode,
     isDemo: false,

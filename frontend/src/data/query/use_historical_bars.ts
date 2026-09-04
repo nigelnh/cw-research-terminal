@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { useSyncExternalStore } from "react";
 import type { HistoricalBar } from "@/domain/models";
 import type { ChartInterval } from "@/domain/historical/types";
 import { queryKeys } from "./query_keys";
 import { fetchHistoricalBars } from "./historical_bars";
+import { liveBarStore } from "@/data/backend/live_bar_store";
 
 export interface UseHistoricalBarsArgs {
   symbol: string | null | undefined;
@@ -46,7 +48,14 @@ export function useHistoricalBars({
     enabled: active,
   });
 
-  const bars = query.data ?? [];
+  useSyncExternalStore(liveBarStore.subscribe, liveBarStore.getRevision, liveBarStore.getRevision);
+
+  const completed = query.data ?? [];
+  const live = !adjusted && ["1m", "5m", "15m", "30m", "1h"].includes(String(interval))
+    ? liveBarStore.get(sym, String(interval)) : [];
+  const byTime = new Map(completed.map((bar) => [bar.date, bar]));
+  live.forEach((bar) => byTime.set(bar.date, bar));
+  const bars = [...byTime.values()].sort((a, b) => a.date.localeCompare(b.date));
   return {
     bars,
     isLoading: active && query.isLoading,

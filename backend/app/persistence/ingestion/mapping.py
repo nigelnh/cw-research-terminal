@@ -82,6 +82,7 @@ def map_history(
                 price_basis=price_basis,
                 source=source,
                 session_date=session_date,
+                trading_value=float(b.value) if b.value is not None else None,
             )
         )
         max_ts = ts_utc if max_ts is None or ts_utc > max_ts else max_ts

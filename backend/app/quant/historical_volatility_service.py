@@ -115,6 +115,7 @@ class HistoricalVolatilityService:
         )
 
         self._cache: Dict[str, VolEstimate] = {}
+        self._last_refresh_day: Dict[str, date] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
         self._sem = asyncio.Semaphore(self._max_concurrent)
         self._pending: Set[str] = set()          # underlyings with an in-flight ensure() task
@@ -147,7 +148,7 @@ class HistoricalVolatilityService:
         est = self._cache.get(symbol.strip().upper())
         if est is None:
             return None
-        if (_vn_today() - est.as_of).days > self._max_stale_days:
+        if est.as_of > _vn_today() or (_vn_today() - est.as_of).days > self._max_stale_days:
             return None
         return est
 
@@ -191,7 +192,7 @@ class HistoricalVolatilityService:
         async with self._lock_for(sym):
             # Another caller may have just refreshed it this VN day - reuse, no upstream call.
             existing = self._cache.get(sym)
-            if not force and existing is not None and existing.as_of == _vn_today():
+            if not force and existing is not None and self._last_refresh_day.get(sym) == _vn_today():
                 return existing
 
             try:
@@ -224,7 +225,7 @@ class HistoricalVolatilityService:
                 )
                 return self._cache.get(sym)
 
-            closes: List[float] = []
+            observations: Dict[date, float] = {}
             for bar in bars or []:
                 close = getattr(bar, "close", None)
                 if close is None:
@@ -234,7 +235,16 @@ class HistoricalVolatilityService:
                 except (TypeError, ValueError):
                     continue
                 if c > 0:
-                    closes.append(c)
+                    raw_date = getattr(bar, "session_date", None) or getattr(bar, "date", None)
+                    try:
+                        bar_date = raw_date if isinstance(raw_date, date) else date.fromisoformat(str(raw_date)[:10])
+                    except (TypeError, ValueError):
+                        continue
+                    if bar_date <= _vn_today():
+                        observations[bar_date] = c
+
+            ordered = sorted(observations.items())
+            closes = [close for _, close in ordered]
 
             hv = calculate_historical_volatility(
                 closes, window=self._window, min_periods=self._min_sessions
@@ -247,8 +257,10 @@ class HistoricalVolatilityService:
                 )
                 return self._cache.get(sym)
 
-            est = VolEstimate(value=hv, window=self._window, as_of=_vn_today())
+            # Provenance is the final included bar, never the wall-clock refresh date.
+            est = VolEstimate(value=hv, window=self._window, as_of=ordered[-1][0])
             self._cache[sym] = est
+            self._last_refresh_day[sym] = _vn_today()
             logger.info("HV[%s] %s = %.4f (as_of %s)", est.source_label, sym, hv, est.as_of)
             return est
 

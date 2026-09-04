@@ -386,6 +386,9 @@ def _to_wire(rows, price_basis: str) -> list[HistoricalBar]:
             date=r.session_date.isoformat(),
             open=r.open, high=r.high, low=r.low, close=r.close,
             volume=float(r.volume), adjusted=is_adj,
+            value=r.trading_value,
+            price_basis=price_basis,
+            session_date=r.session_date.isoformat(),
         )
         for r in rows
     ]

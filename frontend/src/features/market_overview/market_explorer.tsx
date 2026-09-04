@@ -36,6 +36,7 @@ export function MarketExplorer() {
     connectionState,
     upstreamFeedState,
     marketSession,
+    marketPhase,
     marketSessionActive,
     dataMode,
   } = useResearchMarket();
@@ -133,6 +134,12 @@ export function MarketExplorer() {
         ? "Reconnecting feed"
         : upstreamFeedState === "STALE"
         ? "Stale feed"
+        : marketPhase === "ATO"
+        ? "ATO auction"
+        : marketPhase === "ATC"
+        ? "ATC auction"
+        : marketPhase === "POST_CLOSE_NEGOTIATED"
+        ? "Post-close negotiated"
         : marketSession === "LUNCH_BREAK"
         ? "Lunch break"
         : marketSession === "CLOSED_PRE_OPEN" ||
@@ -152,6 +159,7 @@ export function MarketExplorer() {
       realtimeStatus: realtimeStatusLabel,
       dataMode,
       marketSession,
+      marketPhase,
       marketSessionActive,
       quoteDisplayEligible: marketSessionActive,
       dataState: selectedDashRow?.displayState ?? (marketSessionActive ? "LIVE" : "LAST_SESSION"),
@@ -172,6 +180,7 @@ export function MarketExplorer() {
     connectionState,
     upstreamFeedState,
     marketSession,
+    marketPhase,
     marketSessionActive,
     dashMeta,
   ]);

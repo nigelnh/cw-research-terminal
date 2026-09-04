@@ -92,7 +92,7 @@ describe("Current Bar Builder & Realtime Merge", () => {
     { symbol: "HPG", date: "2026-08-25", open: 21500, high: 21800, low: 21400, close: 21700, volume: 5000000 },
   ];
 
-  it("1. Merges live quote into active candle when matching trade exists", () => {
+  it("1. Never builds a candle from a session quote", () => {
     const liveQuote = {
       symbol: "HPG",
       lastPrice: 22050,
@@ -108,15 +108,7 @@ describe("Current Bar Builder & Realtime Merge", () => {
     } as unknown as MarketQuote;
 
     const merged = mergeCompletedBarsWithLiveQuote(completedBars, liveQuote, "1D", new Date("2026-08-26T14:30:00Z").getTime());
-    expect(merged.length).toBe(2);
-
-    const liveBar = merged[1];
-    expect(liveBar.symbol).toBe("HPG");
-    expect(liveBar.open).toBe(21800);
-    expect(liveBar.high).toBe(22100);
-    expect(liveBar.low).toBe(21750);
-    expect(liveBar.close).toBe(22050);
-    expect(liveBar.volume).toBe(11200000);
+    expect(merged).toBe(completedBars);
   });
 
   it("1b. Returns completed bars UNCHANGED when there is no live quote (market closed)", () => {

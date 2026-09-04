@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.core.config import settings
 from app.market_data.market_session import market_session
+from app.market_data.providers.fiinquant_normalization import normalize_event, number, first, timestamp
 from app.market_data.market_schemas import (
     CIRCUIT_REASON_AUTH,
     CIRCUIT_REASON_RATE_LIMIT,
@@ -305,6 +306,7 @@ class FiinQuantProvider(MarketDataProvider):
             return
         try:
             d = data.to_dict() if hasattr(data, "to_dict") else (data if isinstance(data, dict) else vars(data))
+            d = normalize_event(d)
             sym = str(d.get("Ticker", "")).upper()
             if not sym:
                 return
@@ -331,6 +333,7 @@ class FiinQuantProvider(MarketDataProvider):
             return
         try:
             d = data.to_dict() if hasattr(data, "to_dict") else (data if isinstance(data, dict) else vars(data))
+            d = normalize_event(d)
             sym = str(d.get("Ticker", "")).upper()
             if not sym:
                 return
@@ -1278,7 +1281,7 @@ class FiinQuantProvider(MarketDataProvider):
                     res = self._session.Fetch_Trading_Data(
                         realtime=False,
                         tickers=[sym],
-                        fields=["open", "high", "low", "close", "volume"],
+                        fields=["open", "high", "low", "close", "volume", "value"],
                         by=by_param,
                         from_date=f_date,
                         to_date=t_date,
@@ -1304,18 +1307,18 @@ class FiinQuantProvider(MarketDataProvider):
                 if df is not None and hasattr(df, "to_dict"):
                     records = df.to_dict(orient="records")
                     for r in records:
-                        d_str = str(r.get("timestamp") or r.get("TradingDate") or r.get("date") or "")
-                        c_val = r.get("close") or r.get("Close")
-                        if d_str and c_val is not None:
+                        d_str = timestamp(first(r, "timestamp", "TradingDate", "date"))
+                        values = {key: number(r, key, key.title()) for key in ("open", "high", "low", "close", "volume")}
+                        # Incomplete bars are gaps, not fabricated OHLC or zero volume.
+                        if d_str and all(v is not None for v in values.values()):
                             bars.append(
                                 HistoricalBar(
                                     date=d_str,
-                                    open=float(r.get("open") or r.get("Open") or c_val),
-                                    high=float(r.get("high") or r.get("High") or c_val),
-                                    low=float(r.get("low") or r.get("Low") or c_val),
-                                    close=float(c_val),
-                                    volume=float(r.get("volume") or r.get("Volume") or 0.0),
+                                    **values,
+                                    value=number(r, "value", "Value", "TotalMatchValue"),
                                     adjusted=adjusted,
+                                    price_basis="ADJUSTED" if adjusted else "RAW",
+                                    session_date=d_str[:10],
                                 )
                             )
                 self._historical_last_status = "HEALTHY"
@@ -1527,7 +1530,11 @@ class FiinQuantProvider(MarketDataProvider):
                     history = sorted(history_by.get(symbol, []), key=stamp)
                     previous = history[-1] if history else {}
                     band = bands_by.get(symbol, {})
-                    reference = number(previous, "close", "Close", "closePrice", "ClosePrice")
+                    reference = number(
+                        band, "referenceValue", "referencePrice", "Reference", "ReferencePrice"
+                    )
+                    if reference is None:
+                        reference = number(previous, "close", "Close", "closePrice", "ClosePrice")
                     ceiling = number(band, "ceilingValue", "ceilingPrice", "CeilingPrice")
                     floor = number(band, "floorValue", "floorPrice", "FloorPrice")
                     if reference is None and ceiling is None and floor is None:
@@ -1717,12 +1724,16 @@ class FiinQuantProvider(MarketDataProvider):
                 indices = []
                 for symbol in index_symbols:
                     bars = sorted(daily_by.get(symbol, []), key=stamp)
-                    latest = bars[-1] if bars else {}
-                    previous = bars[-2] if len(bars) > 1 else {}
                     intraday_bars = sorted(intra_by.get(symbol, []), key=stamp)
                     if intraday_bars:
                         latest_day = stamp(intraday_bars[-1])[:10]
                         intraday_bars = [x for x in intraday_bars if stamp(x)[:10] == latest_day]
+                    else:
+                        latest_day = stamp(bars[-1])[:10] if bars else ""
+                    session_bars = [row for row in bars if stamp(row)[:10] == latest_day]
+                    prior_bars = [row for row in bars if stamp(row)[:10] < latest_day]
+                    latest = session_bars[-1] if session_bars else {}
+                    previous = prior_bars[-1] if prior_bars else {}
                     current = intraday_bars[-1] if intraday_bars else latest
                     close, reference = num(current, "close", "Close"), num(previous, "close", "Close")
                     change = close - reference if close is not None and reference is not None else None
@@ -1736,10 +1747,24 @@ class FiinQuantProvider(MarketDataProvider):
                     indices.append({
                         "symbol": symbol, "value": close, "change": change, "change_percent": pct,
                         "volume": num(latest, "volume", "Volume"), "trading_value": num(latest, "value", "Value"),
+                        "reference": reference,
                         "advancing": num(b, "totalStockUpPrice"), "ceiling": num(b, "totalStockOverCeiling"),
                         "unchanged": num(b, "totalStockNoChangePrice"), "declining": num(b, "totalStockDownPrice"),
                         "floor": num(b, "totalStockUnderFloor"), "as_of": stamp(current) or stamp(b),
-                        "sparkline": [num(x, "close", "Close") for x in intraday_bars if num(x, "close", "Close") is not None],
+                        "session_date": latest_day or None,
+                        "sparkline": [{"timestamp": stamp(x), "value": num(x, "close", "Close"),
+                                       "reference": reference} for x in intraday_bars
+                                      if num(x, "close", "Close") is not None],
+                        "provenance": {
+                            "price": {"source": "FIINQUANT", "as_of": stamp(current) or None,
+                                      "session_date": latest_day or None},
+                            "totals": {"source": "FIINQUANT", "as_of": stamp(latest) or None,
+                                       "session_date": latest_day or None,
+                                       "availability": "AVAILABLE" if latest else "UNAVAILABLE"},
+                            "breadth": {"source": "FIINQUANT", "as_of": stamp(b) or None,
+                                        "session_date": stamp(b)[:10] or latest_day or None,
+                                        "availability": "AVAILABLE" if b else "UNAVAILABLE"},
+                        },
                         "availability": card_state,
                     })
 
@@ -1789,6 +1814,7 @@ class FiinQuantProvider(MarketDataProvider):
                     "top_cw_volume": cw_leaders,
                     "as_of": as_of,
                     "market_session_active": self._market_is_active(),
+                    "market_phase": market_session.get_market_phase().value,
                     "stock_scope": "HOSE (VNINDEX constituents)",
                     "cw_scope": "active CW registry",
                     "source": "FIINQUANT",

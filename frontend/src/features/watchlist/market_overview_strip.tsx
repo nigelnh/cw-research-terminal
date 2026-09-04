@@ -27,12 +27,20 @@ function DirectionTriangle({ down = false, color }: { down?: boolean; color: str
   </svg>;
 }
 
-function Sparkline({ values, direction }: { values: number[]; direction: number | null }) {
-  if (values.length < 2) return <div className="overview-spark-empty">NO INTRADAY SERIES</div>;
-  const min = Math.min(...values), max = Math.max(...values), span = max - min || 1;
-  const points = values.map((v, i) => `${i / (values.length - 1) * 100},${30 - (v - min) / span * 25}`).join(" ");
+function Sparkline({ values, direction, reference }: { values: IndexOverview["sparkline"]; direction: number | null; reference?: number | null }) {
+  const pointsWithTime = values.map((item, index) => typeof item === "number"
+    ? { value: item, time: index, reference }
+    : { value: item.value, time: new Date(item.timestamp).getTime(), reference: item.reference ?? reference });
+  if (pointsWithTime.length < 2) return <div className="overview-spark-empty">NO INTRADAY SERIES</div>;
+  const seriesValues = pointsWithTime.map(p => p.value);
+  const ref = pointsWithTime.find(p => p.reference != null)?.reference ?? reference ?? null;
+  const domain = ref == null ? seriesValues : [...seriesValues, ref];
+  const min = Math.min(...domain), max = Math.max(...domain), span = max - min || 1;
+  const start = pointsWithTime[0].time, timeSpan = pointsWithTime[pointsWithTime.length - 1].time - start || 1;
+  const points = pointsWithTime.map((p) => `${(p.time - start) / timeSpan * 100},${30 - (p.value - min) / span * 25}`).join(" ");
+  const referenceY = ref == null ? null : 30 - (ref - min) / span * 25;
   return <svg className="overview-spark" role="img" aria-label="Intraday index path" viewBox="0 0 100 32" preserveAspectRatio="none">
-    <line x1="0" y1="16" x2="100" y2="16" stroke="var(--border-32)" strokeDasharray="2 2" />
+    {referenceY != null && <line x1="0" y1={referenceY} x2="100" y2={referenceY} stroke="var(--border-32)" strokeDasharray="2 2" />}
     <polyline points={points} fill="none" stroke={tone(direction)} strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
   </svg>;
 }
@@ -41,7 +49,7 @@ function IndexCard({ item }: { item: IndexOverview }) {
   const prefix = item.change != null && item.change > 0 ? "+" : "";
   const sessionKey = item.as_of?.slice(0, 10) ?? null;
   return <article className="index-card mono" aria-label={`${item.symbol} index overview`}>
-    <Sparkline values={item.sparkline || []} direction={item.change} />
+    <Sparkline values={item.sparkline || []} direction={item.change} reference={item.reference} />
     <div className="index-card-main">
       <strong className="heading">{item.symbol}</strong>
       <span style={{ color: tone(item.change) }}>
@@ -52,6 +60,7 @@ function IndexCard({ item }: { item: IndexOverview }) {
         </small>
       </span>
     </div>
+    <div className="index-card-line"><span>{item.stale ? "STALE" : item.availability ?? "PARTIAL"}</span><span>{item.as_of ? new Date(item.as_of).toLocaleTimeString("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" }) : "AS OF —"} ICT</span></div>
     <div className="index-card-line"><span>VOL <PolledRealtimeValue value={item.volume} resetKey={sessionKey}>{compact(item.volume)}</PolledRealtimeValue></span><span>VAL <PolledRealtimeValue value={item.trading_value} resetKey={sessionKey}>{compact(item.trading_value)}</PolledRealtimeValue></span></div>
     <div className="index-card-breadth">
       <span style={{ color: "var(--up)" }}><DirectionTriangle color="var(--up)" /> <PolledRealtimeValue value={item.advancing} resetKey={sessionKey}>{number(item.advancing)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.ceiling} resetKey={sessionKey} style={{ color: "var(--price-ceiling)" }}>({number(item.ceiling)})</PolledRealtimeValue></span>
