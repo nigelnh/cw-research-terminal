@@ -69,6 +69,8 @@ class SubscriptionManager:
         self._server_owned = False
         self._debounce_task: Optional[asyncio.Task] = None
         self._reference_refresh_task: Optional[asyncio.Task] = None
+        self._session_clock_task: Optional[asyncio.Task] = None
+        self._last_clock_phase: Optional[tuple[str, str]] = None
         self._reference_refresh_session: Optional[str] = None
         self._reference_attempt_session: Optional[str] = None
         self._reference_retry_at = 0.0
@@ -104,6 +106,9 @@ class SubscriptionManager:
         Updates in-memory MarketState and broadcasts incremental patch.
         """
         try:
+            if self._server_owned and self._event_session_date(raw_data) > reference_session_date().isoformat():
+                # Do not let an early next-session reset erase the overnight close.
+                return
             if event_type == "trade":
                 quote, diff = self.state.apply_trade_event(raw_data)
             else:
@@ -219,13 +224,40 @@ class SubscriptionManager:
             return
         try:
             target = date.fromisoformat(session_date)
-            if target < reference_session_date():
+            if target != reference_session_date():
                 return
             loop = asyncio.get_running_loop()
         except (RuntimeError, ValueError):
             return
 
         self._reference_refresh_task = loop.create_task(self._attempt_reference_refresh(target))
+
+    def _session_clock_tick(self) -> None:
+        """Own 08:00 rollover and phase notifications even with no clients/provider ticks."""
+        now = market_session.get_vn_now()
+        target = reference_session_date(now).isoformat()
+        for quote, diff in self.state.advance_display_session(target):
+            self.store.enqueue_save(quote.symbol, quote)
+            message = {"type": "patch", "symbol": quote.symbol,
+                       "patch": quote.to_wire_patch(diff), "ts": int(now.timestamp() * 1000)}
+            for listener in self._patch_listeners:
+                try:
+                    listener(message)
+                except Exception:
+                    logger.exception("Session rollover patch listener failed")
+        self._schedule_reference_refresh(target)
+        phase = (target, market_session.get_market_phase(now).value)
+        if phase != self._last_clock_phase:
+            self._last_clock_phase = phase
+            self._notify_status_change()
+
+    async def _run_session_clock(self) -> None:
+        while True:
+            try:
+                self._session_clock_tick()
+            except Exception:
+                logger.exception("Market session clock failed; retrying")
+            await asyncio.sleep(1)
 
     def get_desired_symbols(self) -> List[str]:
         return sorted(list(self._desired_symbols))
@@ -376,13 +408,14 @@ class SubscriptionManager:
             if not loaded:
                 return []
 
-            today_vn = market_session.get_vn_now().date()
+            now_vn = market_session.get_vn_now()
+            display_day = reference_session_date(now_vn)
 
             for sym, quote in loaded.items():
                 ts_ms = quote.received_timestamp or quote.source_timestamp
                 if ts_ms:
                     quote_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=VN_TZ)
-                    is_same_session = (quote_dt.date() == today_vn)
+                    is_same_session = (quote_dt.date() == display_day)
                 else:
                     is_same_session = False
 
@@ -430,6 +463,10 @@ class SubscriptionManager:
                             "provider_trading_date": None,
                             "provider_timestamp": None,
                             "source_timestamp": None,
+                            "trade_timestamp": None,
+                            "book_timestamp": None,
+                            "trade_received_timestamp": None,
+                            "book_received_timestamp": None,
                             "market_session_date": None,
                             **reference_update,
                         }
@@ -555,6 +592,8 @@ class SubscriptionManager:
         connected = await self.provider.connect()
         if not connected:
             self._active_symbols.clear()
+            if self._server_owned and (self._session_clock_task is None or self._session_clock_task.done()):
+                self._session_clock_task = asyncio.create_task(self._run_session_clock())
             self._notify_status_change()
             return False
 
@@ -577,15 +616,22 @@ class SubscriptionManager:
         else:
             self._active_symbols.clear()
             logger.error("Provider rejected the server-owned realtime universe (%d symbols).", len(target))
+        if self._session_clock_task is None or self._session_clock_task.done():
+            self._session_clock_task = asyncio.create_task(self._run_session_clock())
         self._notify_status_change()
         return success
 
     async def shutdown(self) -> None:
         """Cleans up upstream streams and warm cache store on application shutdown."""
+        if self._session_clock_task:
+            self._session_clock_task.cancel()
+            await asyncio.gather(self._session_clock_task, return_exceptions=True)
+            self._session_clock_task = None
         if self._debounce_task and not self._debounce_task.done():
             self._debounce_task.cancel()
         if self._reference_refresh_task and not self._reference_refresh_task.done():
             self._reference_refresh_task.cancel()
+            await asyncio.gather(self._reference_refresh_task, return_exceptions=True)
         try:
             await self.store.close()
         except Exception as e:

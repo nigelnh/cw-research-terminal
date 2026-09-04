@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any
 
 from app.market_data import trading_calendar as cal
@@ -25,11 +25,11 @@ class ReferenceUpdate:
 def reference_session_date(now: datetime | None = None) -> date:
     """Session whose bands should be used now in ICT.
 
-    On a trading day this is today, including pre-open and lunch. On weekends/holidays
-    the last completed session remains the truthful display session.
+    The display rolls at 08:00 ICT on trading days, not at midnight. Weekends and
+    holidays retain the last completed session. This is also the intraday reset boundary.
     """
     current = cal._as_vn(now)
-    if cal.is_trading_day(current.date()):
+    if cal.is_trading_day(current.date()) and current.time() >= time(8):
         return current.date()
     return cal.latest_completed_trading_session(current)
 

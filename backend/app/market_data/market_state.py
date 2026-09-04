@@ -252,6 +252,19 @@ class MarketState:
         diff["reference_session_date"] = None
         diff["reference_timestamp"] = None
 
+    def advance_display_session(self, session_date: str) -> list[tuple[CanonicalQuote, dict]]:
+        """Reset the new session without fabricating a trade or a receive timestamp."""
+        updates = []
+        with self._lock:
+            for quote in self._quotes.values():
+                current = self._quote_market_session_date(quote)
+                if current and current < session_date:
+                    diff: dict[str, Any] = {}
+                    self._prepare_intraday_session(quote, session_date, diff)
+                    self._expire_reference_metadata(quote, session_date, diff)
+                    updates.append((quote.model_copy(), diff))
+        return updates
+
     def apply_reference_metadata(
         self,
         symbol: str,

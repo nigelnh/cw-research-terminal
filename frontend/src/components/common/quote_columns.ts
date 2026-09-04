@@ -79,7 +79,7 @@ export function quoteCell(
   const muted = "var(--t-50)";
   switch (key) {
     case "symbol":
-      return { text: row.symbol, color: "var(--accent)" };
+      return { text: row.symbol, color: priceColor(row.last, row) };
     case "ceiling":
     case "floor":
     case "ref":
@@ -101,7 +101,7 @@ export function quoteCell(
     case "change": {
       const amount = typeof row.change === "number"
         ? row.change
-        : row.last !== null && row.ref !== null
+        : row.change === undefined && row.last !== null && row.ref !== null
           ? row.last - row.ref
           : null;
       return {
