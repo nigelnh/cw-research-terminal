@@ -64,6 +64,10 @@ they do not create a last trade, trade timestamp, last-match quantity, or candle
   Cold HTTP reads wait at most two seconds for provider computation; a slow refresh does
   not block warm reads or other tabs. Cache age and original observation timestamps stay
   separate, and stale cached values are explicitly labelled rather than marked live.
+  Index cards and volume rankings share one observed session; pre-open zero-price resets
+  and other-session breadth/rankings are excluded. Naive SDK timestamps are normalized to
+  explicit Vietnam offsets before reaching the browser. The overview Redis namespace is
+  versioned to prevent replay of pre-fix mixed-session payloads.
 
 ## Availability and fail-closed behaviour
 
@@ -81,7 +85,7 @@ they do not create a last trade, trade timestamp, last-match quantity, or candle
 
 | Check | Result |
 |---|---|
-| Backend test suite | 1,194 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
+| Backend test suite | 1,196 passed; 21 skipped; one upstream Starlette/httpx deprecation warning |
 | Frontend test suite | 36 files; 282 tests passed |
 | Backend byte-code compilation | Passed |
 | Frontend typecheck and production build | Passed; Vite reported the existing large-chunk/deprecated-option warnings |
