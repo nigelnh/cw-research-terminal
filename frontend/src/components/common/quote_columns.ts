@@ -1,5 +1,6 @@
 import {
   DASH,
+  fmtAmount,
   fmtChg,
   fmtIV,
   fmtPrice,
@@ -19,7 +20,7 @@ export const QUOTE_COLUMNS = [
   { key: "bid", label: "BID_PRC" },
   { key: "ivTrade", label: "IV_TRD" },
   { key: "last", label: "TRD_PRC" },
-  { key: "tradedQuantity", label: "TRD_AMT" },
+  { key: "tradingValue", label: "TRD_AMT" },
   { key: "change", label: "+/-" },
   { key: "chgPct", label: "%CHG" },
   { key: "ivAsk", label: "IV_ASK" },
@@ -36,7 +37,7 @@ export const QUOTE_COLUMN_PULSE_FIELD: Partial<Record<QuoteColumnKey, string>> =
   bid: "bidPrice",
   ask: "askPrice",
   last: "lastPrice",
-  tradedQuantity: "tradedQuantity",
+  tradingValue: "tradingValue",
   change: "priceChange",
   chgPct: "priceChangePercent",
   vol: "totalVolume",
@@ -45,7 +46,7 @@ export const QUOTE_COLUMN_PULSE_FIELD: Partial<Record<QuoteColumnKey, string>> =
   ivAsk: "ivAsk",
 };
 export const QUOTE_COLUMN_HINTS: Partial<Record<QuoteColumnKey, string>> = {
-  tradedQuantity: "Quantity of the most recent match",
+  tradingValue: "Session traded value (turnover, VND)",
   lastTradingDate: "Last trading date (YYYY-MM-DD)",
 };
 export interface QuoteTableValues {
@@ -57,8 +58,7 @@ export interface QuoteTableValues {
   bid: number | null;
   ask: number | null;
   last: number | null;
-  tradedQuantity?: number | null;
-  /** Retained in the row shape for callers that also display session value elsewhere. */
+  /** Session traded value (turnover, raw VND). */
   tradingValue?: number | null;
   change?: number | null;
   chgPct: number | null;
@@ -123,8 +123,8 @@ export function quoteCell(
       return fmtChg(row.chgPct);
     case "vol":
       return { text: fmtVol(row.vol), color: muted };
-    case "tradedQuantity":
-      return { text: fmtVol(row.tradedQuantity), color: muted };
+    case "tradingValue":
+      return { text: fmtAmount(row.tradingValue), color: muted };
     case "strike":
       return { text: fmtPrice(row.strike), color: "var(--t-60)" };
     case "ratio":
