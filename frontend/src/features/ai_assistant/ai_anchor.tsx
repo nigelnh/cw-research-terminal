@@ -531,7 +531,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
                 <div key={m.id ?? i} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <ResearchTrace steps={m.trace ?? []} live={activity} running={running} />
                   {m.content ? (
-                    <AssistantMarkdown>{m.content}</AssistantMarkdown>
+                    <AssistantMarkdown streaming={running}>{m.content}</AssistantMarkdown>
                   ) : running && (m.trace?.length ?? 0) === 0 ? (
                     <div className="mono" style={{ color: "var(--t-55)", fontStyle: "italic", fontSize: 11 }}>
                       {activity || "Thinking…"}

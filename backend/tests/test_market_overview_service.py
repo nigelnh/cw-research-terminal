@@ -64,6 +64,9 @@ async def test_restart_restores_stale_snapshot_without_waiting_for_provider():
     provider.get_market_overview.side_effect = slow
     service = MarketOverviewService()
     service.configure(provider, store(saved))
+    # Off-session the TTL stretches to the next real session open; pin it small so a
+    # 1-hour-old cache is deterministically stale regardless of when this test runs.
+    service._seconds_to_next_session = lambda: 1.0
     try:
         result = await asyncio.wait_for(service.get([]), 0.1)
         assert result["indices"][0]["value"] == 1200
@@ -93,6 +96,7 @@ async def test_unavailable_refresh_preserves_last_good_snapshot():
     cache = store({"payload": overview(), "cached_at": time.time() - 3600})
     service = MarketOverviewService()
     service.configure(provider, cache)
+    service._seconds_to_next_session = lambda: 1.0  # deterministic off-session TTL
     await service.get([])
     await service._refresh_task
     result = await service.get([])
@@ -101,6 +105,34 @@ async def test_unavailable_refresh_preserves_last_good_snapshot():
     assert result["refreshing"] is False
     assert provider.get_market_overview.await_count == 1
     cache.save_market_overview.assert_not_called()
+
+
+async def test_ttl_extends_through_the_closed_stretch_but_not_past_the_next_session(monkeypatch):
+    """Outside trading hours nothing can change until the market reopens, so a request an
+    hour after the last fetch must still be served from cache - but not forever: once the
+    next session is genuinely close, the cache still rebuilds."""
+    from app.market_data.market_session import market_session
+    monkeypatch.setattr(market_session, "is_trading_active", lambda: False)
+
+    provider = SimpleNamespace(get_market_overview=AsyncMock(return_value=overview()))
+    service = MarketOverviewService()
+    service.configure(provider, store())
+    service._seconds_to_next_session = lambda: 6 * 3600  # e.g. overnight
+    try:
+        await service.get([])
+        await service._refresh_task
+        assert provider.get_market_overview.await_count == 1
+
+        service._cached_at -= 3600  # an hour passes - the old fixed 300s TTL would refresh
+        await service.get([])
+        assert provider.get_market_overview.await_count == 1  # still cached
+
+        service._seconds_to_next_session = lambda: 10.0  # next session now very close
+        await service.get([])
+        await service._refresh_task
+        assert provider.get_market_overview.await_count == 2  # rebuilt
+    finally:
+        await service.close()
 
 
 async def test_failed_refresh_is_bounded_and_backed_off():

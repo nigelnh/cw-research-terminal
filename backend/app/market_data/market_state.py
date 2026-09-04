@@ -99,6 +99,11 @@ class MarketState:
             return "CW"
         return "STOCK"
 
+    def determine_instrument_type(self, symbol: str) -> Literal["STOCK", "INDEX", "CW"]:
+        """Public alias — other subsystems (e.g. the reference-refresh completeness check)
+        need the classification without duplicating the CW/INDEX symbol-shape rules."""
+        return self._determine_instrument_type(symbol)
+
     def get_or_create_quote(self, symbol: str) -> CanonicalQuote:
         sym = symbol.upper()
         with self._lock:
