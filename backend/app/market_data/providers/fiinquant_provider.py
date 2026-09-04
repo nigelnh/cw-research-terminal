@@ -1552,15 +1552,113 @@ class FiinQuantProvider(MarketDataProvider):
             finally:
                 self._tame_sdk_side_effects()
 
+    async def get_session_trade_snapshot(
+        self, symbols: List[str], session_date: date
+    ) -> Dict[str, Dict[str, Any]]:
+        """Today's forming 1d bar (last price, session OHLC / volume / value) per symbol
+        via the ``realtime=False`` snapshot path. Seeds the trade group for instruments
+        that have not yet ticked on ``Trading_Data_Stream`` this session — sparsely-traded
+        covered warrants show bid/ask live but no trade until this fills them.
+
+        ``by='1d', from_date=<recent>, to_date=<today>, lasted=True`` returns 2 rows/ticker:
+        the prior close (reference) and today's live forming bar. ``period`` mode is NOT
+        used — it truncates to the host clock and returns yesterday only.
+        """
+        clean = sorted({s.strip().upper() for s in symbols if s and s.strip()})
+        if not clean:
+            return {}
+        sd = session_date.isoformat()
+        from_date = (session_date - timedelta(days=6)).isoformat()
+
+        async with self._reference_lock:
+            if not self._session or not self._is_connected:
+                if not await self.connect():
+                    raise RuntimeError("FiinQuant session trade snapshot is unavailable")
+
+            def records(value: Any) -> List[Dict[str, Any]]:
+                if value is None:
+                    return []
+                if hasattr(value, "get_data"):
+                    value = value.get_data()
+                if hasattr(value, "reset_index"):
+                    try:
+                        value = value.reset_index()
+                    except (TypeError, ValueError):
+                        pass
+                if hasattr(value, "to_dict"):
+                    try:
+                        return value.to_dict(orient="records")
+                    except TypeError:
+                        value = value.to_dict()
+                if isinstance(value, list):
+                    return [dict(x) for x in value if isinstance(x, dict)]
+                return [dict(value)] if isinstance(value, dict) else []
+
+            def stamp(row: Dict[str, Any]) -> str:
+                return str(first(row, "timestamp", "Timestamp", "TradingDate", "tradingDate") or "")
+
+            def fetch() -> Dict[str, Dict[str, Any]]:
+                rows: List[Dict[str, Any]] = []
+                captured = io.StringIO()
+                with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+                    try:
+                        for start in range(0, len(clean), 100):
+                            res = self._session.Fetch_Trading_Data(
+                                realtime=False,
+                                tickers=clean[start:start + 100],
+                                fields=["open", "high", "low", "close", "volume", "value"],
+                                adjusted=False,
+                                by="1d",
+                                from_date=from_date,
+                                to_date=sd,
+                                lasted=True,
+                            )
+                            rows.extend(records(res))
+                    except Exception as exc:  # noqa: BLE001 - never break the poll loop
+                        logger.warning("FiinQuant session trade snapshot fetch failed: %s", exc)
+                        return {}
+
+                by_ticker: Dict[str, List[Dict[str, Any]]] = {}
+                for row in rows:
+                    tk = str(first(row, "ticker", "Ticker") or "").upper()
+                    if tk:
+                        by_ticker.setdefault(tk, []).append(row)
+
+                out: Dict[str, Dict[str, Any]] = {}
+                for sym, ticker_rows in by_ticker.items():
+                    ticker_rows.sort(key=stamp)
+                    positive = [r for r in ticker_rows if (number(r, "close", "Close") or 0) > 0]
+                    today = [r for r in positive if stamp(r)[:10] == sd]
+                    prior = [r for r in positive if stamp(r)[:10] < sd]
+                    if not today:
+                        continue
+                    bar = today[-1]
+                    out[sym] = {
+                        "last_price": number(bar, "close", "Close"),
+                        "open_price": number(bar, "open", "Open"),
+                        "high_price": number(bar, "high", "High"),
+                        "low_price": number(bar, "low", "Low"),
+                        "total_volume": number(bar, "volume", "Volume"),
+                        "trading_value": number(bar, "value", "Value"),
+                        "reference_price": number(prior[-1], "close", "Close") if prior else None,
+                        "as_of": stamp(bar),
+                    }
+                return out
+
+            try:
+                return await asyncio.to_thread(fetch)
+            finally:
+                self._tame_sdk_side_effects()
+
     async def get_market_overview(self, cw_symbols: List[str]) -> Dict[str, Any]:
         """Read the four index cards and HOSE volume leaders without new streams.
 
-        This uses the documented ``realtime=False`` snapshot path and MarketBreadth, so
+        This uses the documented ``realtime=False`` snapshot path (no ``MarketBreadth`` —
+        that API is not on this account; breadth is computed from constituents here), so
         the 33-symbol SignalR subscription budget remains exclusively available to the
-        user's watchlist. Results are cached for 60 seconds in-session and five minutes
-        outside the live session.
+        user's watchlist. Cached ~15 s in-session, five minutes outside it.
         """
-        ttl = 60.0 if self._market_is_active() else 300.0
+        ttl = 15.0 if self._market_is_active() else 300.0
         if (
             self._overview_cache
             and self._session
@@ -1668,7 +1766,7 @@ class FiinQuantProvider(MarketDataProvider):
                 clean_cws = sorted({s.strip().upper() for s in cw_symbols if s.strip()})
                 daily: List[Dict[str, Any]] = []
                 intraday: List[Dict[str, Any]] = []
-                breadth: List[Dict[str, Any]] = []
+                group_members: Dict[str, set] = {}
                 bands: List[Dict[str, Any]] = []
                 with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
                     try:
@@ -1677,8 +1775,14 @@ class FiinQuantProvider(MarketDataProvider):
                         unavailable_components.add("stock_universe")
                         logger.warning("FiinQuant VNINDEX constituents unavailable: %s", exc)
                     try:
+                        # `period=2` truncates to the host clock and returns YESTERDAY only.
+                        # An explicit yesterday->today range with `lasted=True` returns the
+                        # prior close (reference) AND today's live forming bar.
+                        vn_today = market_session.get_vn_now().date()
                         daily = actual_prices(fetch_rows(
-                            sorted(set(index_symbols + stocks + clean_cws)), by="1d", period=2
+                            sorted(set(index_symbols + stocks + clean_cws)), by="1d",
+                            from_date=(vn_today - timedelta(days=6)).isoformat(),
+                            to_date=vn_today.isoformat(),
                         ))
                     except Exception as exc:
                         unavailable_components.add("daily")
@@ -1697,11 +1801,16 @@ class FiinQuantProvider(MarketDataProvider):
                     except Exception as exc:
                         unavailable_components.add("intraday")
                         logger.warning("FiinQuant overview intraday snapshot unavailable: %s", exc)
-                    try:
-                        breadth = records(self._session.MarketBreadth().get(tickers=index_symbols))
-                    except Exception as exc:
-                        unavailable_components.add("breadth")
-                        logger.warning("FiinQuant market breadth unavailable: %s", exc)
+                    # `MarketBreadth` is not licensed on this account — breadth is computed
+                    # from each index group's constituents (close vs prior close vs bands).
+                    group_members["VNINDEX"] = set(stocks)
+                    for grp in ("VN30", "VNFINLEAD", "VNDIAMOND"):
+                        try:
+                            group_members[grp] = set(ticker_list(grp))
+                        except Exception as exc:
+                            unavailable_components.add("breadth")
+                            logger.warning("FiinQuant %s constituents unavailable: %s", grp, exc)
+                            group_members[grp] = set()
                     index_dates = [stamp(r)[:10] for r in daily + intraday if key(r) in index_symbols]
                     session_date = max(index_dates or [stamp(r)[:10] for r in daily], default="")
                     try:
@@ -1716,8 +1825,6 @@ class FiinQuantProvider(MarketDataProvider):
                     unavailable_components.add("daily")
                 if not intraday:
                     unavailable_components.add("intraday")
-                if not breadth:
-                    unavailable_components.add("breadth")
                 if not bands:
                     unavailable_components.add("bands")
 
@@ -1727,12 +1834,44 @@ class FiinQuantProvider(MarketDataProvider):
                 intra_by: Dict[str, List[Dict[str, Any]]] = {}
                 for row in intraday:
                     if key(row): intra_by.setdefault(key(row), []).append(row)
-                breadth_by = {str(r.get("comGroupCode") or "").upper(): r for r in breadth}
                 bands_by: Dict[str, Dict[str, Any]] = {}
                 for row in bands:
                     symbol = key(row)
                     if symbol and (symbol not in bands_by or stamp(row) > stamp(bands_by[symbol])):
                         bands_by[symbol] = row
+
+                def constituent_breadth(members: set) -> Dict[str, int]:
+                    up = down = flat = at_ceiling = at_floor = 0
+                    for c in members:
+                        c_bars = sorted(daily_by.get(c, []), key=stamp)
+                        today_c = [r for r in c_bars if stamp(r)[:10] == session_date]
+                        prior_c = [r for r in c_bars if stamp(r)[:10] < session_date]
+                        px = num(today_c[-1], "close", "Close") if today_c else None
+                        ref = num(prior_c[-1], "close", "Close") if prior_c else None
+                        if px is None or ref is None:
+                            continue
+                        band = bands_by.get(c, {})
+                        c_ceil = num(band, "ceilingValue", "ceilingPrice", "CeilingPrice")
+                        c_floor = num(band, "floorValue", "floorPrice", "FloorPrice")
+                        if c_ceil is not None and px >= c_ceil:
+                            at_ceiling += 1
+                        if c_floor is not None and px <= c_floor:
+                            at_floor += 1
+                        if px > ref:
+                            up += 1
+                        elif px < ref:
+                            down += 1
+                        else:
+                            flat += 1
+                    return {
+                        "totalStockUpPrice": up, "totalStockDownPrice": down,
+                        "totalStockNoChangePrice": flat, "totalStockOverCeiling": at_ceiling,
+                        "totalStockUnderFloor": at_floor,
+                    }
+
+                breadth_by = {g: constituent_breadth(m) for g, m in group_members.items()}
+                if not any(sum(b.values()) for b in breadth_by.values()):
+                    unavailable_components.add("breadth")
 
                 indices = []
                 for symbol in index_symbols:
@@ -1749,11 +1888,12 @@ class FiinQuantProvider(MarketDataProvider):
                     change = close - reference if close is not None and reference is not None else None
                     pct = change / reference * 100 if change is not None and reference else None
                     b = breadth_by.get(symbol, {})
-                    if stamp(b)[:10] != latest_day:
-                        b = {}  # missing/unverified or other-session breadth is not this card's breadth
+                    has_breadth = bool(b) and sum(b.values()) > 0
+                    if not has_breadth:
+                        b = {}
                     card_state = (
-                        "AVAILABLE" if close is not None and bool(b) and bool(intraday_bars)
-                        else "PARTIAL" if close is not None or bool(b)
+                        "AVAILABLE" if close is not None and has_breadth and bool(intraday_bars)
+                        else "PARTIAL" if close is not None or has_breadth
                         else "UNAVAILABLE"
                     )
                     indices.append({
@@ -1762,14 +1902,14 @@ class FiinQuantProvider(MarketDataProvider):
                         "reference": reference,
                         "advancing": num(b, "totalStockUpPrice"), "ceiling": num(b, "totalStockOverCeiling"),
                         "unchanged": num(b, "totalStockNoChangePrice"), "declining": num(b, "totalStockDownPrice"),
-                        "floor": num(b, "totalStockUnderFloor"), "as_of": stamp(current) or stamp(b),
+                        "floor": num(b, "totalStockUnderFloor"), "as_of": stamp(current) or None,
                         "session_date": latest_day or None,
                         "update_mode": "POLLED",
                         "partial_reasons": [reason for reason, missing in (
                             ("PRICE_UNAVAILABLE", close is None),
                             ("REFERENCE_UNAVAILABLE", reference is None),
                             ("INTRADAY_UNAVAILABLE", not intraday_bars),
-                            ("BREADTH_UNAVAILABLE", not b),
+                            ("BREADTH_UNAVAILABLE", not has_breadth),
                         ) if missing],
                         "sparkline": [{"timestamp": stamp(x), "value": num(x, "close", "Close"),
                                        "reference": reference} for x in intraday_bars
@@ -1780,9 +1920,9 @@ class FiinQuantProvider(MarketDataProvider):
                             "totals": {"source": "FIINQUANT", "as_of": stamp(latest) or None,
                                        "session_date": latest_day or None,
                                        "availability": "AVAILABLE" if latest else "UNAVAILABLE"},
-                            "breadth": {"source": "FIINQUANT", "as_of": stamp(b) or None,
-                                        "session_date": stamp(b)[:10] or latest_day or None,
-                                        "availability": "AVAILABLE" if b else "UNAVAILABLE"},
+                            "breadth": {"source": "DERIVED_CONSTITUENTS", "as_of": stamp(current) or None,
+                                        "session_date": latest_day or None,
+                                        "availability": "AVAILABLE" if has_breadth else "UNAVAILABLE"},
                             "sparkline": {"source": "FIINQUANT", "as_of": stamp(intraday_bars[-1]) if intraday_bars else None,
                                           "session_date": latest_day or None, "timeframe": "5m",
                                           "availability": "AVAILABLE" if intraday_bars else "UNAVAILABLE"},

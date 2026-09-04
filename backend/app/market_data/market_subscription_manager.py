@@ -70,6 +70,7 @@ class SubscriptionManager:
         self._debounce_task: Optional[asyncio.Task] = None
         self._reference_refresh_task: Optional[asyncio.Task] = None
         self._session_clock_task: Optional[asyncio.Task] = None
+        self._session_trade_poll_task: Optional[asyncio.Task] = None
         self._last_clock_phase: Optional[tuple[str, str]] = None
         self._reference_refresh_session: Optional[str] = None
         self._reference_attempt_session: Optional[str] = None
@@ -258,6 +259,59 @@ class SubscriptionManager:
             except Exception:
                 logger.exception("Market session clock failed; retrying")
             await asyncio.sleep(1)
+
+    async def _run_session_trade_poll(self) -> None:
+        """Seed the trade group (last price + session OHLC / volume / value) for universe
+        symbols that have not ticked on ``Trading_Data_Stream`` yet this session — sparsely
+        traded covered warrants otherwise show a live order book but no trade at all. A
+        real stream tick always wins via ``apply_trade_event``'s stale-timestamp guard.
+        """
+        while True:
+            try:
+                if self._server_owned and market_session.is_trading_active():
+                    await self._poll_session_trades()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Session trade poll failed; retrying")
+            await asyncio.sleep(20)
+
+    async def _poll_session_trades(self) -> None:
+        symbols = self.get_server_universe_symbols()
+        if not symbols:
+            return
+        target = reference_session_date()
+        try:
+            snapshot = await self.provider.get_session_trade_snapshot(symbols, target)
+        except NotImplementedError:
+            return
+        except Exception as exc:  # noqa: BLE001 - the live streams must not depend on this
+            logger.warning("Session trade snapshot unavailable: %s", exc)
+            return
+        target_iso = target.isoformat()
+        for sym, values in snapshot.items():
+            last = values.get("last_price")
+            if last is None or last <= 0:
+                continue
+            as_of = str(values.get("as_of") or "").strip()
+            ref = values.get("reference_price")
+            event: Dict[str, Any] = {
+                "Ticker": sym,
+                "Close": last,
+                "Open": values.get("open_price"),
+                "High": values.get("high_price"),
+                "Low": values.get("low_price"),
+                "TotalMatchVolume": values.get("total_volume"),
+                "TotalMatchValue": values.get("trading_value"),
+                "TradingDate": as_of or f"{target_iso} 09:00",
+            }
+            if as_of:
+                event["Timestamp"] = as_of
+            if ref is not None:
+                event["Reference"] = ref
+                event["Change"] = last - ref
+            # Routes through apply_trade_event (session prep, stale guard, diff, broadcast).
+            self._on_provider_event("trade", event, sym)
 
     def get_desired_symbols(self) -> List[str]:
         return sorted(list(self._desired_symbols))
@@ -618,6 +672,8 @@ class SubscriptionManager:
             logger.error("Provider rejected the server-owned realtime universe (%d symbols).", len(target))
         if self._session_clock_task is None or self._session_clock_task.done():
             self._session_clock_task = asyncio.create_task(self._run_session_clock())
+        if self._session_trade_poll_task is None or self._session_trade_poll_task.done():
+            self._session_trade_poll_task = asyncio.create_task(self._run_session_trade_poll())
         self._notify_status_change()
         return success
 
@@ -627,6 +683,10 @@ class SubscriptionManager:
             self._session_clock_task.cancel()
             await asyncio.gather(self._session_clock_task, return_exceptions=True)
             self._session_clock_task = None
+        if self._session_trade_poll_task:
+            self._session_trade_poll_task.cancel()
+            await asyncio.gather(self._session_trade_poll_task, return_exceptions=True)
+            self._session_trade_poll_task = None
         if self._debounce_task and not self._debounce_task.done():
             self._debounce_task.cancel()
         if self._reference_refresh_task and not self._reference_refresh_task.done():
