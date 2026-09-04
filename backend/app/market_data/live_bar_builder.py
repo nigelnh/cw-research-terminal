@@ -32,7 +32,7 @@ class LiveBarBuilder:
     def on_trade(self, symbol: str, raw: dict) -> list[dict[str, Any]]:
         price = number(raw, "Close", "MatchPrice", "Price")
         dt = self._instant(raw)
-        if price is None or dt is None:
+        if price is None or price <= 0 or dt is None:
             return []
         source_ms = int(dt.timestamp() * 1000)
         if source_ms < self._latest_ms.get(symbol, 0):
