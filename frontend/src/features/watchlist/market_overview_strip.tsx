@@ -31,6 +31,8 @@ function DirectionTriangle({ down = false, color }: { down?: boolean; color: str
 const SESSION_OPEN_MIN = 9 * 60;
 const SESSION_CLOSE_MIN = 15 * 60;
 const SESSION_SPAN_MIN = SESSION_CLOSE_MIN - SESSION_OPEN_MIN;
+const LUNCH_START_MIN = 11 * 60 + 30;
+const LUNCH_END_MIN = 13 * 60;
 const ICT_FMT = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false,
 });
@@ -73,8 +75,11 @@ export function Sparkline({ values, direction, reference }: { values: IndexOverv
   const y = (v: number) => 30 - ((v - min) / span) * 25;
   const segments: string[][] = [[]];
   points.forEach((p, i) => {
-    // A missing 5m bucket (including the 11:30–13:00 lunch break) stays a visible gap.
-    if (i > 0 && p.min - points[i - 1].min > 7.5) segments.push([]);
+    // A missing 5m bucket breaks the line — EXCEPT the 11:30–13:00 lunch break, which is
+    // bridged (a near-flat connector) so the morning and afternoon paths read as one session.
+    const prev = points[i - 1];
+    const isLunchBridge = prev && prev.min <= LUNCH_START_MIN + 5 && p.min >= LUNCH_END_MIN - 5;
+    if (i > 0 && p.min - prev.min > 7.5 && !isLunchBridge) segments.push([]);
     segments[segments.length - 1].push(`${points.length === 1 ? 50 : p.x},${y(p.value)}`);
   });
   const referenceY = ref == null ? null : y(ref);
