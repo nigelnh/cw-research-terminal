@@ -53,10 +53,18 @@ class Settings(BaseSettings):
     DASHBOARD_HISTORY_CACHE_TTL_SECONDS: int = Field(default=21600, description="TTL for session- and price-basis-scoped dashboard history fallback cache")
 
     # Redis Warm Market State Cache Configuration
+    # 24h used to be the default for both of these, which quietly erased the whole
+    # watchlist on any restart that landed more than a day after the last write - not just
+    # the ~66h of a normal Friday-close-to-Monday-open weekend, but especially Tet, when
+    # HOSE can close for up to ~9 consecutive calendar days (see trading_calendar's
+    # _TET_WINDOWS). 14 days covers every closure this calendar knows about with margin;
+    # Redis storage for ~30 small quote records is trivial regardless of TTL length, and
+    # the existing session-sanitization on restore already keeps stale data from being
+    # misrepresented as live no matter how long it's been cached.
     REDIS_ENABLED: bool = Field(default=True, description="Enable Redis warm market state cache")
     REDIS_URL: str = Field(default="redis://localhost:6379/0", description="Redis connection URL")
-    MARKET_STATE_CACHE_TTL_SECONDS: int = Field(default=86400, description="Warm cache key TTL in seconds (24h)")
-    MARKET_STATE_MAX_STALENESS_SECONDS: int = Field(default=86400, description="Max acceptable age for restored cached quotes in seconds")
+    MARKET_STATE_CACHE_TTL_SECONDS: int = Field(default=1_209_600, description="Warm cache key TTL in seconds (14d - survives the longest closure, e.g. Tet)")
+    MARKET_STATE_MAX_STALENESS_SECONDS: int = Field(default=1_209_600, description="Max acceptable age for restored cached quotes in seconds (14d, matches the key TTL)")
 
     # Quantitative Engine Configuration
     QUANT_RISK_FREE_RATE: float = Field(default=0.05, description="Default annual risk-free interest rate (5.0%)")
