@@ -1,8 +1,18 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { render, fireEvent, cleanup } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render, fireEvent, cleanup, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+
+const { getAiQuota } = vi.hoisted(() => ({ getAiQuota: vi.fn() }));
+vi.mock("@/data/backend/backend_client", async (orig) => {
+  const actual = (await orig()) as Record<string, unknown>;
+  return { ...actual, backendClient: { getAiQuota } };
+});
+
+const authRef = vi.hoisted(() => ({ current: { user: null as { id: string } | null, status: "anonymous" } }));
+vi.mock("@/data/auth", () => ({ useAuth: () => authRef.current }));
+
 import { AiChatProvider } from "@/data/ai/ai_chat_provider";
 import { AiAnchor } from "@/features/ai_assistant/ai_anchor";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
@@ -26,8 +36,17 @@ beforeEach(() => {
   window.localStorage.clear();
   window.innerWidth = 1440;
   window.innerHeight = 900;
+  authRef.current = { user: null, status: "anonymous" };
+  getAiQuota.mockReset();
+  getAiQuota.mockResolvedValue({ enabled: false, tier: "guest" });
 });
 afterEach(cleanup);
+
+function openAnchorPanel() {
+  const btn = screen.getByRole("button", { name: /open research assistant/i });
+  fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 850, pointerId: 1 });
+  fireEvent.pointerUp(btn, { clientX: 1390, clientY: 850, pointerId: 1 });
+}
 
 describe("AiAnchor — draggable assistant anchor + fixed conversation panel", () => {
   it("defaults to the bottom-right corner of the viewport with a safe inset", () => {
@@ -268,5 +287,43 @@ describe("AiAnchor — Markdown rendering + research trace", () => {
     expect(expanded).toContain("248 bars loaded");
     // no raw payloads / reasoning
     expect(expanded).not.toContain("chain-of-thought");
+  });
+});
+
+describe("AiAnchor — visible AI quota", () => {
+  it("guest: shows today's usage and the sign-in upsell", async () => {
+    getAiQuota.mockResolvedValue({
+      enabled: true,
+      tier: "guest",
+      per_day: { limit: 8, used: 7, remaining: 1, resets_at: 0 },
+      per_minute: { limit: 3, used: 0, remaining: 3, resets_at: 0 },
+    });
+    render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, { wrapper: Wrapper });
+    openAnchorPanel();
+    await waitFor(() => expect(screen.getByText("7 / 8")).toBeTruthy());
+    expect(screen.getByText(/Today.s AI usage/)).toBeTruthy();
+    expect(screen.getByText(/Sign in for a larger daily allowance/)).toBeTruthy();
+  });
+
+  it("signed in: shows the larger allowance and no upsell", async () => {
+    authRef.current = { user: { id: "u1" }, status: "authenticated" };
+    getAiQuota.mockResolvedValue({
+      enabled: true,
+      tier: "authenticated",
+      per_day: { limit: 40, used: 17, remaining: 23, resets_at: 0 },
+      per_minute: { limit: 6, used: 0, remaining: 6, resets_at: 0 },
+    });
+    render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, { wrapper: Wrapper });
+    openAnchorPanel();
+    await waitFor(() => expect(screen.getByText("17 / 40")).toBeTruthy());
+    expect(screen.queryByText(/Sign in for a larger daily allowance/)).toBeNull();
+  });
+
+  it("renders nothing when the backend says limiting is disabled", async () => {
+    getAiQuota.mockResolvedValue({ enabled: false, tier: "guest" });
+    render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, { wrapper: Wrapper });
+    openAnchorPanel();
+    await waitFor(() => expect(getAiQuota).toHaveBeenCalled());
+    expect(screen.queryByText(/Today.s AI usage/)).toBeNull();
   });
 });

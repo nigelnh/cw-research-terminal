@@ -66,7 +66,7 @@ def policy_table() -> tuple[RoutePolicy, ...]:
         ),
         RoutePolicy(
             tier="ai_health",
-            pattern=_p(r"^/api/ai/health/?$"),
+            pattern=_p(r"^/api/ai/(?:health|quota)/?$"),
             methods=frozenset({"*"}),
             key_scope="ip",
             _items_factory=lambda authenticated: (per_minute(settings.RL_HEALTH_PER_MIN),),
