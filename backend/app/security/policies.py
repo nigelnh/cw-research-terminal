@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 
 from app.core.config import settings
-from app.security.rate_limiter import RateLimitItem, per_hour, per_minute
+from app.security.rate_limiter import RateLimitItem, per_day, per_minute
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +25,9 @@ class RoutePolicy:
     methods: frozenset[str]  # {"*"} matches all
     key_scope: str  # "ip" | "subject_or_ip"
     fail_closed: bool = False
+    # Callable[[authenticated: bool], tuple[RateLimitItem, ...]] - every tier's factory
+    # accepts the flag (most ignore it); only a tier whose allowance actually depends on
+    # sign-in state (currently just "ai") branches on it.
     _items_factory: object = field(default=None, repr=False)
 
     def matches(self, method: str, path: str) -> bool:
@@ -32,8 +35,8 @@ class RoutePolicy:
             return False
         return self.pattern.match(path) is not None
 
-    def items(self) -> tuple[RateLimitItem, ...]:
-        return self._items_factory()  # type: ignore[operator]
+    def items(self, *, authenticated: bool = False) -> tuple[RateLimitItem, ...]:
+        return self._items_factory(authenticated)  # type: ignore[operator]
 
 
 def _p(regex: str) -> re.Pattern[str]:
@@ -45,21 +48,28 @@ def policy_table() -> tuple[RoutePolicy, ...]:
     """Ordered, first-match-wins. Cached; call ``policy_table.cache_clear()`` after
     mutating the relevant settings (tests do)."""
     return (
-        # ---- Tier E: AI - very strict, fail-closed (spends real money) ----
+        # ---- Tier E: AI - very strict, fail-closed (spends real money). Keyed by
+        # subject_or_ip so a verified signed-in caller gets its own (larger) allowance
+        # instead of sharing the anonymous IP bucket; falls back to ip - and the guest
+        # item set - if the token is missing/invalid. ----
         RoutePolicy(
             tier="ai",
             pattern=_p(r"^/api/ai/(?:chat|files/extract)/?$"),
             methods=frozenset({"POST"}),
-            key_scope="ip",
+            key_scope="subject_or_ip",
             fail_closed=True,
-            _items_factory=lambda: (per_minute(settings.RL_AI_PER_MIN), per_hour(settings.RL_AI_PER_HOUR)),
+            _items_factory=lambda authenticated: (
+                (per_minute(settings.RL_AI_AUTH_PER_MIN), per_day(settings.RL_AI_AUTH_PER_DAY))
+                if authenticated else
+                (per_minute(settings.RL_AI_GUEST_PER_MIN), per_day(settings.RL_AI_GUEST_PER_DAY))
+            ),
         ),
         RoutePolicy(
             tier="ai_health",
             pattern=_p(r"^/api/ai/health/?$"),
             methods=frozenset({"*"}),
             key_scope="ip",
-            _items_factory=lambda: (per_minute(settings.RL_HEALTH_PER_MIN),),
+            _items_factory=lambda authenticated: (per_minute(settings.RL_HEALTH_PER_MIN),),
         ),
         # ---- Tier D: history - DB + possible provider gap-fill ----
         RoutePolicy(
@@ -67,7 +77,7 @@ def policy_table() -> tuple[RoutePolicy, ...]:
             pattern=_p(r"^/api/market/history/"),
             methods=frozenset({"*"}),
             key_scope="ip",
-            _items_factory=lambda: (per_minute(settings.RL_HISTORY_PER_MIN),),
+            _items_factory=lambda authenticated: (per_minute(settings.RL_HISTORY_PER_MIN),),
         ),
         # ---- Tier A: health / tiny metadata ----
         RoutePolicy(
@@ -75,7 +85,7 @@ def policy_table() -> tuple[RoutePolicy, ...]:
             pattern=_p(r"^(/health|/api/market/health|/api/instruments/metrics/)"),
             methods=frozenset({"*"}),
             key_scope="ip",
-            _items_factory=lambda: (per_minute(settings.RL_HEALTH_PER_MIN),),
+            _items_factory=lambda authenticated: (per_minute(settings.RL_HEALTH_PER_MIN),),
         ),
         # ---- Tier C: quant ----
         RoutePolicy(
@@ -83,7 +93,7 @@ def policy_table() -> tuple[RoutePolicy, ...]:
             pattern=_p(r"^/api/quant/"),
             methods=frozenset({"*"}),
             key_scope="ip",
-            _items_factory=lambda: (per_minute(settings.RL_QUANT_PER_MIN),),
+            _items_factory=lambda authenticated: (per_minute(settings.RL_QUANT_PER_MIN),),
         ),
         # ---- Tier F: authenticated writes/reads - keyed by verified sub ----
         RoutePolicy(
@@ -91,7 +101,7 @@ def policy_table() -> tuple[RoutePolicy, ...]:
             pattern=_p(r"^/api/me/"),
             methods=frozenset({"*"}),
             key_scope="subject_or_ip",
-            _items_factory=lambda: (per_minute(settings.RL_ME_PER_MIN),),
+            _items_factory=lambda authenticated: (per_minute(settings.RL_ME_PER_MIN),),
         ),
         # ---- Tier B: ordinary market-data + instrument reads ----
         RoutePolicy(
@@ -99,14 +109,14 @@ def policy_table() -> tuple[RoutePolicy, ...]:
             pattern=_p(r"^/api/(market|instruments)/"),
             methods=frozenset({"*"}),
             key_scope="ip",
-            _items_factory=lambda: (per_minute(settings.RL_MARKET_PER_MIN),),
+            _items_factory=lambda authenticated: (per_minute(settings.RL_MARKET_PER_MIN),),
         ),
         RoutePolicy(
             tier="market",
             pattern=_p(r"^/api/instruments/?$"),
             methods=frozenset({"*"}),
             key_scope="ip",
-            _items_factory=lambda: (per_minute(settings.RL_MARKET_PER_MIN),),
+            _items_factory=lambda authenticated: (per_minute(settings.RL_MARKET_PER_MIN),),
         ),
         # ---- catch-all for any other /api route ----
         RoutePolicy(
@@ -114,7 +124,7 @@ def policy_table() -> tuple[RoutePolicy, ...]:
             pattern=_p(r"^/api/"),
             methods=frozenset({"*"}),
             key_scope="ip",
-            _items_factory=lambda: (per_minute(settings.RL_DEFAULT_PER_MIN),),
+            _items_factory=lambda authenticated: (per_minute(settings.RL_DEFAULT_PER_MIN),),
         ),
     )
 

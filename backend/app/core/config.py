@@ -403,8 +403,15 @@ class Settings(BaseSettings):
     RL_MARKET_PER_MIN: int = Field(default=120, description="Tier B: ordinary market-data + instrument reads")
     RL_QUANT_PER_MIN: int = Field(default=40, description="Tier C: /api/quant/* (CPU-bounded, body-bounded)")
     RL_HISTORY_PER_MIN: int = Field(default=20, description="Tier D: /api/market/history/* (DB + possible provider fill)")
-    RL_AI_PER_MIN: int = Field(default=6, description="Tier E burst: /api/ai/* per minute (spends real money)")
-    RL_AI_PER_HOUR: int = Field(default=40, description="Tier E sustained: /api/ai/* per hour")
+    # Tier E (AI, fail-closed - spends real money) is keyed by subject_or_ip: a guest
+    # (anonymous, IP-keyed) gets a modest allowance; a verified signed-in caller (subject-
+    # keyed) gets a materially larger one. Both are config, not a one-time decision - see
+    # the Sign-In & AI Limits plan (backend/docs, or the published plan artifact) for the
+    # reasoning behind these starting numbers.
+    RL_AI_GUEST_PER_MIN: int = Field(default=3, description="Tier E burst, guest (anonymous, IP-keyed): /api/ai/* per minute")
+    RL_AI_GUEST_PER_DAY: int = Field(default=8, description="Tier E sustained, guest (anonymous, IP-keyed): /api/ai/* per day")
+    RL_AI_AUTH_PER_MIN: int = Field(default=6, description="Tier E burst, signed-in (verified sub): /api/ai/* per minute")
+    RL_AI_AUTH_PER_DAY: int = Field(default=40, description="Tier E sustained, signed-in (verified sub): /api/ai/* per day")
     RL_ME_PER_MIN: int = Field(default=30, description="Tier F: authenticated /api/me/* (keyed by verified sub)")
     RL_DEFAULT_PER_MIN: int = Field(default=60, description="Catch-all for any public route without a specific tier")
 
