@@ -319,3 +319,58 @@ def test_17_system_prompt_documents_research_provenance_and_causal_restraint():
     assert "get_news" in prompt and "get_corporate_actions" in prompt
     assert "caused" in prompt.lower()
     assert "SCHEDULED" in prompt  # scheduled-vs-confirmed distinction is spelled out
+
+
+@pytest.mark.asyncio
+async def test_18_ranking_query_naming_a_ticker_also_pulls_the_dashboard_snapshot():
+    """'most active HPG warrant by volume' names HPG but is asking to rank the CHPG set -
+    without the multi-symbol snapshot the model gets one quote and nothing to rank, then
+    tends to stall on 'let me query…'."""
+    executor = ToolExecutor(max_tool_calls=4)
+    envelope = ResearchContextEnvelope(
+        activePage="dashboard", marketSessionActive=False, watchlist=["HPG", "CHPG2541"]
+    )
+    executed = await executor.resolve_and_execute_proactive_tools(
+        "give me the most active HPG warrant by volume", envelope
+    )
+    tools = {e["tool"] for e in executed}
+    assert "get_dashboard_snapshot" in tools
+    assert "get_quote" in tools  # still fetched HPG's own quote
+    snap = next(e for e in executed if e["tool"] == "get_dashboard_snapshot")
+    assert snap["result"]["universe_size"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_19_ranking_query_without_a_ticker_pulls_only_the_dashboard_snapshot():
+    executor = ToolExecutor(max_tool_calls=4)
+    envelope = ResearchContextEnvelope(activePage="dashboard", marketSessionActive=False)
+    executed = await executor.resolve_and_execute_proactive_tools(
+        "which warrant is most active right now?", envelope
+    )
+    assert {e["tool"] for e in executed} == {"get_dashboard_snapshot"}
+
+
+@pytest.mark.asyncio
+async def test_20_a_plain_single_symbol_volume_question_is_not_a_ranking_query():
+    """No false positive: 'HPG's trading volume today' names one symbol and asks for one
+    number - it must NOT pull the whole-universe snapshot."""
+    executor = ToolExecutor(max_tool_calls=4)
+    envelope = ResearchContextEnvelope(
+        activePage="dashboard",
+        selectedInstrument=SelectedInstrumentContext(symbol="HPG", instrumentType="STOCK"),
+        marketSessionActive=True,
+    )
+    executed = await executor.resolve_and_execute_proactive_tools(
+        "what is HPG's trading volume today?", envelope
+    )
+    assert "get_dashboard_snapshot" not in {e["tool"] for e in executed}
+
+
+def test_21_system_prompt_forbids_promising_a_follow_up_query():
+    prompt = build_system_prompt(
+        context=None,
+        tool_results=[{"symbol": "HPG", "status": "AVAILABLE", "provenance": "MARKET_STATE"}],
+    )
+    assert "COMPLETE and FINAL" in prompt
+    assert "one moment" in prompt.lower()
+    assert "cannot run more tools" in prompt.lower()
