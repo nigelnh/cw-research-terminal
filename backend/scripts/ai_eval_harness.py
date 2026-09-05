@@ -250,7 +250,8 @@ def main() -> int:
                     help="Comma-separated base URLs (1-3), each a server configured with the model to test.")
     ap.add_argument("--timeout", type=float, default=90.0)
     ap.add_argument("--delay", type=float, default=12.0,
-                    help="Seconds between prompts (keep >= 60/RL_AI_PER_MIN; default 12).")
+                    help="Seconds between prompts (keep >= 60/RL_AI_AUTH_PER_MIN or "
+                         "60/RL_AI_GUEST_PER_MIN depending on how this harness authenticates; default 12).")
     args = ap.parse_args()
 
     targets = [t.strip() for t in args.targets.split(",") if t.strip()]

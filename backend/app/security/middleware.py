@@ -75,7 +75,8 @@ class RateLimitMiddleware:
         key = resolve_client_key(conn, subject=subject)
 
         decision = await rate_limiter.check(
-            tier=policy.tier, key=key, items=policy.items(), fail_closed=policy.fail_closed
+            tier=policy.tier, key=key, items=policy.items(authenticated=subject is not None),
+            fail_closed=policy.fail_closed,
         )
         if not decision.allowed:
             logger.info("rate limit: tier=%s retry_after=%ss%s", policy.tier, decision.retry_after,
