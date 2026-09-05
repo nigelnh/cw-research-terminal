@@ -39,6 +39,19 @@ DASHBOARD_KEYWORDS = {
     "all", "tất cả", "danh mục", "watchlist",
 }
 
+# Ranking / cross-instrument comparison intent that DASHBOARD_KEYWORDS doesn't cover.
+# This pulls get_dashboard_snapshot (the multi-symbol read) EVEN WHEN a specific ticker
+# also resolved from the query - "most active HPG warrant by volume" names HPG but is
+# really asking to rank the whole CHPG set. Without the snapshot the model gets one quote
+# and (correctly) says it can't rank anything - then tends to stall on "let me query…".
+RANKING_KEYWORDS = {
+    "most active", "least active", "most traded", "most liquid", "highest volume",
+    "lowest volume", "highest turnover", "by volume", "by turnover", "by value",
+    "by spread", "rank", "ranked", "ranking", "which warrant", "which cw",
+    "tightest spread", "widest spread", "sôi động", "thanh khoản", "khối lượng lớn",
+    "xếp hạng",
+}
+
 MARKET_STATUS_KEYWORDS = {
     "market status", "market session", "phiên", "mở cửa", "đóng cửa",
     "nghỉ trưa", "lunch break", "trading hours", "is market open",
@@ -155,7 +168,9 @@ def _result_summary(tool_name: str, result: Dict[str, Any]) -> tuple[str, bool]:
         return (f"terms retrieved ({mv})" if mv else "terms retrieved", True)
 
     if tool_name == "get_dashboard_snapshot":
-        n = len(result.get("rows") or result.get("symbols") or [])
+        n = result.get("universe_size")
+        if n is None:
+            n = len(result.get("instruments") or result.get("rows") or [])
         return (f"{n} symbols" if n else "snapshot retrieved", True)
 
     if tool_name == "get_market_status":
@@ -220,6 +235,16 @@ class ToolExecutor:
         })
         return result
 
+    @staticmethod
+    def _watched_universe(context: Optional[ResearchContextEnvelope]) -> Optional[List[str]]:
+        """The user's watchlist for scoping a dashboard snapshot. The frontend sends this
+        as `watchlist`; `watchedSymbols` is the older field name, still accepted. Returns
+        None when neither is set - get_dashboard_snapshot then covers the full tracked
+        universe, which is the right default for a market-wide ranking question."""
+        if context is None:
+            return None
+        return context.watchedSymbols or context.watchlist or None
+
     async def _resolve_symbols(
         self, query: str, context: Optional[ResearchContextEnvelope]
     ) -> Dict[str, ResolvedInstrument]:
@@ -271,6 +296,7 @@ class ToolExecutor:
         wants_history = any(k in q_lower for k in HISTORY_KEYWORDS)
         wants_order_book = any(k in q_lower for k in ORDER_BOOK_KEYWORDS)
         is_dashboard_query = any(k in q_lower for k in DASHBOARD_KEYWORDS)
+        wants_ranking = is_dashboard_query or any(k in q_lower for k in RANKING_KEYWORDS)
         wants_corp_actions = any(k in q_lower for k in CORP_ACTION_KEYWORDS)
         wants_company_events = any(k in q_lower for k in COMPANY_EVENT_KEYWORDS)
         wants_news = any(k in q_lower for k in NEWS_KEYWORDS)
@@ -306,13 +332,23 @@ class ToolExecutor:
                 if pull_eod:
                     await self.call_tool("get_history", {"symbol": sym, "lookback_days": 30})
 
+            # A ranking / cross-instrument comparison also needs the multi-symbol snapshot -
+            # the per-symbol tools above only cover the ticker(s) literally named, not the
+            # SET the user is asking to rank (e.g. "most active HPG warrant by volume").
+            if wants_ranking and len(self._executed_calls) < self.max_tool_calls:
+                watched = self._watched_universe(context)
+                await self.call_tool(
+                    "get_dashboard_snapshot", {"symbols": watched} if watched else {}
+                )
+
         # Case 2a: news / disclosure query with no specific symbol (or on the NEWS page)
         elif wants_news or (on_news_page and not is_dashboard_query):
             await self.call_tool("get_news", {})
 
-        # Case 2: dashboard comparison query (e.g. "which stock is doing best?")
-        elif is_dashboard_query:
-            watched = context.watchedSymbols if (context and context.watchedSymbols) else None
+        # Case 2: dashboard / ranking query with no specific symbol
+        # (e.g. "which stock is doing best?", "which CW is most active?")
+        elif wants_ranking:
+            watched = self._watched_universe(context)
             await self.call_tool("get_dashboard_snapshot", {"symbols": watched} if watched else {})
 
         # Case 3: market status query

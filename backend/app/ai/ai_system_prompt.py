@@ -112,6 +112,7 @@ def build_system_prompt(
 </canonical_market_data>
 
 ### Tool & Canonical Data Instructions:
+- The <canonical_market_data> block is the COMPLETE and FINAL set of tool results for this turn. The relevant tools were already run before this reply based on the user's question. You CANNOT run more tools, request more data, or return later with results. Never write "let me query…", "one moment", "I'll check and get back to you", "fetching…", or anything implying a follow-up lookup. Answer now with what the block contains. If something needed for a complete answer is genuinely missing from it, say briefly what's missing and give the best answer the available data supports (e.g. rank only the instruments that do have volume, and note which were excluded).
 - The <canonical_market_data> block above is retrieved directly from backend canonical services. Each entry carries a `provenance` / `status` field - map it to the Data Provenance origins above:
   - `get_quote` -> OBSERVED (check `quote_display_eligible`; `data_source` REDIS_WARM_CACHE means a restored cache value, not a fresh tick).
   - `get_order_book` -> OBSERVED depth.
