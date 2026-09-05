@@ -25,7 +25,12 @@ import math
 import time
 from dataclasses import dataclass
 
-from limits import RateLimitItemPerHour, RateLimitItemPerMinute, RateLimitItemPerSecond
+from limits import (
+    RateLimitItemPerDay,
+    RateLimitItemPerHour,
+    RateLimitItemPerMinute,
+    RateLimitItemPerSecond,
+)
 from limits.aio.storage import MemoryStorage
 from limits.aio.strategies import MovingWindowRateLimiter
 
@@ -36,7 +41,7 @@ logger = logging.getLogger("cw-research-backend.security")
 
 _KEY_PREFIX = "cw_research:ratelimit:v1"
 
-RateLimitItem = RateLimitItemPerMinute | RateLimitItemPerHour | RateLimitItemPerSecond
+RateLimitItem = RateLimitItemPerMinute | RateLimitItemPerHour | RateLimitItemPerDay | RateLimitItemPerSecond
 
 
 def per_minute(n: int) -> RateLimitItemPerMinute:
@@ -45,6 +50,14 @@ def per_minute(n: int) -> RateLimitItemPerMinute:
 
 def per_hour(n: int) -> RateLimitItemPerHour:
     return RateLimitItemPerHour(max(1, int(n)))
+
+
+def per_day(n: int) -> RateLimitItemPerDay:
+    """Calendar-window daily cap (the ``limits`` moving-window strategy still applies -
+    this is a rolling 24h window, not a UTC-midnight reset). Used by tiers with a stateful
+    daily allowance (e.g. the AI tier's guest/signed-in quotas) alongside a per-minute
+    burst item from the same tier - both must pass."""
+    return RateLimitItemPerDay(max(1, int(n)))
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import time
+
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
+from app.auth.jwt_verifier import get_verifier
 from app.core.config import settings
 from app.main import app
 from app.security.policies import policy_table
@@ -74,3 +78,62 @@ def test_429_carries_cors_header_for_an_allowed_origin(low_market_limit):
     blocked = client.get("/api/instruments", headers={"Origin": "http://localhost:5173"})
     assert blocked.status_code == 429
     assert blocked.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
+# --- AI tier: guest vs signed-in allowances (subject_or_ip) -----------------
+
+_AI_TEST_SECRET = "ai-tier-test-hs256-secret-at-least-32-bytes+"
+_AI_BODY = {"messages": [{"role": "user", "content": "hi"}], "stream": False}
+
+
+def _ai_token(*, sub: str) -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {"sub": sub, "aud": "authenticated", "iat": now - 5, "exp": now + 3600},
+        _AI_TEST_SECRET, algorithm="HS256",
+    )
+
+
+@pytest.fixture
+def ai_tier_limits(rate_limit_enabled, monkeypatch):
+    """Tiny, deterministic guest vs signed-in AI allowances for one test, plus a working
+    test-only HS256 secret so a minted bearer token verifies as a real signed-in caller."""
+    monkeypatch.setattr(settings, "RL_AI_GUEST_PER_MIN", 1)
+    monkeypatch.setattr(settings, "RL_AI_GUEST_PER_DAY", 100)
+    monkeypatch.setattr(settings, "RL_AI_AUTH_PER_MIN", 3)
+    monkeypatch.setattr(settings, "RL_AI_AUTH_PER_DAY", 100)
+    monkeypatch.setattr(settings, "AUTH_TEST_HS256_SECRET", _AI_TEST_SECRET)
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+    policy_table.cache_clear()
+    get_verifier.cache_clear()
+    yield
+    policy_table.cache_clear()
+    get_verifier.cache_clear()
+
+
+def test_ai_tier_guest_and_signed_in_get_independent_allowances(ai_tier_limits):
+    # Guest (anonymous, IP-keyed): allowed exactly RL_AI_GUEST_PER_MIN=1, then 429.
+    first = client.post("/api/ai/chat", json=_AI_BODY)
+    assert first.status_code != 429
+    second = client.post("/api/ai/chat", json=_AI_BODY)
+    assert second.status_code == 429
+    assert second.json()["tier"] == "ai"
+
+    # Signed-in (subject-keyed): a SEPARATE bucket with its own, larger allowance - not
+    # blocked by the guest bucket above already being exhausted.
+    headers = {"Authorization": f"Bearer {_ai_token(sub='11111111-1111-1111-1111-111111111111')}"}
+    for _ in range(3):
+        r = client.post("/api/ai/chat", json=_AI_BODY, headers=headers)
+        assert r.status_code != 429
+    blocked = client.post("/api/ai/chat", json=_AI_BODY, headers=headers)
+    assert blocked.status_code == 429
+
+
+def test_ai_tier_invalid_token_falls_back_to_the_guest_allowance(ai_tier_limits):
+    """`_peek_verified_subject`'s documented contract: any verification failure keys
+    anonymous (ip), never raises here - the route still returns its own 401 if it cares."""
+    headers = {"Authorization": "Bearer not-a-real-jwt"}
+    first = client.post("/api/ai/chat", json=_AI_BODY, headers=headers)
+    assert first.status_code != 429
+    second = client.post("/api/ai/chat", json=_AI_BODY, headers=headers)
+    assert second.status_code == 429  # the guest (1/min) allowance, not the signed-in one
