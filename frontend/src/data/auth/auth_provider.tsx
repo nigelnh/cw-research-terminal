@@ -30,9 +30,17 @@ export interface AuthUser {
   /** Verified Supabase subject (JWT `sub`). The ownership key everywhere. */
   id: string;
   email: string | null;
+  /** From signup metadata (password accounts only) - null for Google/magic-link accounts
+   * and for any account created before usernames existed. UI falls back to `email`. */
+  username: string | null;
 }
 
 export type AuthStatus = "loading" | "anonymous" | "authenticated";
+
+export interface AuthResult {
+  ok: boolean;
+  message: string;
+}
 
 export interface AuthContextValue {
   user: AuthUser | null;
@@ -40,20 +48,28 @@ export interface AuthContextValue {
   /** false when this build has no Supabase config - the whole UI stays anonymous-only. */
   isConfigured: boolean;
   signInWithGoogle: () => Promise<void>;
-  signInWithEmail: (email: string) => Promise<{ ok: boolean; message: string }>;
+  signInWithEmail: (email: string) => Promise<AuthResult>;
+  signUpWithPassword: (username: string, email: string, password: string) => Promise<AuthResult>;
+  signInWithPassword: (email: string, password: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
 }
 
 const noopAsync = async () => {};
+const NOT_CONFIGURED: AuthResult = { ok: false, message: "Sign-in is not configured." };
 
 const DEFAULT_VALUE: AuthContextValue = {
   user: null,
   status: "anonymous",
   isConfigured: false,
   signInWithGoogle: noopAsync,
-  signInWithEmail: async () => ({ ok: false, message: "Sign-in is not configured." }),
+  signInWithEmail: async () => NOT_CONFIGURED,
+  signUpWithPassword: async () => NOT_CONFIGURED,
+  signInWithPassword: async () => NOT_CONFIGURED,
   signOut: noopAsync,
 };
+
+const USERNAME_PATTERN = /^[A-Za-z0-9_]{3,32}$/;
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const AuthContext = createContext<AuthContextValue>(DEFAULT_VALUE);
 
@@ -95,7 +111,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const applySession = (session: { access_token?: string; user?: { id: string; email?: string | null } } | null) => {
+    const applySession = (
+      session: {
+        access_token?: string;
+        user?: { id: string; email?: string | null; user_metadata?: { username?: unknown } | null };
+      } | null
+    ) => {
       currentAccessToken = session?.access_token ?? null;
       const nextId = session?.user?.id ?? null;
 
@@ -106,7 +127,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (nextId) {
-        setUser({ id: nextId, email: session?.user?.email ?? null });
+        const rawUsername = session?.user?.user_metadata?.username;
+        setUser({
+          id: nextId,
+          email: session?.user?.email ?? null,
+          username: typeof rawUsername === "string" && rawUsername.trim() ? rawUsername.trim() : null,
+        });
         setStatus("authenticated");
       } else {
         setUser(null);
@@ -144,9 +170,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithEmail = useCallback(async (email: string) => {
     const supabase = getSupabase();
-    if (!supabase) return { ok: false, message: "Sign-in is not configured." };
+    if (!supabase) return NOT_CONFIGURED;
     const trimmed = email.trim();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) {
+    if (!EMAIL_PATTERN.test(trimmed)) {
       return { ok: false, message: "Enter a valid email address." };
     }
     const { error } = await supabase.auth.signInWithOtp({
@@ -158,6 +184,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { ok: true, message: "Check your email for a sign-in link." };
   }, []);
 
+  const signUpWithPassword = useCallback(async (username: string, email: string, password: string) => {
+    const supabase = getSupabase();
+    if (!supabase) return NOT_CONFIGURED;
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim();
+    if (!USERNAME_PATTERN.test(trimmedUsername)) {
+      return { ok: false, message: "Username must be 3-32 characters: letters, numbers, or underscore." };
+    }
+    if (!EMAIL_PATTERN.test(trimmedEmail)) {
+      return { ok: false, message: "Enter a valid email address." };
+    }
+    if (password.length < 8) {
+      return { ok: false, message: "Password must be at least 8 characters." };
+    }
+    const { data, error } = await supabase.auth.signUp({
+      email: trimmedEmail,
+      password,
+      options: {
+        data: { username: trimmedUsername },
+        emailRedirectTo: window.location.origin + window.location.pathname,
+      },
+    });
+    if (error) {
+      // The signup trigger (supabase/migrations/0001_profiles.sql) raises a distinguishable
+      // "username_taken" message on a duplicate - not verified live (see the migration's
+      // own note); anything else falls back to Supabase's own error text, same as
+      // signInWithEmail already does.
+      const message = /username_taken/i.test(error.message)
+        ? "That username is already taken."
+        : error.message;
+      return { ok: false, message };
+    }
+    if (data.user && !data.session) {
+      return { ok: true, message: "Check your email to confirm your account, then sign in." };
+    }
+    return { ok: true, message: "Account created." };
+  }, []);
+
+  const signInWithPassword = useCallback(async (email: string, password: string) => {
+    const supabase = getSupabase();
+    if (!supabase) return NOT_CONFIGURED;
+    const trimmed = email.trim();
+    if (!EMAIL_PATTERN.test(trimmed)) {
+      return { ok: false, message: "Enter a valid email address." };
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email: trimmed, password });
+    if (error) return { ok: false, message: error.message };
+    return { ok: true, message: "" };
+  }, []);
+
   const signOut = useCallback(async () => {
     const supabase = getSupabase();
     if (!supabase) return;
@@ -166,8 +242,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, status, isConfigured: configured, signInWithGoogle, signInWithEmail, signOut }),
-    [user, status, configured, signInWithGoogle, signInWithEmail, signOut]
+    () => ({
+      user, status, isConfigured: configured,
+      signInWithGoogle, signInWithEmail, signUpWithPassword, signInWithPassword, signOut,
+    }),
+    [user, status, configured, signInWithGoogle, signInWithEmail, signUpWithPassword, signInWithPassword, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

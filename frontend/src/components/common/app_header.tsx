@@ -113,7 +113,7 @@ function SignInControl() {
     );
   }
 
-  const label = user?.email ?? "account";
+  const label = user?.username ?? user?.email ?? "account";
   return (
     <div
       ref={wrapRef}
@@ -123,7 +123,7 @@ function SignInControl() {
     >
       <span
         style={{ color: "var(--accent)", cursor: "default", fontSize: 11 }}
-        title={label}
+        title={user?.email ?? label}
       >
         {label}
       </span>
