@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { config } from "@/config";
+import { getAccessToken } from "@/data/backend/backend_client";
 
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const ATTACHMENT_ACCEPT = ".pdf,.txt,.md,.csv,.tsv,.json,.xlsx,.docx";
@@ -58,7 +59,15 @@ export function useFileAttachments(conversationId: string | null | undefined) {
     try {
       const body = new FormData();
       next.forEach(file => body.append("files", file));
-      const response = await fetch(endpoint, { method: "POST", body, signal: controller.signal });
+      // Same AI rate-limit tier as /api/ai/chat - carry the bearer token when signed in
+      // so the upload counts against the caller's account, not the per-IP guest bucket.
+      const token = await getAccessToken();
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body,
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        signal: controller.signal,
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "Could not read these files. Please try again.");
       if (!Array.isArray(result.files)) throw new Error("The file preview service returned an invalid response.");
