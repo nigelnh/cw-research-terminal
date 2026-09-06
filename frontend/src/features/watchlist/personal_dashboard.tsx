@@ -1,7 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import type { RealtimePulseMap, WatchlistItem } from "@/domain/models";
-import { flip } from "@/design/motion";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
 import { useDashboardData } from "@/data/query/use_dashboard_data";
@@ -335,22 +333,12 @@ export function PersonalDashboard({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const columns = layout.columns.map(key => QUOTE_COLUMNS.find(c => c.key === key)!);
   const endDrag = () => { drag.current = null; setDropTarget(null); };
-  const tbodyRef = useRef<HTMLTableSectionElement>(null);
   const moveRow = (from: string, to: string) => {
     const next = moveGroupedRows(view.ordered, from, to);
     if (!next) return;
-    const play = flip(tbodyRef.current);
     // Preserve hidden/filtered identities when saving a visible reorder.
-    flushSync(() => {
-      layout.setRows([...next, ...completeOrder(items.map(i => i.symbol), layout.rows).filter(s => !next.includes(s))]);
-      view.clearOrder();
-    });
-    play();
-  };
-  const hideRow = (symbol: string) => {
-    const play = flip(tbodyRef.current);
-    flushSync(() => hiddenRows.hide(symbol));
-    play();
+    layout.setRows([...next, ...completeOrder(items.map(i => i.symbol), layout.rows).filter(s => !next.includes(s))]);
+    view.clearOrder();
   };
 
   const searchOptions = useMemo<WatchlistSearchOption[]>(() => view.ordered.map(row => {
@@ -426,7 +414,7 @@ export function PersonalDashboard({
             {r.kind === "stock" && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : cell.text}
           </RealtimeValue>;
         })}
-        <DismissCell symbol={r.symbol} onDismiss={hideRow} />
+        <DismissCell symbol={r.symbol} onDismiss={hiddenRows.hide} />
       </tr>
     );
   };
@@ -524,7 +512,7 @@ export function PersonalDashboard({
               <DismissHeader />
             </tr>
           </thead>
-          <tbody ref={tbodyRef}>
+          <tbody>
             {searched.rows.map(renderRow)}
           </tbody>
         </table>

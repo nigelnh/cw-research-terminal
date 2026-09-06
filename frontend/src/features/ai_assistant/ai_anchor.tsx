@@ -8,7 +8,6 @@ import { useAiQuota } from "@/data/ai/use_ai_quota";
 import type { AiQuota } from "@/data/backend/backend_client";
 import { AssistantMarkdown } from "./assistant_markdown";
 import { ATTACHMENT_ACCEPT, useFileAttachments } from "@/data/ai/use_file_attachments";
-import { prefersReducedMotion, spring } from "@/design/motion";
 
 const POS_KEY = "cw_research:ai_anchor_pos:v1";
 const DRAFT_KEY = "cw_research:ai_draft:v1";
@@ -140,10 +139,10 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
       >
         {running ? "Working…" : `${open ? "▾" : "▸"} ${summary}`}
       </button>
-      <div className="trace-body" data-open={open || running}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingTop: 2, overflow: "hidden" }}>
+      {(open || running) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingTop: 2 }}>
           {steps.map((s, i) => (
-            <div key={i} className={running ? "trace-step is-live" : "trace-step"} style={{ display: "flex", gap: 6, color: s.ok ? "var(--t-60)" : "var(--down)" }}>
+            <div key={i} style={{ display: "flex", gap: 6, color: s.ok ? "var(--t-60)" : "var(--down)" }}>
               <span style={{ color: s.ok ? "var(--up)" : "var(--down)", width: 8, flexShrink: 0 }}>
                 {stepGlyph(s.ok)}
               </span>
@@ -167,7 +166,7 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -179,26 +178,12 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
  * to signing in; the bar turns amber near the ceiling.
  */
 function QuotaStrip({ quota }: { quota: AiQuota | undefined }) {
-  const fillRef = useRef<HTMLDivElement>(null);
-  const wasNear = useRef(false);
   const day = quota?.enabled ? quota.per_day : null;
-
-  const near = !!day && day.remaining <= Math.max(1, Math.ceil(day.limit * 0.15));
-  // One pulse the frame the bar first crosses into the amber zone — not on every render.
-  useEffect(() => {
-    const el = fillRef.current;
-    if (near && !wasNear.current && el && !prefersReducedMotion() && typeof el.animate === "function") {
-      const { easing, duration } = spring("snap");
-      el.animate([{ opacity: 0.45 }, { opacity: 1 }], { duration: duration + 120, easing });
-    }
-    wasNear.current = near;
-  }, [near]);
-
   if (!day || !quota) return null;
 
   const pct = day.limit > 0 ? Math.min(100, Math.round((day.used / day.limit) * 100)) : 0;
+  const near = day.remaining <= Math.max(1, Math.ceil(day.limit * 0.15));
   const bar = near ? "var(--warn)" : "var(--accent)";
-  const settle = spring("settle");
 
   return (
     <div
@@ -217,15 +202,7 @@ function QuotaStrip({ quota }: { quota: AiQuota | undefined }) {
         <span style={{ fontVariantNumeric: "tabular-nums" }}>{day.used} / {day.limit}</span>
       </div>
       <div style={{ height: 2, background: "var(--border)", borderRadius: 1, overflow: "hidden" }}>
-        <div
-          ref={fillRef}
-          style={{
-            width: `${pct}%`,
-            height: "100%",
-            background: bar,
-            transition: prefersReducedMotion() ? "none" : `width ${settle.duration}ms ${settle.easing}`,
-          }}
-        />
+        <div style={{ width: `${pct}%`, height: "100%", background: bar, transition: "width .3s" }} />
       </div>
       {quota.tier === "guest" && (
         <div style={{ color: "var(--t-46)", marginTop: 1 }}>
@@ -385,7 +362,6 @@ export function AiAnchor({ context }: AiAnchorProps) {
   const lastMsg = messages[messages.length - 1];
   const streaming = isLoading && (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.content);
   const assistantRunning = isLoading && lastMsg?.role === "assistant";
-  const busy = streaming || assistantRunning;
 
   // keep anchor on-screen through viewport resize
   useEffect(() => {
@@ -664,7 +640,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
           transition: dragging ? "none" : "box-shadow 120ms ease",
         }}
       >
-        <Orbit size={16} strokeWidth={1.5} className={busy ? "orbit-thinking" : undefined} />
+        <Orbit size={16} strokeWidth={1.5} />
         <span
           aria-hidden
           style={{

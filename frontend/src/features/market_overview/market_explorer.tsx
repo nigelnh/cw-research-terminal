@@ -1,7 +1,5 @@
 import { useMemo } from "react";
-import { flushSync } from "react-dom";
 import { AppHeader } from "@/components/common/app_header";
-import { viewTransition } from "@/design/motion";
 import { PersonalDashboard } from "@/features/watchlist/personal_dashboard";
 import { ResearchUniverse } from "@/features/stock_research/research_universe";
 import { NewsFeed } from "@/features/news_feed/news_feed";
@@ -189,12 +187,7 @@ export function MarketExplorer() {
     dashMeta,
   ]);
 
-  const goToTab = (tab: Tab) => {
-    if (tab === activeTab) return;
-    // Cross-view continuity: the old page clips up and out, the new one rises in; the
-    // header / drawer / anchor sit outside `.page-shell` and stay put.
-    viewTransition(() => flushSync(() => setTabParam(tab, "push")));
-  };
+  const goToTab = (tab: Tab) => setTabParam(tab, "push");
   const selectSymbol = (sym: string | null) => setSelectedSymbol(sym, "push");
 
   return (
@@ -220,13 +213,9 @@ export function MarketExplorer() {
         upstreamFeedState={upstreamFeedState}
         searchOptions={globalSearchOptions}
         onJump={(option) => {
-          const jump = () => {
-            setTabParam(option.destination, "push");
-            setSelectedSymbol(option.symbol, "push");
-            setFilter(option.symbol, "replace");
-          };
-          if (option.destination === activeTab) jump();
-          else viewTransition(() => flushSync(jump));
+          setTabParam(option.destination, "push");
+          setSelectedSymbol(option.symbol, "push");
+          setFilter(option.symbol, "replace");
         }}
       />
 
