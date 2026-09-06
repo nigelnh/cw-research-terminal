@@ -334,7 +334,7 @@ describe("AiAnchor — Markdown rendering + research trace", () => {
 });
 
 describe("AiAnchor — visible AI quota", () => {
-  it("guest: shows today's usage and the sign-in upsell", async () => {
+  it("guest: shows today's usage, no sign-in upsell", async () => {
     getAiQuota.mockResolvedValue({
       enabled: true,
       tier: "guest",
@@ -345,10 +345,10 @@ describe("AiAnchor — visible AI quota", () => {
     openAnchorPanel();
     await waitFor(() => expect(screen.getByText("7 / 8")).toBeTruthy());
     expect(screen.getByText(/Today.s AI usage/)).toBeTruthy();
-    expect(screen.getByText(/Sign in for a larger daily allowance/)).toBeTruthy();
+    expect(screen.queryByText(/larger daily allowance/i)).toBeNull();
   });
 
-  it("signed in: shows the larger allowance and no upsell", async () => {
+  it("signed in: shows the larger allowance", async () => {
     authRef.current = { user: { id: "u1" }, status: "authenticated" };
     getAiQuota.mockResolvedValue({
       enabled: true,
@@ -359,7 +359,7 @@ describe("AiAnchor — visible AI quota", () => {
     render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, { wrapper: Wrapper });
     openAnchorPanel();
     await waitFor(() => expect(screen.getByText("17 / 40")).toBeTruthy());
-    expect(screen.queryByText(/Sign in for a larger daily allowance/)).toBeNull();
+    expect(screen.queryByText(/larger daily allowance/i)).toBeNull();
   });
 
   it("renders nothing when the backend says limiting is disabled", async () => {

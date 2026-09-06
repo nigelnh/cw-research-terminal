@@ -173,8 +173,8 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
 // ------------------------------------------------------------------- quota strip
 /**
  * Today's AI-chat allowance, always in view (not a surprise 429). Renders nothing until
- * the backend confirms limiting is on and a daily window exists. A guest sees an upsell
- * to signing in; the bar turns amber near the ceiling.
+ * the backend confirms limiting is on and a daily window exists. The bar turns amber
+ * near the ceiling.
  */
 function QuotaStrip({ quota }: { quota: AiQuota | undefined }) {
   const day = quota?.enabled ? quota.per_day : null;
@@ -203,11 +203,6 @@ function QuotaStrip({ quota }: { quota: AiQuota | undefined }) {
       <div style={{ height: 2, background: "var(--border)", borderRadius: 1, overflow: "hidden" }}>
         <div style={{ width: `${pct}%`, height: "100%", background: bar, transition: "width .3s" }} />
       </div>
-      {quota.tier === "guest" && (
-        <div style={{ color: "var(--t-46)", marginTop: 1 }}>
-          Sign in for a larger daily allowance.
-        </div>
-      )}
     </div>
   );
 }
@@ -557,7 +552,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
             {messages.length === 0 && !streaming && (
               <div
                 className="heading ai-empty-prompt"
-                style={{ color: "var(--t-46)", fontSize: 11, letterSpacing: "0.04em", textAlign: "center", margin: "auto" }}
+                style={{ color: "var(--accent)", fontSize: 11, letterSpacing: "0.04em", textAlign: "center", margin: "auto" }}
               >
                 {emptyPhrase}
               </div>
