@@ -163,23 +163,26 @@ export function useAiChat(
     setHasHydrated(true);
   }, []);
 
-  // Identity boundary: the auth provider has already wiped the local Copilot keys for the
-  // new identity — drop the in-memory copy too so account A's conversations don't linger
-  // in the panel until a reload. Adopts the first settled subject without resetting; a
-  // token refresh (same subject) is a no-op.
+  // Identity boundary. The `useState` initializer above runs before the auth session has
+  // settled, so `store` can hold the previous identity's conversations — or, on the first
+  // load after the owner marker shipped, pre-reconcile leaked history. By the time
+  // `subject` settles, the auth provider has already run `reconcileCopilotOwner()` for it,
+  // so re-reading localStorage here hands the panel the reconciled state with no manual
+  // reload. A repeat settle for the SAME subject (the ~hourly token refresh) is a no-op,
+  // so an in-flight stream is never torn down under it.
   const knownSubject = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (subject === undefined) return;
-    if (knownSubject.current === undefined) {
-      knownSubject.current = subject;
-      return;
-    }
-    if (knownSubject.current === subject) return;
+    if (subject === undefined) return; // auth still settling
+    if (knownSubject.current === subject) return; // unchanged — includes the token refresh
+    const identityChanged = knownSubject.current !== undefined;
     knownSubject.current = subject;
-    abortControllerRef.current?.abort();
-    setIsLoading(false);
-    setError(null);
-    setActivity(null);
+    if (identityChanged) {
+      // A real switch mid-session — tear down anything streaming for the old identity.
+      abortControllerRef.current?.abort();
+      setIsLoading(false);
+      setError(null);
+      setActivity(null);
+    }
     setStore(loadCopilotHistory());
   }, [subject]);
 
