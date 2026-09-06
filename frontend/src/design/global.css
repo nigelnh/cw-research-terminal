@@ -189,6 +189,34 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
   display: inline-block; will-change: transform; pointer-events: none;
 }
 
+/* Phase 15 P3 — spatial continuity.
+
+   Tab switch: only `.page-shell` is named, so the header / instrument drawer / Orbit
+   anchor (all outside it, part of `root`) hold still while the page content clips up
+   and out and the incoming page rises in. No cross-fade. */
+.page-shell { view-transition-name: page; }
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none; }
+  ::view-transition-old(page) {
+    animation: page-leave var(--dur-settle) var(--ease-in) both;
+  }
+  ::view-transition-new(page) {
+    animation: page-enter var(--dur-settle) var(--ease-out) both;
+  }
+  @keyframes page-leave { to { transform: translateY(-12px); clip-path: inset(0 0 100% 0); } }
+  @keyframes page-enter { from { transform: translateY(12px); clip-path: inset(100% 0 0 0); } }
+}
+
+/* Filter / news popovers drop open from their trigger — a clip + short slide, no fade. */
+.filter-panel { animation: popover-drop var(--dur-snap) var(--ease-out) both; }
+@media (prefers-reduced-motion: reduce) {
+  .filter-panel { animation: none; }
+}
+@keyframes popover-drop {
+  from { transform: translateY(-6px); clip-path: inset(0 0 100% 0); }
+}
+
 .bg-background { background-color: var(--bg); }
 .bg-surface { background-color: var(--panel); }
 .bg-surface-hover { background-color: var(--panel-2); }
