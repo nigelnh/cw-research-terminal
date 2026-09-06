@@ -2,6 +2,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+// AiAnchor now reads /api/ai/quota via the backend client; mock it so this test's
+// global `fetch` stub only ever sees the file-extraction call it's counting.
+vi.mock("@/data/backend/backend_client", async (orig) => {
+  const actual = (await orig()) as Record<string, unknown>;
+  return { ...actual, backendClient: { getAiQuota: vi.fn().mockResolvedValue({ enabled: false, tier: "guest" }) } };
+});
 import { CalendarInput } from "@/components/common/calendar_input";
 import { attachmentError, MAX_ATTACHMENT_BYTES } from "@/data/ai/use_file_attachments";
 import { AiChatProvider } from "@/data/ai/ai_chat_provider";
@@ -66,7 +74,10 @@ describe("File attachment preview", () => {
   it("previews local extraction, preserves attachments on minimize, and blocks file egress to AI", async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ files: [{ name: "a.csv", characters: 11, warnings: [], sections: [{ location: "row 1", text: "HPG | 12345" }] }], analysis_enabled: false }), { status: 200 }));
     vi.stubGlobal("fetch", fetch);
-    const page = render(<AiChatProvider><AiAnchor /></AiChatProvider>);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const page = render(
+      <QueryClientProvider client={qc}><AiChatProvider><AiAnchor /></AiChatProvider></QueryClientProvider>
+    );
     fireEvent.keyDown(page.getByRole("button", { name: "Open research assistant" }), { key: "Enter" });
     const input = page.getByLabelText("Upload research files");
     fireEvent.change(input, { target: { files: [new File(["HPG,12345"], "a.csv", { type: "text/csv" })] } });

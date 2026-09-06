@@ -212,6 +212,35 @@ class RateLimiter:
             except Exception:  # noqa: BLE001
                 return RateLimitDecision(False, 5, tier, degraded=True)
 
+    async def peek(
+        self, *, tier: str, key: str, items: tuple[RateLimitItem, ...]
+    ) -> list[dict]:
+        """Current usage for each ``item`` WITHOUT consuming a hit (for a "quota remaining"
+        read). One dict per item: ``{window, limit, used, remaining, resets_at}``. Best
+        effort - if the backend errors, returns ``[]`` (the caller shows nothing rather
+        than a wrong number)."""
+        if not self._configured or self._primary is None:
+            await self.configure()
+        assert self._primary is not None
+        namespaced = f"{tier}:{key}"
+        out: list[dict] = []
+        try:
+            for item in items:
+                stats = await self._primary.get_window_stats(item, namespaced)
+                limit = item.amount
+                remaining = max(0, int(stats.remaining))
+                out.append({
+                    "window": f"{item.amount}/{item.GRANULARITY.name}",
+                    "limit": limit,
+                    "used": max(0, limit - remaining),
+                    "remaining": remaining,
+                    "resets_at": int(stats.reset_time),
+                })
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Rate limiter peek failed (%s)", exc.__class__.__name__)
+            return []
+        return out
+
     async def reset(self) -> None:
         """Test helper - wipe all counters."""
         for lim in (self._primary, self._fallback):

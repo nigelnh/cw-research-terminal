@@ -72,6 +72,17 @@ class InstrumentRegistry:
             await self.initialize()
         return self._instruments.get(symbol.strip().upper())
 
+    def underlying_of(self, symbol: str) -> Optional[str]:
+        """Synchronous best-effort: the CW's underlying ticker, or None if not a known CW.
+        Reads the already-loaded index only (no init) - safe on a hot request path."""
+        spec = self._instruments.get(symbol.strip().upper())
+        return spec.underlying_symbol.upper() if (spec and spec.underlying_symbol) else None
+
+    def warrants_for_underlying(self, underlying: str) -> Set[str]:
+        """Synchronous best-effort: all known CW symbols on ``underlying`` (empty if none
+        loaded / unknown). Reads the already-loaded index only."""
+        return set(self._underlying_index.get(underlying.strip().upper(), set()))
+
     async def search(
         self,
         query: Optional[str] = None,

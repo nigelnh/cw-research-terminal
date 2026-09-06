@@ -1,8 +1,9 @@
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from starlette.requests import HTTPConnection
 
 from app.ai.ai_errors import AiErrorCode, classify, http_status, user_message
 from app.ai.ai_limits import ai_daily_budget, validate_chat_input
@@ -13,8 +14,12 @@ from app.ai.openrouter_client import (
     OpenRouterClient,
     openrouter_client,
 )
+from app.auth.current_user import CurrentUser, get_optional_current_user
 from app.core.config import settings
+from app.security.client_ip import resolve_client_key
 from app.security.concurrency import GateTimeout, ai_call_gate
+from app.security.policies import resolve_policy
+from app.security.rate_limiter import rate_limiter
 
 logger = logging.getLogger(__name__)
 ai_router = APIRouter(prefix="/api/ai", tags=["AI Research Copilot"])
@@ -44,6 +49,37 @@ async def ai_health(client: OpenRouterClient = Depends(get_client)):
         model=client.model,
         has_api_key=bool(client.api_key),
     )
+
+
+@ai_router.get("/quota")
+async def ai_quota(
+    request: Request,
+    user: CurrentUser | None = Depends(get_optional_current_user),
+):
+    """Today's AI-chat usage for this caller, so the panel can show it before a 429 - not
+    after. Same key + item set the rate-limit middleware uses for `/api/ai/chat`: a guest
+    (anonymous) is IP-keyed on the smaller allowance, a signed-in caller is subject-keyed
+    on the larger one. Never consumes a request."""
+    tier_label = "authenticated" if user else "guest"
+    if not settings.PUBLIC_RATE_LIMIT_ENABLED:
+        return {"enabled": False, "tier": tier_label}
+
+    policy = resolve_policy("POST", "/api/ai/chat")
+    if policy is None:  # pragma: no cover - the AI policy is always in the table
+        return {"enabled": False, "tier": tier_label}
+
+    subject = user.subject if user else None
+    key = resolve_client_key(HTTPConnection(request.scope), subject=subject)
+    items = policy.items(authenticated=subject is not None)
+    windows = await rate_limiter.peek(tier=policy.tier, key=key, items=items)
+
+    by_granularity = {w["window"].split("/", 1)[1]: w for w in windows}
+    return {
+        "enabled": True,
+        "tier": tier_label,
+        "per_day": by_granularity.get("day"),
+        "per_minute": by_granularity.get("minute"),
+    }
 
 @ai_router.post("/chat")
 async def chat_endpoint(
@@ -114,10 +150,18 @@ async def chat_endpoint(
     from app.ai.ai_system_prompt import detect_reply_language
 
     _reply_lang = detect_reply_language(last_user_query)
+    _tools_ran = bool(tool_results)
     for _m in reversed(raw_messages):
         if _m["role"] == "user":
             _tag = "Trả lời bằng tiếng Việt." if _reply_lang == "Vietnamese" else "Respond in English."
             _m["content"] = f"{_m['content']}\n\n[{_tag}]"
+            if _tools_ran:
+                # Weak free models keep offering to "run the queries" even with the results
+                # already attached. One more nudge right where they look last.
+                _m["content"] += (
+                    "\n[The tool results you need are already attached and complete. "
+                    "Answer from them now - do not offer to run more queries or come back later.]"
+                )
             break
 
     if req.stream:

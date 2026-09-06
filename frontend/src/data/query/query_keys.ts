@@ -19,6 +19,7 @@ export const queryKeys = {
   all: ["cw-research"] as const,
   marketOverview: ["cw-research", "market-overview"] as const,
   stockProfiles: (symbols: string[]) => ["cw-research", "stock-profiles", ...symbols] as const,
+  aiQuota: (subject: string) => ["cw-research", "ai-quota", subject] as const,
 
   history: {
     all: ["cw-research", "history"] as const,

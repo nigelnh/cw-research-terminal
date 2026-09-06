@@ -236,6 +236,32 @@ class ToolExecutor:
         return result
 
     @staticmethod
+    def _ranking_scope(
+        query: str,
+        resolved: Dict[str, "ResolvedInstrument"],
+        watched: Optional[List[str]],
+    ) -> Optional[List[str]]:
+        """Narrow a ranking snapshot to just the warrants on a named underlying when the
+        query is clearly 'which warrant on <stock>' - a short, unambiguous list beats
+        handing the model the whole universe and hoping it filters. Falls back to the full
+        watched set (or the tracked universe when that's empty too)."""
+        from app.instruments.instrument_registry import instrument_registry
+
+        if "warrant" not in query.lower() and "cw" not in query.lower():
+            return watched
+        for sym, inst in resolved.items():
+            if inst.instrument_type == "CW":
+                continue
+            cws = instrument_registry.warrants_for_underlying(sym)
+            if not cws:
+                continue
+            pool = set(watched) if watched else cws
+            scoped = sorted(cws & pool) or sorted(cws)
+            if scoped:
+                return scoped
+        return watched
+
+    @staticmethod
     def _watched_universe(context: Optional[ResearchContextEnvelope]) -> Optional[List[str]]:
         """The user's watchlist for scoping a dashboard snapshot. The frontend sends this
         as `watchlist`; `watchedSymbols` is the older field name, still accepted. Returns
@@ -337,8 +363,9 @@ class ToolExecutor:
             # SET the user is asking to rank (e.g. "most active HPG warrant by volume").
             if wants_ranking and len(self._executed_calls) < self.max_tool_calls:
                 watched = self._watched_universe(context)
+                scope = self._ranking_scope(query, resolved, watched)
                 await self.call_tool(
-                    "get_dashboard_snapshot", {"symbols": watched} if watched else {}
+                    "get_dashboard_snapshot", {"symbols": scope} if scope else {}
                 )
 
         # Case 2a: news / disclosure query with no specific symbol (or on the NEWS page)

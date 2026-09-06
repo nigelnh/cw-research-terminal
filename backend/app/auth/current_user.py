@@ -87,3 +87,25 @@ async def get_current_user(
     # Stash for downstream logging / rate-limit keys without re-verifying.
     request.state.current_user = user
     return user
+
+
+async def get_optional_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+) -> CurrentUser | None:
+    """Like ``get_current_user`` but never raises: returns ``None`` for a missing,
+    malformed, or expired token instead of a 401/503. For routes where anonymous access
+    is legitimate but a verified identity, when present, changes behaviour (e.g. the AI
+    tier's guest-vs-signed-in quota)."""
+    verifier = get_verifier()
+    if not verifier.is_configured or credentials is None:
+        return None
+    if (credentials.scheme or "").lower() != "bearer" or not credentials.credentials:
+        return None
+    try:
+        claims = verifier.verify(credentials.credentials)
+    except (AuthConfigError, AuthError):
+        return None
+    user = CurrentUser.from_claims(claims)
+    request.state.current_user = user
+    return user

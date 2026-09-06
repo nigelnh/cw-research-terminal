@@ -4,6 +4,8 @@ import { Orbit, Plus, History, Minus, CornerDownLeft, AtSign, X } from "lucide-r
 import { useAiChatContext } from "@/data/ai/ai_chat_provider";
 import type { ResearchContextEnvelope, TraceStep } from "@/data/ai/use_ai_chat";
 import { formatRelativeTime } from "@/data/ai/copilot_history_store";
+import { useAiQuota } from "@/data/ai/use_ai_quota";
+import type { AiQuota } from "@/data/backend/backend_client";
 import { AssistantMarkdown } from "./assistant_markdown";
 import { ATTACHMENT_ACCEPT, useFileAttachments } from "@/data/ai/use_file_attachments";
 
@@ -169,6 +171,48 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
   );
 }
 
+// ------------------------------------------------------------------- quota strip
+/**
+ * Today's AI-chat allowance, always in view (not a surprise 429). Renders nothing until
+ * the backend confirms limiting is on and a daily window exists. A guest sees an upsell
+ * to signing in; the bar turns amber near the ceiling.
+ */
+function QuotaStrip({ quota }: { quota: AiQuota | undefined }) {
+  const day = quota?.enabled ? quota.per_day : null;
+  if (!day || !quota) return null;
+
+  const pct = day.limit > 0 ? Math.min(100, Math.round((day.used / day.limit) * 100)) : 0;
+  const near = day.remaining <= Math.max(1, Math.ceil(day.limit * 0.15));
+  const bar = near ? "var(--warn)" : "var(--accent)";
+
+  return (
+    <div
+      className="mono"
+      style={{
+        padding: "6px 12px 8px",
+        borderTop: "1px solid var(--border)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        fontSize: 10,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", color: near ? "var(--warn)" : "var(--t-55)" }}>
+        <span>Today&rsquo;s AI usage</span>
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>{day.used} / {day.limit}</span>
+      </div>
+      <div style={{ height: 2, background: "var(--border)", borderRadius: 1, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: bar, transition: "width .3s" }} />
+      </div>
+      {quota.tier === "guest" && (
+        <div style={{ color: "var(--t-46)", marginTop: 1 }}>
+          Sign in for a larger daily allowance.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------- composer
 function Composer({
   onSend,
@@ -298,6 +342,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
   } = chat;
 
   const attachments = useFileAttachments(activeConversationId);
+  const { quota, refresh: refreshQuota } = useAiQuota();
 
   const [pos, setPos] = useState<Pos>(() => (typeof window === "undefined" ? { x: 0, y: 0 } : loadPos()));
   const [open, setOpen] = useState(false);
@@ -387,9 +432,16 @@ export function AiAnchor({ context }: AiAnchorProps) {
     (text: string) => {
       nearBottomRef.current = true;
       sendMessage(text, context);
+      // the rate-limit hit lands server-side almost immediately; give it a beat then re-read.
+      window.setTimeout(refreshQuota, 900);
     },
-    [sendMessage, context],
+    [sendMessage, context, refreshQuota],
   );
+
+  // fresh count whenever the panel is opened
+  useEffect(() => {
+    if (open) refreshQuota();
+  }, [open, refreshQuota]);
 
   const box = useMemo(() => panelBox(pos), [pos]);
 
@@ -554,6 +606,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
             )}
           </div>
 
+          <QuotaStrip quota={quota} />
           <Composer key={activeConversationId} onSend={send} disabled={isLoading} draftKey={DRAFT_KEY} attachments={attachments} />
         </div>
       )}
