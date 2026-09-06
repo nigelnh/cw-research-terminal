@@ -3,9 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __setReducedMotionForTests,
   DIST,
+  draw,
   flip,
+  introChart,
   prefersReducedMotion,
   spring,
+  springTransform,
   SPRINGS,
   STAGGER_BASE_MS,
   STAGGER_CAP,
@@ -104,6 +107,65 @@ describe("flip", () => {
     el.appendChild(el.firstElementChild!);
     expect(() => play()).not.toThrow();
     el.remove();
+  });
+});
+
+describe("reduced-motion is a hard gate on every JS entry point", () => {
+  it("draw / springTransform / introChart / flip all no-op and start no animation", () => {
+    __setReducedMotionForTests(true);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    (path as unknown as { getTotalLength: () => number }).getTotalLength = () => 40;
+    svg.appendChild(path);
+    const div = document.createElement("div");
+    div.appendChild(document.createElement("span")).setAttribute("data-symbol", "A");
+    document.body.append(svg, div);
+
+    expect(draw(path as unknown as SVGGeometryElement)).toBeNull();
+    expect(springTransform(div, "translateY(4px)")).toBeNull();
+    expect(() => introChart(svg)).not.toThrow();
+    const play = flip(div);
+    div.appendChild(div.firstElementChild!); // "reorder"
+    expect(() => play()).not.toThrow();
+
+    // nothing was scheduled
+    expect(typeof document.getAnimations === "function" ? document.getAnimations().length : 0).toBe(0);
+
+    svg.remove();
+    div.remove();
+  });
+});
+
+describe("draw", () => {
+  const makePath = (len: number) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path") as unknown as SVGGeometryElement & {
+      getTotalLength: () => number;
+      animate: unknown;
+    };
+    path.getTotalLength = () => len;
+    return path;
+  };
+
+  it("stamps the dash props then clears them on the animation's cancel/finish", () => {
+    __setReducedMotionForTests(false);
+    const listeners: Record<string, () => void> = {};
+    const path = makePath(120);
+    path.animate = () =>
+      ({
+        addEventListener: (ev: string, cb: () => void) => {
+          listeners[ev] = cb;
+        },
+      }) as unknown as Animation;
+    expect(draw(path)).not.toBeNull();
+    expect(path.style.strokeDasharray).toBe("120");
+    listeners.cancel?.();
+    expect(path.style.strokeDasharray).toBe("");
+  });
+
+  it("returns null for a zero-length or non-animatable element", () => {
+    __setReducedMotionForTests(false);
+    expect(draw(makePath(0))).toBeNull(); // zero length
+    expect(draw(makePath(50))).toBeNull(); // no .animate in this env
   });
 });
 
