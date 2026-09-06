@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 import { useMarketOverview, type IndexOverview, type VolumeLeader } from "@/data/query/use_market_overview";
 import { DASH, fmtPrice, fmtVol } from "@/components/common/grid_table";
 import { PolledRealtimeValue, RollingNumber } from "@/components/common/realtime_value";
-import { introChart } from "@/design/motion";
+import { introChart, prefersReducedMotion, spring } from "@/design/motion";
 
 const ORDER = ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"];
 const number = (value: number | null | undefined) => value == null ? DASH : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -23,8 +23,18 @@ const marketTone = (state: VolumeLeader["market_state"]) => {
   return "var(--t-50)";
 };
 
-function DirectionTriangle({ down = false, color }: { down?: boolean; color: string }) {
-  return <svg className="overview-direction-icon" aria-hidden="true" viewBox="0 0 12 12" fill={color}>
+function DirectionTriangle({ down = false, color, pulseKey }: { down?: boolean; color: string; pulseKey?: number | null }) {
+  const ref = useRef<SVGSVGElement>(null);
+  const prev = useRef(pulseKey);
+  useLayoutEffect(() => {
+    const had = prev.current;
+    prev.current = pulseKey;
+    const el = ref.current;
+    if (had == null || pulseKey == null || had === pulseKey) return;
+    if (!el || prefersReducedMotion() || typeof el.animate !== "function") return;
+    el.animate([{ transform: "scale(1.4)" }, { transform: "scale(1)" }], spring("snap"));
+  }, [pulseKey]);
+  return <svg ref={ref} className="overview-direction-icon" aria-hidden="true" viewBox="0 0 12 12" fill={color}>
     <path d={down ? "M1 2h10L6 11Z" : "M1 10h10L6 1Z"} />
   </svg>;
 }
@@ -226,9 +236,9 @@ function IndexCard({ item }: { item: IndexOverview }) {
     </div>
     <div className="index-card-line"><span>VOL <PolledRealtimeValue value={item.volume} resetKey={sessionKey}>{compact(item.volume)}</PolledRealtimeValue></span><span>VAL <PolledRealtimeValue value={item.trading_value} resetKey={sessionKey}>{compact(item.trading_value)}</PolledRealtimeValue></span></div>
     <div className="index-card-breadth">
-      <span style={{ color: "var(--up)" }}><DirectionTriangle color="var(--up)" /> <PolledRealtimeValue value={item.advancing} resetKey={sessionKey}>{number(item.advancing)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.ceiling} resetKey={sessionKey} style={{ color: "var(--price-ceiling)" }}>({number(item.ceiling)})</PolledRealtimeValue></span>
+      <span style={{ color: "var(--up)" }}><DirectionTriangle color="var(--up)" pulseKey={item.advancing} /> <PolledRealtimeValue value={item.advancing} resetKey={sessionKey}>{number(item.advancing)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.ceiling} resetKey={sessionKey} style={{ color: "var(--price-ceiling)" }}>({number(item.ceiling)})</PolledRealtimeValue></span>
       <span style={{ color: "var(--flat)" }}>― <PolledRealtimeValue value={item.unchanged} resetKey={sessionKey}>{number(item.unchanged)}</PolledRealtimeValue></span>
-      <span style={{ color: "var(--down)" }}><DirectionTriangle down color="var(--down)" /> <PolledRealtimeValue value={item.declining} resetKey={sessionKey}>{number(item.declining)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.floor} resetKey={sessionKey} style={{ color: "var(--price-floor)" }}>({number(item.floor)})</PolledRealtimeValue></span>
+      <span style={{ color: "var(--down)" }}><DirectionTriangle down color="var(--down)" pulseKey={item.declining} /> <PolledRealtimeValue value={item.declining} resetKey={sessionKey}>{number(item.declining)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.floor} resetKey={sessionKey} style={{ color: "var(--price-floor)" }}>({number(item.floor)})</PolledRealtimeValue></span>
     </div>
   </article>;
 }

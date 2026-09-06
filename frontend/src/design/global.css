@@ -217,6 +217,28 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
   from { transform: translateY(-6px); clip-path: inset(0 0 100% 0); }
 }
 
+/* Phase 15 P5 — icons express state.
+
+   The Orbit mark is the one sanctioned ambient loop: it turns ONLY while a request
+   is in flight (a load indicator wearing the brand), dead still otherwise. */
+.orbit-thinking { animation: orbit-turn 1.7s linear infinite; transform-origin: center; }
+@keyframes orbit-turn { to { transform: rotate(360deg); } }
+
+/* The filter caret rotates to point up when the popover is open — it never cuts. */
+.filter-caret { display: inline-block; transition: transform var(--dur-snap) var(--ease-out); }
+.filter-trigger[aria-expanded="true"] .filter-caret { transform: rotate(180deg); }
+
+/* Each research-trace step wipes in from the left as it starts (live trace only —
+   re-expanding a settled trace doesn't replay them). */
+.trace-step.is-live { animation: trace-step-in var(--dur-snap) var(--ease-out) both; }
+@keyframes trace-step-in { from { transform: translateX(-5px); clip-path: inset(0 0 0 100%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-thinking { animation: none; }
+  .filter-caret { transition: none; }
+  .trace-step.is-live { animation: none; }
+}
+
 .bg-background { background-color: var(--bg); }
 .bg-surface { background-color: var(--panel); }
 .bg-surface-hover { background-color: var(--panel-2); }
@@ -381,7 +403,7 @@ select:focus-visible,
 .index-card-main small, .index-card-breadth small { font-size: 8.5px; }
 .index-card-line { color: var(--t-92); font-size: 9px; }
 .index-card-breadth { font-size: 9.5px; }
-.overview-direction-icon { width: 1em; height: 1em; vertical-align: -0.12em; }
+.overview-direction-icon { width: 1em; height: 1em; vertical-align: -0.12em; transform-origin: center; }
 .leader-panel { display: flex; flex-direction: column; }
 .leader-title { height: 24px; padding: 4px 8px; display: flex; align-items: center; border-bottom: 1px solid var(--border-row); min-width: 0; flex: none; }
 .leader-title span { display: block; color: var(--t-92); font-size: 10.5px; white-space: nowrap; }
