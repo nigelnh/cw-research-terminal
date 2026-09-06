@@ -64,8 +64,10 @@ export function useChartTheme() {
 
 function readTheme() {
   const grid = token("--border-row", "#333333");
-  const tick = token("--t-46", "#767676");
-  const label = token("--t-60", "#999999");
+  // Axis text is data, not chrome — it reads at the same weight as the table columns
+  // (the same --t-92 the Dashboard/Research tables use for non-semantic values).
+  const tick = token("--t-92", "#ebebeb");
+  const label = token("--t-92", "#ebebeb");
   return {
     grid,
     tick,

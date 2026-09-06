@@ -128,6 +128,72 @@ async def test_successful_non_streaming_chat(mock_openrouter_client):
 
 
 @pytest.mark.asyncio
+async def test_off_topic_turn_carries_the_scope_reminder_last(mock_openrouter_client):
+    """The scope rule lives in the system prompt, but this free model honours a rule far
+    more reliably when it also closes the turn it is answering — the same reason the
+    language tag is appended. Without it, "solve two sum leetcode in python" was answered."""
+    app.dependency_overrides[get_client] = lambda: mock_openrouter_client
+
+    fake_response = MockHttpxResponse(
+        status_code=200,
+        json_data={
+            "id": "gen-1", "model": "stealth/ox-alpha",
+            "choices": [{"message": {"role": "assistant", "content": "That's outside what I do."}}],
+        },
+    )
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = fake_response
+        response = client.post(
+            "/api/ai/chat",
+            json={
+                "messages": [{"role": "user", "content": "solve two sum leetcode in python"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200
+        sent = mock_post.call_args[1]["json"]["messages"]
+
+        # the domain lock is in the system prompt ...
+        assert "DOMAIN-LOCKED" in sent[0]["content"]
+        # ... and reinforced at the very end of the user turn, after the language tag
+        last_user = [m for m in sent if m["role"] == "user"][-1]
+        assert "solve two sum leetcode in python" in last_user["content"]
+        assert "Scope check" in last_user["content"]
+        assert "do not answer it anyway" in last_user["content"]
+        assert last_user["content"].index("Scope check") > last_user["content"].index("Respond in English")
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_scope_reminder_is_attached_to_in_scope_turns_too(mock_openrouter_client):
+    """It is a per-turn check, not an off-topic classifier — nothing server-side decides
+    what is in scope, so a legitimate warrant question carries the same reminder and is
+    answered normally."""
+    app.dependency_overrides[get_client] = lambda: mock_openrouter_client
+
+    fake_response = MockHttpxResponse(
+        status_code=200,
+        json_data={
+            "id": "gen-2", "model": "stealth/ox-alpha",
+            "choices": [{"message": {"role": "assistant", "content": "Vega is..."}}],
+        },
+    )
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = fake_response
+        response = client.post(
+            "/api/ai/chat",
+            json={"messages": [{"role": "user", "content": "what is vega?"}], "stream": False},
+        )
+        assert response.status_code == 200
+        sent = mock_post.call_args[1]["json"]["messages"]
+        last_user = [m for m in sent if m["role"] == "user"][-1]
+        assert "Scope check" in last_user["content"]
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_upstream_401_403_sanitized_502(mock_openrouter_client):
     app.dependency_overrides[get_client] = lambda: mock_openrouter_client
 
