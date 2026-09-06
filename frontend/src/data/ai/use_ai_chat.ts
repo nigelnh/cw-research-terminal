@@ -146,7 +146,11 @@ export function normalizePlainResponse(text: string): string {
     .trim();
 }
 
-export function useAiChat(apiEndpoint: string = DEFAULT_AI_CHAT_ENDPOINT) {
+export function useAiChat(
+  apiEndpoint: string = DEFAULT_AI_CHAT_ENDPOINT,
+  /** Verified auth subject, `null` for a guest, `undefined` while auth is still settling. */
+  subject: string | null | undefined = undefined,
+) {
   const [store, setStore] = useState<CopilotHistoryStore>(() => loadCopilotHistory());
   const [hasHydrated, setHasHydrated] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -158,6 +162,26 @@ export function useAiChat(apiEndpoint: string = DEFAULT_AI_CHAT_ENDPOINT) {
   useEffect(() => {
     setHasHydrated(true);
   }, []);
+
+  // Identity boundary: the auth provider has already wiped the local Copilot keys for the
+  // new identity — drop the in-memory copy too so account A's conversations don't linger
+  // in the panel until a reload. Adopts the first settled subject without resetting; a
+  // token refresh (same subject) is a no-op.
+  const knownSubject = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (subject === undefined) return;
+    if (knownSubject.current === undefined) {
+      knownSubject.current = subject;
+      return;
+    }
+    if (knownSubject.current === subject) return;
+    knownSubject.current = subject;
+    abortControllerRef.current?.abort();
+    setIsLoading(false);
+    setError(null);
+    setActivity(null);
+    setStore(loadCopilotHistory());
+  }, [subject]);
 
   // Compute active conversation
   const activeConversation = useMemo(() => {
