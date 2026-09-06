@@ -6,6 +6,7 @@ import { DASH, DismissCell, HiddenNote, dteDisplay, dteNumber, fmtPrice, fmtRati
 import { MarketOverviewStrip } from "@/features/watchlist/market_overview_strip";
 import { useStockProfiles } from "@/data/query/use_stock_profiles";
 import { WatchlistSymbolSearch, matchingSymbols, type WatchlistSearchOption } from "@/features/watchlist/watchlist_symbol_search";
+import { ResearchAnalyticsBand } from "./research_analytics_band";
 import { ResearchTable, type ResearchColumn } from "./research_table";
 
 interface ResearchUniverseProps {
@@ -46,12 +47,15 @@ const STOCK_COLUMNS: ResearchColumn<StockRegistryRow>[] = [
 
 export function ResearchUniverse({ selectedSymbol = null, onSelectSymbol, filter = "" }: ResearchUniverseProps) {
   const setSelected = onSelectSymbol ?? (() => {});
-  const { isInWatchlist, addToWatchlist } = useWatchlist();
+  const { items, isInWatchlist, addToWatchlist } = useWatchlist();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
   const [symbolSearch, setSymbolSearch] = useState("");
   const hiddenRows = useHiddenRows();
   const stockHidden = useHiddenRows();
   const term = filter.trim().toUpperCase().replace(/^\//, "").trim();
+  // The analytics band charts the user's own watchlist, not the whole ACTIVE registry:
+  // it describes what they actually follow, and Dashboard has already warmed these reads.
+  const watchlistSymbols = useMemo(() => items.map(i => i.symbol), [items]);
   const active = useActiveWarrants({ status: "ACTIVE" });
   // Metadata only: suggestions can find discovered symbols without adding quote subscriptions.
   const discovered = useActiveWarrants({ status: "ALL" });
@@ -90,6 +94,7 @@ export function ResearchUniverse({ selectedSymbol = null, onSelectSymbol, filter
 
   return <div className="page-shell">
     <MarketOverviewStrip />
+    <ResearchAnalyticsBand symbols={watchlistSymbols} selectedSymbol={selectedSymbol} onSelectSymbol={setSelected} />
     <div className="page-title-row" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, position: "relative" }}>
       <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>Registry</span>
       <WatchlistSymbolSearch scope="research" options={searchOptions} value={symbolSearch} onSubmit={setSymbolSearch} />
