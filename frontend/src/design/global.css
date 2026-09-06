@@ -188,10 +188,9 @@ select:focus-visible,
   outline-offset: 1px;
 }
 
-/* The AI composer uses the terminal's own language: no rectangular box around the
-   textarea — a caret, a faint ground shift, and a subtle accent on the container's
-   top border. Consistent across Chrome/Safari (both draw a default textarea :focus
-   ring otherwise). */
+/* The AI composer uses the terminal's own language: no box, no ring, no ground shift
+   on focus — the blinking caret is the only affordance. Consistent across Chrome/Safari
+   (both draw a default textarea :focus ring otherwise). */
 .ai-composer textarea {
   outline: none !important;
   box-shadow: none !important;
@@ -201,10 +200,6 @@ select:focus-visible,
 .ai-composer textarea:focus,
 .ai-composer textarea:focus-visible {
   outline: none !important;
-}
-.ai-composer:focus-within {
-  border-top-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
 }
 
 /* Grid Terminal — dense vertical cell rules on data tables ("Direction C"). Applied
@@ -258,19 +253,52 @@ select:focus-visible,
 }
 
 /* Targeted table/filter refinements; retain the Grid Terminal type and palette. */
-.watchlist-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--border-strong); }
+
+/* Fixed-frame pages: the header, index strip, top-volume panels and the section
+   title stay put; only the data table scrolls. Each *-table-scroll is a flex child
+   that claims the leftover height (flex:1 / min-height:0) and scrolls both axes. */
+.page-shell { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.page-shell > .market-overview-wrap,
+.page-shell > .market-overview-state,
+.page-title-row { flex-shrink: 0; }
+
+.watchlist-table-scroll,
+.news-table-scroll { flex: 1; min-height: 0; max-width: 100%; overflow: auto; border: 1px solid var(--border-strong); }
+.registry-table-scroll { flex: 1; min-height: 0; max-width: 100%; overflow: auto; border: 1px solid var(--border-strong); }
+
+/* Column headers ride along the top edge of their own scroll box. border-collapse
+   drops the <tr> border when sticky, so the rule is repainted as a th box-shadow. */
+.watchlist-table thead th,
+.registry-table thead th,
+.news-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg);
+  box-shadow: inset 0 -1px 0 var(--border-strong);
+}
 
 .market-overview-wrap { position: relative; display: grid; grid-template-columns: minmax(600px, 1.7fr) minmax(400px, 1fr); gap: 8px; margin-bottom: 10px; }
 .market-overview-wrap.indices-only { grid-template-columns: 1fr; }
 .index-viewer, .top-exchange-viewer { display: grid; min-width: 0; gap: 6px; }
 .index-viewer { grid-template-columns: repeat(4, minmax(140px, 1fr)); }
 .top-exchange-viewer { grid-template-columns: repeat(2, minmax(190px, 1fr)); }
-.index-card, .leader-panel, .market-overview-state { height: 154px; border: 1px solid var(--border-strong); background: var(--panel); min-width: 0; overflow: hidden; }
-.index-card { padding: 7px 8px; display: grid; grid-template-rows: minmax(0, 1fr) repeat(3, 16px); row-gap: 3px; }
+.index-card, .leader-panel, .market-overview-state { height: 176px; border: 1px solid var(--border-strong); background: var(--panel); min-width: 0; overflow: hidden; }
+.index-card { padding: 7px 8px; display: grid; grid-template-rows: minmax(0, 1fr) 15px repeat(3, 16px); row-gap: 3px; }
 .overview-spark-wrap { position: relative; min-height: 0; border-bottom: 1px solid var(--border-row); background: var(--bg); }
 .overview-spark { display: block; width: 100%; height: 100%; min-height: 0; }
 .overview-spark-tag { position: absolute; top: 2px; right: 3px; font-size: 7.5px; line-height: 1; letter-spacing: 0.04em; color: var(--t-40); pointer-events: auto; }
 .overview-spark-tag.is-stale { color: var(--flat); }
+.overview-spark-ref {
+  position: absolute; right: 3px; transform: translateY(-50%);
+  font-size: 7.5px; line-height: 1; letter-spacing: 0.03em; white-space: nowrap;
+  color: var(--t-50); background: color-mix(in srgb, var(--bg) 78%, transparent);
+  padding: 0 2px; pointer-events: none;
+}
+.index-hourvol { display: flex; align-items: stretch; gap: 2px; height: 100%; min-height: 0; }
+.index-hourvol > span { flex: 1; min-width: 0; position: relative; background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.index-hourvol > span > i { position: absolute; inset: auto 0 0 0; display: block; background: color-mix(in srgb, var(--accent) 42%, transparent); }
+.index-hourvol.is-empty { visibility: hidden; }
 .overview-spark-empty { height: 100%; min-height: 0; display: grid; place-items: center; background: var(--bg); color: var(--t-40); font-size: 8px; }
 .index-card-main, .index-card-line, .index-card-breadth { display: flex; justify-content: space-between; align-items: baseline; white-space: nowrap; }
 .index-card-main { gap: 6px; font-size: 10.5px; }
@@ -302,7 +330,7 @@ select:focus-visible,
   .market-overview-wrap { display: block; overflow-x: auto; padding-bottom: 20px; }
   .index-viewer { min-width: 620px; }
   .top-exchange-viewer { min-width: 620px; grid-template-columns: repeat(2, 1fr); margin-top: 6px; }
-  .leader-panel { height: 154px; }
+  .leader-panel { height: 176px; }
   .research-registry-grid { display: block; }
   .research-stock-panel { width: 100%; margin-top: 16px; }
 }
@@ -326,9 +354,9 @@ select:focus-visible,
 .watchlist-search-empty { padding: 18px 10px; text-align: center; color: var(--t-46); font-size: 10.5px; }
 .watchlist-row.is-search-match, .watchlist-row.is-selected { box-shadow: inset 3px 0 var(--accent); }
 .untracked-realtime-mark::after { content: "◇"; margin-left: 5px; color: var(--t-40); font-size: .82em; }
-.research-registry-grid { display: grid; grid-template-columns: minmax(720px, 1fr) 300px; gap: 16px; align-items: start; }
-.research-registry-panel, .research-stock-panel { min-width: 0; }
-.registry-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--border-strong); }
+.research-registry-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(720px, 1fr) 300px; gap: 16px; align-items: stretch; }
+.research-registry-panel, .research-stock-panel { min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.research-registry-panel > .registry-panel-label, .research-stock-panel > .registry-panel-label { flex-shrink: 0; }
 .registry-table th, .registry-table td { white-space: nowrap; }
 .registry-table .is-drop-target, .registry-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .registry-row.is-search-match, .registry-row.is-selected, .news-row.is-search-match { box-shadow: inset 3px 0 var(--accent); }
