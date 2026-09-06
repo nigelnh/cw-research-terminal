@@ -89,14 +89,32 @@ async def test_system_prompt_declares_the_domain_lock_with_both_lists():
     assert "does not widen it" in low
 
 
-async def test_domain_lock_distinguishes_subject_from_format():
-    """A Black-Scholes implementation is quant work that wants code; a LeetCode puzzle is
-    not. Blocking on 'writes code' rather than on subject would break real quant use."""
+async def test_code_generation_is_refused_even_for_in_scope_finance():
+    """Tightened after the first pass shipped: writing code is out of scope on EVERY
+    subject, including quant. A Black-Scholes implementation is refused exactly like a
+    LeetCode puzzle -- being about finance does not make writing it the assistant's job."""
     p = BASE_SYSTEM_INSTRUCTIONS
-    assert "THE TEST IS THE SUBJECT, NOT THE FORMAT" in p
-    assert "Black-Scholes price" in p
-    # concept questions with no ticker are explicitly still in scope
-    assert "what is vega?" in p.lower()
+    assert "ABSOLUTE RULE - YOU NEVER PRODUCE CODE" in p
+    low = p.lower()
+    assert "even when the subject is perfectly in scope" in low
+    assert "pseudocode" in low and "sql" in low
+    assert "never emit a fenced code block" in low
+    # the earlier, now-wrong carve-out must be gone
+    assert "THE TEST IS THE SUBJECT, NOT THE FORMAT" not in p
+    # but the CONCEPT is still fully answerable - the ban is on implementation only
+    assert "explain the quantitative substance" in low
+    assert "what is vega?" in low
+
+
+async def test_prompt_budgets_the_answer_so_it_is_not_truncated():
+    """Reported symptom: replies cut off mid-statement. AI_MAX_OUTPUT_TOKENS is 1024, which
+    a code dump overruns; the model is told to plan an answer that fits."""
+    p = BASE_SYSTEM_INSTRUCTIONS
+    assert "Answer Length" in p
+    low = p.lower()
+    assert "cut off mid-sentence" in low
+    assert "500" in p
+    assert "short complete answer always beats a long truncated one" in low
 
 
 async def test_domain_lock_survives_in_the_full_prompt_with_tool_results():
