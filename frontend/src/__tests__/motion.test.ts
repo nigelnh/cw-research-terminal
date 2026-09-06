@@ -1,14 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
+// @vitest-environment happy-dom
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __setReducedMotionForTests,
   DIST,
   prefersReducedMotion,
   spring,
-  springEasing,
   SPRINGS,
   STAGGER_BASE_MS,
   STAGGER_CAP,
   staggerDelay,
+  viewTransition,
 } from "@/design/motion";
 
 afterEach(() => __setReducedMotionForTests(null));
@@ -25,39 +26,41 @@ describe("prefersReducedMotion", () => {
   });
 });
 
-describe("springEasing", () => {
-  it("produces a valid CSS linear() string that starts at 0 and lands exactly on 1", () => {
+describe("SPRINGS", () => {
+  const values = (easing: string) =>
+    easing
+      .slice(easing.indexOf("(") + 1, -1)
+      .split(",")
+      .map((s) => parseFloat(s.trim()));
+
+  it("every tier is a well-formed linear() curve from 0 to exactly 1", () => {
     for (const name of Object.keys(SPRINGS) as (keyof typeof SPRINGS)[]) {
-      const { easing, duration } = springEasing(name);
+      const { easing, duration } = spring(name);
       expect(easing.startsWith("linear(")).toBe(true);
-      const stops = easing.slice(7, -1).split(",").map((s) => s.trim());
-      expect(stops.length).toBeGreaterThan(4);
-      expect(stops[0]).toBe("0 0%");
-      expect(stops[stops.length - 1]).toBe("1 100%");
-      // every stop is "<number> <number>%"
-      for (const stop of stops) expect(stop).toMatch(/^-?\d+(\.\d+)? \d+(\.\d+)?%$/);
-      expect(duration).toBeGreaterThan(80);
-      expect(duration).toBeLessThan(1200);
+      const v = values(easing);
+      expect(v.length).toBeGreaterThan(6);
+      expect(v[0]).toBe(0);
+      expect(v[v.length - 1]).toBe(1);
+      expect(duration).toBeGreaterThan(120);
+      expect(duration).toBeLessThan(600);
     }
   });
 
-  it("orders the tiers snap < settle < drift by settle time", () => {
-    expect(springEasing("snap").duration).toBeLessThan(springEasing("settle").duration);
-    expect(springEasing("settle").duration).toBeLessThan(springEasing("drift").duration);
+  it("orders the tiers snap < settle < drift by duration", () => {
+    expect(spring("snap").duration).toBeLessThan(spring("settle").duration);
+    expect(spring("settle").duration).toBeLessThan(spring("drift").duration);
   });
 
-  it("only settle/drift overshoot (a stop > 1); snap never does", () => {
-    const overshoots = (name: keyof typeof SPRINGS) =>
-      springEasing(name).easing.slice(7, -1).split(",").some((s) => parseFloat(s) > 1.001);
+  it("only settle overshoots (a control point past 1); snap and drift never do", () => {
+    const overshoots = (name: keyof typeof SPRINGS) => values(spring(name).easing).some((n) => n > 1.001);
     expect(overshoots("snap")).toBe(false);
+    expect(overshoots("drift")).toBe(false);
     expect(overshoots("settle")).toBe(true);
   });
-});
 
-describe("spring (memoised)", () => {
-  it("returns a stable reference and matches springEasing", () => {
-    expect(spring("settle")).toBe(spring("settle"));
-    expect(spring("snap")).toEqual(springEasing("snap"));
+  it("spring() hands back the same object each call", () => {
+    expect(spring("settle")).toBe(SPRINGS.settle);
+    expect(spring("drift")).toBe(spring("drift"));
   });
 });
 
@@ -74,5 +77,41 @@ describe("DIST", () => {
   it("is an ascending nudge/step/slab scale", () => {
     expect(DIST.nudge).toBeLessThan(DIST.step);
     expect(DIST.step).toBeLessThan(DIST.slab);
+  });
+});
+
+describe("viewTransition", () => {
+  const doc = document as unknown as { startViewTransition?: unknown };
+
+  afterEach(() => {
+    delete doc.startViewTransition;
+  });
+
+  it("runs the update directly when the API is absent", () => {
+    const update = vi.fn();
+    viewTransition(update);
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes through startViewTransition when it exists and motion is allowed", () => {
+    const start = vi.fn((cb: () => void) => {
+      cb();
+      return { finished: Promise.resolve() };
+    });
+    doc.startViewTransition = start;
+    const update = vi.fn();
+    viewTransition(update);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it("bypasses the API entirely under reduced motion", () => {
+    __setReducedMotionForTests(true);
+    const start = vi.fn();
+    doc.startViewTransition = start;
+    const update = vi.fn();
+    viewTransition(update);
+    expect(start).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledTimes(1);
   });
 });
