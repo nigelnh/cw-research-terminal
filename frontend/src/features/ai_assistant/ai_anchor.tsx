@@ -140,8 +140,8 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
       >
         {running ? "Working…" : `${open ? "▾" : "▸"} ${summary}`}
       </button>
-      {(open || running) && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingTop: 2 }}>
+      <div className="trace-body" data-open={open || running}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingTop: 2, overflow: "hidden" }}>
           {steps.map((s, i) => (
             <div key={i} className={running ? "trace-step is-live" : "trace-step"} style={{ display: "flex", gap: 6, color: s.ok ? "var(--t-60)" : "var(--down)" }}>
               <span style={{ color: s.ok ? "var(--up)" : "var(--down)", width: 8, flexShrink: 0 }}>
@@ -167,7 +167,7 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
             </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
