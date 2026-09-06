@@ -79,6 +79,7 @@
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
   --ease-in: cubic-bezier(0.5, 0, 1, 1);
   --stagger: 18ms;
+  --flash-decay: 620ms; /* directional value wake; the roll now carries most of the signal */
 
   /* ---- Legacy aliases (kept so un-migrated inline styles degrade gracefully) ---- */
   --background: var(--bg);
@@ -158,8 +159,8 @@ textarea::placeholder {
 .realtime-flash {
   display: inline-block;
   border-radius: 1px;
-  animation-duration: 1200ms;
-  animation-timing-function: ease-out;
+  animation-duration: var(--flash-decay);
+  animation-timing-function: var(--ease-out);
   animation-fill-mode: both;
 }
 td.realtime-flash { display: table-cell; border-radius: 0; }
@@ -177,6 +178,15 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
   .realtime-flash { animation: none; box-shadow: none; }
   .realtime-flash-up { background-color: color-mix(in srgb, var(--up) 38%, transparent); }
   .realtime-flash-down { background-color: color-mix(in srgb, var(--down) 38%, transparent); }
+}
+
+/* A hero value that rolls on change (RollingNumber). The host clips; the current value
+   and the outgoing ghost slide vertically past each other. */
+.rolling-number { position: relative; display: inline-block; overflow: hidden; vertical-align: bottom; }
+.rolling-number-cur { display: inline-block; will-change: transform; }
+.rolling-number-ghost {
+  position: absolute; left: 0; top: 0; white-space: nowrap;
+  display: inline-block; will-change: transform; pointer-events: none;
 }
 
 .bg-background { background-color: var(--bg); }
