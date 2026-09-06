@@ -486,6 +486,7 @@ select:focus-visible,
 .ai-composer { border-top: 1px solid var(--border); padding: 8px 10px; flex-shrink: 0; background: var(--panel); max-height: 52%; overflow-y: auto; }
 .ai-composer-input { display: flex; align-items: center; gap: 8px; }
 .ai-composer textarea { flex: 1; min-width: 0; resize: none; background: transparent; border: none; outline: none; box-shadow: none; font: 11.5px/18px var(--font-mono); height: 36px; min-height: 36px; max-height: 36px; color: var(--t-92); overflow-y: auto; }
+.ai-composer textarea::placeholder { color: color-mix(in srgb, var(--accent) 70%, transparent); opacity: 1; }
 
 @media (max-width: 1100px) {
   .terminal-header { grid-template-columns: minmax(0, 1fr) 240px minmax(0, 1fr); gap: 12px; }
