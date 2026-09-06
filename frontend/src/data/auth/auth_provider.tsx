@@ -8,7 +8,8 @@
  *  - restore an existing session on load, follow token refreshes, sign in / out;
  *  - keep the backend API client's bearer token current (module-level, synchronous read);
  *  - on ANY identity boundary (anon->user, user A->user B, user->anon) call
- *    `queryClient.clear()` so no user-scoped server cache can bleed across accounts;
+ *    `queryClient.clear()` so no user-scoped server cache can bleed across accounts, and
+ *    `reconcileCopilotOwner()` so the client-only AI chat history does the same;
  *  - after an OAuth / magic-link callback, strip the auth params from the URL while
  *    preserving research state (`?tab`, `?symbol`, `?range`, `?interval`).
  */
@@ -24,6 +25,7 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { setAccessTokenProvider } from "@/data/backend/backend_client";
+import { reconcileCopilotOwner } from "@/data/ai/copilot_history_store";
 import { getSupabase, isAuthConfigured } from "./supabase_client";
 
 export interface AuthUser {
@@ -119,6 +121,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ) => {
       currentAccessToken = session?.access_token ?? null;
       const nextId = session?.user?.id ?? null;
+
+      // Client-only AI chat history: wiped whenever it doesn't belong to `nextId`. Runs
+      // every settle (its own owner marker makes it a no-op on a reload / token refresh),
+      // so it also plugs the leak on the first load after this ships.
+      reconcileCopilotOwner(nextId);
 
       // Identity boundary: wipe every cached query so user B never sees user A's data.
       if (nextId !== lastUserIdRef.current) {

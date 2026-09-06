@@ -3,14 +3,13 @@ import { createPortal } from "react-dom";
 import { Orbit, Plus, History, Minus, CornerDownLeft, AtSign, X } from "lucide-react";
 import { useAiChatContext } from "@/data/ai/ai_chat_provider";
 import type { ResearchContextEnvelope, TraceStep } from "@/data/ai/use_ai_chat";
-import { formatRelativeTime } from "@/data/ai/copilot_history_store";
+import { AI_DRAFT_KEY, formatRelativeTime } from "@/data/ai/copilot_history_store";
 import { useAiQuota } from "@/data/ai/use_ai_quota";
 import type { AiQuota } from "@/data/backend/backend_client";
 import { AssistantMarkdown } from "./assistant_markdown";
 import { ATTACHMENT_ACCEPT, useFileAttachments } from "@/data/ai/use_file_attachments";
 
 const POS_KEY = "cw_research:ai_anchor_pos:v1";
-const DRAFT_KEY = "cw_research:ai_draft:v1";
 const ANCHOR = 34; // px, square
 const EDGE = 16; // safe viewport inset
 const PANEL_W = 380;
@@ -607,7 +606,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
           </div>
 
           <QuotaStrip quota={quota} />
-          <Composer key={activeConversationId} onSend={send} disabled={isLoading} draftKey={DRAFT_KEY} attachments={attachments} />
+          <Composer key={activeConversationId} onSend={send} disabled={isLoading} draftKey={AI_DRAFT_KEY} attachments={attachments} />
         </div>
       )}
 
