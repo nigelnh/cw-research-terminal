@@ -144,36 +144,39 @@ export function Sparkline({ values, reference }: { values: IndexOverview["sparkl
   </>;
 }
 
-/** HOSE continuous session hours the intraday buckets can land in (the 14:00 bar spans
- *  14:00–15:00 to the close; 12:00 is fully inside the 11:30–13:00 lunch break). */
-const VOLUME_HOURS = [9, 10, 11, 12, 13, 14];
+/** Nominal width of one 5-minute bucket on the 0–100 session axis. */
+const VOL_SLOT_W = (5 / SESSION_SPAN_MIN) * 100;
 
-function hourlyVolume(values: IndexOverview["sparkline"]): number[] {
-  const byHour = new Map<number, number>();
-  for (const item of values) {
-    if (typeof item === "number") continue;
-    const mins = ictMinutes(item.timestamp);
-    if (mins == null) continue;
-    byHour.set(Math.floor(mins / 60), (byHour.get(Math.floor(mins / 60)) ?? 0) + (item.volume ?? 0));
+/** Traded volume as one bar per realized 5-minute bar — the same points the index line is
+ *  drawn from — on the sparkline's fixed 09:00–15:00 ICT x-axis, so each bar sits directly
+ *  under its point on the line. Bars are scaled to the busiest bar of the session; the axis
+ *  stays empty past the latest bar, matching the line. */
+export function IntradayVolume({ values }: { values: IndexOverview["sparkline"] }) {
+  const bars = values
+    .map(item => {
+      if (typeof item === "number") return null;
+      const mins = ictMinutes(item.timestamp);
+      if (mins == null) return null;
+      const x = ((mins - SESSION_OPEN_MIN) / SESSION_SPAN_MIN) * 100;
+      if (!Number.isFinite(x)) return null;
+      return { mins, x: Math.min(100, Math.max(0, x)), volume: Math.max(0, item.volume ?? 0) };
+    })
+    .filter((b): b is { mins: number; x: number; volume: number } => b !== null)
+    .sort((a, b) => a.mins - b.mins);
+
+  if (!bars.length || !bars.some(b => b.volume > 0)) {
+    return <div className="index-hourvol is-empty" aria-hidden="true" />;
   }
-  return VOLUME_HOURS.map(h => byHour.get(h) ?? 0);
-}
-
-/** Per-hour traded volume for the session, 09:00–15:00 ICT, as a compact bar row under
- *  the index path. Each bar is scaled to the busiest hour; a faint track shows the slot
- *  even when that hour was quiet. */
-function HourlyVolume({ values }: { values: IndexOverview["sparkline"] }) {
-  const bars = hourlyVolume(values);
-  const peak = Math.max(...bars, 1);
-  if (!bars.some(v => v > 0)) return <div className="index-hourvol is-empty" aria-hidden="true" />;
+  const peak = Math.max(...bars.map(b => b.volume), 1);
+  const w = VOL_SLOT_W * 0.82;
   return (
-    <div className="index-hourvol" role="img" aria-label="Traded volume by hour, 09:00–15:00 ICT">
-      {bars.map((v, i) => (
-        <span key={VOLUME_HOURS[i]} title={`${VOLUME_HOURS[i]}:00 ICT — ${compact(v)}`}>
-          <i style={{ height: v > 0 ? `${Math.max(8, (v / peak) * 100)}%` : 0 }} />
-        </span>
-      ))}
-    </div>
+    <svg className="index-hourvol" role="img" viewBox="0 0 100 32" preserveAspectRatio="none"
+      aria-label="Traded volume per 5-minute bar, 09:00–15:00 ICT">
+      {bars.map((b, i) => {
+        const h = b.volume > 0 ? Math.max(1.4, (b.volume / peak) * 30) : 0;
+        return <rect key={i} x={Math.max(0, b.x - w / 2)} y={32 - h} width={w} height={h} />;
+      })}
+    </svg>
   );
 }
 
@@ -200,7 +203,7 @@ function IndexCard({ item }: { item: IndexOverview }) {
       <Sparkline values={item.sparkline || []} reference={item.reference} />
       {tag && <span className={`overview-spark-tag${item.stale ? " is-stale" : ""}`} title={tagTitle}>{tag}</span>}
     </div>
-    <HourlyVolume values={item.sparkline || []} />
+    <IntradayVolume values={item.sparkline || []} />
     <div className="index-card-main">
       <strong className="heading">{item.symbol}</strong>
       <span style={{ color: tone(item.change) }}>
