@@ -165,7 +165,7 @@ export function springTransform(
  * finish so a later static render is unaffected. No-op under reduced motion.
  */
 export function draw(el: SVGGeometryElement, name: SpringName = "snap", delay = 0): Animation | null {
-  if (prefersReducedMotion() || typeof el.getTotalLength !== "function") return null;
+  if (prefersReducedMotion() || typeof el.getTotalLength !== "function" || !canAnimate(el)) return null;
   let length = 0;
   try {
     length = el.getTotalLength();
