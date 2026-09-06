@@ -137,3 +137,31 @@ def test_ai_tier_invalid_token_falls_back_to_the_guest_allowance(ai_tier_limits)
     assert first.status_code != 429
     second = client.post("/api/ai/chat", json=_AI_BODY, headers=headers)
     assert second.status_code == 429  # the guest (1/min) allowance, not the signed-in one
+
+
+def test_ai_quota_reports_the_guest_allowance_and_tracks_usage(ai_tier_limits):
+    q0 = client.get("/api/ai/quota").json()
+    assert q0["enabled"] is True and q0["tier"] == "guest"
+    assert q0["per_day"]["limit"] == 100 and q0["per_day"]["used"] == 0
+    assert q0["per_minute"]["limit"] == 1
+
+    # a chat request is consumed by the rate-limit middleware even when the route then
+    # fails (AI disabled in tests) - the quota read must reflect it.
+    client.post("/api/ai/chat", json=_AI_BODY)
+    q1 = client.get("/api/ai/quota").json()
+    assert q1["per_day"]["used"] == 1 and q1["per_day"]["remaining"] == 99
+    assert q1["per_minute"]["used"] == 1
+
+
+def test_ai_quota_reports_the_signed_in_allowance(ai_tier_limits):
+    headers = {"Authorization": f"Bearer {_ai_token(sub='22222222-2222-2222-2222-222222222222')}"}
+    q = client.get("/api/ai/quota", headers=headers).json()
+    assert q["tier"] == "authenticated"
+    assert q["per_day"]["limit"] == 100  # RL_AI_AUTH_PER_DAY
+    assert q["per_minute"]["limit"] == 3  # RL_AI_AUTH_PER_MIN, not the guest 1
+
+
+def test_ai_quota_says_disabled_when_rate_limiting_is_off(monkeypatch):
+    monkeypatch.setattr(settings, "PUBLIC_RATE_LIMIT_ENABLED", False)
+    q = client.get("/api/ai/quota").json()
+    assert q["enabled"] is False

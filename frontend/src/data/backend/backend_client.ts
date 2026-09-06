@@ -20,6 +20,19 @@ export function setAccessTokenProvider(fn: AccessTokenProvider | null): void {
   accessTokenProvider = fn;
 }
 
+export interface AiQuotaWindow {
+  limit: number;
+  used: number;
+  remaining: number;
+  resets_at: number;
+}
+export interface AiQuota {
+  enabled: boolean;
+  tier: "guest" | "authenticated";
+  per_day?: AiQuotaWindow | null;
+  per_minute?: AiQuotaWindow | null;
+}
+
 /** Thrown when a protected call has no token, or the backend answered 401/403. */
 export class AuthRequiredError extends Error {
   status: number;
@@ -78,6 +91,25 @@ export class BackendClient {
       throw new Error(`HTTP ${res.status} on ${path}: ${detail}`);
     }
     return res.json();
+  }
+
+  /**
+   * A GET that attaches the bearer token WHEN there is one but never requires it - for
+   * routes where anonymous is valid and the identity only changes the response
+   * (`/api/ai/quota`: guest vs signed-in allowance).
+   */
+  private async getMaybeAuthed<T>(path: string, signal?: AbortSignal): Promise<T> {
+    const token = accessTokenProvider ? await accessTokenProvider() : null;
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      signal,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`);
+    return res.json();
+  }
+
+  async getAiQuota(signal?: AbortSignal): Promise<AiQuota> {
+    return this.getMaybeAuthed<AiQuota>("/api/ai/quota", signal);
   }
 
   // --- Authenticated: the caller's primary watchlist (/api/me) ---
