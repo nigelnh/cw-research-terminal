@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MarketOverviewStrip, Sparkline } from "@/features/watchlist/market_overview_strip";
+import { IntradayVolume, MarketOverviewStrip, Sparkline } from "@/features/watchlist/market_overview_strip";
 
 const state = vi.hoisted(() => ({ empty: false, refreshing: false }));
 vi.mock("@/data/query/use_market_overview", () => ({
@@ -141,5 +141,39 @@ describe("market overview strip", () => {
     expect(screen.getAllByRole("article")).toHaveLength(4);
     expect(screen.queryByText("Top Stock Trading Volume")).toBeNull();
     expect(screen.queryByText("Top Covered Warrants Trading Volume")).toBeNull();
+  });
+});
+
+describe("IntradayVolume — one bar per index-line point", () => {
+  const pt = (hh: string, mm: string, value: number, volume: number) => ({
+    timestamp: `2026-09-04T${hh}:${mm}:00+07:00`, value, volume,
+  });
+
+  it("draws exactly one <rect> per realized 5-minute bar, on the fixed session axis", () => {
+    const values = [pt("09", "15", 101, 40), pt("09", "20", 102, 55), pt("09", "25", 103, 12), pt("13", "05", 104, 88)];
+    const { container } = render(<IntradayVolume values={values} />);
+    const rects = [...container.querySelectorAll("rect")];
+    expect(rects).toHaveLength(values.length);
+    const x = (r: Element) => Number(r.getAttribute("x"));
+    const h = (r: Element) => Number(r.getAttribute("height"));
+    // 09:15 sits near the left edge of the 09:00–15:00 axis; 13:05 is well past the middle
+    expect(x(rects[0])).toBeGreaterThanOrEqual(0);
+    expect(x(rects[0])).toBeLessThan(6);
+    expect(x(rects[3])).toBeGreaterThan(60);
+    // bars scale to the busiest bar of the session (vol 88), and stay within the viewBox
+    expect(h(rects[3])).toBeGreaterThan(h(rects[1]));
+    expect(h(rects[1])).toBeGreaterThan(h(rects[2]));
+    expect(h(rects[3])).toBeLessThanOrEqual(30);
+  });
+
+  it("hides itself (keeps the row height) when the session has no intraday volume", () => {
+    const { container } = render(<IntradayVolume values={[pt("09", "15", 101, 0), pt("09", "20", 102, 0)]} />);
+    expect(container.querySelector("svg")).toBeNull();
+    expect(container.querySelector(".index-hourvol.is-empty")).not.toBeNull();
+  });
+
+  it("ignores the legacy plain-number sparkline shape", () => {
+    const { container } = render(<IntradayVolume values={[1, 2, 3] as never} />);
+    expect(container.querySelector(".index-hourvol.is-empty")).not.toBeNull();
   });
 });
