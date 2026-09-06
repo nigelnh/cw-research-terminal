@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -8,6 +9,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { prefersReducedMotion, spring } from "@/design/motion";
 
 const useBrowserLayoutEffect =
   typeof document === "undefined" ? useEffect : useLayoutEffect;
@@ -79,24 +81,43 @@ export function FilterPopover({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<number | undefined>(undefined);
   const id = useId();
   const position = useFixedPopover(open, trigger, panel, 360);
 
+  // Let the panel play its lift-out before it leaves the DOM.
+  const close = useCallback(() => {
+    window.clearTimeout(closeTimer.current);
+    if (prefersReducedMotion()) {
+      setClosing(false);
+      setOpen(false);
+      return;
+    }
+    setClosing(true);
+    closeTimer.current = window.setTimeout(() => {
+      setClosing(false);
+      setOpen(false);
+    }, spring("snap").duration);
+  }, []);
+
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
+
   useEffect(() => {
-    if (!open) return;
+    if (!open || closing) return;
     const outside = (e: PointerEvent) => {
       if (
         !trigger.current?.contains(e.target as Node) &&
         !panel.current?.contains(e.target as Node)
       )
-        setOpen(false);
+        close();
     };
     const key = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
-      setOpen(false);
+      close();
       trigger.current?.focus({ preventScroll: true });
     };
     document.addEventListener("pointerdown", outside);
@@ -108,7 +129,7 @@ export function FilterPopover({
       document.removeEventListener("pointerdown", outside);
       document.removeEventListener("keydown", key);
     };
-  }, [open]);
+  }, [open, closing, close]);
 
   return (
     <div className="filter-anchor">
@@ -116,10 +137,10 @@ export function FilterPopover({
         ref={trigger}
         type="button"
         className={`filter-trigger focus-ring${active ? " is-active" : ""}`}
-        aria-expanded={open}
+        aria-expanded={open && !closing}
         aria-controls={open ? id : undefined}
         aria-haspopup="dialog"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => (open ? close() : setOpen(true))}
       >
         FILTER <span className="filter-caret">▾</span>
       </button>
@@ -129,7 +150,7 @@ export function FilterPopover({
           id={id}
           role="dialog"
           aria-label={label}
-          className="filter-panel mono"
+          className={`filter-panel mono${closing ? " is-closing" : ""}`}
           style={position}
         >
           {children}

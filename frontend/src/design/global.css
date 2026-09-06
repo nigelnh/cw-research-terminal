@@ -208,13 +208,18 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
   @keyframes page-enter { from { transform: translateY(12px); clip-path: inset(100% 0 0 0); } }
 }
 
-/* Filter / news popovers drop open from their trigger — a clip + short slide, no fade. */
+/* Filter / news popovers drop open from their trigger — a clip + short slide, no fade —
+   and lift back out the same way on close (P6). */
 .filter-panel { animation: popover-drop var(--dur-snap) var(--ease-out) both; }
+.filter-panel.is-closing { animation: popover-lift var(--dur-snap) var(--ease-in) both; }
 @media (prefers-reduced-motion: reduce) {
-  .filter-panel { animation: none; }
+  .filter-panel, .filter-panel.is-closing { animation: none; }
 }
 @keyframes popover-drop {
   from { transform: translateY(-6px); clip-path: inset(0 0 100% 0); }
+}
+@keyframes popover-lift {
+  to { transform: translateY(-5px); clip-path: inset(0 0 100% 0); }
 }
 
 /* Phase 15 P5 — icons express state.
@@ -233,10 +238,17 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
 .trace-step.is-live { animation: trace-step-in var(--dur-snap) var(--ease-out) both; }
 @keyframes trace-step-in { from { transform: translateX(-5px); clip-path: inset(0 0 0 100%); } }
 
+/* The trace body tucks away with a real height collapse when the answer is done
+   (0fr↔1fr grid row — animates to auto height; unsupported browsers just snap). */
+.trace-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-settle) var(--ease-out); }
+.trace-body[data-open="true"] { grid-template-rows: 1fr; }
+.trace-body > div { min-height: 0; }
+
 @media (prefers-reduced-motion: reduce) {
   .orbit-thinking { animation: none; }
   .filter-caret { transition: none; }
   .trace-step.is-live { animation: none; }
+  .trace-body { transition: none; }
 }
 
 .bg-background { background-color: var(--bg); }
@@ -470,6 +482,10 @@ select:focus-visible,
 .registry-table th, .registry-table td { white-space: nowrap; }
 .registry-table .is-drop-target, .registry-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .news-row.is-search-match { box-shadow: inset 3px 0 var(--accent); }
+/* New feed rows (a loaded page, a filter change) wipe down from the top edge. */
+.news-row.is-new { animation: news-row-in var(--dur-settle) var(--ease-out) both; }
+@keyframes news-row-in { from { transform: translateY(-4px); clip-path: inset(0 0 100% 0); } }
+@media (prefers-reduced-motion: reduce) { .news-row.is-new { animation: none; } }
 .filter-anchor { margin-left: auto; }
 .filter-trigger {
   height: 24px;
