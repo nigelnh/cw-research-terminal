@@ -5,10 +5,12 @@ Does NOT reimplement mathematics in the AI layer.
 """
 
 from typing import Dict, Any, List
+from datetime import datetime
 import logging
 
 from app.quant.quant_engine import live_quant_engine
 from app.instruments.instrument_registry import instrument_registry
+from app.market_data.trading_calendar import VN_TZ, latest_completed_trading_session
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,32 @@ async def get_quant(symbol: str) -> Dict[str, Any]:
             "provenance": "PROJECT_QUANT_ENGINE",
         }
 
+    basis = "LIVE"
+    as_of_session: str | None = None
+
+    # The live path only produces analytics for the current live session - outside trading
+    # hours it returns MARKET_INPUT_SESSION_MISMATCH because the last observed book belongs
+    # to a prior session. Fall back to temporally-aligned EOD analytics for the last
+    # completed session: the SAME source the watchlist IV columns and the instrument
+    # panel's OPTIONS ANALYTICS already display (market_snapshot_resolver._attach_analytics
+    # does exactly this live->EOD hop). Without it the AI reports "IV unavailable" while
+    # the numbers sit on screen next to it.
+    if not analytics.is_available:
+        last_session = latest_completed_trading_session(datetime.now(VN_TZ))
+        try:
+            eod = await live_quant_engine.compute_eod_analytics(sym_clean, last_session)
+        except Exception as e:  # noqa: BLE001 - EOD is best-effort; keep the live result
+            logger.info("get_quant EOD fallback for %s failed: %s", sym_clean, e)
+            eod = None
+        if eod is not None:
+            # On a closed market the EOD read is authoritative whether or not it solved -
+            # its unavailable_reason (e.g. METADATA_NOT_VERIFIED_CURRENT) is more actionable
+            # than the live path's session-mismatch.
+            analytics = eod
+            if eod.is_available:
+                basis = "LAST_COMPLETED_SESSION"
+                as_of_session = last_session.isoformat()
+
     if not analytics.is_available:
         missing_inputs = _determine_missing_inputs(analytics.unavailable_reason or "INCOMPLETE_INPUTS")
         return {
@@ -99,6 +127,8 @@ async def get_quant(symbol: str) -> Dict[str, Any]:
         "underlying_symbol": analytics.underlying_symbol,
         "status": "AVAILABLE",
         "is_available": True,
+        "basis": basis,
+        "as_of_session": as_of_session,
         "iv_bid": analytics.iv_bid,
         "iv_trade": analytics.iv_trade,
         "iv_mid": analytics.iv_mid,
