@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  AI_DRAFT_KEY,
   COPILOT_STORAGE_KEY_V2,
   LEGACY_STORAGE_KEY_V1,
   MAX_CONVERSATIONS,
   loadCopilotHistory,
+  reconcileCopilotOwner,
   saveCopilotHistory,
   generateConversationTitle,
   formatRelativeTime,
@@ -272,4 +274,60 @@ describe("Targeted Copilot Chat Persistence & History Store Verifications", () =
   // The conversation surface's controls (new chat, history, composer) are covered in
   // ai_anchor.test.tsx against a real DOM — the anchor renders through a portal, which
   // the static renderMarkup helper here cannot capture.
+});
+
+describe("reconcileCopilotOwner — history never crosses an identity boundary", () => {
+  let mockStorage: MemoryStorage;
+  const seed = () => {
+    saveCopilotHistory({
+      version: 2,
+      activeConversationId: "c1",
+      conversations: [{
+        id: "c1", title: "t", createdAt: 1, updatedAt: 2,
+        messages: [{ id: "m", role: "user", content: "secret question", createdAt: 1 }],
+      }],
+    });
+    mockStorage.setItem(AI_DRAFT_KEY, "half-typed secret");
+  };
+  const hasHistory = () => (loadCopilotHistory().conversations[0]?.messages ?? []).some(m => m.content === "secret question");
+
+  beforeEach(() => {
+    mockStorage = new MemoryStorage();
+    (globalThis as any).window = (globalThis as any).window || {};
+    (globalThis as any).window.localStorage = mockStorage;
+  });
+
+  it("wipes pre-existing (unattributable) history on the first reconcile", () => {
+    seed();
+    expect(hasHistory()).toBe(true);
+    reconcileCopilotOwner("user-a");
+    expect(hasHistory()).toBe(false);
+    expect(mockStorage.getItem(AI_DRAFT_KEY)).toBeNull();
+  });
+
+  it("keeps history across a reload / token refresh for the same subject", () => {
+    reconcileCopilotOwner("user-a"); // adopt
+    seed();                          // user-a builds a conversation
+    reconcileCopilotOwner("user-a"); // reload
+    expect(hasHistory()).toBe(true);
+  });
+
+  it("wipes on logout (user -> guest) and on a user switch", () => {
+    reconcileCopilotOwner("user-a");
+    seed();
+    reconcileCopilotOwner(null); // sign out
+    expect(hasHistory()).toBe(false);
+
+    reconcileCopilotOwner("user-b");
+    seed();
+    reconcileCopilotOwner("user-a"); // A signs in on the same device
+    expect(hasHistory()).toBe(false);
+  });
+
+  it("lets a guest keep history across reloads (marker is '', not absent)", () => {
+    reconcileCopilotOwner(null); // adopt guest
+    seed();
+    reconcileCopilotOwner(null); // reload as guest
+    expect(hasHistory()).toBe(true);
+  });
 });
