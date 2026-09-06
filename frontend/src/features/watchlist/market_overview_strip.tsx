@@ -1,6 +1,8 @@
+import { useLayoutEffect, useRef } from "react";
 import { useMarketOverview, type IndexOverview, type VolumeLeader } from "@/data/query/use_market_overview";
 import { DASH, fmtPrice, fmtVol } from "@/components/common/grid_table";
-import { PolledRealtimeValue } from "@/components/common/realtime_value";
+import { PolledRealtimeValue, RollingNumber } from "@/components/common/realtime_value";
+import { introChart } from "@/design/motion";
 
 const ORDER = ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"];
 const number = (value: number | null | undefined) => value == null ? DASH : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -183,6 +185,14 @@ export function IntradayVolume({ values }: { values: IndexOverview["sparkline"] 
 function IndexCard({ item }: { item: IndexOverview }) {
   const prefix = item.change != null && item.change > 0 ? "+" : "";
   const sessionKey = item.as_of?.slice(0, 10) ?? null;
+
+  // Chart intro on first paint and on session rollover only — never on the 15s poll.
+  const cardRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    cardRef.current
+      ?.querySelectorAll(".overview-spark, .index-hourvol")
+      .forEach(introChart);
+  }, [sessionKey]);
   const reasons = item.partial_reasons?.map(reason => ({
     BREADTH_UNAVAILABLE: "Market breadth unavailable (advancing/declining counts)",
     INTRADAY_UNAVAILABLE: "No intraday observations for this session",
@@ -198,7 +208,7 @@ function IndexCard({ item }: { item: IndexOverview }) {
     reasons,
     item.stale ? "Snapshot overdue for refresh." : "",
   ].filter(Boolean).join(" ");
-  return <article className="index-card mono" aria-label={`${item.symbol} index overview`}>
+  return <article ref={cardRef} className="index-card mono" aria-label={`${item.symbol} index overview`}>
     <div className="overview-spark-wrap">
       <Sparkline values={item.sparkline || []} reference={item.reference} />
       {tag && <span className={`overview-spark-tag${item.stale ? " is-stale" : ""}`} title={tagTitle}>{tag}</span>}
@@ -207,7 +217,7 @@ function IndexCard({ item }: { item: IndexOverview }) {
     <div className="index-card-main">
       <strong className="heading">{item.symbol}</strong>
       <span style={{ color: tone(item.change) }}>
-        <PolledRealtimeValue value={item.value} resetKey={sessionKey}>{number(item.value)}</PolledRealtimeValue>{" "}
+        <RollingNumber value={item.value} display={number(item.value)} resetKey={sessionKey} />{" "}
         <small>
           <PolledRealtimeValue value={item.change} resetKey={sessionKey}>{prefix}{number(item.change)}</PolledRealtimeValue>{" "}(
           <PolledRealtimeValue value={item.change_percent} resetKey={sessionKey}>{prefix}{item.change_percent == null ? DASH : `${item.change_percent.toFixed(2)}%`}</PolledRealtimeValue>)

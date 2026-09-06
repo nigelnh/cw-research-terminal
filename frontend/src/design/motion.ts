@@ -113,3 +113,82 @@ export function spring(name: SpringName): { easing: string; duration: number } {
 export function staggerDelay(index: number): number {
   return Math.min(Math.max(0, index), STAGGER_CAP) * STAGGER_BASE_MS;
 }
+
+const canAnimate = (el: unknown): el is Element =>
+  typeof (el as Element | null)?.animate === "function";
+
+/**
+ * Run one transform from `from` back to `to` (default rest) with a named spring. The
+ * caller owns the DOM's final state; this is only the visual travel. No-op — returns
+ * `null` — under reduced motion or when WAAP is unavailable.
+ */
+export function springTransform(
+  el: Element,
+  from: string,
+  to = "none",
+  name: SpringName = "settle",
+): Animation | null {
+  if (prefersReducedMotion() || !canAnimate(el)) return null;
+  const { easing, duration } = spring(name);
+  return el.animate([{ transform: from }, { transform: to }], { duration, easing, composite: "replace" });
+}
+
+/**
+ * Draw an SVG geometry element on by sweeping its dash offset from full length to 0.
+ * The element must not declare `stroke-dasharray` in CSS. Cleans the inline props on
+ * finish so a later static render is unaffected. No-op under reduced motion.
+ */
+export function draw(el: SVGGeometryElement, name: SpringName = "snap", delay = 0): Animation | null {
+  if (prefersReducedMotion() || typeof el.getTotalLength !== "function") return null;
+  let length = 0;
+  try {
+    length = el.getTotalLength();
+  } catch {
+    return null; // not yet laid out
+  }
+  if (!length) return null;
+  const { easing, duration } = spring(name);
+  el.style.strokeDasharray = String(length);
+  el.style.strokeDashoffset = String(length);
+  const anim = el.animate([{ strokeDashoffset: length }, { strokeDashoffset: 0 }], {
+    duration,
+    easing,
+    delay,
+  });
+  const clear = () => {
+    el.style.strokeDasharray = "";
+    el.style.strokeDashoffset = "";
+  };
+  anim.addEventListener("finish", clear);
+  anim.addEventListener("cancel", clear);
+  return anim;
+}
+
+/**
+ * Chart intro: draw the line(s) on and grow the bars up from the baseline. Call from a
+ * `useLayoutEffect` keyed on the *session*, not on every data poll — a live market that
+ * re-drew its charts every 15s would be pure noise. No-op under reduced motion.
+ *
+ * `.overview-spark-grid` (the hour ticks) and `<line>` (the reference) are skipped —
+ * scaffolding is there from the first frame, only data arrives.
+ */
+export function introChart(root: Element | null | undefined): void {
+  if (!root || prefersReducedMotion()) return;
+  const { easing, duration } = spring("drift");
+
+  root
+    .querySelectorAll<SVGGeometryElement>("polyline, path:not(.overview-spark-grid)")
+    .forEach((el) => draw(el, "drift"));
+
+  const rects = [...root.querySelectorAll<SVGRectElement>("rect")];
+  rects.forEach((el, i) => {
+    if (typeof el.animate !== "function") return;
+    el.style.transformBox = "fill-box";
+    el.style.transformOrigin = "bottom";
+    el.animate([{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], {
+      duration,
+      easing,
+      delay: staggerDelay(Math.floor((i / Math.max(1, rects.length)) * (STAGGER_CAP + 1))),
+    });
+  });
+}
