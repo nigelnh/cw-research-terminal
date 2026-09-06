@@ -155,6 +155,15 @@ async def chat_endpoint(
         if _m["role"] == "user":
             _tag = "Trả lời bằng tiếng Việt." if _reply_lang == "Vietnamese" else "Respond in English."
             _m["content"] = f"{_m['content']}\n\n[{_tag}]"
+            # Same reason as the language tag: this free model honours a rule far more
+            # reliably when it also appears at the very end of the turn it is answering.
+            # Without it, "solve two sum leetcode in python" was answered in full.
+            _m["content"] += (
+                "\n[Scope check: answer ONLY if this is about covered warrants, "
+                "Vietnam-market equities/indices, or quantitative finance. If it is not, "
+                "decline in one or two sentences and offer a research question instead - "
+                "do not answer it anyway.]"
+            )
             if _tools_ran:
                 # Weak free models keep offering to "run the queries" even with the results
                 # already attached. One more nudge right where they look last.
