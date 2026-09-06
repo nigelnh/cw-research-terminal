@@ -206,3 +206,17 @@ async def test_conflicting_metadata_quant_tool_returns_no_numbers():
     for k in ("iv_bid", "iv_trade", "delta", "gamma", "theoretical_price"):
         assert q.get(k) in (None, ) or k not in q
     assert "unavailable_reason" in q
+
+
+async def test_prompt_bans_latex_because_the_panel_has_no_maths_engine():
+    """Introduced by the no-code rule: told to explain maths instead of writing code, the
+    model reached for LaTeX, which react-markdown renders verbatim ($$\\frac{...}$$)."""
+    p = BASE_SYSTEM_INSTRUCTIONS
+    assert "PLAIN UNICODE ONLY, NEVER LaTeX" in p
+    low = p.lower()
+    assert "no maths engine" in low
+    for cmd in ("\\frac", "\\sqrt", "\\sigma"):
+        assert cmd in p, f"{cmd} should be named as banned"
+    # a worked right/wrong pair, the shape this model actually follows
+    assert "WRONG:" in p and "RIGHT:" in p
+    assert "d₁" in p and "σ" in p and "√" in p
