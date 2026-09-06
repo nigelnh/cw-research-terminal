@@ -1,6 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { RealtimePulse } from "@/domain/models";
-import { prefersReducedMotion, spring } from "@/design/motion";
 import type { SelectedInstrumentView } from "@/data/selected_instrument";
 import type { DashboardRow } from "@/data/query/use_dashboard_data";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
@@ -160,28 +159,6 @@ export function InstrumentPanel({
   const [addNote, setAddNote] = useState<string | null>(null);
 
   const hasInstrument = !!instrument;
-
-  // Slide the drawer up from below the first time it opens (not when swapping symbols
-  // while already open, and not on close).
-  const sectionRef = useRef<HTMLElement>(null);
-  const wasOpen = useRef(false);
-  useLayoutEffect(() => {
-    const el = sectionRef.current;
-    if (
-      hasInstrument &&
-      !wasOpen.current &&
-      el &&
-      !prefersReducedMotion() &&
-      typeof el.animate === "function"
-    ) {
-      el.animate(
-        [{ transform: "translateY(100%)" }, { transform: "translateY(0)" }],
-        spring("drift"),
-      );
-    }
-    wasOpen.current = hasInstrument;
-  }, [hasInstrument]);
-
   const isCW = instrument?.instrumentType === "CW";
   const isIndex = instrument?.instrumentType === "INDEX";
   const symbol = instrument?.symbol ?? null;
@@ -299,7 +276,6 @@ export function InstrumentPanel({
 
   return (
     <section
-      ref={sectionRef}
       style={{
         height: "min(410px, 58vh)",
         flexShrink: 0,

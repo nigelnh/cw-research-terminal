@@ -160,20 +160,21 @@ describe("IntradayVolume — one bar per index-line point", () => {
     expect(x(rects[0])).toBeGreaterThanOrEqual(0);
     expect(x(rects[0])).toBeLessThan(6);
     expect(x(rects[3])).toBeGreaterThan(60);
-    // bars scale to the busiest bar of the session (vol 88), and stay within the viewBox
+    // the svg spans the whole bottom band; bars scale to the busiest bar (vol 88 -> full)
+    expect(container.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 100 100");
+    expect(h(rects[3])).toBe(100);
     expect(h(rects[3])).toBeGreaterThan(h(rects[1]));
     expect(h(rects[1])).toBeGreaterThan(h(rects[2]));
-    expect(h(rects[3])).toBeLessThanOrEqual(30);
   });
 
-  it("hides itself (keeps the row height) when the session has no intraday volume", () => {
+  it("renders nothing when the session has no intraday volume", () => {
     const { container } = render(<IntradayVolume values={[pt("09", "15", 101, 0), pt("09", "20", 102, 0)]} />);
     expect(container.querySelector("svg")).toBeNull();
-    expect(container.querySelector(".index-hourvol.is-empty")).not.toBeNull();
+    expect(container.firstChild).toBeNull();
   });
 
   it("ignores the legacy plain-number sparkline shape", () => {
     const { container } = render(<IntradayVolume values={[1, 2, 3] as never} />);
-    expect(container.querySelector(".index-hourvol.is-empty")).not.toBeNull();
+    expect(container.firstChild).toBeNull();
   });
 });

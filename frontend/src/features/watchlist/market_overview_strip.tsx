@@ -1,8 +1,6 @@
-import { useLayoutEffect, useRef } from "react";
 import { useMarketOverview, type IndexOverview, type VolumeLeader } from "@/data/query/use_market_overview";
 import { DASH, fmtPrice, fmtVol } from "@/components/common/grid_table";
-import { PolledRealtimeValue, RollingNumber } from "@/components/common/realtime_value";
-import { introChart, prefersReducedMotion, spring } from "@/design/motion";
+import { PolledRealtimeValue } from "@/components/common/realtime_value";
 
 const ORDER = ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"];
 const number = (value: number | null | undefined) => value == null ? DASH : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -23,18 +21,8 @@ const marketTone = (state: VolumeLeader["market_state"]) => {
   return "var(--t-50)";
 };
 
-function DirectionTriangle({ down = false, color, pulseKey }: { down?: boolean; color: string; pulseKey?: number | null }) {
-  const ref = useRef<SVGSVGElement>(null);
-  const prev = useRef(pulseKey);
-  useLayoutEffect(() => {
-    const had = prev.current;
-    prev.current = pulseKey;
-    const el = ref.current;
-    if (had == null || pulseKey == null || had === pulseKey) return;
-    if (!el || prefersReducedMotion() || typeof el.animate !== "function") return;
-    el.animate([{ transform: "scale(1.4)" }, { transform: "scale(1)" }], spring("snap"));
-  }, [pulseKey]);
-  return <svg ref={ref} className="overview-direction-icon" aria-hidden="true" viewBox="0 0 12 12" fill={color}>
+function DirectionTriangle({ down = false, color }: { down?: boolean; color: string }) {
+  return <svg className="overview-direction-icon" aria-hidden="true" viewBox="0 0 12 12" fill={color}>
     <path d={down ? "M1 2h10L6 11Z" : "M1 10h10L6 1Z"} />
   </svg>;
 }
@@ -143,14 +131,14 @@ export function Sparkline({ values, reference }: { values: IndexOverview["sparkl
   return <>
     <svg className="overview-spark" role="img" aria-label="Intraday index path" viewBox="0 0 100 32" preserveAspectRatio="none">
       <path className="overview-spark-grid" d={hourTicks} stroke="var(--border-32)" strokeWidth="0.4" fill="none" />
-      {referenceY != null && <line x1="0" y1={referenceY} x2="100" y2={referenceY} stroke="var(--t-46)" strokeDasharray="2 2" />}
+      {referenceY != null && <line x1="0" y1={referenceY} x2="100" y2={referenceY} stroke="var(--accent)" strokeWidth="0.7" strokeDasharray="2 2" />}
       {colorSegments.map((seg, i) => seg.isPoint
         ? <circle key={i} cx={seg.pts.split(",")[0]} cy={seg.pts.split(",")[1]} r="1" fill={seg.color} />
         : <polyline key={i} points={seg.pts} fill="none" stroke={seg.color} strokeWidth="1.3" vectorEffect="non-scaling-stroke" />)}
     </svg>
     {ref != null && referenceY != null && (
       <span className="overview-spark-ref" style={{ top: `${(referenceY / 32) * 100}%` }}>
-        REF {number(ref)}
+        {number(ref)}
       </span>
     )}
   </>;
@@ -160,9 +148,9 @@ export function Sparkline({ values, reference }: { values: IndexOverview["sparkl
 const VOL_SLOT_W = (5 / SESSION_SPAN_MIN) * 100;
 
 /** Traded volume as one bar per realized 5-minute bar — the same points the index line is
- *  drawn from — on the sparkline's fixed 09:00–15:00 ICT x-axis, so each bar sits directly
- *  under its point on the line. Bars are scaled to the busiest bar of the session; the axis
- *  stays empty past the latest bar, matching the line. */
+ *  drawn from — layered in the bottom band of the chart on the sparkline's own fixed
+ *  09:00–15:00 ICT x-axis, so each bar sits directly under its point on the line. Bars are
+ *  scaled to the busiest bar of the session; the axis stays empty past the latest bar. */
 export function IntradayVolume({ values }: { values: IndexOverview["sparkline"] }) {
   const bars = values
     .map(item => {
@@ -176,17 +164,17 @@ export function IntradayVolume({ values }: { values: IndexOverview["sparkline"] 
     .filter((b): b is { mins: number; x: number; volume: number } => b !== null)
     .sort((a, b) => a.mins - b.mins);
 
-  if (!bars.length || !bars.some(b => b.volume > 0)) {
-    return <div className="index-hourvol is-empty" aria-hidden="true" />;
-  }
+  if (!bars.length || !bars.some(b => b.volume > 0)) return null;
+
   const peak = Math.max(...bars.map(b => b.volume), 1);
-  const w = VOL_SLOT_W * 0.82;
+  const w = VOL_SLOT_W * 0.8;
+  // Own coordinate space: 0..100 tall, bars grow up from the baseline; CSS parks the
+  // whole svg in the bottom ~44% of the chart wrap.
   return (
-    <svg className="index-hourvol" role="img" viewBox="0 0 100 32" preserveAspectRatio="none"
-      aria-label="Traded volume per 5-minute bar, 09:00–15:00 ICT">
+    <svg className="index-hourvol" aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
       {bars.map((b, i) => {
-        const h = b.volume > 0 ? Math.max(1.4, (b.volume / peak) * 30) : 0;
-        return <rect key={i} x={Math.max(0, b.x - w / 2)} y={32 - h} width={w} height={h} />;
+        const h = b.volume > 0 ? Math.max(3, (b.volume / peak) * 100) : 0;
+        return <rect key={i} x={Math.max(0, b.x - w / 2)} y={100 - h} width={w} height={h} />;
       })}
     </svg>
   );
@@ -195,14 +183,6 @@ export function IntradayVolume({ values }: { values: IndexOverview["sparkline"] 
 function IndexCard({ item }: { item: IndexOverview }) {
   const prefix = item.change != null && item.change > 0 ? "+" : "";
   const sessionKey = item.as_of?.slice(0, 10) ?? null;
-
-  // Chart intro on first paint and on session rollover only — never on the 15s poll.
-  const cardRef = useRef<HTMLElement>(null);
-  useLayoutEffect(() => {
-    cardRef.current
-      ?.querySelectorAll(".overview-spark, .index-hourvol")
-      .forEach(introChart);
-  }, [sessionKey]);
   const reasons = item.partial_reasons?.map(reason => ({
     BREADTH_UNAVAILABLE: "Market breadth unavailable (advancing/declining counts)",
     INTRADAY_UNAVAILABLE: "No intraday observations for this session",
@@ -218,16 +198,16 @@ function IndexCard({ item }: { item: IndexOverview }) {
     reasons,
     item.stale ? "Snapshot overdue for refresh." : "",
   ].filter(Boolean).join(" ");
-  return <article ref={cardRef} className="index-card mono" aria-label={`${item.symbol} index overview`}>
+  return <article className="index-card mono" aria-label={`${item.symbol} index overview`}>
     <div className="overview-spark-wrap">
+      <IntradayVolume values={item.sparkline || []} />
       <Sparkline values={item.sparkline || []} reference={item.reference} />
       {tag && <span className={`overview-spark-tag${item.stale ? " is-stale" : ""}`} title={tagTitle}>{tag}</span>}
     </div>
-    <IntradayVolume values={item.sparkline || []} />
     <div className="index-card-main">
       <strong className="heading">{item.symbol}</strong>
       <span style={{ color: tone(item.change) }}>
-        <RollingNumber value={item.value} display={number(item.value)} resetKey={sessionKey} />{" "}
+        <PolledRealtimeValue value={item.value} resetKey={sessionKey}>{number(item.value)}</PolledRealtimeValue>{" "}
         <small>
           <PolledRealtimeValue value={item.change} resetKey={sessionKey}>{prefix}{number(item.change)}</PolledRealtimeValue>{" "}(
           <PolledRealtimeValue value={item.change_percent} resetKey={sessionKey}>{prefix}{item.change_percent == null ? DASH : `${item.change_percent.toFixed(2)}%`}</PolledRealtimeValue>)
@@ -236,9 +216,9 @@ function IndexCard({ item }: { item: IndexOverview }) {
     </div>
     <div className="index-card-line"><span>VOL <PolledRealtimeValue value={item.volume} resetKey={sessionKey}>{compact(item.volume)}</PolledRealtimeValue></span><span>VAL <PolledRealtimeValue value={item.trading_value} resetKey={sessionKey}>{compact(item.trading_value)}</PolledRealtimeValue></span></div>
     <div className="index-card-breadth">
-      <span style={{ color: "var(--up)" }}><DirectionTriangle color="var(--up)" pulseKey={item.advancing} /> <PolledRealtimeValue value={item.advancing} resetKey={sessionKey}>{number(item.advancing)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.ceiling} resetKey={sessionKey} style={{ color: "var(--price-ceiling)" }}>({number(item.ceiling)})</PolledRealtimeValue></span>
+      <span style={{ color: "var(--up)" }}><DirectionTriangle color="var(--up)" /> <PolledRealtimeValue value={item.advancing} resetKey={sessionKey}>{number(item.advancing)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.ceiling} resetKey={sessionKey} style={{ color: "var(--price-ceiling)" }}>({number(item.ceiling)})</PolledRealtimeValue></span>
       <span style={{ color: "var(--flat)" }}>― <PolledRealtimeValue value={item.unchanged} resetKey={sessionKey}>{number(item.unchanged)}</PolledRealtimeValue></span>
-      <span style={{ color: "var(--down)" }}><DirectionTriangle down color="var(--down)" pulseKey={item.declining} /> <PolledRealtimeValue value={item.declining} resetKey={sessionKey}>{number(item.declining)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.floor} resetKey={sessionKey} style={{ color: "var(--price-floor)" }}>({number(item.floor)})</PolledRealtimeValue></span>
+      <span style={{ color: "var(--down)" }}><DirectionTriangle down color="var(--down)" /> <PolledRealtimeValue value={item.declining} resetKey={sessionKey}>{number(item.declining)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.floor} resetKey={sessionKey} style={{ color: "var(--price-floor)" }}>({number(item.floor)})</PolledRealtimeValue></span>
     </div>
   </article>;
 }
