@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __setReducedMotionForTests,
   DIST,
+  flip,
   prefersReducedMotion,
   spring,
   SPRINGS,
@@ -77,6 +78,32 @@ describe("DIST", () => {
   it("is an ascending nudge/step/slab scale", () => {
     expect(DIST.nudge).toBeLessThan(DIST.step);
     expect(DIST.step).toBeLessThan(DIST.slab);
+  });
+});
+
+describe("flip", () => {
+  it("returns a callable no-op for a null container", () => {
+    expect(() => flip(null)()).not.toThrow();
+  });
+
+  it("returns a no-op under reduced motion", () => {
+    __setReducedMotionForTests(true);
+    const el = document.createElement("div");
+    el.innerHTML = `<span data-symbol="A"></span><span data-symbol="B"></span>`;
+    const play = flip(el);
+    expect(() => play()).not.toThrow();
+  });
+
+  it("measures on capture and plays without throwing when nothing moved", () => {
+    __setReducedMotionForTests(false);
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    el.innerHTML = `<span data-symbol="A"></span><span data-symbol="B"></span>`;
+    const play = flip(el);
+    // reorder the DOM
+    el.appendChild(el.firstElementChild!);
+    expect(() => play()).not.toThrow();
+    el.remove();
   });
 });
 

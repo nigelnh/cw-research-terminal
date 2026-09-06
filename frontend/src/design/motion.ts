@@ -111,6 +111,39 @@ export function viewTransition(update: () => void): void {
 }
 
 /**
+ * FLIP. Call `flip(container)` immediately BEFORE a layout-changing update (row reorder,
+ * a removal that closes a gap), then call the returned `play()` AFTER the DOM has
+ * committed — wrap the React state change in `flushSync` so `play()` measures the settled
+ * layout. Every element matching `selector` that changed box animates from its old
+ * position to its new one with `spring.settle`, staggered in document order. Keyed by
+ * `data-symbol` so rows are tracked across the reorder. No-op under reduced motion.
+ */
+export function flip(container: Element | null, selector = "[data-symbol]"): () => void {
+  if (!container || prefersReducedMotion()) return () => {};
+  const idOf = (el: Element) => el.getAttribute("data-symbol") ?? "";
+  const before = new Map<string, DOMRect>();
+  container.querySelectorAll(selector).forEach((el) => before.set(idOf(el), el.getBoundingClientRect()));
+
+  return () => {
+    if (prefersReducedMotion()) return;
+    const { easing, duration } = spring("settle");
+    let i = 0;
+    container.querySelectorAll(selector).forEach((el) => {
+      const b = before.get(idOf(el));
+      if (!b || typeof (el as HTMLElement).animate !== "function") return;
+      const a = el.getBoundingClientRect();
+      const dx = b.left - a.left;
+      const dy = b.top - a.top;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+      (el as HTMLElement).animate(
+        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }],
+        { duration, easing, delay: staggerDelay(i++), composite: "replace" },
+      );
+    });
+  };
+}
+
+/**
  * Run one transform from `from` back to `to` (default rest) with a named spring. The
  * caller owns the DOM's final state; this is only the visual travel. No-op — returns
  * `null` — under reduced motion or when WAAP is unavailable.
