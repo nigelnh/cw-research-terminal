@@ -8,6 +8,7 @@ import { useAiQuota } from "@/data/ai/use_ai_quota";
 import type { AiQuota } from "@/data/backend/backend_client";
 import { AssistantMarkdown } from "./assistant_markdown";
 import { ATTACHMENT_ACCEPT, useFileAttachments } from "@/data/ai/use_file_attachments";
+import { prefersReducedMotion, spring } from "@/design/motion";
 
 const POS_KEY = "cw_research:ai_anchor_pos:v1";
 const DRAFT_KEY = "cw_research:ai_draft:v1";
@@ -178,12 +179,26 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
  * to signing in; the bar turns amber near the ceiling.
  */
 function QuotaStrip({ quota }: { quota: AiQuota | undefined }) {
+  const fillRef = useRef<HTMLDivElement>(null);
+  const wasNear = useRef(false);
   const day = quota?.enabled ? quota.per_day : null;
+
+  const near = !!day && day.remaining <= Math.max(1, Math.ceil(day.limit * 0.15));
+  // One pulse the frame the bar first crosses into the amber zone — not on every render.
+  useEffect(() => {
+    const el = fillRef.current;
+    if (near && !wasNear.current && el && !prefersReducedMotion() && typeof el.animate === "function") {
+      const { easing, duration } = spring("snap");
+      el.animate([{ opacity: 0.45 }, { opacity: 1 }], { duration: duration + 120, easing });
+    }
+    wasNear.current = near;
+  }, [near]);
+
   if (!day || !quota) return null;
 
   const pct = day.limit > 0 ? Math.min(100, Math.round((day.used / day.limit) * 100)) : 0;
-  const near = day.remaining <= Math.max(1, Math.ceil(day.limit * 0.15));
   const bar = near ? "var(--warn)" : "var(--accent)";
+  const settle = spring("settle");
 
   return (
     <div
@@ -202,7 +217,15 @@ function QuotaStrip({ quota }: { quota: AiQuota | undefined }) {
         <span style={{ fontVariantNumeric: "tabular-nums" }}>{day.used} / {day.limit}</span>
       </div>
       <div style={{ height: 2, background: "var(--border)", borderRadius: 1, overflow: "hidden" }}>
-        <div style={{ width: `${pct}%`, height: "100%", background: bar, transition: "width .3s" }} />
+        <div
+          ref={fillRef}
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: bar,
+            transition: prefersReducedMotion() ? "none" : `width ${settle.duration}ms ${settle.easing}`,
+          }}
+        />
       </div>
       {quota.tier === "guest" && (
         <div style={{ color: "var(--t-46)", marginTop: 1 }}>
