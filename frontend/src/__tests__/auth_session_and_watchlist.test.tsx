@@ -67,6 +67,7 @@ import { useWatchlist, resetWatchlistMemoryForTests } from "@/data/watchlist";
 import { queryKeys } from "@/data/query/query_keys";
 import { WATCHLIST_STORAGE_KEY_V5, createDefaultWatchlist } from "@/domain/models";
 import { COPILOT_STORAGE_KEY_V2 } from "@/data/ai/copilot_history_store";
+import { AiChatProvider, useAiChatContext } from "@/data/ai/ai_chat_provider";
 
 function serverItem(symbol: string) {
   return { symbol, instrumentType: "STOCK" };
@@ -252,6 +253,44 @@ describe("logout + user switch + cache isolation", () => {
     await act(async () => emitSession(null));
     await waitFor(() => expect(result.current.status).toBe("anonymous"));
     expect(window.localStorage.getItem(COPILOT_STORAGE_KEY_V2)).toBeNull();
+  });
+
+  it("a logged-out first load never leaves the previous session's chat in the panel", async () => {
+    // The pre-marker leak, still on disk on first load after this ships: an unattributed
+    // conversation and no owner marker. useAiChat's lazy initializer reads it before auth
+    // settles; once reconcileCopilotOwner(null) wipes it, the panel must re-read rather
+    // than keep rendering the stale in-memory copy.
+    window.localStorage.setItem(
+      COPILOT_STORAGE_KEY_V2,
+      JSON.stringify({
+        version: 2,
+        activeConversationId: "leak",
+        conversations: [
+          {
+            id: "leak",
+            title: "user A private thread",
+            createdAt: 1,
+            updatedAt: 2,
+            messages: [{ id: "m1", role: "user", content: "what are user A's warrants", createdAt: 1 }],
+          },
+        ],
+      }),
+    );
+    getMyWatchlist.mockResolvedValue([]);
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(
+        QueryClientProvider,
+        { client: qc },
+        createElement(AuthProvider, null, createElement(AiChatProvider, null, children)),
+      );
+
+    const { result } = renderHook(() => useAiChatContext(), { wrapper });
+
+    await waitFor(() => expect(result.current.messages).toHaveLength(0));
+    expect(JSON.stringify(result.current.conversations)).not.toContain("user A private thread");
+    expect(window.localStorage.getItem(COPILOT_STORAGE_KEY_V2) ?? "").not.toContain("user A private thread");
   });
 
   it("identity change also clears unrelated public cache (acceptable; correctness first)", async () => {
