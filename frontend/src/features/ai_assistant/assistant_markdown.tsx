@@ -124,11 +124,23 @@ const COMPONENTS: Components = {
         {children}
       </code>
     ) : (
-      <code style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--t-85)" }} {...p}>
+      <code
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10.5,
+          color: "var(--t-85)",
+          whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
+        }}
+        {...p}
+      >
         {children}
       </code>
     );
   },
+  // The assistant is instructed never to emit code, but a fenced block can still arrive
+  // (a quoted disclosure, a pasted snippet echoed back). It WRAPS rather than scrolls:
+  // in a 380px panel a horizontally-scrolling block reads as a truncated answer.
   pre: ({ node, ...p }) => (
     <pre
       style={{
@@ -137,7 +149,8 @@ const COMPONENTS: Components = {
         background: "var(--panel-2)",
         border: "1px solid var(--border)",
         borderRadius: 2,
-        overflowX: "auto",
+        whiteSpace: "pre-wrap",
+        overflowWrap: "anywhere",
         lineHeight: 1.45,
       }}
       {...p}
