@@ -10,6 +10,12 @@ import {
 } from "@/components/common/registry_filter";
 import { MARKET_COLOR, priceBandColor } from "@/components/common/grid_table";
 import { columnOrder } from "@/components/common/watchlist_layout";
+import { __setReducedMotionForTests } from "@/design/motion";
+
+// The popover closes on an animation timer; pin reduced-motion so these DOM-shape
+// assertions see the synchronous close path.
+beforeEach(() => __setReducedMotionForTests(true));
+afterEach(() => __setReducedMotionForTests(null));
 
 const fixture = vi.hoisted(() => {
   const items = [

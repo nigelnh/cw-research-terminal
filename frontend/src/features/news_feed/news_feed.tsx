@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useResearchFeed } from "@/data/query";
 import { DASH } from "@/components/common/grid_table";
 import { CalendarInput } from "@/components/common/calendar_input";
@@ -128,17 +128,19 @@ function FeedRow({
   item,
   onSelectSymbol,
   highlighted,
+  isNew = false,
 }: {
   item: ResearchFeedItem;
   onSelectSymbol?: (s: string) => void;
   highlighted: boolean;
+  isNew?: boolean;
 }) {
   const isEvent = item.content_type === "company_event";
   const hasOriginal = item.title && item.title !== item.title_en;
   const category = item.category_en && (item.category_en !== item.category || item.source_language !== "vi") ? item.category_en : null;
   return (
       <tr
-        className={`news-row${highlighted ? " is-search-match" : ""}`}
+        className={`news-row${highlighted ? " is-search-match" : ""}${isNew ? " is-new" : ""}`}
         data-symbol={item.symbol ?? undefined}
         style={{
           background: highlighted ? "var(--panel-3)" : "transparent",
@@ -250,6 +252,16 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
     return "HOSE disclosures & company events";
   }, [symbol, query]);
 
+  // Rows that weren't on screen last render wipe in (a fresh page / filter change
+  // doesn't cascade the whole list — only the first paint is skipped entirely).
+  const seenIds = useRef<Set<string>>(new Set());
+  const settled = useRef(false);
+  const isNewRow = (id: string) => settled.current && !seenIds.current.has(id);
+  useEffect(() => {
+    seenIds.current = new Set(items.map((it) => it.id));
+    settled.current = true;
+  }, [items]);
+
   return (
     <div className="page-shell">
       <MarketOverviewStrip />
@@ -308,6 +320,7 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
               <FeedRow
                 key={item.id}
                 item={item}
+                isNew={isNewRow(item.id)}
                 onSelectSymbol={(s) => onSelectSymbol?.(s)}
                 highlighted={!!item.symbol && (item.symbol === selectedSymbol || item.symbol.toUpperCase() === term.toUpperCase())}
               />
