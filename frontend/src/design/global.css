@@ -71,16 +71,6 @@
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
   --font-sans: var(--font-display);
 
-  /* ---- Motion tokens (Phase 15, P1). Spring physics lives in src/design/motion.ts;
-     these plain durations/curves are for CSS-only, non-interruptible animations. ---- */
-  --dur-snap: 140ms;
-  --dur-settle: 240ms;
-  --dur-drift: 420ms;
-  --ease-out: cubic-bezier(0.2, 0, 0, 1);
-  --ease-in: cubic-bezier(0.5, 0, 1, 1);
-  --stagger: 18ms;
-  --flash-decay: 620ms; /* directional value wake; the roll now carries most of the signal */
-
   /* ---- Legacy aliases (kept so un-migrated inline styles degrade gracefully) ---- */
   --background: var(--bg);
   --foreground: var(--t-92);
@@ -159,8 +149,8 @@ textarea::placeholder {
 .realtime-flash {
   display: inline-block;
   border-radius: 1px;
-  animation-duration: var(--flash-decay);
-  animation-timing-function: var(--ease-out);
+  animation-duration: 1200ms;
+  animation-timing-function: ease-out;
   animation-fill-mode: both;
 }
 td.realtime-flash { display: table-cell; border-radius: 0; }
@@ -178,77 +168,6 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
   .realtime-flash { animation: none; box-shadow: none; }
   .realtime-flash-up { background-color: color-mix(in srgb, var(--up) 38%, transparent); }
   .realtime-flash-down { background-color: color-mix(in srgb, var(--down) 38%, transparent); }
-}
-
-/* A hero value that rolls on change (RollingNumber). The host clips; the current value
-   and the outgoing ghost slide vertically past each other. */
-.rolling-number { position: relative; display: inline-block; overflow: hidden; vertical-align: bottom; }
-.rolling-number-cur { display: inline-block; will-change: transform; }
-.rolling-number-ghost {
-  position: absolute; left: 0; top: 0; white-space: nowrap;
-  display: inline-block; will-change: transform; pointer-events: none;
-}
-
-/* Phase 15 P3 — spatial continuity.
-
-   Tab switch: only `.page-shell` is named, so the header / instrument drawer / Orbit
-   anchor (all outside it, part of `root`) hold still while the page content clips up
-   and out and the incoming page rises in. No cross-fade. */
-.page-shell { view-transition-name: page; }
-@media (prefers-reduced-motion: no-preference) {
-  ::view-transition-old(root),
-  ::view-transition-new(root) { animation: none; }
-  ::view-transition-old(page) {
-    animation: page-leave var(--dur-settle) var(--ease-in) both;
-  }
-  ::view-transition-new(page) {
-    animation: page-enter var(--dur-settle) var(--ease-out) both;
-  }
-  @keyframes page-leave { to { transform: translateY(-12px); clip-path: inset(0 0 100% 0); } }
-  @keyframes page-enter { from { transform: translateY(12px); clip-path: inset(100% 0 0 0); } }
-}
-
-/* Filter / news popovers drop open from their trigger — a clip + short slide, no fade —
-   and lift back out the same way on close (P6). */
-.filter-panel { animation: popover-drop var(--dur-snap) var(--ease-out) both; }
-.filter-panel.is-closing { animation: popover-lift var(--dur-snap) var(--ease-in) both; }
-@media (prefers-reduced-motion: reduce) {
-  .filter-panel, .filter-panel.is-closing { animation: none; }
-}
-@keyframes popover-drop {
-  from { transform: translateY(-6px); clip-path: inset(0 0 100% 0); }
-}
-@keyframes popover-lift {
-  to { transform: translateY(-5px); clip-path: inset(0 0 100% 0); }
-}
-
-/* Phase 15 P5 — icons express state.
-
-   The Orbit mark is the one sanctioned ambient loop: it turns ONLY while a request
-   is in flight (a load indicator wearing the brand), dead still otherwise. */
-.orbit-thinking { animation: orbit-turn 1.7s linear infinite; transform-origin: center; }
-@keyframes orbit-turn { to { transform: rotate(360deg); } }
-
-/* The filter caret rotates to point up when the popover is open — it never cuts. */
-.filter-caret { display: inline-block; transition: transform var(--dur-snap) var(--ease-out); }
-.filter-trigger[aria-expanded="true"] .filter-caret { transform: rotate(180deg); }
-
-/* Each research-trace step wipes in from the left as it starts (live trace only —
-   re-expanding a settled trace doesn't replay them). */
-.trace-step.is-live { animation: trace-step-in var(--dur-snap) var(--ease-out) both; }
-@keyframes trace-step-in { from { transform: translateX(-5px); clip-path: inset(0 0 0 100%); } }
-
-/* The trace body tucks away with a real height collapse when the answer is done
-   (0fr↔1fr grid row — animates to auto height; unsupported browsers just snap). */
-.trace-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-settle) var(--ease-out); }
-.trace-body[data-open="true"] { grid-template-rows: 1fr; }
-.trace-body > div { min-height: 0; }
-
-@media (prefers-reduced-motion: reduce) {
-  .orbit-thinking { animation: none; }
-  .filter-caret { transition: none; }
-  .trace-step.is-live { animation: none; }
-  .trace-body { transition: none; }
 }
 
 .bg-background { background-color: var(--bg); }
@@ -359,55 +278,27 @@ select:focus-visible,
   box-shadow: inset 0 -1px 0 var(--border-strong);
 }
 
-/* Phase 15 P1 — the header lifts a soft shadow over the rows once the body is scrolled
-   off the top. Scroll-driven, compositor-only (opacity on a pseudo), and the whole thing
-   is opt-in: browsers without scroll timelines just keep the flat 1px rule. */
-.watchlist-table thead th::after,
-.registry-table thead th::after,
-.news-table thead th::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 100%;
-  height: 12px;
-  pointer-events: none;
-  opacity: 0;
-  background: linear-gradient(rgb(0 0 0 / 0.34), rgb(0 0 0 / 0));
-}
-@supports (animation-timeline: scroll()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .watchlist-table thead th::after,
-    .registry-table thead th::after,
-    .news-table thead th::after {
-      animation: header-scroll-shadow linear both;
-      animation-timeline: scroll(nearest);
-      animation-range: 0 44px;
-    }
-    @keyframes header-scroll-shadow { to { opacity: 1; } }
-  }
-}
-
 .market-overview-wrap { position: relative; display: grid; grid-template-columns: minmax(600px, 1.7fr) minmax(400px, 1fr); gap: 8px; margin-bottom: 10px; }
 .market-overview-wrap.indices-only { grid-template-columns: 1fr; }
 .index-viewer, .top-exchange-viewer { display: grid; min-width: 0; gap: 6px; }
 .index-viewer { grid-template-columns: repeat(4, minmax(140px, 1fr)); }
 .top-exchange-viewer { grid-template-columns: repeat(2, minmax(190px, 1fr)); }
-.index-card, .leader-panel, .market-overview-state { height: 176px; border: 1px solid var(--border-strong); background: var(--panel); min-width: 0; overflow: hidden; }
-.index-card { padding: 7px 8px; display: grid; grid-template-rows: minmax(0, 1fr) 15px repeat(3, 16px); row-gap: 3px; }
+.index-card, .leader-panel, .market-overview-state { height: 154px; border: 1px solid var(--border-strong); background: var(--panel); min-width: 0; overflow: hidden; }
+.index-card { padding: 7px 8px; display: grid; grid-template-rows: minmax(0, 1fr) repeat(3, 16px); row-gap: 3px; }
 .overview-spark-wrap { position: relative; min-height: 0; border-bottom: 1px solid var(--border-row); background: var(--bg); }
-.overview-spark { display: block; width: 100%; height: 100%; min-height: 0; }
+.overview-spark { position: relative; display: block; width: 100%; height: 100%; min-height: 0; }
 .overview-spark-tag { position: absolute; top: 2px; right: 3px; font-size: 7.5px; line-height: 1; letter-spacing: 0.04em; color: var(--t-40); pointer-events: auto; }
 .overview-spark-tag.is-stale { color: var(--flat); }
 .overview-spark-ref {
-  position: absolute; right: 3px; transform: translateY(-50%);
-  font-size: 7.5px; line-height: 1; letter-spacing: 0.03em; white-space: nowrap;
-  color: var(--t-50); background: color-mix(in srgb, var(--bg) 78%, transparent);
-  padding: 0 2px; pointer-events: none;
+  position: absolute; left: 50%; transform: translate(-50%, -50%);
+  font-size: 11px; line-height: 1; letter-spacing: 0.01em; white-space: nowrap;
+  font-variant-numeric: tabular-nums; color: var(--t-85);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  padding: 1px 5px; pointer-events: none;
 }
-.index-hourvol { display: block; width: 100%; height: 100%; min-height: 0; }
-.index-hourvol rect { fill: color-mix(in srgb, var(--accent) 55%, transparent); }
-.index-hourvol.is-empty { visibility: hidden; }
+/* Volume histogram, parked in the bottom band of the chart, behind the index line. */
+.index-hourvol { position: absolute; inset: auto 0 0 0; height: 44%; display: block; pointer-events: none; }
+.index-hourvol rect { fill: color-mix(in srgb, var(--accent) 30%, transparent); }
 .overview-spark-empty { height: 100%; min-height: 0; display: grid; place-items: center; background: var(--bg); color: var(--t-40); font-size: 8px; }
 .index-card-main, .index-card-line, .index-card-breadth { display: flex; justify-content: space-between; align-items: baseline; white-space: nowrap; }
 .index-card-main { gap: 6px; font-size: 10.5px; }
@@ -415,7 +306,7 @@ select:focus-visible,
 .index-card-main small, .index-card-breadth small { font-size: 8.5px; }
 .index-card-line { color: var(--t-92); font-size: 9px; }
 .index-card-breadth { font-size: 9.5px; }
-.overview-direction-icon { width: 1em; height: 1em; vertical-align: -0.12em; transform-origin: center; }
+.overview-direction-icon { width: 1em; height: 1em; vertical-align: -0.12em; }
 .leader-panel { display: flex; flex-direction: column; }
 .leader-title { height: 24px; padding: 4px 8px; display: flex; align-items: center; border-bottom: 1px solid var(--border-row); min-width: 0; flex: none; }
 .leader-title span { display: block; color: var(--t-92); font-size: 10.5px; white-space: nowrap; }
@@ -439,7 +330,7 @@ select:focus-visible,
   .market-overview-wrap { display: block; overflow-x: auto; padding-bottom: 20px; }
   .index-viewer { min-width: 620px; }
   .top-exchange-viewer { min-width: 620px; grid-template-columns: repeat(2, 1fr); margin-top: 6px; }
-  .leader-panel { height: 176px; }
+  .leader-panel { height: 154px; }
   .research-registry-grid { display: block; }
   .research-stock-panel { width: 100%; margin-top: 16px; }
 }
@@ -461,31 +352,14 @@ select:focus-visible,
 .watchlist-search-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t-82); }
 .watchlist-search-kind { text-align: right; color: var(--t-55); white-space: nowrap; }
 .watchlist-search-empty { padding: 18px 10px; text-align: center; color: var(--t-46); font-size: 10.5px; }
-/* Phase 15 P4 — the accent rail wipes in from the left on select / search-match
-   (a 3px pseudo that scales from 0), instead of a shadow snapping on. */
-.watchlist-row, .registry-row { position: relative; }
-.watchlist-row::before, .registry-row::before {
-  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; z-index: 2;
-  background: var(--accent); pointer-events: none;
-  transform: scaleX(0); transform-origin: left;
-  transition: transform var(--dur-snap) var(--ease-out);
-}
-.watchlist-row.is-search-match::before, .watchlist-row.is-selected::before,
-.registry-row.is-search-match::before, .registry-row.is-selected::before { transform: scaleX(1); }
-@media (prefers-reduced-motion: reduce) {
-  .watchlist-row::before, .registry-row::before { transition: none; }
-}
+.watchlist-row.is-search-match, .watchlist-row.is-selected { box-shadow: inset 3px 0 var(--accent); }
 .untracked-realtime-mark::after { content: "◇"; margin-left: 5px; color: var(--t-40); font-size: .82em; }
 .research-registry-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(720px, 1fr) 300px; gap: 16px; align-items: stretch; }
 .research-registry-panel, .research-stock-panel { min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .research-registry-panel > .registry-panel-label, .research-stock-panel > .registry-panel-label { flex-shrink: 0; }
 .registry-table th, .registry-table td { white-space: nowrap; }
 .registry-table .is-drop-target, .registry-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-.news-row.is-search-match { box-shadow: inset 3px 0 var(--accent); }
-/* New feed rows (a loaded page, a filter change) wipe down from the top edge. */
-.news-row.is-new { animation: news-row-in var(--dur-settle) var(--ease-out) both; }
-@keyframes news-row-in { from { transform: translateY(-4px); clip-path: inset(0 0 100% 0); } }
-@media (prefers-reduced-motion: reduce) { .news-row.is-new { animation: none; } }
+.registry-row.is-search-match, .registry-row.is-selected, .news-row.is-search-match { box-shadow: inset 3px 0 var(--accent); }
 .filter-anchor { margin-left: auto; }
 .filter-trigger {
   height: 24px;
