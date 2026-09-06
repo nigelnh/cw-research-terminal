@@ -314,4 +314,16 @@ describe("RollingNumber", () => {
     expect(page.container.querySelector(".realtime-flash-up")).toBeNull();
     expect(page.container.querySelector(".realtime-flash-down")).toBeNull();
   });
+
+  it("retargets on a mid-roll re-tick — ends on the newest value, one current node", () => {
+    __setReducedMotionForTests(false);
+    const page = render(<RollingNumber value={100} display="100" resetKey="s" />);
+    // three ticks back to back
+    page.rerender(<RollingNumber value={103} display="103" resetKey="s" />);
+    page.rerender(<RollingNumber value={101} display="101" resetKey="s" />);
+    page.rerender(<RollingNumber value={107} display="107" resetKey="s" />);
+    // the visible current value is the last one; ghosts are aria-hidden and never stack
+    expect(page.container.querySelector(".rolling-number-cur")?.textContent).toBe("107");
+    expect(page.container.querySelectorAll(".rolling-number-cur")).toHaveLength(1);
+  });
 });
