@@ -491,3 +491,57 @@ async def test_ai_chat_enriches_missing_session_context(mock_openrouter_client):
         assert "serverTime" in system_msg
 
     app.dependency_overrides.clear()
+
+
+# --------------------------------------------------------------------------- #
+# Truncation is surfaced, not hidden (reported: replies cut off mid-statement)
+# --------------------------------------------------------------------------- #
+class _FakeStream:
+    """Minimal stand-in for httpx's streaming response context manager."""
+
+    def __init__(self, lines):
+        self._lines = lines
+        self.status_code = 200
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+def _sse(delta=None, finish=None):
+    choice = {"delta": {"content": delta} if delta is not None else {}}
+    if finish is not None:
+        choice["finish_reason"] = finish
+    return "data: " + json.dumps({"choices": [choice]})
+
+
+@pytest.mark.asyncio
+async def test_stream_appends_a_marker_when_the_model_hit_the_token_cap():
+    from app.ai.openrouter_client import OpenRouterClient
+
+    client_ = OpenRouterClient(api_key="k", model="m")
+    lines = [_sse("Delta measures"), _sse(" the hedge"), _sse(finish="length"), "data: [DONE]"]
+    with patch("httpx.AsyncClient.stream", return_value=_FakeStream(lines)):
+        out = "".join([tok async for tok in client_.stream_chat([{"role": "user", "content": "hi"}])])
+
+    assert out.startswith("Delta measures the hedge")
+    assert "cut off at the response limit" in out
+
+
+@pytest.mark.asyncio
+async def test_stream_adds_no_marker_on_a_complete_answer():
+    from app.ai.openrouter_client import OpenRouterClient
+
+    client_ = OpenRouterClient(api_key="k", model="m")
+    lines = [_sse("Delta is a hedge ratio."), _sse(finish="stop"), "data: [DONE]"]
+    with patch("httpx.AsyncClient.stream", return_value=_FakeStream(lines)):
+        out = "".join([tok async for tok in client_.stream_chat([{"role": "user", "content": "hi"}])])
+
+    assert out == "Delta is a hedge ratio."
+    assert "cut off" not in out

@@ -194,6 +194,7 @@ class OpenRouterClient(AiProvider):
                     elif response.status_code != 200:
                         raise AiProviderError("AI provider error during stream.")
 
+                    finish_reason: str | None = None
                     async for line in response.aiter_lines():
                         if not line:
                             continue
@@ -203,12 +204,21 @@ class OpenRouterClient(AiProvider):
                                 break
                             try:
                                 parsed = json.loads(raw_data)
-                                delta = parsed.get("choices", [{}])[0].get("delta", {})
+                                choice = parsed.get("choices", [{}])[0]
+                                # Kept from every frame: only the final one carries it.
+                                finish_reason = choice.get("finish_reason") or finish_reason
+                                delta = choice.get("delta", {})
                                 token = delta.get("content")
                                 if token:
                                     yield token
                             except json.JSONDecodeError:
                                 continue
+
+                    # `length` means the model hit max_tokens and stopped mid-sentence.
+                    # Without this the half-answer renders as though it were complete.
+                    if finish_reason == "length":
+                        logger.info("AI response truncated at max_tokens (%s)", settings.AI_MAX_OUTPUT_TOKENS)
+                        yield "\n\n_(cut off at the response limit — ask me to continue, or for a shorter answer)_"
             except httpx.TimeoutException:
                 logger.error("OpenRouter stream timed out.")
                 raise AiTimeoutError()
