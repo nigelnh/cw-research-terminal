@@ -6,8 +6,48 @@
 
 export const COPILOT_STORAGE_KEY_V2 = "cw_research:copilot_history:v2";
 export const LEGACY_STORAGE_KEY_V1 = "cw_research:copilot:v1";
+/** Unsent composer text. Cleared alongside the history on an identity change. */
+export const AI_DRAFT_KEY = "cw_research:ai_draft:v1";
+/** Records which verified subject the local Copilot keys currently belong to
+ *  ("" for a guest). Absent = never reconciled -> distrust whatever is there. */
+const COPILOT_OWNER_KEY = "cw_research:copilot_owner:v1";
 export const MAX_CONVERSATIONS = 25;
 export const MAX_MESSAGES_PER_CONVERSATION = 50;
+
+/**
+ * Copilot conversation history is client-only (no server copy — the backend `/api/ai/chat`
+ * is stateless). It must therefore be wiped locally whenever the identity changes, or
+ * account A's conversations surface for a guest / account B on a shared device.
+ *
+ * Call this on every auth-state settle with the verified subject (JWT `sub`), or `null`
+ * for a guest. It no-ops when ownership is unchanged (so a page reload or a token refresh
+ * keeps the history), and wipes every local Copilot key otherwise — including the first
+ * run after this ships, when the pre-existing unscoped history can't be attributed.
+ */
+export function reconcileCopilotOwner(subject: string | null): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  const want = subject ?? "";
+  let marker: string | null;
+  try {
+    marker = window.localStorage.getItem(COPILOT_OWNER_KEY);
+  } catch {
+    return;
+  }
+  if (marker !== null && marker === want) return;
+
+  for (const key of [COPILOT_STORAGE_KEY_V2, LEGACY_STORAGE_KEY_V1, AI_DRAFT_KEY]) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    window.localStorage.setItem(COPILOT_OWNER_KEY, want);
+  } catch {
+    /* ignore */
+  }
+}
 
 /** One step in the user-visible research trace for an assistant turn. */
 export interface TraceStep {

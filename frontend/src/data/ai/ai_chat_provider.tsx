@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo, useRef, type ReactNode } from "react";
-import { useAiChat, type ResearchContextEnvelope } from "./use_ai_chat";
+import { useAuth } from "@/data/auth";
+import { useAiChat, DEFAULT_AI_CHAT_ENDPOINT, type ResearchContextEnvelope } from "./use_ai_chat";
 
 /**
  * One `useAiChat` instance for the whole app. The docked REPL input and the floating
@@ -17,7 +18,10 @@ type AiChat = ReturnType<typeof useAiChat> & {
 const AiChatContext = createContext<AiChat | null>(null);
 
 export function AiChatProvider({ children }: { children: ReactNode }) {
-  const chat = useAiChat();
+  const { user, status } = useAuth();
+  // `undefined` while auth is still settling so a reload doesn't read as a user switch.
+  const subject = status === "loading" ? undefined : user?.id ?? null;
+  const chat = useAiChat(DEFAULT_AI_CHAT_ENDPOINT, subject);
   const ctxRef = useRef<ResearchContextEnvelope | undefined>(undefined);
 
   const value = useMemo<AiChat>(

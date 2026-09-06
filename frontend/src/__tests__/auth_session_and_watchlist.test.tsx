@@ -66,6 +66,7 @@ import { AuthProvider, useAuth } from "@/data/auth";
 import { useWatchlist, resetWatchlistMemoryForTests } from "@/data/watchlist";
 import { queryKeys } from "@/data/query/query_keys";
 import { WATCHLIST_STORAGE_KEY_V5, createDefaultWatchlist } from "@/domain/models";
+import { COPILOT_STORAGE_KEY_V2 } from "@/data/ai/copilot_history_store";
 
 function serverItem(symbol: string) {
   return { symbol, instrumentType: "STOCK" };
@@ -227,6 +228,30 @@ describe("logout + user switch + cache isolation", () => {
     // no AAA1 anywhere in the cache
     const allData = qc.getQueryCache().getAll().flatMap((q) => (q.state.data as Array<{ symbol: string }>) ?? []);
     expect(allData.some((i) => i.symbol === "AAA1")).toBe(false);
+  });
+
+  it("logout / user switch also wipes the client-only AI chat history", async () => {
+    const aHistory = JSON.stringify({
+      version: 2, activeConversationId: "c1",
+      conversations: [{ id: "c1", title: "t", createdAt: 1, updatedAt: 2, messages: [] }],
+    });
+    getMyWatchlist.mockResolvedValue([]);
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useAuth(), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.status).toBe("anonymous"));
+
+    await act(async () => emitSession(A));
+    await waitFor(() => expect(result.current.status).toBe("authenticated"));
+    window.localStorage.setItem(COPILOT_STORAGE_KEY_V2, aHistory); // A holds conversations
+
+    await act(async () => emitSession(B));
+    await waitFor(() => expect(result.current.user?.id).toBe("user-b"));
+    expect(window.localStorage.getItem(COPILOT_STORAGE_KEY_V2)).toBeNull();
+
+    window.localStorage.setItem(COPILOT_STORAGE_KEY_V2, aHistory); // B holds conversations
+    await act(async () => emitSession(null));
+    await waitFor(() => expect(result.current.status).toBe("anonymous"));
+    expect(window.localStorage.getItem(COPILOT_STORAGE_KEY_V2)).toBeNull();
   });
 
   it("identity change also clears unrelated public cache (acceptable; correctness first)", async () => {
