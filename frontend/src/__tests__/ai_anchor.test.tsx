@@ -16,6 +16,7 @@ vi.mock("@/data/auth", () => ({ useAuth: () => authRef.current }));
 import { AiChatProvider } from "@/data/ai/ai_chat_provider";
 import { AiAnchor } from "@/features/ai_assistant/ai_anchor";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
+import { setAccessTokenProvider } from "@/data/backend/backend_client";
 
 const POS_KEY = "cw_research:ai_anchor_pos:v1";
 
@@ -220,6 +221,48 @@ describe("AiAnchor — unified composer inside the panel", () => {
     const { getByRole } = render(<AiAnchor context={ctx} />, { wrapper: Wrapper });
     const panel = openPanel(getByRole);
     expect(panel.querySelector('textarea[aria-label="Ask the research assistant"]')).not.toBeNull();
+  });
+});
+
+describe("AiAnchor — the chat request is keyed to the signed-in caller", () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      headers: { get: () => null },
+      json: () => Promise.resolve({}),
+    });
+    (globalThis as any).fetch = fetchSpy;
+  });
+  afterEach(() => setAccessTokenProvider(null));
+
+  function submit(value: string) {
+    const { getByRole } = render(<AiAnchor context={{ activePage: "dashboard" } as ResearchContextEnvelope} />, {
+      wrapper: Wrapper,
+    });
+    const panel = openPanel(getByRole);
+    const ta = panel.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value } });
+    fireEvent.keyDown(ta, { key: "Enter" });
+  }
+
+  it("attaches the bearer token to POST /api/ai/chat when a session exists", async () => {
+    setAccessTokenProvider(() => "tok-live-123");
+    submit("rank my HPG warrants");
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(String(url)).toContain("/api/ai/chat");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok-live-123");
+  });
+
+  it("sends no Authorization header for an anonymous caller", async () => {
+    setAccessTokenProvider(() => null);
+    submit("rank my HPG warrants");
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [, init] = fetchSpy.mock.calls[0];
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 });
 

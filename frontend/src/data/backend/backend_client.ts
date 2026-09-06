@@ -20,6 +20,17 @@ export function setAccessTokenProvider(fn: AccessTokenProvider | null): void {
   accessTokenProvider = fn;
 }
 
+/**
+ * The current bearer token, or null when anonymous / not configured. For the request
+ * paths that authenticate the same way `BackendClient` does but live outside it - the AI
+ * chat SSE `fetch` and the file-extract upload. On those routes a signed-in caller must
+ * be keyed to their account (rate-limit tier, visible quota) yet anonymous stays valid,
+ * so the header is attached only when a token exists.
+ */
+export async function getAccessToken(): Promise<string | null> {
+  return accessTokenProvider ? await accessTokenProvider() : null;
+}
+
 export interface AiQuotaWindow {
   limit: number;
   used: number;

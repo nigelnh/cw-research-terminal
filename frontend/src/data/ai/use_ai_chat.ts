@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { config } from "@/config";
+import { getAccessToken } from "@/data/backend/backend_client";
 import {
   type StoredChatMessage,
   type TraceStep,
@@ -343,10 +344,15 @@ export function useAiChat(apiEndpoint: string = DEFAULT_AI_CHAT_ENDPOINT) {
           { role: "user", content: trimmed },
         ];
 
+        // Attach the caller's bearer token when signed in, so the backend rate-limiter
+        // keys this request to their account (authenticated allowance + visible quota)
+        // instead of the shared per-IP guest bucket. Anonymous callers send no header.
+        const token = await getAccessToken();
         const response = await fetch(apiEndpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({
             messages: outboundMessages,
