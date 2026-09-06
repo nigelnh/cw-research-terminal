@@ -7,6 +7,7 @@ that power the UI WebSocket gateway.
 from typing import Dict, Any, Optional, List
 import logging
 
+from app.instruments.instrument_registry import instrument_registry
 from app.market_data.market_state import market_state
 from app.market_data.market_session import market_session
 from app.market_data.market_subscription_manager import subscription_manager
@@ -203,9 +204,14 @@ def get_dashboard_snapshot(watched_symbols: Optional[List[str]] = None) -> Dict[
                 if q.bid1_price > 0:
                     spread_pct = diff / q.bid1_price
 
+        # For a CW, the underlying it's written on - so a "rank the warrants on HPG"
+        # question can be answered by filtering this list, not by another tool call.
+        und = (q.underlying_symbol if q else None) or instrument_registry.underlying_of(sym_clean)
+
         items.append({
             "symbol": sym_clean,
             "instrument_type": inst_type,
+            "underlying_symbol": und.upper() if und else None,
             "last_price": q.last_price if q else None,
             "reference_price": q.reference_price if q else None,
             "change": q.price_change if q else None,
@@ -215,6 +221,7 @@ def get_dashboard_snapshot(watched_symbols: Optional[List[str]] = None) -> Dict[
             "spread": spread,
             "spread_percent": spread_pct,
             "total_volume": q.total_volume if q else None,
+            "trading_value": q.trading_value if q else None,
             "data_source": ("REDIS_WARM_CACHE" if getattr(q, "is_restored_from_cache", False) else "FIINQUANT_REALTIME") if q else "NONE",
             "is_available": q is not None,
         })

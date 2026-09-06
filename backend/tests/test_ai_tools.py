@@ -341,6 +341,33 @@ async def test_18_ranking_query_naming_a_ticker_also_pulls_the_dashboard_snapsho
 
 
 @pytest.mark.asyncio
+async def test_18b_which_cw_on_an_underlying_scopes_the_snapshot_to_that_underlyings_warrants():
+    """'which cw is the most active in HPG?' - the snapshot should be narrowed to HPG's
+    warrants (a short unambiguous list), not the whole watchlist."""
+    await instrument_registry.initialize(current_date="2026-08-28")
+    executor = ToolExecutor(max_tool_calls=4)
+    envelope = ResearchContextEnvelope(
+        activePage="dashboard", marketSessionActive=False,
+        watchlist=["HPG", "FPT", "CHPG2541", "CFPT2628"],
+    )
+    executed = await executor.resolve_and_execute_proactive_tools(
+        "which cw is the most active one in HPG?", envelope
+    )
+    snap = next(e for e in executed if e["tool"] == "get_dashboard_snapshot")
+    assert snap["args"]["symbols"] == ["CHPG2541"]  # HPG's warrant from the watchlist only
+
+
+@pytest.mark.asyncio
+async def test_18c_dashboard_snapshot_rows_carry_underlying_symbol_for_cws():
+    await instrument_registry.initialize(current_date="2026-08-28")
+    snap = get_dashboard_snapshot(["HPG", "CHPG2541"])
+    cw = next(i for i in snap["instruments"] if i["symbol"] == "CHPG2541")
+    assert cw["underlying_symbol"] == "HPG"
+    stock = next(i for i in snap["instruments"] if i["symbol"] == "HPG")
+    assert stock["underlying_symbol"] is None
+
+
+@pytest.mark.asyncio
 async def test_19_ranking_query_without_a_ticker_pulls_only_the_dashboard_snapshot():
     executor = ToolExecutor(max_tool_calls=4)
     envelope = ResearchContextEnvelope(activePage="dashboard", marketSessionActive=False)
@@ -372,5 +399,7 @@ def test_21_system_prompt_forbids_promising_a_follow_up_query():
         tool_results=[{"symbol": "HPG", "status": "AVAILABLE", "provenance": "MARKET_STATE"}],
     )
     assert "COMPLETE and FINAL" in prompt
-    assert "one moment" in prompt.lower()
-    assert "cannot run more tools" in prompt.lower()
+    assert "fire off queries" in prompt.lower()  # the exact stall phrasing this model uses
+    assert "no way to run another tool" in prompt.lower()
+    # ranking questions are explicitly routed to the dashboard snapshot
+    assert "get_dashboard_snapshot" in prompt and "underlying_symbol" in prompt

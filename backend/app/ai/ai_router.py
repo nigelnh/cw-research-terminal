@@ -150,10 +150,18 @@ async def chat_endpoint(
     from app.ai.ai_system_prompt import detect_reply_language
 
     _reply_lang = detect_reply_language(last_user_query)
+    _tools_ran = bool(tool_results)
     for _m in reversed(raw_messages):
         if _m["role"] == "user":
             _tag = "Trả lời bằng tiếng Việt." if _reply_lang == "Vietnamese" else "Respond in English."
             _m["content"] = f"{_m['content']}\n\n[{_tag}]"
+            if _tools_ran:
+                # Weak free models keep offering to "run the queries" even with the results
+                # already attached. One more nudge right where they look last.
+                _m["content"] += (
+                    "\n[The tool results you need are already attached and complete. "
+                    "Answer from them now - do not offer to run more queries or come back later.]"
+                )
             break
 
     if req.stream:
