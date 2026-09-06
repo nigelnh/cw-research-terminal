@@ -427,14 +427,27 @@ select:focus-visible,
 .watchlist-search-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t-82); }
 .watchlist-search-kind { text-align: right; color: var(--t-55); white-space: nowrap; }
 .watchlist-search-empty { padding: 18px 10px; text-align: center; color: var(--t-46); font-size: 10.5px; }
-.watchlist-row.is-search-match, .watchlist-row.is-selected { box-shadow: inset 3px 0 var(--accent); }
+/* Phase 15 P4 — the accent rail wipes in from the left on select / search-match
+   (a 3px pseudo that scales from 0), instead of a shadow snapping on. */
+.watchlist-row, .registry-row { position: relative; }
+.watchlist-row::before, .registry-row::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; z-index: 2;
+  background: var(--accent); pointer-events: none;
+  transform: scaleX(0); transform-origin: left;
+  transition: transform var(--dur-snap) var(--ease-out);
+}
+.watchlist-row.is-search-match::before, .watchlist-row.is-selected::before,
+.registry-row.is-search-match::before, .registry-row.is-selected::before { transform: scaleX(1); }
+@media (prefers-reduced-motion: reduce) {
+  .watchlist-row::before, .registry-row::before { transition: none; }
+}
 .untracked-realtime-mark::after { content: "◇"; margin-left: 5px; color: var(--t-40); font-size: .82em; }
 .research-registry-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(720px, 1fr) 300px; gap: 16px; align-items: stretch; }
 .research-registry-panel, .research-stock-panel { min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .research-registry-panel > .registry-panel-label, .research-stock-panel > .registry-panel-label { flex-shrink: 0; }
 .registry-table th, .registry-table td { white-space: nowrap; }
 .registry-table .is-drop-target, .registry-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-.registry-row.is-search-match, .registry-row.is-selected, .news-row.is-search-match { box-shadow: inset 3px 0 var(--accent); }
+.news-row.is-search-match { box-shadow: inset 3px 0 var(--accent); }
 .filter-anchor { margin-left: auto; }
 .filter-trigger {
   height: 24px;
