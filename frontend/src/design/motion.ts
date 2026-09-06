@@ -13,27 +13,40 @@
 export type SpringName = "snap" | "settle" | "drift";
 
 export interface SpringConfig {
-  /** N/m — how hard it pulls toward rest. */
-  stiffness: number;
-  /** N·s/m — how fast the oscillation bleeds off. */
-  damping: number;
-  /** kg — inertia. */
-  mass: number;
+  /** Pre-baked `linear()` spring easing — progress vs. normalised time. */
+  easing: string;
+  /** ms the animation runs for; picked so the eye reads it as done at the end. */
+  duration: number;
 }
 
 /**
- * The whole vocabulary. Components name a tier, never hand-write these.
- *  - `snap`   — arrives and stops, no overshoot. Input feedback: press, toggle, tab bar.
- *  - `settle` — one soft settle, a hair of overshoot. The default for live data: value
- *               rolls, row reorder, panel open.
- *  - `drift`  — slow, weighty. Large spatial moves: the instrument drawer, a view change.
+ * The whole vocabulary — three pre-baked spring curves. Components name a tier, never
+ * hand-write an easing. The curves are sampled critically-/near-critically-damped springs;
+ * only `settle` carries a small overshoot (values past 1.0).
+ *
+ *  - `snap`   — arrives and stops, no overshoot. Input feedback: press, toggle, tab bar,
+ *               popover, the scroll-shadow.
+ *  - `settle` — one soft settle with a ~6% overshoot. The default for live data: value
+ *               rolls, row reorder, panel open, quota fill.
+ *  - `drift`  — slow, weighty, no overshoot. Large spatial moves: the instrument drawer,
+ *               a view transition.
  */
 export const SPRINGS: Record<SpringName, SpringConfig> = {
-  // snap is critically damped (ζ ≈ 1.02) so it truly never overshoots; settle and drift
-  // sit under 1 for the single soft settle each is meant to have.
-  snap: { stiffness: 420, damping: 42, mass: 1 },
-  settle: { stiffness: 210, damping: 24, mass: 1 },
-  drift: { stiffness: 120, damping: 20, mass: 1.1 },
+  snap: {
+    duration: 190,
+    easing:
+      "linear(0, 0.219, 0.416, 0.577, 0.702, 0.797, 0.867, 0.918, 0.953, 0.977, 0.992, 1)",
+  },
+  settle: {
+    duration: 300,
+    easing:
+      "linear(0, 0.12, 0.32, 0.548, 0.754, 0.909, 1.008, 1.058, 1.072, 1.062, 1.042, 1.02, 1.004, 0.995, 0.993, 0.995, 0.998, 1)",
+  },
+  drift: {
+    duration: 460,
+    easing:
+      "linear(0, 0.09, 0.203, 0.331, 0.46, 0.579, 0.683, 0.77, 0.84, 0.895, 0.935, 0.963, 0.981, 0.992, 0.997, 1)",
+  },
 };
 
 /** Per-item delay in a staggered group; the group shares the last delay past the cap. */
@@ -62,51 +75,11 @@ export function prefersReducedMotion(): boolean {
 }
 
 /**
- * Integrate a damped spring (from displacement 1 back to 0) and express the trajectory as
- * a CSS `linear()` easing string plus the wall-clock duration it settles in. Pure — hand
- * the result straight to `element.animate(keyframes, { duration, easing })` and the WAAP
- * animation gets the same physics as a hand-rolled rAF spring, with none of the cost.
+ * The `{ easing, duration }` for a spring tier — hand straight to
+ * `element.animate(keyframes, spring("settle"))` or a CSS `transition`.
  */
-export function springEasing(name: SpringName): { easing: string; duration: number } {
-  const { stiffness: k, damping: c, mass: m } = SPRINGS[name];
-  const step = 1 / 60;
-  const substeps = 8;
-  let x = 1;
-  let v = 0;
-  const progress: number[] = [0];
-
-  for (let frame = 0; frame < 180; frame++) {
-    for (let i = 0; i < substeps; i++) {
-      const a = (-k * x - c * v) / m;
-      v += a * (step / substeps);
-      x += v * (step / substeps);
-    }
-    progress.push(1 - x);
-    if (Math.abs(x) < 5e-4 && Math.abs(v) < 5e-4) break;
-  }
-
-  if (progress.length < 3) return { easing: "linear", duration: 180 };
-
-  const last = progress.length - 1;
-  // Snap the final sample exactly to 1 so the animation lands clean.
-  progress[last] = 1;
-  const points = progress
-    .map((p, i) => `${Number(p.toFixed(4))} ${Number(((i / last) * 100).toFixed(2))}%`)
-    .join(", ");
-
-  return { easing: `linear(${points})`, duration: Math.round(last * step * 1000) };
-}
-
-const easingCache = new Map<SpringName, { easing: string; duration: number }>();
-
-/** `springEasing`, memoised — the three curves never change at runtime. */
-export function spring(name: SpringName): { easing: string; duration: number } {
-  let hit = easingCache.get(name);
-  if (hit === undefined) {
-    hit = springEasing(name);
-    easingCache.set(name, hit);
-  }
-  return hit;
+export function spring(name: SpringName): SpringConfig {
+  return SPRINGS[name];
 }
 
 /** Delay (ms) for the i-th element of a staggered group. */
@@ -116,6 +89,26 @@ export function staggerDelay(index: number): number {
 
 const canAnimate = (el: unknown): el is Element =>
   typeof (el as Element | null)?.animate === "function";
+
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (update: () => void | Promise<void>) => { finished?: Promise<void> };
+};
+
+/**
+ * Run a DOM change inside a View Transition — the outgoing and incoming states are
+ * captured and animated per the `::view-transition-*` rules in global.css (a rise +
+ * clip, never a cross-fade). `update` MUST apply the change synchronously (wrap React
+ * state in `flushSync`). Falls back to a plain call when the API is missing or motion
+ * is reduced.
+ */
+export function viewTransition(update: () => void): void {
+  const doc = document as ViewTransitionDocument;
+  if (prefersReducedMotion() || typeof doc.startViewTransition !== "function") {
+    update();
+    return;
+  }
+  doc.startViewTransition(update);
+}
 
 /**
  * Run one transform from `from` back to `to` (default rest) with a named spring. The
