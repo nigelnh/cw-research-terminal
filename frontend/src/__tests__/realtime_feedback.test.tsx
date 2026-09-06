@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-import { act, cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { RealtimeValue, REALTIME_FLASH_DURATION_MS, RollingNumber } from "@/components/common/realtime_value";
-import { __setReducedMotionForTests } from "@/design/motion";
+import { act, render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { RealtimeValue, REALTIME_FLASH_DURATION_MS } from "@/components/common/realtime_value";
 import { quoteCell } from "@/components/common/quote_columns";
 import { MARKET_COLOR, priceColor } from "@/components/common/grid_table";
 import { BackendWebSocketClient } from "@/data/backend/backend_websocket_client";
@@ -24,7 +23,7 @@ const snapshot = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("incremental realtime feedback", () => {
-  it("flashes the table cell itself for the wake duration and cleans up after expiry", () => {
+  it("flashes the table cell itself for 1200ms and cleans up after expiry", () => {
     vi.useFakeTimers();
     try {
       const { container, unmount } = render(<table><tbody><tr>
@@ -33,11 +32,11 @@ describe("incremental realtime feedback", () => {
       </tr></tbody></table>);
       expect(container.querySelector("td.realtime-flash-up")?.textContent).toBe("21,700");
       expect(container.querySelector("td span")).toBeNull();
-      act(() => vi.advanceTimersByTime(REALTIME_FLASH_DURATION_MS - 20));
+      act(() => vi.advanceTimersByTime(1000));
       expect(container.querySelector("td.realtime-flash-up")).not.toBeNull();
-      act(() => vi.advanceTimersByTime(21));
+      act(() => vi.advanceTimersByTime(201));
       expect(container.querySelector(".realtime-flash")).toBeNull();
-      expect(REALTIME_FLASH_DURATION_MS).toBe(620);
+      expect(REALTIME_FLASH_DURATION_MS).toBe(1200);
       unmount();
     } finally { vi.useRealTimers(); }
   });
@@ -281,49 +280,5 @@ describe("incremental realtime feedback", () => {
 
     expect(client.isRealtimeTracked("HPG")).toBe(true);
     expect(client.isRealtimeTracked("VNM")).toBe(false);
-  });
-});
-
-describe("RollingNumber", () => {
-  afterEach(() => {
-    __setReducedMotionForTests(null);
-    cleanup();
-  });
-
-  it("renders the display string and swaps it on value change", () => {
-    const page = render(<RollingNumber value={1984.89} display="1,984.89" resetKey="2026-09-04" />);
-    expect(page.getByText("1,984.89")).toBeTruthy();
-    page.rerender(<RollingNumber value={1990.12} display="1,990.12" resetKey="2026-09-04" />);
-    expect(page.getByText("1,990.12")).toBeTruthy();
-  });
-
-  it("under reduced motion, updates in place with no ghost element", () => {
-    __setReducedMotionForTests(true);
-    const page = render(<RollingNumber value={100} display="100" resetKey="s1" />);
-    page.rerender(<RollingNumber value={102} display="102" resetKey="s1" />);
-    expect(page.container.querySelector(".rolling-number-ghost")).toBeNull();
-    expect(page.getByText("102")).toBeTruthy();
-    // the directional wake still fires (it carries the up/down signal without motion)
-    expect(page.container.querySelector(".realtime-flash-up")).not.toBeNull();
-  });
-
-  it("does not treat a session rollover (resetKey change) as a tick", () => {
-    __setReducedMotionForTests(true);
-    const page = render(<RollingNumber value={100} display="100" resetKey="mon" />);
-    page.rerender(<RollingNumber value={2} display="2" resetKey="tue" />);
-    expect(page.container.querySelector(".realtime-flash-up")).toBeNull();
-    expect(page.container.querySelector(".realtime-flash-down")).toBeNull();
-  });
-
-  it("retargets on a mid-roll re-tick — ends on the newest value, one current node", () => {
-    __setReducedMotionForTests(false);
-    const page = render(<RollingNumber value={100} display="100" resetKey="s" />);
-    // three ticks back to back
-    page.rerender(<RollingNumber value={103} display="103" resetKey="s" />);
-    page.rerender(<RollingNumber value={101} display="101" resetKey="s" />);
-    page.rerender(<RollingNumber value={107} display="107" resetKey="s" />);
-    // the visible current value is the last one; ghosts are aria-hidden and never stack
-    expect(page.container.querySelector(".rolling-number-cur")?.textContent).toBe("107");
-    expect(page.container.querySelectorAll(".rolling-number-cur")).toHaveLength(1);
   });
 });

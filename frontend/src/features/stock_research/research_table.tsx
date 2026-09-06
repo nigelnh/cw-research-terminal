@@ -1,8 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { flushSync } from "react-dom";
 import { DismissHeader, PinCell, PinHeader, SortHeader, useSortPin } from "@/components/common/grid_table";
 import { completeOrder, moveItem } from "@/components/common/watchlist_layout";
-import { flip } from "@/design/motion";
 
 export interface ResearchColumn<T> {
   key: string;
@@ -52,7 +50,6 @@ export function ResearchTable<T extends { symbol: string }>({
   }, [rows, layout.rows]);
   const grid = useSortPin(manualRows, fields);
   const drag = useRef<{ type: "row" | "column"; key: string } | null>(null);
-  const tbodyRef = useRef<HTMLTableSectionElement>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const endDrag = () => { drag.current = null; setDropTarget(null); };
   const moveColumn = (from: string, to: string) => save({ ...layout, columns: moveItem(orderedColumns.map(c => c.key), from, to) });
@@ -60,12 +57,8 @@ export function ResearchTable<T extends { symbol: string }>({
     if (from === to) return;
     const visible = grid.ordered.map(row => row.symbol);
     if (!visible.includes(from) || !visible.includes(to)) return;
-    const play = flip(tbodyRef.current);
-    flushSync(() => {
-      save({ ...layout, rows: [...moveItem(visible, from, to), ...layout.rows.filter(symbol => !visible.includes(symbol))] });
-      grid.clearOrder();
-    });
-    play();
+    save({ ...layout, rows: [...moveItem(visible, from, to), ...layout.rows.filter(symbol => !visible.includes(symbol))] });
+    grid.clearOrder();
   };
   const dragProps = (type: "row" | "column", key: string) => ({
     draggable: true,
@@ -108,7 +101,7 @@ export function ResearchTable<T extends { symbol: string }>({
         <th style={{ width: 20 }} aria-hidden />
         <DismissHeader />
       </tr></thead>
-      <tbody ref={tbodyRef}>
+      <tbody>
         {isLoading || isError || !grid.ordered.length ? <tr><td colSpan={columns.length + 3}
           style={{ padding: "40px 8px", textAlign: "center", color: isError ? "var(--down)" : "var(--t-46)" }}>
           {isLoading ? "Loading research registry…" : isError ? "Could not load the research registry. Retry shortly." : "No instruments match."}
