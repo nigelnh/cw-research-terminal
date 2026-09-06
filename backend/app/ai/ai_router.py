@@ -162,7 +162,9 @@ async def chat_endpoint(
                 "\n[Scope check: answer ONLY if this is about covered warrants, "
                 "Vietnam-market equities/indices, or quantitative finance. If it is not, "
                 "decline in one or two sentences and offer a research question instead - "
-                "do not answer it anyway.]"
+                "do not answer it anyway. Never write code of any kind, in any language, "
+                "on any subject - not even for a finance topic; explain the maths in prose "
+                "instead. Keep the reply under 500 words so it is not cut off.]"
             )
             if _tools_ran:
                 # Weak free models keep offering to "run the queries" even with the results
