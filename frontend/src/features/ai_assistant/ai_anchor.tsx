@@ -143,7 +143,7 @@ function ResearchTrace({ steps, live, running }: { steps: TraceStep[]; live: str
       {(open || running) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingTop: 2 }}>
           {steps.map((s, i) => (
-            <div key={i} style={{ display: "flex", gap: 6, color: s.ok ? "var(--t-60)" : "var(--down)" }}>
+            <div key={i} className={running ? "trace-step is-live" : "trace-step"} style={{ display: "flex", gap: 6, color: s.ok ? "var(--t-60)" : "var(--down)" }}>
               <span style={{ color: s.ok ? "var(--up)" : "var(--down)", width: 8, flexShrink: 0 }}>
                 {stepGlyph(s.ok)}
               </span>
@@ -385,6 +385,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
   const lastMsg = messages[messages.length - 1];
   const streaming = isLoading && (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.content);
   const assistantRunning = isLoading && lastMsg?.role === "assistant";
+  const busy = streaming || assistantRunning;
 
   // keep anchor on-screen through viewport resize
   useEffect(() => {
@@ -663,7 +664,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
           transition: dragging ? "none" : "box-shadow 120ms ease",
         }}
       >
-        <Orbit size={16} strokeWidth={1.5} />
+        <Orbit size={16} strokeWidth={1.5} className={busy ? "orbit-thinking" : undefined} />
         <span
           aria-hidden
           style={{

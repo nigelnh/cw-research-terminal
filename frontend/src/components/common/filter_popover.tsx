@@ -121,7 +121,7 @@ export function FilterPopover({
         aria-haspopup="dialog"
         onClick={() => setOpen((current) => !current)}
       >
-        FILTER ▾
+        FILTER <span className="filter-caret">▾</span>
       </button>
       {open && (
         <div
