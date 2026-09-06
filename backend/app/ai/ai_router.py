@@ -164,7 +164,9 @@ async def chat_endpoint(
                 "decline in one or two sentences and offer a research question instead - "
                 "do not answer it anyway. Never write code of any kind, in any language, "
                 "on any subject - not even for a finance topic; explain the maths in prose "
-                "instead. Keep the reply under 500 words so it is not cut off.]"
+                "instead. Write any formula as plain Unicode text (σ, √, ·, ², d₁) on one "
+                "line - never LaTeX, no $ or $$ or backslash commands, they do not render. "
+                "Keep the reply under 500 words so it is not cut off.]"
             )
             if _tools_ran:
                 # Weak free models keep offering to "run the queries" even with the results
