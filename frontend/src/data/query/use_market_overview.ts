@@ -21,7 +21,9 @@ export interface IndexOverview {
   stale?: boolean;
   update_mode?: "POLLED";
   partial_reasons?: string[];
-  sparkline: Array<number | { timestamp: string; value: number; reference?: number | null }>;
+  sparkline: Array<
+    number | { timestamp: string; value: number; reference?: number | null; volume?: number | null }
+  >;
   provenance?: Record<string, { source: string; as_of?: string | null; session_date?: string | null; availability?: string; timeframe?: string }>;
 }
 export interface VolumeLeader {

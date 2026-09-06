@@ -2081,7 +2081,8 @@ class FiinQuantProvider(MarketDataProvider):
                             ("BREADTH_UNAVAILABLE", not has_breadth),
                         ) if missing],
                         "sparkline": [{"timestamp": stamp(x), "value": num(x, "close", "Close"),
-                                       "reference": reference} for x in intraday_bars
+                                       "reference": reference,
+                                       "volume": num(x, "volume", "Volume")} for x in intraday_bars
                                       if num(x, "close", "Close") is not None],
                         "provenance": {
                             "price": {"source": "FIINQUANT", "as_of": stamp(current) or None,
