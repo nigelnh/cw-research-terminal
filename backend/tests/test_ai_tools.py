@@ -142,6 +142,90 @@ async def test_5_and_6_get_quant_delegates_and_returns_structured_missing_inputs
 
 
 @pytest.mark.asyncio
+async def test_6b_get_quant_serves_last_completed_session_when_live_is_session_gated():
+    """Outside trading hours the live path returns MARKET_INPUT_SESSION_MISMATCH. get_quant
+    must then fall back to the last completed session's EOD analytics - the SAME numbers
+    the watchlist IV columns and the instrument panel already show - not report IV as
+    unavailable."""
+    from datetime import date
+    from app.quant.quant_schemas import (
+        WarrantAnalytics,
+        WarrantGreeks,
+        MoneynessCategory,
+        GreeksVolatilitySource,
+    )
+
+    live_gated = WarrantAnalytics(
+        symbol="CHPG2617", underlying_symbol="HPG",
+        calculated_at="2026-09-06T08:00:00+07:00",
+        is_available=False, unavailable_reason="MARKET_INPUT_SESSION_MISMATCH",
+    )
+    eod_ok = WarrantAnalytics(
+        symbol="CHPG2617", underlying_symbol="HPG",
+        calculated_at="2026-09-04T15:00:00+07:00", is_available=True,
+        moneyness=0.85433, moneyness_category=MoneynessCategory.OTM,
+        iv_bid=0.41216, iv_trade=0.431195, iv_ask=0.431195, iv_mid=0.421697,
+        historical_volatility=0.2494, theoretical_price=157.26,
+        greeks=WarrantGreeks(
+            delta=0.10159, gamma=0.0000138, theta=-1.9, vega=15.81, rho=10.01,
+            volatility_source=GreeksVolatilitySource.IV_TRADE,
+        ),
+    )
+
+    with patch.object(
+        live_quant_engine, "compute_warrant_analytics",
+        new=AsyncMock(return_value=live_gated),
+    ), patch.object(
+        live_quant_engine, "compute_eod_analytics",
+        new=AsyncMock(return_value=eod_ok),
+    ) as eod_mock:
+        quant = await get_quant("CHPG2617")
+
+    assert quant["is_available"] is True
+    assert quant["status"] == "AVAILABLE"
+    assert quant["basis"] == "LAST_COMPLETED_SESSION"
+    assert quant["as_of_session"]  # ISO date of the completed session
+    assert quant["iv_trade"] == 0.431195
+    assert quant["iv_bid"] == 0.41216
+    assert quant["delta"] == 0.10159
+    assert quant["historical_volatility"] == 0.2494
+    called_sym, called_session = eod_mock.call_args.args
+    assert called_sym == "CHPG2617"
+    assert isinstance(called_session, date)
+
+
+@pytest.mark.asyncio
+async def test_6c_get_quant_reports_unavailable_only_when_both_live_and_eod_decline():
+    """If the last-session EOD compute also declines (e.g. unverified metadata), the tool
+    surfaces that reason - not a fabricated number and not the raw session-mismatch."""
+    from app.quant.quant_schemas import WarrantAnalytics
+
+    live_gated = WarrantAnalytics(
+        symbol="CHPG2617", underlying_symbol="HPG",
+        calculated_at="2026-09-06T08:00:00+07:00",
+        is_available=False, unavailable_reason="MARKET_INPUT_SESSION_MISMATCH",
+    )
+    eod_gated = WarrantAnalytics(
+        symbol="CHPG2617", underlying_symbol="HPG",
+        calculated_at="2026-09-04T15:00:00+07:00",
+        is_available=False, unavailable_reason="METADATA_NOT_VERIFIED_CURRENT (PENDING)",
+    )
+
+    with patch.object(
+        live_quant_engine, "compute_warrant_analytics",
+        new=AsyncMock(return_value=live_gated),
+    ), patch.object(
+        live_quant_engine, "compute_eod_analytics",
+        new=AsyncMock(return_value=eod_gated),
+    ):
+        quant = await get_quant("CHPG2617")
+
+    assert quant["is_available"] is False
+    assert quant["status"] == "INCOMPLETE_INPUTS"
+    assert "METADATA_NOT_VERIFIED_CURRENT" in quant["unavailable_reason"]
+
+
+@pytest.mark.asyncio
 async def test_7_ui_context_resolves_referenced_symbol():
     """7. UI context envelope resolves 'this stock' or 'this warrant' to correct symbol tool calls."""
     executor = ToolExecutor(max_tool_calls=4)
