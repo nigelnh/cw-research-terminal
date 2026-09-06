@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BackendClient,
   AuthRequiredError,
+  getAccessToken,
   setAccessTokenProvider,
 } from "@/data/backend/backend_client";
 import { mapItemsToServer } from "@/data/watchlist/use_server_watchlist";
@@ -83,6 +84,28 @@ describe("backend client - Authorization is attached ONLY to /api/me/*", () => {
     const err = await client.getMyWatchlist().catch((e) => e);
     expect(err).toBeInstanceOf(AuthRequiredError);
     expect(err.status).toBe(403);
+  });
+});
+
+describe("getAccessToken - shared token accessor for authed fetches outside BackendClient", () => {
+  it("returns null when no provider is registered", async () => {
+    setAccessTokenProvider(null);
+    await expect(getAccessToken()).resolves.toBeNull();
+  });
+
+  it("resolves the current token from a sync or async provider", async () => {
+    setAccessTokenProvider(() => "tok-sync");
+    await expect(getAccessToken()).resolves.toBe("tok-sync");
+    setAccessTokenProvider(async () => "tok-async");
+    await expect(getAccessToken()).resolves.toBe("tok-async");
+  });
+
+  it("reflects a sign-out (provider now yields null)", async () => {
+    let token: string | null = "tok-live";
+    setAccessTokenProvider(() => token);
+    await expect(getAccessToken()).resolves.toBe("tok-live");
+    token = null;
+    await expect(getAccessToken()).resolves.toBeNull();
   });
 });
 
