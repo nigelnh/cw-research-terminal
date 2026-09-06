@@ -251,9 +251,9 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
   }, [symbol, query]);
 
   return (
-    <div>
+    <div className="page-shell">
       <MarketOverviewStrip />
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 3, flexWrap: "wrap" }}>
+      <div className="page-title-row" style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>
           News
         </span>
@@ -262,7 +262,8 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
           <NewsFilterDropdown symbolOptions={symbolOptions} value={nf} onChange={setNf} />
         </span>
       </div>
-      <table className="mono grid-lined" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, marginTop: 14 }}>
+      <div className="news-table-scroll">
+      <table className="mono grid-lined news-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
         <colgroup><col style={{ width: 96 }} /><col style={{ width: 72 }} /><col style={{ width: 96 }} /><col /><col style={{ width: 90 }} /><col style={{ width: 40 }} /></colgroup>
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
@@ -316,7 +317,7 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
       </table>
 
       {hasNextPage && !isLoading && !isError && (
-        <div style={{ textAlign: "center", padding: "16px 0 4px" }}>
+        <div style={{ textAlign: "center", padding: "16px 0 12px" }}>
           <button
             type="button"
             onClick={fetchNextPage}
@@ -337,6 +338,7 @@ export function NewsFeed({ filter = "", selectedSymbol = null, onSelectSymbol }:
           </button>
         </div>
       )}
+      </div>
     </div>
   );
 }

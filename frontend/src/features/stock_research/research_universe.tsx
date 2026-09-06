@@ -88,9 +88,9 @@ export function ResearchUniverse({ selectedSymbol = null, onSelectSymbol, filter
     strikePrice: row.strike, exerciseRatio: row.ratio, maturityDate: row.maturity, lastTradingDate: row.lastTradingDate,
   });
 
-  return <div>
+  return <div className="page-shell">
     <MarketOverviewStrip />
-    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, position: "relative" }}>
+    <div className="page-title-row" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, position: "relative" }}>
       <span className="heading" style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.02em" }}>Registry</span>
       <WatchlistSymbolSearch scope="research" options={searchOptions} value={symbolSearch} onSubmit={setSymbolSearch} />
       <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
@@ -98,13 +98,13 @@ export function ResearchUniverse({ selectedSymbol = null, onSelectSymbol, filter
     </div>
     <div className="research-registry-grid">
       <div className="research-registry-panel">
-        <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>COVERED WARRANTS</div>
+        <div className="registry-panel-label" style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>COVERED WARRANTS</div>
         <ResearchTable id="warrants" label="Covered warrants" rows={rows} columns={CW_COLUMNS} selectedSymbol={selectedSymbol}
           matches={matches} onSelect={setSelected} isLoading={isLoading} isError={isError}
           actions={row => <><AddCell symbol={row.symbol} tracked={row.tracked} onAdd={() => addCw(row)} /><DismissCell symbol={row.symbol} onDismiss={hiddenRows.hide} /></>} />
       </div>
       <div className="research-stock-panel">
-        <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
+        <div className="registry-panel-label" style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--t-46)", marginBottom: 6 }}>
           STOCKS <HiddenNote count={stockHidden.count} onReset={stockHidden.reset} />
         </div>
         <ResearchTable id="stocks" label="Stocks" rows={stockRows} columns={STOCK_COLUMNS} selectedSymbol={selectedSymbol}

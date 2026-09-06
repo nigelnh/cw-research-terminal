@@ -128,13 +128,53 @@ export function Sparkline({ values, reference }: { values: IndexOverview["sparkl
   const hourTicks = [10, 11, 13, 14]
     .map(h => `M${((h * 60 - SESSION_OPEN_MIN) / SESSION_SPAN_MIN) * 100} 0V30`)
     .join("");
-  return <svg className="overview-spark" role="img" aria-label="Intraday index path" viewBox="0 0 100 32" preserveAspectRatio="none">
-    <path className="overview-spark-grid" d={hourTicks} stroke="var(--border-32)" strokeWidth="0.4" fill="none" />
-    {referenceY != null && <line x1="0" y1={referenceY} x2="100" y2={referenceY} stroke="var(--t-46)" strokeDasharray="2 2" />}
-    {colorSegments.map((seg, i) => seg.isPoint
-      ? <circle key={i} cx={seg.pts.split(",")[0]} cy={seg.pts.split(",")[1]} r="1" fill={seg.color} />
-      : <polyline key={i} points={seg.pts} fill="none" stroke={seg.color} strokeWidth="1.3" vectorEffect="non-scaling-stroke" />)}
-  </svg>;
+  return <>
+    <svg className="overview-spark" role="img" aria-label="Intraday index path" viewBox="0 0 100 32" preserveAspectRatio="none">
+      <path className="overview-spark-grid" d={hourTicks} stroke="var(--border-32)" strokeWidth="0.4" fill="none" />
+      {referenceY != null && <line x1="0" y1={referenceY} x2="100" y2={referenceY} stroke="var(--t-46)" strokeDasharray="2 2" />}
+      {colorSegments.map((seg, i) => seg.isPoint
+        ? <circle key={i} cx={seg.pts.split(",")[0]} cy={seg.pts.split(",")[1]} r="1" fill={seg.color} />
+        : <polyline key={i} points={seg.pts} fill="none" stroke={seg.color} strokeWidth="1.3" vectorEffect="non-scaling-stroke" />)}
+    </svg>
+    {ref != null && referenceY != null && (
+      <span className="overview-spark-ref" style={{ top: `${(referenceY / 32) * 100}%` }}>
+        REF {number(ref)}
+      </span>
+    )}
+  </>;
+}
+
+/** HOSE continuous session hours the intraday buckets can land in (the 14:00 bar spans
+ *  14:00–15:00 to the close; 12:00 is fully inside the 11:30–13:00 lunch break). */
+const VOLUME_HOURS = [9, 10, 11, 12, 13, 14];
+
+function hourlyVolume(values: IndexOverview["sparkline"]): number[] {
+  const byHour = new Map<number, number>();
+  for (const item of values) {
+    if (typeof item === "number") continue;
+    const mins = ictMinutes(item.timestamp);
+    if (mins == null) continue;
+    byHour.set(Math.floor(mins / 60), (byHour.get(Math.floor(mins / 60)) ?? 0) + (item.volume ?? 0));
+  }
+  return VOLUME_HOURS.map(h => byHour.get(h) ?? 0);
+}
+
+/** Per-hour traded volume for the session, 09:00–15:00 ICT, as a compact bar row under
+ *  the index path. Each bar is scaled to the busiest hour; a faint track shows the slot
+ *  even when that hour was quiet. */
+function HourlyVolume({ values }: { values: IndexOverview["sparkline"] }) {
+  const bars = hourlyVolume(values);
+  const peak = Math.max(...bars, 1);
+  if (!bars.some(v => v > 0)) return <div className="index-hourvol is-empty" aria-hidden="true" />;
+  return (
+    <div className="index-hourvol" role="img" aria-label="Traded volume by hour, 09:00–15:00 ICT">
+      {bars.map((v, i) => (
+        <span key={VOLUME_HOURS[i]} title={`${VOLUME_HOURS[i]}:00 ICT — ${compact(v)}`}>
+          <i style={{ height: v > 0 ? `${Math.max(8, (v / peak) * 100)}%` : 0 }} />
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function IndexCard({ item }: { item: IndexOverview }) {
@@ -160,6 +200,7 @@ function IndexCard({ item }: { item: IndexOverview }) {
       <Sparkline values={item.sparkline || []} reference={item.reference} />
       {tag && <span className={`overview-spark-tag${item.stale ? " is-stale" : ""}`} title={tagTitle}>{tag}</span>}
     </div>
+    <HourlyVolume values={item.sparkline || []} />
     <div className="index-card-main">
       <strong className="heading">{item.symbol}</strong>
       <span style={{ color: tone(item.change) }}>

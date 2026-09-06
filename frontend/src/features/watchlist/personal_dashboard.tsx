@@ -420,9 +420,10 @@ export function PersonalDashboard({
   };
 
   return (
-    <div>
+    <div className="page-shell">
       <MarketOverviewStrip />
       <div
+        className="page-title-row"
         style={{
           display: "flex",
           alignItems: "center",

@@ -87,7 +87,7 @@ async def test_overview_queries_intraday_in_explicit_ict_not_sdk_host_clock(monk
     for item in result["indices"]:
         assert item["value"] == 102  # newer daily snapshot beats older 5m close
         assert item["as_of"] == "2026-09-02T09:27:00+07:00"
-        assert item["sparkline"] == [{"timestamp": "2026-09-02T09:20:00+07:00", "value": 101, "reference": 100}]
+        assert item["sparkline"] == [{"timestamp": "2026-09-02T09:20:00+07:00", "value": 101, "reference": 100, "volume": 7}]
         assert item["update_mode"] == "POLLED"
         assert item["provenance"]["sparkline"]["timeframe"] == "5m"
 
