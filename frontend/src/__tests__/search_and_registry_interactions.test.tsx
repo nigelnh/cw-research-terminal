@@ -22,7 +22,10 @@ vi.mock("@/data/query", () => ({
   useActiveWarrants: (filter?: { status?: string }) => ({ instruments: filter?.status === "ALL" ? fixture.discovered : fixture.instruments, isLoading: false, isError: false }),
   useResearchFeed: fixture.feed,
 }));
-vi.mock("@/data/watchlist", () => ({ useWatchlist: () => ({ isInWatchlist: () => false, addToWatchlist: fixture.add }) }));
+vi.mock("@/data/watchlist", () => ({ useWatchlist: () => ({ items: [], isInWatchlist: () => false, addToWatchlist: fixture.add }) }));
+// The analytics band is exercised in research_analytics_band.test.tsx; these cases are
+// about the registry tables, and stubbing it keeps chart.js out of this suite.
+vi.mock("@/features/stock_research/research_analytics_band", () => ({ ResearchAnalyticsBand: () => null }));
 vi.mock("@/data/query/use_stock_profiles", () => ({ useStockProfiles: () => ({ profiles: [
   { symbol: "HPG", name: "Hoa Phat Group", exchange: "HOSE" },
   { symbol: "VPB", name: "Vietnam Prosperity Bank", exchange: "HOSE" },
