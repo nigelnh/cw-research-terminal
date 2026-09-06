@@ -414,11 +414,11 @@ select:focus-visible,
   flex-shrink: 0;
   display: flex; flex-wrap: wrap; gap: 2px 10px;
   padding: 2px 8px 5px;
-  font: 8.5px/1.4 var(--font-mono); color: var(--t-50);
+  font: 8.5px/1.4 var(--font-mono); color: var(--t-92);
 }
 .chart-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .chart-legend i { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-.chart-legend em { font-style: normal; color: var(--t-40); }
+.chart-legend em { font-style: normal; color: var(--t-92); }
 
 @media (max-width: 1180px) {
   /* Three compact charts stop being readable before the table does — drop the ladder
