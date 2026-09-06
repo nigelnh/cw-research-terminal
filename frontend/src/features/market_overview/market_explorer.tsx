@@ -220,7 +220,7 @@ export function MarketExplorer() {
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <main style={{ flex: 1, overflow: "auto", padding: "16px 20px", minHeight: 100 }}>
+        <main style={{ flex: 1, overflow: "auto", padding: "16px 20px", minHeight: 0, display: "flex", flexDirection: "column" }}>
           {activeTab === "dashboard" ? (
             <PersonalDashboard
               onNavigateToUniverse={() => goToTab("research")}
