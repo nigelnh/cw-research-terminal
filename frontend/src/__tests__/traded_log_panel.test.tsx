@@ -5,7 +5,7 @@
  * blank at 15:00 as it used to.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 
 const tape = vi.hoisted(() => ({
   items: [] as any[],
@@ -107,5 +107,26 @@ describe("TRADED LOGS", () => {
     tape.items = [print()];
     const header = panel(true).getByTitle(/derived from the order book/i);
     expect(header.textContent).toBe("B/S");
+  });
+});
+
+describe("a full session's tape", () => {
+  it("paints a first page rather than thousands of rows, and grows on scroll", () => {
+    // The shared server tape can hold a whole session - HPG prints thousands of times.
+    // Painting all of it on open would cost tens of thousands of nodes for history the
+    // user has not scrolled to.
+    tape.items = Array.from({ length: 1_000 }, (_, i) =>
+      print({ ts: 1_757_000_000_000 + i * 1_000, time: `09:${20 + Math.floor(i / 60)}:${i % 60}` }),
+    );
+    const view = panel(true);
+    const scroller = view.container.querySelector(".instrument-tape") as HTMLElement;
+    expect(scroller.querySelectorAll(".instrument-tape-row")).toHaveLength(300);
+
+    // Reaching the end of the painted rows extends the window.
+    Object.defineProperty(scroller, "scrollHeight", { value: 6_000, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: 400, configurable: true });
+    Object.defineProperty(scroller, "scrollTop", { value: 5_500, configurable: true });
+    fireEvent.scroll(scroller);
+    expect(scroller.querySelectorAll(".instrument-tape-row")).toHaveLength(600);
   });
 });

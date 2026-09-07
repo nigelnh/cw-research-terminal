@@ -119,7 +119,7 @@ class SubscriptionManager:
                     try:
                         printed = traded_log.record(quote, diff)
                         if printed is not None:
-                            asyncio.ensure_future(traded_log.persist(quote.symbol))
+                            asyncio.ensure_future(traded_log.persist(quote.symbol, printed))
                             # Push the print on the same rail as quote and bar patches.
                             # Polling REST every 5s left the tape visibly behind STATS and
                             # the watchlist row, which update on every tick; a print is a

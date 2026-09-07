@@ -272,10 +272,14 @@ export class BackendClient {
     );
   }
 
-  /** Time & sales for one instrument. `side` is derived from the book, never published. */
+  /**
+   * Time & sales for one instrument, from the shared server-side tape - so this is the
+   * whole session's history regardless of which machine or browser is asking. `side` is
+   * derived from the book, never published by the exchange.
+   */
   async getTradedLog(
     symbol: string,
-    limit = 50,
+    limit = 200,
     signal?: AbortSignal,
   ): Promise<{
     symbol: string;
