@@ -218,6 +218,10 @@ export function AppHeader({
   const sessionLabel = ({ PRE_OPEN: "PRE-OPEN", ATO: "ATO", LUNCH_BREAK: "LUNCH BREAK",
     ATC: "ATC", POST_CLOSE_NEGOTIATED: "NEGOTIATED", CLOSED: "CLOSED", UNKNOWN: "SYNCING" } as Record<string, string>)[marketPhase ?? ""]
     ?? (marketSessionActive ? "OPEN" : "CLOSED");
+  // Exception-only feed status. A healthy feed shows nothing: the session chip beside it
+  // already reads OPEN with a green dot, so a second "LIVE" badge was pure duplication.
+  // The abnormal states stay - on a trading terminal, silently hiding STALE / RECONNECTING
+  // / OFFLINE would be the dangerous edit, since those are exactly when the numbers lie.
   const feedLabel = gatewayState === "RECONNECTING" || upstreamFeedState === "RECONNECTING"
       ? "RECONNECTING"
       : upstreamFeedState === "STALE"
@@ -225,13 +229,11 @@ export function AppHeader({
         : gatewayState === "ERROR" || gatewayState === "DISCONNECTED" || upstreamFeedState === "DISCONNECTED" || upstreamFeedState === "ERROR"
           ? "OFFLINE"
           : upstreamFeedState === "CONNECTED"
-            ? marketSessionActive ? "LIVE" : null
+            ? null
             : "CONNECTING";
-  const feedTone = feedLabel === "LIVE"
-    ? "var(--up)"
-    : feedLabel === "STALE" || feedLabel === "RECONNECTING" || feedLabel === "CONNECTING"
-      ? "var(--flat)"
-      : "var(--t-46)";
+  const feedTone = feedLabel === "STALE" || feedLabel === "RECONNECTING" || feedLabel === "CONNECTING"
+    ? "var(--flat)"
+    : "var(--t-46)";
 
   return (
     <header
