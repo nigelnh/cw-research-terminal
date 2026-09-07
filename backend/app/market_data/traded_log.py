@@ -30,7 +30,12 @@ from app.market_data.trading_calendar import VN_TZ
 
 logger = logging.getLogger(__name__)
 
-KEY_PREFIX = "cw_research:traded_log:v1"
+#: Bumped to v2 when the stored shape changed from one JSON blob to a Redis LIST. The
+#: version is part of the key on purpose: a list operation against a leftover v1 string
+#: fails with WRONGTYPE, which - being caught, as a cache fault must be - would have
+#: silently disabled persistence until the old key's TTL expired. A new prefix means the
+#: two shapes can never meet, and yesterday's keys simply age out.
+KEY_PREFIX = "cw_research:traded_log:v2"
 #: The tape is kept until this hour on the following day, matching the dashboard's own
 #: 08:00 ICT data rollover.
 ROLLOVER_HOUR_ICT = 8
@@ -86,6 +91,8 @@ class TradedLog:
         self._redis: Any = None
         # Symbols whose stored tape must be dropped before the next append.
         self._pending_resets: set[str] = set()
+        # Symbols already warned about, so a Redis outage logs once rather than per tick.
+        self._persist_failed: set[str] = set()
 
     def set_redis(self, client: Any) -> None:
         """Attach an already-connected client. Redis is optional: without it the tape is
@@ -177,8 +184,16 @@ class TradedLog:
             pipe.ltrim(key, -self._max, -1)
             pipe.expire(key, seconds_until_rollover())
             await pipe.execute()
+            self._persist_failed.discard(symbol)
         except Exception as err:  # noqa: BLE001 - a cache fault must never break the feed
-            logger.debug("Traded-log persist failed for %s: %s", symbol, err)
+            # Debug-only logging here once hid a dead persistence path for hours. The first
+            # failure per symbol is worth a warning; the rest stay quiet so a Redis outage
+            # cannot flood the log at tick rate.
+            if symbol in self._persist_failed:
+                logger.debug("Traded-log persist failed for %s: %s", symbol, err)
+            else:
+                self._persist_failed.add(symbol)
+                logger.warning("Traded-log persist failed for %s: %s", symbol, err)
 
     async def _reset_redis_session(self, symbol: str) -> None:
         """Drop a symbol's stored tape when its session rolls over, so yesterday's prints

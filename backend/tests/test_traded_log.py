@@ -1,9 +1,11 @@
 """Time & sales tape: only real matches, an honest derived side, 08:00 ICT retention."""
 import json
 from datetime import datetime, timedelta
+from unittest import mock
 
 import pytest
 
+from app.market_data import traded_log as traded_log_module
 from app.market_data.market_state import MarketState
 from app.market_data.traded_log import (
     TradedLog, classify_side, seconds_until_rollover, ROLLOVER_HOUR_ICT,
@@ -203,12 +205,12 @@ async def test_persisting_is_constant_work_per_print():
             await log.persist("HPG", e)
     # one rpush per print, not one full-tape serialisation
     assert redis.writes == 100
-    assert len(redis.lists["cw_research:traded_log:v1:HPG"]) == 100
+    assert len(redis.lists[TradedLog._key("HPG")]) == 100
 
 
 async def test_a_stored_tape_from_an_earlier_session_is_not_restored_into_today():
     redis = _FakeRedis()
-    key = "cw_research:traded_log:v1:HPG"
+    key = TradedLog._key("HPG")
     redis.lists[key] = [json.dumps({
         "ts": 1, "time": "09:20:00", "price": 21_000, "change": None,
         "change_percent": None, "volume": 100, "side": "B", "session_date": "2999-01-01",
@@ -227,7 +229,7 @@ async def test_a_session_rollover_clears_the_stored_tape():
 
     q, d = _trade(state, 21_900)
     await log.persist("HPG", log.record(q, d))
-    key = "cw_research:traded_log:v1:HPG"
+    key = TradedLog._key("HPG")
     assert len(redis.lists[key]) == 1
 
     q2, d2 = _trade(state, 22_000, when="2026-09-08T09:16:00+07:00")
@@ -272,3 +274,34 @@ async def test_a_redis_outage_degrades_to_recent_prints_rather_than_nothing():
         q, d = _trade(state, 21_800 + i, when=f"2026-09-07T09:20:{i % 60:02d}+07:00")
         log.record(q, d)
     assert (await log.get_session("HPG", limit=6000))["count"] == 50
+
+
+async def test_the_key_version_isolates_the_list_shape_from_the_old_blob():
+    """The v1 keys held one JSON string. A list op against a string raises WRONGTYPE, and
+    since a cache fault is swallowed by design, sharing the prefix would have silently
+    disabled persistence until those keys expired."""
+    assert TradedLog._key("HPG") == "cw_research:traded_log:v2:HPG"
+
+
+async def test_a_failing_persist_warns_once_per_symbol_then_stays_quiet():
+    """A dead persistence path must be visible in the logs, but a Redis outage must not
+    log at tick rate."""
+    state = _state_with_book()
+
+    class _Wrongtype:
+        def pipeline(self):
+            class _P:
+                def rpush(self, *_a): return self
+                def ltrim(self, *_a): return self
+                def expire(self, *_a): return self
+                async def execute(self): raise RuntimeError("WRONGTYPE")
+            return _P()
+
+    log = TradedLog(max_entries=100)
+    log.set_redis(_Wrongtype())
+    warnings = []
+    with mock.patch.object(traded_log_module.logger, "warning", lambda *a: warnings.append(a)):
+        for i in range(5):
+            q, d = _trade(state, 21_800 + i, when=f"2026-09-07T09:20:0{i}+07:00")
+            await log.persist("HPG", log.record(q, d))
+    assert len(warnings) == 1
