@@ -146,3 +146,21 @@ async def test_health_exposes_the_watchdog_counters():
     assert health["silent_stream_reconnect_count"] == 0
     assert health["stream_silence_reconnect_seconds"] == 90.0
     assert "stream_watchdog_active" in health
+
+
+async def test_market_health_endpoint_surfaces_the_watchdog():
+    """The counters are useless if the sanitized endpoint drops them - that is how the
+    original silent-stream failure stayed invisible for 70 minutes."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    with TestClient(app) as client:
+        body = client.get("/api/market/health").json()
+
+    for key in (
+        "silent_stream_reconnect_count",
+        "stream_watchdog_active",
+        "stream_silence_reconnect_seconds",
+        "trade_tick_age_seconds",
+    ):
+        assert key in body, f"{key} missing from /api/market/health"
