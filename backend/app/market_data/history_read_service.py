@@ -162,6 +162,77 @@ class HistoryReadService:
         return _to_wire(rows, price_basis), "POSTGRES"
 
     # ------------------------------------------------------------------ #
+    # Today's session bar
+    #
+    # Neither source of completed bars can carry the current session: PostgreSQL only ever
+    # holds sessions past their 15:00 close, and the provider's daily series stops at the
+    # last completed session too. The chart used to paper over this with a bar assembled
+    # from WebSocket ticks in the browser - which meant today's candle existed only in
+    # whichever tab had been watching it stream. A reload after the close, or simply
+    # opening on another machine, showed a chart whose newest candle was yesterday while
+    # the header beside it quoted today's price.
+    #
+    # The live market state already holds the whole session's OHLCV server-side (restored
+    # from Redis across restarts), so the honest fix is to serve it as the newest bar.
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _session_bar(
+        symbol: str, req_from: date, req_to: date, *, adjusted: bool, price_basis: str
+    ) -> HistoricalBar | None:
+        """The current session as a daily bar, or None when it cannot be stated truthfully.
+
+        Every field must be present and real. A partial session - an instrument that has
+        quoted but not traded, a frame missing its session high - is a gap, not a bar to
+        be part-invented, which is the same rule the provider path applies.
+        """
+        from app.market_data.market_state import market_state
+
+        quote = market_state.get_quote(symbol)
+        if quote is None or not quote.market_session_date:
+            return None
+        try:
+            session_day = date.fromisoformat(quote.market_session_date[:10])
+        except ValueError:
+            return None
+        if not (req_from <= session_day <= req_to):
+            return None
+
+        o, h, l = quote.open_price, quote.high_price, quote.low_price
+        c, v = quote.last_price, quote.total_volume
+        if any(x is None or x <= 0 for x in (o, h, l, c)) or v is None or v <= 0:
+            return None
+
+        return HistoricalBar(
+            date=session_day.isoformat(),
+            open=float(o), high=float(h), low=float(l), close=float(c),
+            volume=float(v),
+            value=float(quote.trading_value) if quote.trading_value is not None else None,
+            # Corporate actions rescale bars BEFORE their ex-date, never the current one,
+            # so the running session reads the same on either basis - this is the
+            # requested basis, not a RAW bar smuggled into an ADJUSTED series.
+            price_basis=price_basis,
+            adjusted=adjusted,
+            source="REALTIME_SESSION",
+            session_date=session_day.isoformat(),
+        )
+
+    def _with_session_bar(
+        self, bars: list[HistoricalBar], symbol: str, tf: str,
+        req_from: date, req_to: date, *, adjusted: bool, price_basis: str,
+    ) -> list[HistoricalBar]:
+        """Append today's bar to a daily series that stops short of it."""
+        if tf != "1d":
+            return bars
+        bar = self._session_bar(symbol, req_from, req_to, adjusted=adjusted, price_basis=price_basis)
+        if bar is None:
+            return bars
+        # A completed bar for the same day always wins: once the session is ingested, the
+        # persisted bar is the exchange's own, and the live one is only a running total.
+        if any(b.date[:10] == bar.date for b in bars):
+            return bars
+        return [*bars, bar]
+
+    # ------------------------------------------------------------------ #
     async def get_history(
         self,
         symbol: str,
@@ -176,14 +247,22 @@ class HistoryReadService:
         req_from, req_to = self._resolve_window(from_date, to_date, tf)
 
         if self._mode() != "postgres_first" or not self._pg_timeframe(tf):
-            return await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
+            bars = await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
+            return self._with_session_bar(
+                bars, sym, tf, req_from, req_to,
+                adjusted=adjusted, price_basis="ADJUSTED" if adjusted else "RAW",
+            )
 
         assert self._sm is not None and self._ingestion is not None
         async with self._sm() as session:
             inst = await InstrumentRepository(session).get_by_symbol(sym)
         if inst is None:
             logger.info("history: %s not in instruments; serving provider-direct", sym)
-            return await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
+            bars = await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
+            return self._with_session_bar(
+                bars, sym, tf, req_from, req_to,
+                adjusted=adjusted, price_basis="ADJUSTED" if adjusted else "RAW",
+            )
 
         price_basis = "RAW" if inst.instrument_type == "CW" else ("ADJUSTED" if adjusted else "RAW")
         rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
@@ -192,14 +271,14 @@ class HistoryReadService:
         if assessment.covered or not settings.HISTORY_GAPFILL_ENABLED:
             self._counters["db_hit_reads" if assessment.covered else "db_partial_reads"] += 1
             self._counters["provider_calls_avoided"] += 1
-            return _to_wire(rows, price_basis)
+            return self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
         stream_key = f"{sym}:{tf}:{price_basis}"
         if self._in_cooldown(stream_key):
             self._counters["gap_fills_suppressed_cooldown"] += 1
             logger.info("history: %s gap-fill suppressed (recent failure cooldown); serving DB partial", stream_key)
             self._counters["db_partial_reads"] += 1
-            return _to_wire(rows, price_basis)
+            return self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
         # HTTP-layer global cap on how many DISTINCT streams may trigger a provider
         # gap-fill at once. This is SEPARATE from ingestion's own request throttling /
@@ -228,12 +307,18 @@ class HistoryReadService:
                 "history: %s gap-fill deferred (global concurrency cap %d reached); serving DB partial",
                 stream_key, settings.HISTORY_MAX_CONCURRENT_GAPFILLS,
             )
-            return _to_wire(rows, price_basis)
+            return self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
         rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
-        return _to_wire(rows, price_basis)
+        return self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
     # ------------------------------------------------------------------ #
+    def _session_wrapped(self, rows, sym, tf, req_from, req_to, adjusted, price_basis):
+        return self._with_session_bar(
+            _to_wire(rows, price_basis), sym, tf, req_from, req_to,
+            adjusted=adjusted, price_basis=price_basis,
+        )
+
     def _direct_provider(self):
         if self._provider is not None:
             return self._provider

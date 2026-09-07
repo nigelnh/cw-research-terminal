@@ -51,8 +51,11 @@ export function useHistoricalBars({
   useSyncExternalStore(liveBarStore.subscribe, liveBarStore.getRevision, liveBarStore.getRevision);
 
   const completed = query.data ?? [];
-  // "1D" included: the instrument panel charts daily bars, so without it the newest
-  // candle stayed yesterday's completed bar while the header showed a live price.
+  // Socket bars refine the newest candle between fetches; they no longer CREATE it. The
+  // server now serves the running session as the last bar, because a browser-only candle
+  // existed just in the tab that had watched it stream - reload after the close, or open
+  // on another machine, and today's candle was simply missing. Live still wins on the
+  // shared key (same `YYYY-MM-DD` date for 1D) since it is the fresher of the two.
   const live = !adjusted && ["1m", "5m", "15m", "30m", "1h", "1D"].includes(String(interval))
     ? liveBarStore.get(sym, String(interval)) : [];
   const byTime = new Map(completed.map((bar) => [bar.date, bar]));
