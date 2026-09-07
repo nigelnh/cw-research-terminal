@@ -8,7 +8,7 @@ import { useWatchlist } from "@/data/watchlist";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
 import { TradingChart } from "@/components/common/trading_chart";
 import { DASH, fmtIV, fmtPrice, dteDisplay } from "@/components/common/grid_table";
-import { RealtimeValue } from "@/components/common/realtime_value";
+import { RealtimeValue, type FlashTone } from "@/components/common/realtime_value";
 
 import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, QUOTE_COLUMN_PULSE_FIELD, quoteCell, type QuoteTableValues } from "@/components/common/quote_columns";
 import { useWatchlistLayout } from "@/components/common/watchlist_layout";
@@ -35,6 +35,7 @@ function MetricRow({
   compact = false,
   title,
   pulse,
+  tone,
 }: {
   label: string;
   value: React.ReactNode;
@@ -43,6 +44,7 @@ function MetricRow({
   compact?: boolean;
   title?: string;
   pulse?: RealtimePulse;
+  tone?: FlashTone;
 }) {
   return (
     <div
@@ -57,7 +59,7 @@ function MetricRow({
     >
       <span style={{ ...LABEL, fontSize: compact ? 11 : size }}>{label}</span>
       <span style={{ fontSize: compact ? 11 : size, color }}>
-        <RealtimeValue pulse={pulse} style={{ color }}>{value}</RealtimeValue>
+        <RealtimeValue pulse={pulse} tone={tone} style={{ color }}>{value}</RealtimeValue>
       </span>
     </div>
   );
@@ -364,7 +366,7 @@ export function InstrumentPanel({
               const pulse = pulseField
                 ? (cw?.realtimePulses?.[pulseField] ?? q?.realtimePulses?.[pulseField])
                 : undefined;
-              return <MetricRow key={key} label={column.label} value={cell.text} color={cell.color} compact title={QUOTE_COLUMN_HINTS[key]} pulse={pulse} />;
+              return <MetricRow key={key} label={column.label} value={cell.text} color={cell.color} tone={cell.tone} compact title={QUOTE_COLUMN_HINTS[key]} pulse={pulse} />;
             })}
             {conflicting && (
               <div

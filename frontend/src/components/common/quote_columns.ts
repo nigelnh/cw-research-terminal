@@ -7,7 +7,9 @@ import {
   fmtVol,
   priceBandColor,
   priceColor,
+  priceTone,
 } from "./grid_table";
+import type { FlashTone } from "./realtime_value";
 
 /** Shared by the watchlist and the instrument's STATS readout. */
 export const QUOTE_COLUMNS = [
@@ -70,25 +72,37 @@ export interface QuoteTableValues {
   dteText: string;
 }
 
+/**
+ * One cell's text, colour, and realtime-flash tone.
+ *
+ * `tone` is the price band this cell belongs to; the flash reads it so the wash and the
+ * digits always agree (ceiling magenta, floor blue, reference flat-yellow). Cells that are
+ * not price-derived leave it undefined and keep the plain direction flash.
+ */
 export function quoteCell(
   row: QuoteTableValues,
   key: QuoteColumnKey,
-): { text: string; color: string } {
+): { text: string; color: string; tone?: FlashTone } {
   const muted = "var(--t-50)";
   switch (key) {
     case "symbol":
-      return { text: row.symbol, color: priceColor(row.last, row) };
+      return { text: row.symbol, color: priceColor(row.last, row), tone: priceTone(row.last, row) };
     case "ceiling":
     case "floor":
     case "ref":
       return {
         text: fmtPrice(row[key]),
         color: priceBandColor(row[key], key === "ref" ? "reference" : key),
+        tone: key === "ref" ? "flat" : key,
       };
     case "bid":
     case "ask":
     case "last":
-      return { text: fmtPrice(row[key]), color: priceColor(row[key], row) };
+      return {
+        text: fmtPrice(row[key]),
+        color: priceColor(row[key], row),
+        tone: priceTone(row[key], row),
+      };
     case "ivBid":
     case "ivTrade":
     case "ivAsk":
@@ -112,14 +126,33 @@ export function quoteCell(
               : amount < 0
                 ? "var(--down)"
                 : "var(--flat)",
+        tone: amount === null ? undefined : amount > 0 ? "up" : amount < 0 ? "down" : "flat",
       };
     }
-    case "chgPct":
-      return fmtChg(row.chgPct);
+    case "chgPct": {
+      const c = fmtChg(row.chgPct);
+      const p = row.chgPct;
+      return {
+        ...c,
+        tone: typeof p !== "number" || Number.isNaN(p) ? undefined : p > 0 ? "up" : p < 0 ? "down" : "flat",
+      };
+    }
     case "vol":
       return { text: fmtVol(row.vol), color: "var(--t-92)" };
-    case "tradedQuantity":
-      return { text: fmtVol(row.tradedQuantity), color: muted };
+    case "tradedQuantity": {
+      // Size of the most recent match, so it belongs to the same band as the price that
+      // matched. A non-positive size is "no match observed" - never a literal 0 (a
+      // MatchVolume-0 frame used to write one straight into the column).
+      const qty =
+        typeof row.tradedQuantity === "number" && row.tradedQuantity > 0
+          ? row.tradedQuantity
+          : null;
+      return {
+        text: qty === null ? DASH : fmtVol(qty),
+        color: qty === null ? muted : priceColor(row.last, row),
+        tone: qty === null ? undefined : priceTone(row.last, row),
+      };
+    }
     case "strike":
       return { text: fmtPrice(row.strike), color: "var(--t-92)" };
     case "ratio":

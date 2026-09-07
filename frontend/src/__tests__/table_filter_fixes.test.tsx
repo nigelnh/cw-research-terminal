@@ -150,12 +150,18 @@ describe("Targeted watchlist columns", () => {
     ]);
   });
 
-  it.each([1234567, 0, null])("uses provider MatchVolume in both table and STATS: %s", (amount) => {
+  // A non-positive last-match size means "no match observed", not a match of zero lots -
+  // the provider can send MatchVolume 0 on a frame that matched nothing, and rendering a
+  // literal "0" in the column was wrong.
+  it.each([
+    [1234567, "1,234,567"],
+    [0, "—"],
+    [null, "—"],
+  ])("uses provider MatchVolume in both table and STATS: %s", (amount, expected) => {
     const original = fixture.quote.tradedQuantity;
     fixture.quote.tradedQuantity = amount;
     try {
       const page = render(<><PersonalDashboard /><InstrumentPanel instrument={{ symbol: "CHPG2602", instrumentType: "CW", quote: fixture.quote as any }} marketSessionActive={false} onClose={() => {}} /></>);
-      const expected = amount === null ? "—" : amount.toLocaleString("en-US");
       const header = page.getByRole("columnheader", { name: "TRD_AMT" });
       const headers = page.getAllByRole("columnheader");
       const cells = within(page.getByText("CHPG2602", { selector: "td" }).closest("tr")!).getAllByRole("cell");
