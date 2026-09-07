@@ -48,13 +48,15 @@ describe("tradePrintStore", () => {
     expect(tradePrintStore.get("HPG")).toHaveLength(2);
   });
 
-  it("is bounded so a full session cannot grow without limit", () => {
-    for (let i = 0; i < 260; i++) {
+  it("holds a whole session but is still bounded", () => {
+    // The bound matches the server's retention: a long-open tab must not end up showing a
+    // SHORTER tape than a freshly-opened one gets from the shared server-side log.
+    for (let i = 0; i < 8_060; i++) {
       acceptTradePrintMessage({ type: "trade_print", symbol: "HPG", print: print(i, 21_800 + i) });
     }
     const tape = tradePrintStore.get("HPG");
-    expect(tape.length).toBe(200);
-    expect(tape[0].ts).toBe(259); // newest survives, oldest dropped
+    expect(tape.length).toBe(8_000);
+    expect(tape[0].ts).toBe(8_059); // newest survives, oldest dropped
   });
 
   it("notifies subscribers so the panel re-renders on a tick", () => {

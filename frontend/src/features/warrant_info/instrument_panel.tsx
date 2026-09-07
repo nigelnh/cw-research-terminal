@@ -118,16 +118,35 @@ const TS_HEAD: React.CSSProperties = {
   paddingRight: 4,
 };
 
+/** Rows drawn initially, and added each time the tape is scrolled near its end. A liquid
+ *  name prints thousands of times a session; painting all of them up front would cost tens
+ *  of thousands of nodes for history nobody has scrolled to yet. */
+const TAPE_PAGE = 300;
+
 /**
  * TRADED LOGS panel (OVERVIEW tab) - server-side time & sales.
  *
- * The tape is kept until 08:00 ICT the morning after its session, so this stays populated
- * after the close instead of going blank at 15:00. The B/S column is DERIVED from the last
- * known book (at/through the ask = buyer crossed, at/through the bid = seller); a print
- * inside the spread is left blank rather than guessed, and the header says so.
+ * The tape is shared, not per-browser: it lives on the server and is kept until 08:00 ICT
+ * the morning after its session, so it stays populated after the close instead of going
+ * blank at 15:00, and a second machine opening mid-session scrolls back through the whole
+ * day rather than starting empty. The B/S column is DERIVED from the last known book
+ * (at/through the ask = buyer crossed, at/through the bid = seller); a print inside the
+ * spread is left blank rather than guessed, and the header says so.
  */
 function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
   const { items, isLoading, isError } = useTradedLog(symbol, live);
+  const [visible, setVisible] = useState(TAPE_PAGE);
+  // A different instrument is a different tape; start it at the top again.
+  useEffect(() => setVisible(TAPE_PAGE), [symbol]);
+
+  const shown = items.length > visible ? items.slice(0, visible) : items;
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
+      setVisible(v => (v >= items.length ? v : v + TAPE_PAGE));
+    }
+  };
+
   const cellStyle: React.CSSProperties = { textAlign: "right", fontVariantNumeric: "tabular-nums" };
   const note = isError
     ? "Traded logs unavailable."
@@ -166,8 +185,8 @@ function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
           {note}
         </div>
       ) : (
-        <div className="instrument-tape">
-          {items.map((row) => {
+        <div className="instrument-tape" onScroll={onScroll}>
+          {shown.map((row) => {
             const tone =
               row.change == null || row.change === 0
                 ? "var(--flat)"

@@ -60,13 +60,32 @@ def classify_side(price: float, bid: Optional[float], ask: Optional[float]) -> O
 
 
 class TradedLog:
-    """Bounded in-memory tape per symbol, mirrored to Redis for restart survival."""
+    """The session tape: a full session in Redis, a recent window in memory.
 
-    def __init__(self, max_entries: Optional[int] = None) -> None:
+    The two bounds are deliberately different. Redis holds the whole session because it is
+    the SHARED copy - every browser on every machine reads the same tape, so a second laptop
+    opening at 14:00 gets the morning's prints it was never connected for. Memory holds only
+    a recent window, because a full session for every watched symbol would cost around
+    100MB on a single-replica container to cache history that is one Redis read away.
+    """
+
+    def __init__(
+        self,
+        max_entries: Optional[int] = None,
+        memory_entries: Optional[int] = None,
+    ) -> None:
         self._max = int(max_entries if max_entries is not None else settings.TRADED_LOG_MAX_ENTRIES)
+        memory = int(
+            memory_entries if memory_entries is not None else settings.TRADED_LOG_MEMORY_ENTRIES
+        )
+        # Caching more than is retained would be pointless, and a test that passes only
+        # `max_entries` expects that to be the whole bound.
+        self._memory = max(1, min(memory, self._max))
         self._log: Dict[str, Deque[Dict[str, Any]]] = {}
         self._session: Dict[str, str] = {}
         self._redis: Any = None
+        # Symbols whose stored tape must be dropped before the next append.
+        self._pending_resets: set[str] = set()
 
     def set_redis(self, client: Any) -> None:
         """Attach an already-connected client. Redis is optional: without it the tape is
@@ -100,8 +119,11 @@ class TradedLog:
 
         # A new session starts a fresh tape; yesterday's prints never blend into today's.
         if self._session.get(symbol) != session:
+            previous = self._session.get(symbol)
             self._session[symbol] = session
-            self._log[symbol] = deque(maxlen=self._max)
+            self._log[symbol] = deque(maxlen=self._memory)
+            if previous is not None:
+                self._pending_resets.add(symbol)
 
         # Change is versus the session reference by definition, so derive it when the frame
         # omits `Change` rather than leaving the column blank on an otherwise good print.
@@ -124,29 +146,57 @@ class TradedLog:
             "session_date": session,
         }
 
-        tape = self._log.setdefault(symbol, deque(maxlen=self._max))
+        tape = self._log.setdefault(symbol, deque(maxlen=self._memory))
         # The same match can be re-delivered after a reconnect; never print it twice.
         if tape and tape[-1]["ts"] == entry["ts"] and tape[-1]["price"] == entry["price"]:
             return None
         tape.append(entry)
         return entry
 
-    async def persist(self, symbol: str) -> None:
-        """Mirror one symbol's tape to Redis. Never raises: the tape is a convenience."""
+    async def persist(self, symbol: str, entry: Dict[str, Any]) -> None:
+        """Append ONE print to the symbol's Redis list. Never raises.
+
+        A Redis LIST, not a JSON blob. The blob version re-serialised the entire tape on
+        every print, which is fine at 200 entries and ruinous at session length - HPG
+        prints roughly 24 times a minute, so a full-session tape would have meant rewriting
+        about a megabyte per second. RPUSH + LTRIM is constant work per print regardless of
+        how much history is retained, which is what makes keeping the whole session
+        affordable in the first place.
+        """
         if self._redis is None:
             return
         symbol = symbol.upper()
-        tape = self._log.get(symbol)
-        if not tape:
-            return
+        key = self._key(symbol)
         try:
-            payload = json.dumps({"session_date": self._session.get(symbol), "items": list(tape)})
-            await self._redis.set(self._key(symbol), payload, ex=seconds_until_rollover())
+            if symbol in self._pending_resets:
+                self._pending_resets.discard(symbol)
+                await self._redis.delete(key)
+            pipe = self._redis.pipeline()
+            pipe.rpush(key, json.dumps(entry))
+            # Bound the stored tape the same way the in-memory deque is bounded.
+            pipe.ltrim(key, -self._max, -1)
+            pipe.expire(key, seconds_until_rollover())
+            await pipe.execute()
         except Exception as err:  # noqa: BLE001 - a cache fault must never break the feed
             logger.debug("Traded-log persist failed for %s: %s", symbol, err)
 
+    async def _reset_redis_session(self, symbol: str) -> None:
+        """Drop a symbol's stored tape when its session rolls over, so yesterday's prints
+        cannot reappear under today's date."""
+        if self._redis is None:
+            return
+        try:
+            await self._redis.delete(self._key(symbol.upper()))
+        except Exception as err:  # noqa: BLE001
+            logger.debug("Traded-log reset failed for %s: %s", symbol, err)
+
     async def restore(self, symbols: List[str]) -> int:
-        """Reload tapes after a restart, dropping anything from an earlier session."""
+        """Reload tapes after a restart so a redeploy does not erase the session.
+
+        This is what makes the tape shared rather than per-browser: every client reads the
+        same server-side history, and a second machine opening mid-session sees everything
+        that has printed, not just what has arrived since it connected.
+        """
         if self._redis is None or not symbols:
             return 0
         today = datetime.now(VN_TZ).date().isoformat()
@@ -154,22 +204,25 @@ class TradedLog:
         for symbol in symbols:
             sym = symbol.upper()
             try:
-                raw = await self._redis.get(self._key(sym))
+                raw_items = await self._redis.lrange(self._key(sym), -self._memory, -1)
             except Exception:  # noqa: BLE001
                 continue
-            if not raw:
+            if not raw_items:
                 continue
-            try:
-                data = json.loads(raw)
-                session = data.get("session_date")
-                items = data.get("items") or []
-            except (TypeError, ValueError):
+            items: List[Dict[str, Any]] = []
+            for raw in raw_items:
+                try:
+                    item = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                # A key surviving past the rollover would otherwise blend sessions.
+                if item.get("session_date") and item["session_date"] <= today:
+                    items.append(item)
+            if not items:
                 continue
-            # Keep the previous session's tape until the 08:00 rollover retires the key.
-            if not items or not session or session > today:
-                continue
-            self._session[sym] = session
-            self._log[sym] = deque(items[-self._max:], maxlen=self._max)
+            items.sort(key=lambda i: i.get("ts") or 0)
+            self._session[sym] = items[-1].get("session_date")
+            self._log[sym] = deque(items, maxlen=self._memory)
             restored += 1
         return restored
 
@@ -185,6 +238,48 @@ class TradedLog:
             "items": items,
             "count": len(items),
             # The exchange publishes no per-match aggressor flag; see classify_side.
+            "side_basis": "DERIVED_FROM_BOOK",
+        }
+
+    async def get_session(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
+        """Newest-first prints, read from the SHARED tape so any machine sees the session.
+
+        Serving this from process memory is what made the tape look empty on a second
+        laptop: memory only ever holds a recent window, and before that a restart dropped it
+        entirely. Redis is the copy every client shares, so it answers here and memory is
+        the fallback for a Redis outage - which degrades to "recent prints only" rather
+        than to nothing.
+        """
+        sym = symbol.strip().upper()
+        if self._redis is None:
+            return self.get(sym, limit=limit)
+        try:
+            raw_items = await self._redis.lrange(self._key(sym), -limit, -1)
+        except Exception as err:  # noqa: BLE001
+            logger.debug("Traded-log read failed for %s, serving memory: %s", sym, err)
+            return self.get(sym, limit=limit)
+        if not raw_items:
+            # No stored tape yet (first prints of the session are still in flight, or Redis
+            # was attached after the backend started); memory is the better answer.
+            return self.get(sym, limit=limit)
+
+        today = datetime.now(VN_TZ).date().isoformat()
+        items: List[Dict[str, Any]] = []
+        for raw in raw_items:
+            try:
+                item = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if item.get("session_date") and item["session_date"] > today:
+                continue
+            items.append(item)
+        items.sort(key=lambda i: i.get("ts") or 0, reverse=True)
+        return {
+            "symbol": sym,
+            "session_date": (items[0].get("session_date") if items else None)
+            or self._session.get(sym),
+            "items": items,
+            "count": len(items),
             "side_basis": "DERIVED_FROM_BOOK",
         }
 

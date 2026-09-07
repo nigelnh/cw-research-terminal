@@ -21,7 +21,9 @@ export interface TradePrint {
 
 type Listener = () => void;
 
-const MAX_PER_SYMBOL = 200;
+// A session's worth of live prints, so the tape a long-open tab shows does not
+// silently shrink to a shorter window than a freshly-opened one gets from the server.
+const MAX_PER_SYMBOL = 8000;
 const prints = new Map<string, TradePrint[]>();
 const listeners = new Set<Listener>();
 let revision = 0;

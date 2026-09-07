@@ -60,8 +60,24 @@ class Settings(BaseSettings):
 
     # Last-valid market snapshot persistence (Step 13C after-hours fallback).
     TRADED_LOG_MAX_ENTRIES: int = Field(
-        default=200,
-        description="Newest matches kept per symbol for the instrument panel's traded log",
+        default=8000,
+        description=(
+            "Matches retained per symbol in Redis - the shared, durable session tape every "
+            "browser reads. Sized for a whole session: a liquid name prints ~24x/minute, so "
+            "the old 200 held barely 8 minutes and a second machine opening mid-afternoon "
+            "saw almost no history. Redis stores this as a list, so retention costs storage "
+            "but not write throughput."
+        ),
+    )
+    TRADED_LOG_MEMORY_ENTRIES: int = Field(
+        default=600,
+        description=(
+            "Matches held in process memory per symbol. Deliberately far below the Redis "
+            "retention: this is a hot cache for the live panel and the fallback when Redis "
+            "is down, not the archive. Holding a full session for every watched symbol in "
+            "memory would cost ~100MB on a one-replica container for history almost nobody "
+            "scrolls back to."
+        ),
     )
     SNAPSHOT_ENABLED: bool = Field(default=True, description="Persist last-valid realtime snapshots (needs DATABASE_ENABLED)")
     SNAPSHOT_CHECKPOINT_INTERVAL_SECONDS: int = Field(default=90, description="Min seconds between per-symbol snapshot checkpoints")
