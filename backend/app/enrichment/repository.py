@@ -13,7 +13,9 @@ import json
 import re
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import String, Date, DateTime, and_, case, cast, desc, func, literal, or_, select
+from sqlalchemy import (
+    String, Date, DateTime, and_, case, cast, desc, func, literal, literal_column, or_, select, text,
+)
 from app.enrichment.english import headline_search_label, event_search_label
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import array
@@ -41,13 +43,30 @@ async def list_news(
     stmt = select(ExternalNews).where(ExternalNews.lang == lang)
     if symbol:
         stmt = stmt.where(ExternalNews.symbols.contains([symbol.upper()]))
-    if query:
-        like = f"%{query.strip()}%"
-        stmt = stmt.where(ExternalNews.title.ilike(like))
     if before is not None:
         stmt = stmt.where(ExternalNews.published_at < before)
-    stmt = stmt.order_by(desc(func.coalesce(ExternalNews.published_at, ExternalNews.observed_at))).limit(limit)
-    return list((await session.execute(stmt)).scalars().all())
+
+    text_query = (query or "").strip()
+    if text_query:
+        # Relevance, not substring. `websearch_to_tsquery` accepts what people actually
+        # type (bare words, "quoted phrases", -exclusions) and never raises on syntax, so a
+        # user question can be passed through unsanitised. `simple` + f_unaccent match the
+        # generated column exactly - any divergence would silently return nothing.
+        tsq = func.websearch_to_tsquery("simple", func.f_unaccent(text_query))
+        stmt = stmt.where(literal_column("search_tsv").op("@@")(tsq))
+        # Blend relevance with recency: a well-matched article from two years ago should
+        # not outrank a good match from yesterday on a market desk. The denominator halves
+        # the score at roughly 180 days.
+        age_days = func.extract(
+            "epoch",
+            func.now() - func.coalesce(ExternalNews.published_at, ExternalNews.observed_at),
+        ) / 86400.0
+        score = func.ts_rank(literal_column("search_tsv"), tsq) / (1.0 + age_days / 180.0)
+        stmt = stmt.order_by(desc(score), desc(func.coalesce(ExternalNews.published_at, ExternalNews.observed_at)))
+    else:
+        stmt = stmt.order_by(desc(func.coalesce(ExternalNews.published_at, ExternalNews.observed_at)))
+
+    return list((await session.execute(stmt.limit(limit))).scalars().all())
 
 
 async def news_symbol_facets(session: AsyncSession, *, lang: str = "vi", limit: int = 40) -> list[str]:

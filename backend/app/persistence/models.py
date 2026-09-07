@@ -20,6 +20,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Computed,
     Date,
     DateTime,
     ForeignKey,
@@ -32,7 +33,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -435,11 +436,24 @@ class ExternalNews(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
+    # Full-text search vector (0008). GENERATED, so ingestion cannot forget to maintain
+    # it. `simple` because PostgreSQL ships no Vietnamese configuration, and f_unaccent so
+    # a query typed without diacritics still matches - see the migration for the reasoning.
+    search_tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('simple', f_unaccent(coalesce(title, '') || ' ' || coalesce(category, '')))",
+            persisted=True,
+        ),
+        nullable=True,
+    )
+
     __table_args__ = (
         UniqueConstraint("source", "source_id", "lang", name="uq_external_news_identity"),
         Index("ix_external_news_published", "published_at"),
         Index("ix_external_news_symbols", "symbols", postgresql_using="gin"),
         Index("ix_external_news_feed", "published_at", "id"),
+        Index("ix_external_news_search_tsv", "search_tsv", postgresql_using="gin"),
     )
 
 

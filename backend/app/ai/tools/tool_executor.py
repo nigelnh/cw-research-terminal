@@ -69,6 +69,20 @@ ORDER_BOOK_KEYWORDS = (
 )
 
 # Step 14A research enrichment: PostgreSQL-backed disclosure & corporate-action reads.
+# Questions answerable from the quote/quant block alone. Enrichment is skipped for these
+# so a "what's the price" turn stays lean and does not bury the number the user asked for.
+#
+# This is the INVERSE of the old design, and the inversion is the point: a phrasing missing
+# from this list now gets disclosures it may not need (harmless, a little context), whereas
+# a phrasing missing from NEWS_KEYWORDS used to get NONE (silent, and the model then says
+# there is no coverage). The failure falls the safe way.
+QUANTITATIVE_ONLY_KEYWORDS = {
+    "price", "quote", "how much", "up or down", "spread", "bid", "ask", "volume",
+    "iv", "implied vol", "greeks", "delta", "gamma", "theta", "vega", "moneyness",
+    "ceiling", "floor", "reference", "dte", "strike", "ratio",
+    "giá", "bao nhiêu", "tăng hay giảm", "khối lượng", "chênh lệch", "biến động ngầm",
+}
+
 NEWS_KEYWORDS = {
     "news", "disclosure", "disclosures", "announcement", "announced", "headline", "filing",
     "press release", "tin tức", "tin bài", "công bố thông tin", "công bố", "thông báo",
@@ -261,6 +275,12 @@ class ToolExecutor:
                 return scoped
         return watched
 
+    def _budget_left(self) -> int:
+        """Tool calls still available this turn. The executor is bounded on purpose - one
+        pre-flight batch, no agentic loop - so enrichment may only use what the essential
+        quote / contract / quant reads did not."""
+        return max(0, self.max_tool_calls - len(self._executed_calls))
+
     @staticmethod
     def _watched_universe(context: Optional[ResearchContextEnvelope]) -> Optional[List[str]]:
         """The user's watchlist for scoping a dashboard snapshot. The frontend sends this
@@ -326,6 +346,14 @@ class ToolExecutor:
         wants_corp_actions = any(k in q_lower for k in CORP_ACTION_KEYWORDS)
         wants_company_events = any(k in q_lower for k in COMPANY_EVENT_KEYWORDS)
         wants_news = any(k in q_lower for k in NEWS_KEYWORDS)
+        # A purely quantitative ask needs no disclosures; anything else may.
+        quantitative_only = (
+            any(k in q_lower for k in QUANTITATIVE_ONLY_KEYWORDS)
+            and not wants_news
+            and not wants_corp_actions
+            and not wants_company_events
+        )
+        may_enrich = not quantitative_only
         on_news_page = context is not None and context.activePage == "news"
         # Outside an active session there is no live quote to fetch - pull the last
         # completed session's end-of-day series so the model cites real closing values
@@ -344,19 +372,31 @@ class ToolExecutor:
                 elif wants_order_book:
                     await self.call_tool("get_order_book", {"symbol": sym})
 
+                # Priced first, then history, then enrichment. Ordering is the whole
+                # point: the executor is bounded (one pre-flight batch, no agentic loop),
+                # so whatever runs last is what gets starved. Closing prices must never
+                # lose their slot to a headline.
+                if pull_eod:
+                    await self.call_tool("get_history", {"symbol": sym, "lookback_days": 30})
+
                 # Step 14A/B: PostgreSQL-backed research reads — read-only, no upstream.
                 # get_corporate_actions = dividends / ex-dates / meetings (price-adjustment
                 # sense); get_company_events = the broader stream incl. financials + insider.
+                #
+                # NO LONGER gated on a keyword list. The old `if wants_news:` meant a
+                # question phrased outside a fixed vocabulary ("HPG co rui ro pha loang
+                # khong?") reached the model with ZERO disclosures — not badly ranked
+                # ones, none at all. Keywords now only decide PRIORITY; leftover budget is
+                # spent enriching, and the user's own words are passed through so the
+                # store ranks by relevance rather than handing back the newest twelve.
+                if wants_news or (may_enrich and self._budget_left() > 0):
+                    await self.call_tool("get_news", {"symbol": sym, "query": query})
+
                 if inst.instrument_type != "CW":
                     if wants_company_events:
                         await self.call_tool("get_company_events", {"symbol": sym})
-                    if wants_corp_actions:
+                    if wants_corp_actions or (may_enrich and self._budget_left() > 0):
                         await self.call_tool("get_corporate_actions", {"symbol": sym})
-                if wants_news:
-                    await self.call_tool("get_news", {"symbol": sym})
-
-                if pull_eod:
-                    await self.call_tool("get_history", {"symbol": sym, "lookback_days": 30})
 
             # A ranking / cross-instrument comparison also needs the multi-symbol snapshot -
             # the per-symbol tools above only cover the ticker(s) literally named, not the

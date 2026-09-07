@@ -117,8 +117,25 @@ class SubscriptionManager:
                 # routes through here too but carries a daily bar, not an individual trade.
                 if not raw_data.get("_synthetic_session_snapshot"):
                     try:
-                        if traded_log.record(quote, diff) is not None:
+                        printed = traded_log.record(quote, diff)
+                        if printed is not None:
                             asyncio.ensure_future(traded_log.persist(quote.symbol))
+                            # Push the print on the same rail as quote and bar patches.
+                            # Polling REST every 5s left the tape visibly behind STATS and
+                            # the watchlist row, which update on every tick; a print is a
+                            # tick, so it belongs on the tick path - for every subscribed
+                            # symbol, not just whichever panel happens to be open.
+                            print_msg = {
+                                "type": "trade_print",
+                                "symbol": quote.symbol,
+                                "print": printed,
+                                "ts": quote.received_timestamp,
+                            }
+                            for listener in self._patch_listeners:
+                                try:
+                                    listener(print_msg)
+                                except Exception as err:  # noqa: BLE001
+                                    logger.warning("Error broadcasting trade print: %s", err)
                     except Exception as err:  # noqa: BLE001 - the tape must never break the feed
                         logger.debug("Traded-log record failed for %s: %s", quote.symbol, err)
             else:

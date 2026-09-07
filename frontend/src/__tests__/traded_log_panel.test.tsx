@@ -71,7 +71,9 @@ describe("TRADED LOGS", () => {
     expect(text).toContain("+7.21%");
     expect(text).toContain("12,000");
     expect(text).toContain("B");
-    expect(text).toContain("2026-09-07"); // session the tape belongs to
+    // The session date chip was removed from the heading: the tape's own rows carry the
+    // time, and the panel already states which instrument and session it is showing.
+    expect(text).not.toContain("2026-09-07");
   });
 
   it("keeps showing the tape after the close, not an 'unavailable' message", () => {

@@ -32,12 +32,24 @@ def _unavailable(kind: str) -> Dict[str, Any]:
     }
 
 
-async def get_news(symbol: str | None = None, limit: int | None = None, lang: str = "vi") -> Dict[str, Any]:
+async def get_news(
+    symbol: str | None = None,
+    limit: int | None = None,
+    lang: str = "vi",
+    query: str | None = None,
+) -> Dict[str, Any]:
+    """Disclosures for a symbol, ranked against `query` when one is supplied.
+
+    Without `query` this is the newest N for the ticker, which answers "any news?" but not
+    "any dilution risk?" - the relevant filing is often nowhere near the top by date. With
+    it, the repository ranks by full-text relevance blended with recency.
+    """
     if not persistence_db.is_configured():
         return _unavailable("News")
     n = max(1, min(int(limit or settings.AI_NEWS_MAX_RESULTS), int(settings.AI_NEWS_MAX_RESULTS)))
     lang = lang if lang in ("vi", "en") else "vi"
     sym = symbol.strip().upper() if symbol else None
+    text_query = (query or "").strip() or None
 
     from app.enrichment import repository as repo
     from app.enrichment.english import category_en, headline_en
@@ -45,7 +57,12 @@ async def get_news(symbol: str | None = None, limit: int | None = None, lang: st
 
     maker = persistence_db.get_sessionmaker()
     async with maker() as s:
-        rows = await repo.list_news(s, symbol=sym, lang=lang, limit=n)
+        rows = await repo.list_news(s, symbol=sym, lang=lang, limit=n, query=text_query)
+        # A narrow question can legitimately match nothing; fall back to the recent tape
+        # so the model still has context instead of concluding there is no coverage.
+        if text_query and not rows:
+            rows = await repo.list_news(s, symbol=sym, lang=lang, limit=n)
+            text_query = None
 
     items = []
     for r in rows:
@@ -68,6 +85,10 @@ async def get_news(symbol: str | None = None, limit: int | None = None, lang: st
         "symbol": sym,
         "count": len(rows),
         "items": items,
+        # Tells the model whether these rows were selected FOR the question or are simply
+        # the latest, so it does not present a recency dump as targeted evidence.
+        "ranked_by": "RELEVANCE_AND_RECENCY" if text_query else "RECENCY",
+        "matched_query": text_query,
         "causal_note": _CAUSAL_NOTE,
         "provenance": "RESEARCH_ENRICHMENT",
     }
