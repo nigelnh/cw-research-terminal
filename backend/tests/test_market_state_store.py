@@ -11,6 +11,7 @@ from app.market_data.market_schemas import CanonicalQuote, HistoricalBar
 from app.market_data.market_state import MarketState, market_state
 from app.market_data.market_session import market_session
 from app.market_data.market_state_store import NullMarketStateStore
+from tests.conftest import display_session_ms
 from app.market_data.redis_market_state_store import RedisMarketStateStore
 from app.market_data.market_subscription_manager import SubscriptionManager, subscription_manager
 from tests.fixtures.mock_market_provider import MockMarketDataProvider
@@ -500,8 +501,9 @@ async def test_backend_restart_warm_cache_restoration_and_overwrite():
     # Clear in-memory state
     market_state._quotes.clear()
 
-    # Setup Redis store with cached quotes
-    now_ms = int(time.time() * 1000)
+    # Setup Redis store with cached quotes. The cache must read as the CURRENT session, and
+    # that is the displayed session rather than the wall clock - see display_session_ms.
+    now_ms = display_session_ms()
     mock_redis = MockRedisClient()
     test_store = RedisMarketStateStore(
         enabled=True,

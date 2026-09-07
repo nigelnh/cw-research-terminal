@@ -273,7 +273,10 @@ async def test_E_expired_cw_after_last_trading_date_is_not_filled(history_servic
         "CEXP2601", timeframe="1D", from_date=(_CUTOFF - timedelta(days=60)).isoformat(), to_date=_CUTOFF.isoformat(), adjusted=True
     )
     assert fake_provider.calls == []                                    # no fill past the CW's trading life
-    assert [b.date for b in bars][-1] == delist.isoformat()
+    # The last SEEDED session, not `delist` itself: the bars are weekdays, so whenever the
+    # delisting date happens to fall on a weekend the final bar is the Friday before it.
+    # Asserting on `delist` made this pass or fail according to the day of the week.
+    assert [b.date for b in bars][-1] == days[-1].isoformat()
 
 
 # --------------------------------------------------------------------------- #

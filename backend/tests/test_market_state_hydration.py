@@ -10,6 +10,7 @@ from app.market_data.market_subscription_manager import SubscriptionManager
 from app.market_data.market_session import VN_TZ, market_session
 from app.market_data.session_reference import reference_session_date
 from app.market_data.providers.base_market_provider import MarketDataProvider
+from tests.conftest import display_session_ms
 
 
 class MockStore(MarketStateStore):
@@ -83,8 +84,8 @@ class MockProvider(MarketDataProvider):
 async def test_same_session_warm_cache_populates_initial_market_state():
     """Same-session warm cache populates initial MarketState before a new realtime tick arrives."""
     state = MarketState()
-    now_dt = market_session.get_vn_now()
-    now_ms = int(now_dt.timestamp() * 1000)
+    # Anchored to the DISPLAYED session, not the wall clock - see display_session_ms.
+    now_ms = display_session_ms()
 
     cached_quote = CanonicalQuote(
         symbol="HPG",
@@ -129,8 +130,8 @@ async def test_same_session_warm_cache_populates_initial_market_state():
 async def test_later_signalr_tick_supersedes_hydrated_state():
     """Later SignalR tick supersedes hydrated state with updated price and volume."""
     state = MarketState()
-    now_dt = market_session.get_vn_now()
-    now_ms = int(now_dt.timestamp() * 1000)
+    # Anchored to the DISPLAYED session, not the wall clock - see display_session_ms.
+    now_ms = display_session_ms()
 
     cached_quote = CanonicalQuote(
         symbol="HPG",
@@ -168,8 +169,8 @@ async def test_later_signalr_tick_supersedes_hydrated_state():
 async def test_delayed_stale_redis_hydration_cannot_overwrite_newer_realtime_tick():
     """Delayed/stale Redis hydration cannot overwrite a newer realtime tick in memory."""
     state = MarketState()
-    now_dt = market_session.get_vn_now()
-    now_ms = int(now_dt.timestamp() * 1000)
+    # Anchored to the DISPLAYED session, not the wall clock - see display_session_ms.
+    now_ms = display_session_ms()
 
     # Realtime trade arrives first at t = now_ms
     state.apply_trade_event({
@@ -207,8 +208,8 @@ async def test_delayed_stale_redis_hydration_cannot_overwrite_newer_realtime_tic
 async def test_same_session_last_price_and_cumulative_volume_survive_backend_restart():
     """Same-session last price and cumulative volume survive backend restart when warm cache provides them."""
     state_after_restart = MarketState()
-    now_dt = market_session.get_vn_now()
-    now_ms = int(now_dt.timestamp() * 1000)
+    # Anchored to the DISPLAYED session, not the wall clock - see display_session_ms.
+    now_ms = display_session_ms()
 
     cached_quote = CanonicalQuote(
         symbol="NVL",
@@ -295,7 +296,10 @@ async def test_previous_session_last_volume_not_presented_as_today_session_state
 @pytest.mark.asyncio
 async def test_same_reference_session_survives_redis_restore_while_old_trade_is_sanitized():
     state = MarketState()
-    yesterday_ms = int((market_session.get_vn_now() - timedelta(days=1)).timestamp() * 1000)
+    # A day before the DISPLAYED session. "now minus 24h" is not the same thing: run this
+    # just after midnight and it lands inside the session still on screen, so the trade it
+    # expects to see sanitized is in fact current.
+    yesterday_ms = display_session_ms(-24 * 3600 * 1000)
     reference_day = reference_session_date().isoformat()
     cached = CanonicalQuote(
         symbol="HPG",
@@ -360,8 +364,8 @@ async def test_redis_reference_fills_live_quote_without_overwriting_trade_or_boo
 async def test_bid_ask_only_warm_data_never_fabricates_last_price():
     """Bid/ask-only warm data never fabricates a last price."""
     state = MarketState()
-    now_dt = market_session.get_vn_now()
-    now_ms = int(now_dt.timestamp() * 1000)
+    # Anchored to the DISPLAYED session, not the wall clock - see display_session_ms.
+    now_ms = display_session_ms()
 
     ba_quote = CanonicalQuote(
         symbol="CHPG2541",
