@@ -628,3 +628,16 @@ select:focus-visible,
   border-bottom: 1px solid var(--border-19);
 }
 .instrument-tape-row:last-child { border-bottom: 0; }
+
+/* Quarterly revenue & profit (QUANT tab). */
+.quarterly-results { flex: 1; min-width: 0; height: 100%; border: 1px solid var(--border); display: flex; flex-direction: column; }
+.quarterly-results-cap {
+  flex-shrink: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 6px 10px; border-bottom: 1px solid var(--border-row);
+  font-size: 9.5px; letter-spacing: 0.06em; color: var(--t-92); white-space: nowrap;
+}
+.quarterly-results-key { display: inline-flex; align-items: center; font-size: 8.5px; color: var(--t-70); }
+.quarterly-results-key i { width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; display: inline-block; }
+.quarterly-results-body { flex: 1; min-height: 0; position: relative; padding: 4px 8px 4px 4px; }
+.quarterly-results-body > canvas { position: absolute; inset: 4px 8px 4px 4px; }
+.quarterly-results-empty { flex: 1; display: grid; place-items: center; font-size: 10px; color: var(--t-42); }

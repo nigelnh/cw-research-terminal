@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from app.market_data.market_schemas import (
@@ -273,6 +273,53 @@ async def get_stock_profiles(symbols: str = Query(..., max_length=1000)):
             "availability": availability,
         })
     return {"items": items}
+
+
+@market_router.get("/fundamentals/{symbol}")
+async def get_fundamentals(symbol: str):
+    """Valuation and recent quarterly statement lines for one equity.
+
+    Deliberately partial, and says which parts and why. This FiinQuant tier serves
+    `get_stock_valuation` (P/E, P/B) and a `get_ratios` call that returns only Revenue,
+    net profit attributable to the parent, and EBIT - an explicit `fields` list makes the
+    SDK raise and return nothing. So EPS / ROE / ROA / ROIC / gross margin have no source
+    here, and `unavailable` names them rather than leaving silent blanks.
+    """
+    sym = symbol.strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9]{1,11}", sym):
+        raise HTTPException(status_code=400, detail=f"invalid symbol: {symbol!r}")
+
+    valuation: Dict[str, Any] = {}
+    quarters: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    try:
+        valuation = (await subscription_manager.provider.get_stock_valuation([sym])).get(sym, {})
+    except Exception as exc:  # noqa: BLE001 - a partial answer beats a 500
+        logger.warning("Valuation unavailable for %s: %s", sym, exc)
+        errors.append("valuation")
+    try:
+        quarters = await subscription_manager.provider.get_financial_ratios(sym)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Financial ratios unavailable for %s: %s", sym, exc)
+        errors.append("ratios")
+
+    latest = quarters[-1] if quarters else {}
+    return {
+        "symbol": sym,
+        "pe": valuation.get("pe"),
+        "pb": valuation.get("pb"),
+        "valuation_as_of": valuation.get("as_of"),
+        "net_margin": latest.get("net_margin"),
+        "latest_period": latest.get("period"),
+        "quarters": quarters,
+        # Named, not silently blank: the UI shows the reason on each empty row.
+        "unavailable": {
+            field: "not served by the current market-data entitlement"
+            for field in ("eps", "roe", "roa", "roic", "gross_margin")
+        },
+        "source": "FIINQUANT",
+        "errors": errors,
+    }
 
 
 @market_router.get("/overview")

@@ -229,6 +229,12 @@ class FiinQuantProvider(MarketDataProvider):
         self._breadth_task: Optional[asyncio.Task] = None
         self._stock_profile_lock = asyncio.Lock()
         self._stock_profile_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
+        # Fundamentals. Valuation moves once a day, statements once a quarter, so both
+        # are cached hard - this is a request/response read that must never compete with
+        # the realtime streams for the account's attention.
+        self._fundamentals_lock = asyncio.Lock()
+        self._valuation_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
+        self._ratios_cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
         self._reference_lock = asyncio.Lock()
 
     def set_event_callback(self, callback: Callable[[str, Dict[str, Any], str], None]) -> None:
@@ -1546,6 +1552,117 @@ class FiinQuantProvider(MarketDataProvider):
                         "exchange": exchange.upper() if exchange else None,
                     })
             return [dict(self._stock_profile_cache[s][1]) for s in symbols]
+
+    _VALUATION_TTL_SECONDS = 3600.0
+    _RATIOS_TTL_SECONDS = 6 * 3600.0
+
+    async def get_stock_valuation(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Latest P/E and P/B per symbol.
+
+        `MarketDepth().get_stock_valuation` returns one row per ticker per trading day; we
+        keep the newest. Probed on this account: it IS entitled, unlike BasicInfor and
+        MarketBreadth, so the values below are real rather than a hopeful call.
+        """
+        symbols = sorted({s.strip().upper() for s in symbols if s.strip()})
+        if not symbols:
+            return {}
+        async with self._fundamentals_lock:
+            now = time.monotonic()
+            missing = [s for s in symbols
+                       if s not in self._valuation_cache
+                       or now - self._valuation_cache[s][0] >= self._VALUATION_TTL_SECONDS]
+            if missing:
+                if not self._session or not self._is_connected:
+                    if not await self.connect():
+                        raise RuntimeError("FiinQuant valuation is unavailable")
+                today = market_session.get_vn_now().date()
+                start = (today - timedelta(days=14)).isoformat()
+
+                def fetch():
+                    value = self._session.MarketDepth().get_stock_valuation(
+                        tickers=missing, from_date=start, to_date=today.isoformat()
+                    )
+                    if hasattr(value, "to_dict"):
+                        value = value.to_dict(orient="records")
+                    return value if isinstance(value, list) else []
+
+                records = await asyncio.to_thread(fetch)
+                newest: Dict[str, Dict[str, Any]] = {}
+                for row in records:
+                    if not isinstance(row, dict):
+                        continue
+                    sym = str(row.get("ticker", "")).strip().upper()
+                    if not sym:
+                        continue
+                    stamp = str(row.get("timestamp") or "")
+                    prior = newest.get(sym)
+                    if prior is None or stamp >= str(prior.get("as_of") or ""):
+                        newest[sym] = {
+                            "symbol": sym,
+                            "pe": number(row, "pe"),
+                            "pb": number(row, "pb"),
+                            "as_of": stamp[:10] or None,
+                        }
+                stamped = time.monotonic()
+                for sym in missing:
+                    # Cache the miss too, so an unlisted symbol is not retried every request.
+                    self._valuation_cache[sym] = (
+                        stamped, newest.get(sym, {"symbol": sym, "pe": None, "pb": None, "as_of": None}),
+                    )
+            return {s: dict(self._valuation_cache[s][1]) for s in symbols}
+
+    async def get_financial_ratios(self, symbol: str, quarters: int = 8) -> List[Dict[str, Any]]:
+        """Recent quarterly statement lines, oldest first.
+
+        This account's `get_ratios` returns Revenue, AttributeToParentCompany (net profit
+        attributable to the parent) and EBIT, and nothing else: passing an explicit
+        `fields` list makes the SDK raise internally and yield nothing, so the full-node
+        call is deliberate. ROA / ROE / ROIC / margins / EPS are simply not served here.
+        """
+        sym = symbol.strip().upper()
+        if not sym:
+            return []
+        async with self._fundamentals_lock:
+            cached = self._ratios_cache.get(sym)
+            if cached and time.monotonic() - cached[0] < self._RATIOS_TTL_SECONDS:
+                return [dict(r) for r in cached[1]]
+            if not self._session or not self._is_connected:
+                if not await self.connect():
+                    raise RuntimeError("FiinQuant financial ratios are unavailable")
+            today = market_session.get_vn_now().date()
+            years = sorted({today.year - offset for offset in range((quarters // 4) + 2)})
+
+            def fetch():
+                value = self._session.FundamentalAnalysis().get_ratios(
+                    tickers=[sym], years=years, quarters=[1, 2, 3, 4], type="consolidated"
+                )
+                return value if isinstance(value, list) else []
+
+            records = await asyncio.to_thread(fetch)
+            rows: List[Dict[str, Any]] = []
+            for row in records:
+                if not isinstance(row, dict):
+                    continue
+                ratios = row.get("ratios") or {}
+                year, quarter = row.get("year"), row.get("quarter")
+                if year is None or quarter is None:
+                    continue
+                revenue = number(ratios, "Revenue")
+                profit = number(ratios, "AttributeToParentCompany")
+                rows.append({
+                    "period": f"{int(year)}Q{int(quarter)}",
+                    "year": int(year),
+                    "quarter": int(quarter),
+                    "revenue": revenue,
+                    "net_profit": profit,
+                    "ebit": number(ratios, "EBIT"),
+                    # The one margin these three lines can support honestly.
+                    "net_margin": (profit / revenue) if revenue and profit is not None and revenue > 0 else None,
+                })
+            rows.sort(key=lambda r: (r["year"], r["quarter"]))
+            rows = rows[-quarters:]
+            self._ratios_cache[sym] = (time.monotonic(), rows)
+            return [dict(r) for r in rows]
 
     async def get_session_reference_data(
         self, symbols: List[str], session_date: date
