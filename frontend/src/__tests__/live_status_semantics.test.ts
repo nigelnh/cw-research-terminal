@@ -211,7 +211,11 @@ describe("Live Status Semantics & Two-State Tracking", () => {
     expect(html).not.toContain("READY");
   });
 
-  const header = (active: boolean, gateway: string, upstream: string) =>
+  const header = (
+    active: boolean,
+    gateway: Parameters<typeof AppHeader>[0]["gatewayState"],
+    upstream: Parameters<typeof AppHeader>[0]["upstreamFeedState"],
+  ) =>
     renderToStaticMarkup(createElement(AppHeader, {
       activeTab: "dashboard", onTabChange: () => undefined,
       filter: "", onFilterChange: () => undefined,
