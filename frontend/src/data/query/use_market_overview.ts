@@ -58,6 +58,12 @@ export function useMarketOverview() {
     queryFn: ({ signal }) => backendClient.getMarketOverview(signal),
     staleTime: 60_000,
     refetchInterval: (query) => overviewRefetchInterval(query.state.data),
+    // A market surface must not rot while the tab sits in the background. React Query
+    // suspends `refetchInterval` for a hidden document by default, so switching away
+    // froze the index cards and coming back showed a stale board that only caught up at
+    // the next tick. Keep polling, and repaint immediately on focus.
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     retry: 1,
   });
 }

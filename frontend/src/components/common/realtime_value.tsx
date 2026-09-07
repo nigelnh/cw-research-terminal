@@ -3,6 +3,38 @@ import type { RealtimePulse } from "@/domain/models";
 
 export const REALTIME_FLASH_DURATION_MS = 1200;
 
+/**
+ * Re-renders every flashing cell when the tab is shown again.
+ *
+ * A hidden document freezes CSS animations and clamps `setTimeout` to about once a
+ * minute, so the per-cell pulse-expiry timers do not fire while you are away. Without a
+ * nudge on the way back, React never re-evaluates them and the whole board replays a
+ * burst of long-dead flashes. One shared listener (not one per cell) drives it.
+ */
+let visibilityEpoch = 0;
+const visibilityListeners = new Set<() => void>();
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    visibilityEpoch += 1;
+    visibilityListeners.forEach((fn) => fn());
+  });
+}
+
+function useVisibilityEpoch(): number {
+  const [epoch, setEpoch] = useState(visibilityEpoch);
+  useEffect(() => {
+    const onShow = () => setEpoch(visibilityEpoch);
+    visibilityListeners.add(onShow);
+    // The epoch can have moved between render and subscribe.
+    onShow();
+    return () => {
+      visibilityListeners.delete(onShow);
+    };
+  }, []);
+  return epoch;
+}
+
 /** Flash palette. Mirrors `MARKET_COLOR` so the wash can never contradict the digits. */
 export type FlashTone = "up" | "down" | "flat" | "ceiling" | "floor" | "null";
 
@@ -30,6 +62,9 @@ export function RealtimeValue({
   title?: string;
 }) {
   const [, expirePulse] = useState(0);
+  // Reading the epoch re-runs the age check below the moment the tab is shown again, so a
+  // pulse that "expired" while the timers were frozen is dropped instead of flashing.
+  useVisibilityEpoch();
   useEffect(() => {
     if (pulse?.startedAt === undefined) return;
     const remaining = REALTIME_FLASH_DURATION_MS - (Date.now() - pulse.startedAt);

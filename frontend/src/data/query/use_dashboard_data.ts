@@ -67,6 +67,13 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
     queryFn: ({ signal }) => backendClient.getDashboardRows(sortedKey, signal),
     staleTime: 30_000,
     refetchInterval: marketSessionActive ? 30_000 : 5 * 60_000,
+    // Rows the WebSocket does not carry (anything resolved SESSION_SNAPSHOT - most thin
+    // CWs) come only from this poll. React Query suspends `refetchInterval` for a hidden
+    // document by default and this app also disables refetch-on-focus globally, so a
+    // backgrounded tab froze those rows AND did not refresh on return: the board sat
+    // visibly behind other terminals until the next tick, then jumped all at once.
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
   const analyticsQuery = useQuery({
     queryKey: ["dashboard-analytics", sortedKey],
@@ -75,6 +82,7 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
     // Live analytics arrive over WS. This read is the independently hydrated EOD/current
     // cache and may finish later without delaying the quote table.
     staleTime: marketSessionActive ? 30_000 : 5 * 60_000,
+    refetchOnWindowFocus: true,
   });
 
   // Refetch immediately when the session transitions (closed -> open must not keep showing
