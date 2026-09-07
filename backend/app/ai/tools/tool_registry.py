@@ -148,7 +148,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "description": (
                 "Returns recent HOSE exchange news / disclosure headlines from the project's "
                 "PostgreSQL store (ingested from the HSX public feed). Read-only, never fetches. "
-                "Optionally filter to one symbol. Use for 'what was disclosed recently'. "
+                "Optionally filter to one symbol, and pass `query` to rank by topic. "
                 "State only what was disclosed and when — never claim a disclosure caused a price move."
             ),
             "parameters": {
@@ -157,6 +157,14 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "symbol": {"type": "string", "description": "Optional ticker filter (e.g. HPG). Omit for the market-wide feed."},
                     "limit": {"type": "integer", "description": "Max headlines to return (clamped, default 12)."},
                     "lang": {"type": "string", "enum": ["vi", "en"], "description": "Headline language; default 'vi'."},
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Free text to rank against (full-text, diacritic-insensitive). "
+                            "Pass the user's topic — 'pha loang', 'tang von', 'bond issue' — "
+                            "to get the RELEVANT disclosures instead of merely the newest."
+                        ),
+                    },
                 },
                 "required": [],
             },
