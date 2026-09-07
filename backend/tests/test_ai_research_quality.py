@@ -220,3 +220,16 @@ async def test_prompt_bans_latex_because_the_panel_has_no_maths_engine():
     # a worked right/wrong pair, the shape this model actually follows
     assert "WRONG:" in p and "RIGHT:" in p
     assert "d₁" in p and "σ" in p and "√" in p
+
+
+async def test_prompt_has_no_stray_escape_corruption():
+    """The LaTeX ban lists `\\frac` etc. In a non-raw literal `\\f` is a FORMFEED, which
+    silently cut the ban line in half (shipped in #64, caught by the SyntaxWarning)."""
+    p = BASE_SYSTEM_INSTRUCTIONS
+    assert "\x0c" not in p, "formfeed in the prompt - a backslash command was under-escaped"
+    for ctrl in ("\x07", "\x08", "\x0b", "\r"):
+        assert ctrl not in p
+    # the whole ban list must survive on one line
+    line = next(l for l in p.splitlines() if "NEVER emit" in l)
+    for cmd in ("\\frac", "\\sqrt", "\\sigma", "\\ln", "\\cdot", "\\qquad", "\\(", "\\["):
+        assert cmd in line, f"{cmd} missing from the ban line"

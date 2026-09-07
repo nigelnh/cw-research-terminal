@@ -39,6 +39,18 @@ class Settings(BaseSettings):
         default=30.0,
         description="Maximum age of the latest current-stream trade/book tick while HOSE is open",
     )
+    FIINQUANT_STREAM_SILENCE_RECONNECT_SECONDS: float = Field(
+        default=90.0,
+        description=(
+            "Force a reconnect when the SignalR stream reports connected but has delivered no "
+            "tick for this long during an active HOSE session. FiinQuant can stop pushing "
+            "without ever firing on_close, which leaves the provider believing it is healthy. "
+            "Must exceed FIINQUANT_FEED_FRESHNESS_SECONDS. 0 disables the watchdog."
+        ),
+    )
+    FIINQUANT_STREAM_WATCHDOG_INTERVAL_SECONDS: float = Field(
+        default=15.0, description="How often the stream-liveness watchdog samples tick age"
+    )
 
     # Trading calendar (Step 13C). Optional JSON to add/remove HOSE closure dates without a
     # code change, e.g. {"extra_closures": ["2026-07-01"], "force_open": ["2026-05-03"]}.

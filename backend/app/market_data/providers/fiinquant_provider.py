@@ -182,6 +182,21 @@ class FiinQuantProvider(MarketDataProvider):
         self._feed_live_notified = False
         self._feed_freshness_seconds = float(settings.FIINQUANT_FEED_FRESHNESS_SECONDS)
 
+        # ---- Stream-liveness watchdog ----
+        # FiinQuant can stop pushing frames without ever firing on_close, so the SDK still
+        # reports `connected` and no reconnect is ever scheduled. `get_health()` computes
+        # STALE for exactly this case, but it is pull-based - nothing acted on it, and a
+        # session could sit silent for the rest of the day (observed 2026-09-07: last tick
+        # 09:41 ICT, still "connected" at 10:51 with reconnect_count 0).
+        self._stream_watchdog_task: Optional[asyncio.Task] = None
+        self._stream_silence_reconnect_seconds = float(
+            settings.FIINQUANT_STREAM_SILENCE_RECONNECT_SECONDS
+        )
+        self._stream_watchdog_interval_seconds = float(
+            settings.FIINQUANT_STREAM_WATCHDOG_INTERVAL_SECONDS
+        )
+        self._silent_stream_reconnect_count = 0
+
         # ---- Adapter-owned Reconnect State ----
         self._reconnect_task: Optional[asyncio.Task] = None
         self._reconnect_backoff_index: int = 0
@@ -418,6 +433,9 @@ class FiinQuantProvider(MarketDataProvider):
             if self._reconnect_task is not None and not self._reconnect_task.done():
                 self._reconnect_task.cancel()
                 self._reconnect_task = None
+            if self._stream_watchdog_task is not None and not self._stream_watchdog_task.done():
+                self._stream_watchdog_task.cancel()
+                self._stream_watchdog_task = None
             if self._breadth_task is not None and not self._breadth_task.done():
                 self._breadth_task.cancel()
                 self._breadth_task = None
@@ -811,6 +829,87 @@ class FiinQuantProvider(MarketDataProvider):
         if self._loop and self._loop.is_running():
             self._reconnect_task = self._loop.create_task(self._reconnect_worker())
 
+    # ------------------------------------------------------------------ #
+    # Stream-liveness watchdog
+    # ------------------------------------------------------------------ #
+    def _ensure_stream_watchdog(self) -> None:
+        """Start the watchdog if it is not already running. Idempotent."""
+        if self._stream_silence_reconnect_seconds <= 0 or self._shutting_down:
+            return
+        if self._stream_watchdog_task is not None and not self._stream_watchdog_task.done():
+            return
+        self._ensure_loop()
+        if self._loop and self._loop.is_running():
+            self._stream_watchdog_task = self._loop.create_task(self._stream_watchdog())
+
+    def _silent_stream_age_seconds(self) -> Optional[float]:
+        """Seconds since the CURRENT stream last delivered any frame, or None when a
+        silence judgement would be unsound (no stream, off-session, still warming up).
+
+        Deliberately uses `_current_stream_last_tick_at_ms` - any frame on either channel
+        counts as life. A book-only or trade-only lull is normal; total silence is not.
+        """
+        if self._shutting_down or not self._active_symbols or not self._is_connected:
+            return None
+        # Never judge silence outside a session: FiinQuant legitimately stops pushing at
+        # lunch, pre-open and post-close, and `_compute_reconnect_delay` already paces that.
+        try:
+            if not self._market_is_active():
+                return None
+        except Exception:  # noqa: BLE001 - a calendar fault must not trigger reconnect storms
+            return None
+        # A reconnect is already in flight - let it finish rather than stacking another.
+        if self._upstream_status == "RESTARTING":
+            return None
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            return None
+        started = self._current_stream_started_at_monotonic
+        if started is None:
+            return None
+        # Give a fresh stream the full silence budget to produce its first frame, so a
+        # slow start is never mistaken for a dead feed.
+        stream_age = max(0.0, time.monotonic() - started)
+        if stream_age < self._stream_silence_reconnect_seconds:
+            return None
+        last = self._current_stream_last_tick_at_ms
+        if last is None:
+            # Connected for longer than the budget and never delivered anything.
+            return stream_age
+        return max(0.0, (time.time() * 1000 - last) / 1000.0)
+
+    async def _stream_watchdog(self) -> None:
+        """Force a reconnect when a 'connected' stream has gone silent mid-session.
+
+        This is the only component that converts silence into a reconnect; it reuses
+        `_schedule_reconnect`, which is single-flighted, so the provider keeps exactly one
+        reconnect owner.
+        """
+        interval = max(1.0, self._stream_watchdog_interval_seconds)
+        try:
+            while not self._shutting_down:
+                await asyncio.sleep(interval)
+                if self._shutting_down:
+                    return
+                try:
+                    age = self._silent_stream_age_seconds()
+                except Exception as err:  # noqa: BLE001 - the watchdog must never die
+                    logger.warning("Stream watchdog check failed: %s", err)
+                    continue
+                if age is None or age < self._stream_silence_reconnect_seconds:
+                    continue
+                self._silent_stream_reconnect_count += 1
+                logger.warning(
+                    "FiinQuant stream silent for %.0fs during an active session while still "
+                    "reporting connected - forcing reconnect (generation %d, silent restarts %d).",
+                    age, self._stream_generation, self._silent_stream_reconnect_count,
+                )
+                # Reset the backoff: this is a fresh failure mode, not a retry of a
+                # connection that has been failing repeatedly.
+                self._reconnect_backoff_index = 0
+                self._schedule_reconnect()
+        except asyncio.CancelledError:
+            raise
+
     def _compute_reconnect_delay(self) -> float:
         """Seconds to wait before the next reconnect attempt.
 
@@ -976,6 +1075,8 @@ class FiinQuantProvider(MarketDataProvider):
                 "FiinQuant streams active for %d symbols (generation %d): %s",
                 len(clean_symbols), gen, clean_symbols,
             )
+            # A live stream is the only thing worth watching for silence.
+            self._ensure_stream_watchdog()
             self._maybe_notify_feed_live(int(time.time() * 1000))
             return True
 
@@ -1185,6 +1286,13 @@ class FiinQuantProvider(MarketDataProvider):
             "disconnect_count": self._disconnect_count,
             "stream_restart_count": self._stream_restart_count,
             "reconnect_count": self._reconnect_count,
+            # Reconnects forced because a "connected" stream stopped delivering frames
+            # mid-session. A climbing value means FiinQuant is dropping us silently.
+            "silent_stream_reconnect_count": self._silent_stream_reconnect_count,
+            "stream_watchdog_active": bool(
+                self._stream_watchdog_task is not None and not self._stream_watchdog_task.done()
+            ),
+            "stream_silence_reconnect_seconds": self._stream_silence_reconnect_seconds,
             "orphan_ping_threads_reaped": self._orphans_reaped,
             "signalr_adapter_supported_version": _SUPPORTED_SIGNALRCORE_VERSION,
             "signalr_adapter_runtime_version": self._signalrcore_version(),
