@@ -51,7 +51,9 @@ export function useHistoricalBars({
   useSyncExternalStore(liveBarStore.subscribe, liveBarStore.getRevision, liveBarStore.getRevision);
 
   const completed = query.data ?? [];
-  const live = !adjusted && ["1m", "5m", "15m", "30m", "1h"].includes(String(interval))
+  // "1D" included: the instrument panel charts daily bars, so without it the newest
+  // candle stayed yesterday's completed bar while the header showed a live price.
+  const live = !adjusted && ["1m", "5m", "15m", "30m", "1h", "1D"].includes(String(interval))
     ? liveBarStore.get(sym, String(interval)) : [];
   const byTime = new Map(completed.map((bar) => [bar.date, bar]));
   live.forEach((bar) => byTime.set(bar.date, bar));
