@@ -272,6 +272,35 @@ export class BackendClient {
     );
   }
 
+  /** Time & sales for one instrument. `side` is derived from the book, never published. */
+  async getTradedLog(
+    symbol: string,
+    limit = 50,
+    signal?: AbortSignal,
+  ): Promise<{
+    symbol: string;
+    session_date: string | null;
+    count: number;
+    side_basis: string;
+    market_session: string;
+    items: Array<{
+      ts: number;
+      time: string;
+      price: number;
+      change: number | null;
+      change_percent: number | null;
+      volume: number | null;
+      side: "B" | "S" | null;
+      session_date: string;
+    }>;
+  }> {
+    return this.get<any>(
+      `/api/market/trades/${encodeURIComponent(symbol.toUpperCase())}`,
+      { limit: String(limit) },
+      signal,
+    );
+  }
+
   async getStockProfiles(symbols: string[], signal?: AbortSignal): Promise<{ items: Array<{ symbol: string; name: string | null; short_name: string | null; exchange: string | null }> }> {
     return this.get("/api/market/stock-profiles", { symbols: symbols.join(",") }, signal);
   }

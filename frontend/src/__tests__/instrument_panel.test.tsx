@@ -5,6 +5,10 @@ import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/model
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
 import { mapRawSnapshotToQuote } from "../data/backend/mappers/map_snapshot";
 
+vi.mock("@/data/query/use_traded_log", () => ({
+  useTradedLog: () => ({ items: [], sessionDate: null, sideBasis: null, isLoading: false, isError: false }),
+}));
+
 describe("InstrumentPanel — bottom split panel", () => {
   beforeEach(() => {
     (globalThis as any).window = (globalThis as any).window || {};
@@ -62,18 +66,21 @@ describe("InstrumentPanel — bottom split panel", () => {
     expect(html).not.toMatch(/>\s*\d+d\s*</); // never "24d"
   });
 
-  it("3b. OVERVIEW right pane is TRADED LOGS (session-gated, honest empty state)", () => {
+  it("3b. OVERVIEW right pane is TRADED LOGS, with an honest empty state per session", () => {
+    // The tape is now server-backed and survives the close, so the closed-market copy is
+    // about the LAST session having no prints - not about the feature being unavailable.
     const closed = renderMarkup(
       <InstrumentPanel instrument={cw} marketSessionActive={false} onClose={vi.fn()} />,
     );
     expect(closed).toContain("TRADED LOGS");
-    expect(closed).toContain("unavailable outside a live session");
+    expect(closed).toContain("No matches recorded for the last session.");
     expect(closed).not.toContain("PRICE HISTORY");
+    expect(closed).not.toContain("not yet wired");
 
     const live = renderMarkup(
       <InstrumentPanel instrument={cw} marketSessionActive={true} onClose={vi.fn()} />,
     );
-    expect(live).toContain("not yet wired");
+    expect(live).toContain("No matches yet this session.");
   });
 
   it("4. CONFLICTING metadata -> explained in the panel, analytics withheld as em-dash", () => {

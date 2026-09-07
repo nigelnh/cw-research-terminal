@@ -7,6 +7,7 @@ from typing import Set, List, Dict, Any, Callable, Optional, Tuple, TYPE_CHECKIN
 from app.core.config import settings
 from app.market_data.market_session import market_session, VN_TZ
 from app.market_data.live_bar_builder import live_bar_builder
+from app.market_data.traded_log import traded_log
 from app.market_data.market_state import MarketState, market_state
 from app.market_data.market_schemas import CanonicalQuote
 from app.market_data.market_state_store import MarketStateStore, NullMarketStateStore
@@ -112,6 +113,14 @@ class SubscriptionManager:
                 return
             if event_type == "trade":
                 quote, diff = self.state.apply_trade_event(raw_data)
+                # Time & sales. Only real matches print; the 20s session-snapshot poll
+                # routes through here too but carries a daily bar, not an individual trade.
+                if not raw_data.get("_synthetic_session_snapshot"):
+                    try:
+                        if traded_log.record(quote, diff) is not None:
+                            asyncio.ensure_future(traded_log.persist(quote.symbol))
+                    except Exception as err:  # noqa: BLE001 - the tape must never break the feed
+                        logger.debug("Traded-log record failed for %s: %s", quote.symbol, err)
             else:
                 quote, diff = self.state.apply_bidask_event(raw_data)
 
@@ -319,6 +328,9 @@ class SubscriptionManager:
                 "TotalMatchVolume": values.get("total_volume"),
                 "TotalMatchValue": values.get("trading_value"),
                 "TradingDate": as_of or f"{target_iso} 09:00",
+                # Read from a daily bar, not an individual match: the traded log must not
+                # print it, or the tape would fill with a phantom row every 20 seconds.
+                "_synthetic_session_snapshot": True,
             }
             if as_of:
                 event["Timestamp"] = as_of

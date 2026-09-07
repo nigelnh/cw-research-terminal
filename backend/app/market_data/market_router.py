@@ -18,6 +18,7 @@ from app.market_data.market_schemas import (
     CIRCUIT_REASON_RATE_LIMIT,
 )
 from app.market_data.market_state import market_state
+from app.market_data.traded_log import traded_log
 from app.market_data.market_subscription_manager import subscription_manager
 from app.market_data.history_read_service import HistoryRequestError, history_read_service
 from app.market_data.market_snapshot_resolver import market_snapshot_resolver
@@ -285,6 +286,22 @@ async def get_market_overview():
     except Exception as exc:
         logger.warning("Market overview unavailable: %s", exc)
         raise HTTPException(status_code=503, detail="Market overview is temporarily unavailable")
+
+
+@market_router.get("/trades/{symbol}")
+async def get_traded_log(symbol: str, limit: int = Query(default=50, ge=1, le=200)):
+    """Time & sales for one instrument.
+
+    Kept until 08:00 ICT the morning after its session, so the panel still has the day's
+    tape after the close. `side` is DERIVED from the last known book (see traded_log), not
+    published by the exchange - `side_basis` says so on every response.
+    """
+    sym = symbol.strip().upper()
+    if not (1 <= len(sym) <= 12) or not sym.isalnum():
+        raise HTTPException(status_code=400, detail=f"invalid symbol: {symbol!r}")
+    payload = traded_log.get(sym, limit=limit)
+    payload["market_session"] = cal.session_status(cal._as_vn(None)).value
+    return payload
 
 
 @market_router.get("/_diag/{symbol}")
