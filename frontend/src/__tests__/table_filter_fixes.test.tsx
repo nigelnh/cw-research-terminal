@@ -12,6 +12,9 @@ import { MARKET_COLOR, priceBandColor } from "@/components/common/grid_table";
 import { columnOrder } from "@/components/common/watchlist_layout";
 
 // This suite is about columns; the tape has its own tests.
+vi.mock("@/data/query/use_fundamentals", () => ({
+  useFundamentals: () => ({ data: null, quarters: [], isLoading: false, isError: false }),
+}));
 vi.mock("@/data/query/use_traded_log", () => ({
   useTradedLog: () => ({ items: [], sessionDate: null, sideBasis: null, isLoading: false, isError: false }),
 }));

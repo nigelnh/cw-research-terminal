@@ -36,7 +36,9 @@ ChartJS.defaults.font.size = 9;
  * literal when there is no computed style (SSR, or happy-dom in tests).
  */
 export function token(name: string, fallback: string): string {
-  if (typeof window === "undefined" || !document?.documentElement) return fallback;
+  // `typeof` guard, not optional chaining: `document?.x` still throws a ReferenceError
+  // when the identifier is undeclared, which is the case under renderToStaticMarkup.
+  if (typeof document === "undefined" || !document.documentElement) return fallback;
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
 }

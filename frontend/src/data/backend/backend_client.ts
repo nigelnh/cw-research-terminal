@@ -305,6 +305,33 @@ export class BackendClient {
     return this.get("/api/market/stock-profiles", { symbols: symbols.join(",") }, signal);
   }
 
+  /** Valuation + recent quarterly statement lines. Deliberately partial - see `unavailable`. */
+  async getFundamentals(
+    symbol: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    symbol: string;
+    pe: number | null;
+    pb: number | null;
+    valuation_as_of: string | null;
+    net_margin: number | null;
+    latest_period: string | null;
+    quarters: Array<{
+      period: string; year: number; quarter: number;
+      revenue: number | null; net_profit: number | null;
+      ebit: number | null; net_margin: number | null;
+    }>;
+    unavailable: Record<string, string>;
+    source: string;
+    errors: string[];
+  }> {
+    return this.get<any>(
+      `/api/market/fundamentals/${encodeURIComponent(symbol.toUpperCase())}`,
+      undefined,
+      signal,
+    );
+  }
+
   async getMarketOverview(signal?: AbortSignal): Promise<any> {
     return this.get<any>("/api/market/overview", undefined, signal);
   }

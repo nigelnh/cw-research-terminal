@@ -5,6 +5,9 @@ import { createDefaultWatchlist, defaultWatchlistStorage } from "../domain/model
 import { resetWatchlistMemoryForTests } from "../data/watchlist/use_watchlist";
 import { mapRawSnapshotToQuote } from "../data/backend/mappers/map_snapshot";
 
+vi.mock("@/data/query/use_fundamentals", () => ({
+  useFundamentals: () => ({ data: null, quarters: [], isLoading: false, isError: false }),
+}));
 vi.mock("@/data/query/use_traded_log", () => ({
   useTradedLog: () => ({ items: [], sessionDate: null, sideBasis: null, isLoading: false, isError: false }),
 }));

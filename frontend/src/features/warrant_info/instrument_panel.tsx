@@ -7,6 +7,8 @@ import type { CorporateActionItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
 import { useTradedLog } from "@/data/query/use_traded_log";
+import { useFundamentals } from "@/data/query/use_fundamentals";
+import { QuarterlyResultsChart } from "./quarterly_results_chart";
 import { TradingChart } from "@/components/common/trading_chart";
 import { DASH, fmtIV, fmtPrice, fmtVol, dteDisplay } from "@/components/common/grid_table";
 import { RealtimeValue, type FlashTone } from "@/components/common/realtime_value";
@@ -104,6 +106,10 @@ function corpEventDesc(ev: CorporateActionItem): string {
   return DASH;
 }
 
+/** Named, not silently blank: this tier's get_ratios returns only revenue, net profit and
+ *  EBIT, and an explicit `fields` list makes the SDK raise, so these have no source. */
+const UNAVAILABLE_HINT =
+  "Not served by the current market-data entitlement — no source for this figure.";
 const TS_COLS = "1.1fr 1fr 1fr 1.15fr 1fr 0.65fr";
 
 const TS_HEAD: React.CSSProperties = {
@@ -245,6 +251,17 @@ export function InstrumentPanel({
     enabled: hasInstrument && !isCW && !isIndex && tab === "quant",
     limit: 12,
   });
+
+  // Fundamentals belong to the company, so a CW reads its underlying's. Fetched only while
+  // the QUANT tab is open - this is a once-a-day/once-a-quarter read, not a ticking one.
+  const fundamentalsSymbol = isCW ? (instrument?.underlyingSymbol ?? null) : symbol;
+  const fundamentals = useFundamentals(
+    fundamentalsSymbol,
+    hasInstrument && !isIndex && tab === "quant",
+  );
+  const valuationHint = fundamentals.data?.valuation_as_of
+    ? `Trailing, as of ${fundamentals.data.valuation_as_of}`
+    : "Trailing valuation from the market-data provider";
 
   const cw = instrument?.cw;
   const q = dashRow?.quote ?? instrument?.quote ?? cw?.quote;
@@ -532,40 +549,49 @@ export function InstrumentPanel({
                   </div>
                 ) : (
                   <>
-                    <MetricRow label="EPS" color="var(--t-85)" compact value={DASH} />
-                    <MetricRow label="PE" color="var(--t-85)" compact value={DASH} />
-                    <MetricRow label="PB" color="var(--t-85)" compact value={DASH} />
-                    <MetricRow label="ROE" color="var(--t-85)" compact value={DASH} />
-                    <MetricRow label="ROA" color="var(--t-85)" compact value={DASH} />
-                    <MetricRow label="ROIC" color="var(--t-85)" compact value={DASH} />
-                    <MetricRow label="GROSS MARGIN" color="var(--t-85)" compact value={DASH} />
-                    <MetricRow label="NET MARGIN" color="var(--t-85)" compact value={DASH} />
+                    <MetricRow label="EPS" color="var(--t-85)" compact value={DASH} title={UNAVAILABLE_HINT} />
+                    <MetricRow
+                      label="PE"
+                      color="var(--t-85)"
+                      compact
+                      value={fundamentals.data?.pe == null ? DASH : fundamentals.data.pe.toFixed(2)}
+                      title={valuationHint}
+                    />
+                    <MetricRow
+                      label="PB"
+                      color="var(--t-85)"
+                      compact
+                      value={fundamentals.data?.pb == null ? DASH : fundamentals.data.pb.toFixed(2)}
+                      title={valuationHint}
+                    />
+                    <MetricRow label="ROE" color="var(--t-85)" compact value={DASH} title={UNAVAILABLE_HINT} />
+                    <MetricRow label="ROA" color="var(--t-85)" compact value={DASH} title={UNAVAILABLE_HINT} />
+                    <MetricRow label="ROIC" color="var(--t-85)" compact value={DASH} title={UNAVAILABLE_HINT} />
+                    <MetricRow label="GROSS MARGIN" color="var(--t-85)" compact value={DASH} title={UNAVAILABLE_HINT} />
+                    <MetricRow
+                      label="NET MARGIN"
+                      color="var(--t-85)"
+                      compact
+                      value={
+                        fundamentals.data?.net_margin == null
+                          ? DASH
+                          : `${(fundamentals.data.net_margin * 100).toFixed(1)}%`
+                      }
+                      title={
+                        fundamentals.data?.latest_period
+                          ? `Net profit / revenue, ${fundamentals.data.latest_period} (consolidated)`
+                          : "Net profit / revenue for the latest reported quarter"
+                      }
+                    />
                   </>
                 )}
               </div>
               <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", gap: 16 }}>
-                <div
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    height: "100%",
-                    border: "1px solid var(--border)",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 4,
-                    padding: 8,
-                    textAlign: "center",
-                  }}
-                >
-                  <span style={{ fontSize: 11, color: "var(--t-42)" }}>
-                    revenue &amp; profit, quarterly (billion VND)
-                  </span>
-                  <span style={{ fontSize: 9, color: "var(--t-40)" }}>
-                    financial-statement data — pending data provider
-                  </span>
-                </div>
+                <QuarterlyResultsChart
+                  rows={fundamentals.quarters}
+                  isLoading={fundamentals.isLoading}
+                  isError={fundamentals.isError}
+                />
                 {!isIndex && (
                   <div className="mono instrument-data-panel">
                     <h3 className="instrument-section-heading">CORPORATE EVENTS</h3>
