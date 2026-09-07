@@ -613,22 +613,33 @@ class MarketState:
                     return _number(val)
             return None
 
+        def get_price(*keys):
+            """A book price of 0 means that side is EMPTY, not that the order is free.
+
+            No HOSE instrument can trade at 0, so the stream's 0 is a sentinel. It was
+            written through and rendered as a literal `0` in ASK_PRC/BID_PRC (seen on
+            CHPG2618, CHPG2632, CVPB2613) while the IV solver - correctly - refused it and
+            showed nothing. Sizes are left alone: a quantity of 0 is a real quantity.
+            """
+            value = get_field(*keys)
+            return None if value is not None and value <= 0 else value
+
         # Depth 1
-        b1_prc = get_field("Best1Bid", "BidPrice1", "Bid1")
+        b1_prc = get_price("Best1Bid", "BidPrice1", "Bid1")
         b1_vol = get_field("Best1BidVolume", "BidVol1", "Bid1Vol")
-        a1_prc = get_field("Best1Ask", "AskPrice1", "Ask1")
+        a1_prc = get_price("Best1Ask", "AskPrice1", "Ask1")
         a1_vol = get_field("Best1AskVolume", "AskVol1", "Ask1Vol")
 
         # Depth 2
-        b2_prc = get_field("Best2Bid", "BidPrice2")
+        b2_prc = get_price("Best2Bid", "BidPrice2")
         b2_vol = get_field("Best2BidVolume", "BidVol2")
-        a2_prc = get_field("Best2Ask", "AskPrice2")
+        a2_prc = get_price("Best2Ask", "AskPrice2")
         a2_vol = get_field("Best2AskVolume", "AskVol2")
 
         # Depth 3
-        b3_prc = get_field("Best3Bid", "BidPrice3")
+        b3_prc = get_price("Best3Bid", "BidPrice3")
         b3_vol = get_field("Best3BidVolume", "BidVol3")
-        a3_prc = get_field("Best3Ask", "AskPrice3")
+        a3_prc = get_price("Best3Ask", "AskPrice3")
         a3_vol = get_field("Best3AskVolume", "AskVol3")
 
         ts_str = raw_event.get("Timestamp")

@@ -164,3 +164,26 @@ async def test_market_health_endpoint_surfaces_the_watchdog():
         "trade_tick_age_seconds",
     ):
         assert key in body, f"{key} missing from /api/market/health"
+
+
+async def test_watchdog_exits_when_there_is_nothing_left_to_watch():
+    """It must not linger as a stray task once the provider has no streams or symbols;
+    a later stream start re-arms it through the idempotent `_ensure_stream_watchdog`."""
+    import asyncio
+
+    p = _provider(silence=90.0)
+    p._stream_watchdog_interval_seconds = 0.01
+    p._ensure_stream_watchdog()
+    task = p._stream_watchdog_task
+    assert task is not None
+
+    p._owned_streams = []
+    p._active_symbols = []
+    await asyncio.wait_for(task, timeout=2.0)
+    assert task.done() and not task.cancelled()
+
+    # re-arms cleanly
+    p._active_symbols = ["HPG"]
+    p._ensure_stream_watchdog()
+    assert p._stream_watchdog_task is not task
+    p._stream_watchdog_task.cancel()

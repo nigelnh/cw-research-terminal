@@ -61,3 +61,46 @@ async def test_traded_quantity_is_emitted_in_the_diff_for_the_websocket():
     s.apply_trade_event({"Ticker": "CVPB2615", "Close": 820, "TotalMatchVolume": 1000})
     _, diff = s.apply_trade_event({"Ticker": "CVPB2615", "Close": 820, "TotalMatchVolume": 1500})
     assert diff.get("traded_quantity") == 500
+
+
+# --------------------------------------------------------------------------- #
+# Book prices: 0 means "this side is empty", not a free order.
+# --------------------------------------------------------------------------- #
+async def test_zero_book_prices_are_treated_as_an_empty_side():
+    """CHPG2618 / CHPG2632 / CVPB2613 rendered a literal 0 in ASK_PRC while the IV solver
+    correctly refused it - the stream's 0 is a sentinel, no HOSE instrument trades at 0."""
+    s = MarketState()
+    s.apply_bidask_event({
+        "Ticker": "CHPG2618", "Best1Bid": 280, "Best1BidVolume": 100,
+        "Best1Ask": 0, "Best1AskVolume": 0,
+    })
+    q = s.get_quote("CHPG2618")
+    assert q.bid1_price == 280
+    assert q.ask1_price is None          # not 0
+    assert q.bid1_quantity == 100
+    assert q.ask1_quantity == 0          # a size of 0 is a real size and survives
+
+
+async def test_zero_prices_are_dropped_at_every_depth_level():
+    s = MarketState()
+    s.apply_bidask_event({
+        "Ticker": "CVPB2613",
+        "Best1Bid": 140, "Best1Ask": 0,
+        "Best2Bid": 0, "Best2Ask": 0,
+        "Best3Bid": 0, "Best3Ask": 0,
+    })
+    q = s.get_quote("CVPB2613")
+    assert q.bid1_price == 140
+    for field in ("ask1_price", "bid2_price", "ask2_price", "bid3_price", "ask3_price"):
+        assert getattr(q, field) is None, f"{field} should be empty, not 0"
+
+
+async def test_a_real_book_price_is_untouched():
+    s = MarketState()
+    s.apply_bidask_event({
+        "Ticker": "HPG", "Best1Bid": 21_850, "Best1Ask": 21_900,
+        "Best2Bid": 21_800, "Best2Ask": 21_950,
+    })
+    q = s.get_quote("HPG")
+    assert (q.bid1_price, q.ask1_price) == (21_850, 21_900)
+    assert (q.bid2_price, q.ask2_price) == (21_800, 21_950)

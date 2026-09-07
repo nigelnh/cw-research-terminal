@@ -106,7 +106,7 @@ export function quoteCell(
     case "ivBid":
     case "ivTrade":
     case "ivAsk":
-      return { text: fmtIV(row[key]), color: "var(--t-92)" };
+      return { text: fmtIV(row[key]), color: "var(--t-92)", tone: "neutral" };
     case "change": {
       const amount = typeof row.change === "number"
         ? row.change
@@ -138,7 +138,7 @@ export function quoteCell(
       };
     }
     case "vol":
-      return { text: fmtVol(row.vol), color: "var(--t-92)" };
+      return { text: fmtVol(row.vol), color: "var(--t-92)", tone: "neutral" };
     case "tradedQuantity": {
       // Size of the most recent match, so it belongs to the same band as the price that
       // matched. A non-positive size is "no match observed" - never a literal 0 (a

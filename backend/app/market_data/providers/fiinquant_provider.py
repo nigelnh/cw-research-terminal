@@ -890,6 +890,10 @@ class FiinQuantProvider(MarketDataProvider):
                 await asyncio.sleep(interval)
                 if self._shutting_down:
                     return
+                # Nothing left to watch: exit rather than linger. A later stream start
+                # re-arms via `_ensure_stream_watchdog`, which is idempotent.
+                if not self._owned_streams and not self._active_symbols:
+                    return
                 try:
                     age = self._silent_stream_age_seconds()
                 except Exception as err:  # noqa: BLE001 - the watchdog must never die
