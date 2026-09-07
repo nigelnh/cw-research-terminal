@@ -13,6 +13,7 @@ import {
 } from "./mappers";
 import { mergeRealtimePulses } from "./mappers/realtime_pulse";
 import { acceptLiveBarMessage } from "./live_bar_store";
+import { acceptTradePrintMessage } from "./trade_print_store";
 
 type GatewayStateHandler = (state: GatewayConnectionState) => void;
 type UpstreamFeedStateHandler = (state: UpstreamFeedState) => void;
@@ -624,6 +625,11 @@ export class BackendWebSocketClient {
 
       case "bar_patch": {
         acceptLiveBarMessage(msg);
+        break;
+      }
+
+      case "trade_print": {
+        acceptTradePrintMessage(msg);
         break;
       }
 

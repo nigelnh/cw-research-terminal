@@ -616,8 +616,13 @@ select:focus-visible,
 .ai-file-preview summary { cursor: pointer; color: var(--t-75); }
 .ai-file-preview pre { max-height: 100px; overflow: auto; white-space: pre-wrap; background: var(--bg); padding: 6px; font: inherit; }
 
-/* Traded log (time & sales). Scrolls inside the panel; the header row stays put. */
-.instrument-tape { max-height: 240px; overflow-y: auto; }
+/* Traded log (time & sales). Fills the panel's remaining height instead of stopping at a
+   fixed 240px and leaving the container half empty; only the rows scroll, the heading and
+   column header stay put. The small bottom padding keeps the last row off the border. */
+.instrument-data-panel:has(.instrument-tape) { display: flex; flex-direction: column; min-height: 0; }
+.instrument-data-panel:has(.instrument-tape) > h3,
+.instrument-data-panel:has(.instrument-tape) > div:not(.instrument-tape) { flex-shrink: 0; }
+.instrument-tape { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 6px; }
 .instrument-tape-row {
   display: grid;
   grid-template-columns: 58px 1fr 1fr 1fr 1fr 26px;

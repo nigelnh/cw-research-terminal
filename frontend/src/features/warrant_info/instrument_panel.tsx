@@ -127,7 +127,7 @@ const TS_HEAD: React.CSSProperties = {
  * inside the spread is left blank rather than guessed, and the header says so.
  */
 function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
-  const { items, sessionDate, isLoading, isError } = useTradedLog(symbol, live);
+  const { items, isLoading, isError } = useTradedLog(symbol, live);
   const cellStyle: React.CSSProperties = { textAlign: "right", fontVariantNumeric: "tabular-nums" };
   const note = isError
     ? "Traded logs unavailable."
@@ -139,12 +139,7 @@ function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
 
   return (
     <div className="mono instrument-data-panel">
-      <h3 className="instrument-section-heading">
-        TRADED LOGS
-        {sessionDate && (
-          <span style={{ marginLeft: 8, fontSize: 9, color: "var(--t-46)" }}>{sessionDate}</span>
-        )}
-      </h3>
+      <h3 className="instrument-section-heading">TRADED LOGS</h3>
       <div
         style={{
           display: "grid",
