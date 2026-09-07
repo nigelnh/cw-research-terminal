@@ -211,17 +211,31 @@ describe("Live Status Semantics & Two-State Tracking", () => {
     expect(html).not.toContain("READY");
   });
 
-  it.each([
-    [true, "CONNECTED", "CONNECTED", "LIVE"],
-    [false, "CONNECTED", "STALE", "STALE"],
-    [false, "DISCONNECTED", "DISCONNECTED", "OFFLINE"],
-  ] as const)("retains meaningful feed state %s / %s / %s as %s", (active, gateway, upstream, label) => {
-    const html = renderToStaticMarkup(createElement(AppHeader, {
+  const header = (active: boolean, gateway: string, upstream: string) =>
+    renderToStaticMarkup(createElement(AppHeader, {
       activeTab: "dashboard", onTabChange: () => undefined,
       filter: "", onFilterChange: () => undefined,
       marketSessionActive: active, gatewayState: gateway, upstreamFeedState: upstream,
     }));
+
+  // The feed chip is exception-only. A healthy feed shows nothing at all: the session chip
+  // beside it already reads OPEN with a green dot, so a second "LIVE" badge was duplication.
+  it.each([
+    [false, "CONNECTED", "STALE", "STALE"],
+    [false, "DISCONNECTED", "DISCONNECTED", "OFFLINE"],
+    [true, "RECONNECTING", "CONNECTED", "RECONNECTING"],
+    [true, "CONNECTED", "CONNECTING", "CONNECTING"],
+  ] as const)("still surfaces a degraded feed %s / %s / %s as %s", (active, gateway, upstream, label) => {
+    const html = header(active, gateway, upstream);
     expect(html).toContain(`Market feed ${label.toLowerCase()}`);
     expect(html).toContain(label);
+  });
+
+  it("shows no feed chip when the feed is healthy", () => {
+    const html = header(true, "CONNECTED", "CONNECTED");
+    expect(html).not.toContain("Market feed");
+    expect(html).not.toContain("LIVE");
+    // the session chip still carries the real state
+    expect(html).toContain("Market session open");
   });
 });
