@@ -1,5 +1,4 @@
 import asyncio
-from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any
 import pytest
 
@@ -7,7 +6,6 @@ from app.market_data.market_schemas import CanonicalQuote
 from app.market_data.market_state import MarketState
 from app.market_data.market_state_store import MarketStateStore, NullMarketStateStore
 from app.market_data.market_subscription_manager import SubscriptionManager
-from app.market_data.market_session import VN_TZ, market_session
 from app.market_data.session_reference import reference_session_date
 from app.market_data.providers.base_market_provider import MarketDataProvider
 from tests.conftest import display_session_ms
@@ -239,9 +237,10 @@ async def test_same_session_last_price_and_cumulative_volume_survive_backend_res
 async def test_previous_session_last_volume_not_presented_as_today_session_state():
     """Previous-session last/volume are not presented as today's live session state."""
     state = MarketState()
-    # Timestamp from yesterday (24 hours ago)
-    yesterday_dt = market_session.get_vn_now() - timedelta(days=1, hours=2)
-    yesterday_ms = int(yesterday_dt.timestamp() * 1000)
+    # A day before the DISPLAYED session. "now minus 26 hours" was not that: run at 02:13
+    # ICT it lands on the session still on screen, so the values this test expects to see
+    # sanitized are in fact current ones and correctly kept.
+    yesterday_ms = display_session_ms(-24 * 3600 * 1000)
 
     yesterday_quote = CanonicalQuote(
         symbol="HPG",
@@ -331,7 +330,9 @@ async def test_same_reference_session_survives_redis_restore_while_old_trade_is_
 @pytest.mark.asyncio
 async def test_redis_reference_fills_live_quote_without_overwriting_trade_or_book():
     state = MarketState()
-    now_ms = int(market_session.get_vn_now().timestamp() * 1000)
+    # The cache entry is meant to be from the current session; anchor it there rather than
+    # to the wall clock, which before the 08:00 roll is a different session entirely.
+    now_ms = display_session_ms()
     reference_day = reference_session_date().isoformat()
     state.apply_trade_event({"Ticker": "HPG", "Close": 22200.0})
     state.apply_bidask_event({"Ticker": "HPG", "Best1Bid": 22150.0, "Best1Ask": 22250.0})
