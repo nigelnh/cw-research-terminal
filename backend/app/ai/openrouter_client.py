@@ -33,6 +33,25 @@ class AiModelUnavailableError(AiProviderError):
     def __init__(self, message: str = "Configured AI model is currently unavailable."):
         super().__init__(message, status_code=503)
 
+class AiModelNotFoundError(AiProviderError):
+    """The configured model slug does not exist at the provider.
+
+    Kept apart from AiModelUnavailableError because the two need opposite responses. A 5xx
+    is an outage and retrying is exactly right; a 404 means the slug is wrong or has been
+    retired, and no amount of retrying will fix it - the operator has to change the
+    configuration. Telling a user to "try again shortly" for a retired model is advice that
+    can never come true, so this error names the model instead.
+    """
+
+    def __init__(self, model: str):
+        self.model = model
+        super().__init__(
+            f"The configured AI model '{model}' was rejected by the provider as unknown. "
+            "It has likely been retired or renamed; the server's OPENROUTER_MODEL setting "
+            "needs updating.",
+            status_code=503,
+        )
+
 class AiTimeoutError(AiProviderError):
     def __init__(self, message: str = "AI inference request timed out."):
         super().__init__(message, status_code=504)
@@ -155,8 +174,16 @@ class OpenRouterClient(AiProvider):
         elif response.status_code == 429:
             logger.warning("OpenRouter rate limit hit (429).")
             raise AiRateLimitError()
-        elif response.status_code in (502, 503, 504, 404):
-            logger.error(f"OpenRouter model unavailable ({response.status_code}).")
+        elif response.status_code == 404:
+            logger.error(
+                "OpenRouter rejected model %r as unknown (404). Free model slugs are "
+                "retired without notice - update OPENROUTER_MODEL.", self.model,
+            )
+            raise AiModelNotFoundError(self.model)
+        elif response.status_code in (502, 503, 504):
+            logger.error(
+                "OpenRouter model %r unavailable (%s).", self.model, response.status_code
+            )
             raise AiModelUnavailableError()
         elif response.status_code != 200:
             logger.error(f"OpenRouter returned unexpected status: {response.status_code}")
@@ -189,7 +216,17 @@ class OpenRouterClient(AiProvider):
                     elif response.status_code == 429:
                         logger.warning("OpenRouter rate limit during stream.")
                         raise AiRateLimitError()
-                    elif response.status_code in (502, 503, 504, 404):
+                    elif response.status_code == 404:
+                        logger.error(
+                            "OpenRouter rejected model %r as unknown (404) during stream. "
+                            "Update OPENROUTER_MODEL.", self.model,
+                        )
+                        raise AiModelNotFoundError(self.model)
+                    elif response.status_code in (502, 503, 504):
+                        logger.error(
+                            "OpenRouter model %r unavailable during stream (%s).",
+                            self.model, response.status_code,
+                        )
                         raise AiModelUnavailableError()
                     elif response.status_code != 200:
                         raise AiProviderError("AI provider error during stream.")

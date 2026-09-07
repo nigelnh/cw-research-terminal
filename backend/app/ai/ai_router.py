@@ -27,13 +27,15 @@ ai_router = APIRouter(prefix="/api/ai", tags=["AI Research Copilot"])
 AI_ERROR_CODE_HEADER = "X-AI-Error-Code"
 
 
-def _raise_ai_http(code: AiErrorCode, log_detail: str) -> None:
+def _raise_ai_http(
+    code: AiErrorCode, log_detail: str, exc: BaseException | None = None
+) -> None:
     """Raise a sanitized HTTPException carrying the machine code as a header. The body
     `detail` is the short user-facing string; the real reason goes only to the server log."""
     logger.warning("AI request rejected [%s]: %s", code.value, log_detail)
     raise HTTPException(
         status_code=http_status(code),
-        detail=user_message(code),
+        detail=user_message(code, exc),
         headers={AI_ERROR_CODE_HEADER: code.value},
     )
 
@@ -218,7 +220,7 @@ async def chat_endpoint(
                 else:
                     logger.warning("AI stream failed [%s]: %s", code.value, detail)
                 yield sse({
-                    "type": "error", "error": user_message(code),
+                    "type": "error", "error": user_message(code, e),
                     "code": code.value, "done": True,
                 })
 
@@ -244,7 +246,7 @@ async def chat_endpoint(
         raise
     except (GateTimeout, AiProviderError) as e:
         code = classify(e)
-        _raise_ai_http(code, getattr(e, "message", None) or str(e))
+        _raise_ai_http(code, getattr(e, "message", None) or str(e), e)
     except Exception as e:
         logger.exception("Unexpected error during AI chat execution")
         _raise_ai_http(AiErrorCode.INTERNAL_ERROR, str(e))

@@ -15,7 +15,14 @@ class Settings(BaseSettings):
     # AI Service Configuration
     AI_ENABLED: bool = Field(default=True, description="Enable AI research assistant")
     OPENROUTER_API_KEY: str = Field(default="", description="OpenRouter API Key (Server-Side Only)")
-    OPENROUTER_MODEL: str = Field(default="stealth/ox-alpha", description="Target OpenRouter model")
+    OPENROUTER_MODEL: str = Field(
+        default="nvidia/nemotron-3-super-120b-a12b:free",
+        description=(
+            "Target OpenRouter model. Must support tool calling - the research assistant "
+            "is useless without it. Free slugs are retired without notice (minimax-m3:free "
+            "was, mid-flight), so a 404 here is a configuration problem, not an outage."
+        ),
+    )
     OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter Base URL")
     OPENROUTER_SITE_URL: str = Field(default="https://github.com/nigelnh/cw-research-terminal", description="App Site URL header")
     OPENROUTER_APP_NAME: str = Field(default="CW Research Terminal", description="App Name header")

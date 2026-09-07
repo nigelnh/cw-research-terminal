@@ -10,9 +10,23 @@ from app.market_data.market_state import MarketState
 from app.market_data.traded_log import (
     TradedLog, classify_side, seconds_until_rollover, ROLLOVER_HOUR_ICT,
 )
+from app.market_data.market_session import market_session
 from app.market_data.trading_calendar import VN_TZ
 
 pytestmark = pytest.mark.asyncio  # async cases; the pure helpers below are sync
+
+# Dates come from the same clock the state itself reads, never a literal. A book event
+# carries no TradingDate, so the state stamps it with "now"; a trade dated earlier than
+# that is correctly rejected as a late callback from a retired stream. Hard-coding today's
+# date therefore makes these tests pass on the day they are written and fail at the next
+# ICT midnight - which is exactly what happened.
+TODAY = market_session.get_vn_now().date()
+TOMORROW = TODAY + timedelta(days=1)
+
+
+def at(clock: str, day=None) -> str:
+    """An ICT event timestamp for `day` (default today), e.g. at("09:20:00")."""
+    return f"{(day or TODAY).isoformat()}T{clock}+07:00"
 
 
 def _state_with_book(bid=21_850, ask=21_900):
@@ -21,9 +35,9 @@ def _state_with_book(bid=21_850, ask=21_900):
     return s
 
 
-def _trade(state, price, when="2026-09-07T09:20:00+07:00", vol=300):
+def _trade(state, price, when=None, vol=300):
     return state.apply_trade_event({
-        "Ticker": "HPG", "TradingDate": when, "Close": price,
+        "Ticker": "HPG", "TradingDate": when or at("09:20:00"), "Close": price,
         "Reference": 21_700, "MatchVolume": vol, "TotalMatchVolume": 1_000_000,
     })
 
@@ -96,7 +110,7 @@ async def test_the_tape_is_newest_first_and_bounded():
     state = _state_with_book()
     log = TradedLog(max_entries=3)
     for i, price in enumerate([21_800, 21_850, 21_900, 21_950]):
-        q, d = _trade(state, price, when=f"2026-09-07T09:2{i}:00+07:00")
+        q, d = _trade(state, price, when=at(f"09:2{i}:00"))
         log.record(q, d)
     items = log.get("HPG")["items"]
     assert [i["price"] for i in items] == [21_950, 21_900, 21_850]  # newest first, capped
@@ -107,11 +121,11 @@ async def test_a_new_session_starts_a_clean_tape():
     log = TradedLog(max_entries=10)
     q, d = _trade(state, 21_900)
     log.record(q, d)
-    q2, d2 = _trade(state, 22_000, when="2026-09-08T09:16:00+07:00")
+    q2, d2 = _trade(state, 22_000, when=at("09:16:00", TOMORROW))
     log.record(q2, d2)
     tape = log.get("HPG")
     assert tape["count"] == 1
-    assert tape["session_date"] == "2026-09-08"
+    assert tape["session_date"] == TOMORROW.isoformat()
 
 
 async def test_the_response_declares_the_side_is_derived():
@@ -177,7 +191,7 @@ async def test_a_redeploy_mid_session_does_not_wipe_the_tape():
     log.set_redis(redis)
 
     for i in range(250):
-        q, d = _trade(state, 21_800 + i, when=f"2026-09-07T09:{20 + i // 60:02d}:{i % 60:02d}+07:00")
+        q, d = _trade(state, 21_800 + i, when=at(f"{9 + (20 + i // 60) // 60:02d}:{(20 + i // 60) % 60:02d}:{i % 60:02d}"))
         entry = log.record(q, d)
         if entry:
             await log.persist("HPG", entry)
@@ -199,7 +213,7 @@ async def test_persisting_is_constant_work_per_print():
     log = TradedLog(max_entries=6000)
     log.set_redis(redis)
     for i in range(100):
-        q, d = _trade(state, 21_800 + i, when=f"2026-09-07T09:2{i // 10}:{i % 60:02d}+07:00")
+        q, d = _trade(state, 21_800 + i, when=at(f"09:2{i // 10}:{i % 60:02d}"))
         e = log.record(q, d)
         if e:
             await log.persist("HPG", e)
@@ -213,7 +227,7 @@ async def test_a_stored_tape_from_an_earlier_session_is_not_restored_into_today(
     key = TradedLog._key("HPG")
     redis.lists[key] = [json.dumps({
         "ts": 1, "time": "09:20:00", "price": 21_000, "change": None,
-        "change_percent": None, "volume": 100, "side": "B", "session_date": "2999-01-01",
+        "change_percent": None, "volume": 100, "side": "B", "session_date": "2999-01-01",  # a future session
     })]
     log = TradedLog(max_entries=100)
     log.set_redis(redis)
@@ -232,12 +246,12 @@ async def test_a_session_rollover_clears_the_stored_tape():
     key = TradedLog._key("HPG")
     assert len(redis.lists[key]) == 1
 
-    q2, d2 = _trade(state, 22_000, when="2026-09-08T09:16:00+07:00")
+    q2, d2 = _trade(state, 22_000, when=at("09:16:00", TOMORROW))
     entry = log.record(q2, d2)
     await log.persist("HPG", entry)
     # yesterday's print is gone, today's is the only one stored
     assert len(redis.lists[key]) == 1
-    assert json.loads(redis.lists[key][0])["session_date"] == "2026-09-08"
+    assert json.loads(redis.lists[key][0])["session_date"] == TOMORROW.isoformat()
 
 
 async def test_the_endpoint_reads_the_shared_tape_not_this_process_memory():
@@ -249,7 +263,7 @@ async def test_the_endpoint_reads_the_shared_tape_not_this_process_memory():
     log.set_redis(redis)
 
     for i in range(400):
-        q, d = _trade(state, 21_800 + i, when=f"2026-09-07T09:{20 + i // 60:02d}:{i % 60:02d}+07:00")
+        q, d = _trade(state, 21_800 + i, when=at(f"{9 + (20 + i // 60) // 60:02d}:{(20 + i // 60) % 60:02d}:{i % 60:02d}"))
         entry = log.record(q, d)
         if entry:
             await log.persist("HPG", entry)
@@ -271,7 +285,7 @@ async def test_a_redis_outage_degrades_to_recent_prints_rather_than_nothing():
 
     log.set_redis(_Broken())
     for i in range(80):
-        q, d = _trade(state, 21_800 + i, when=f"2026-09-07T09:20:{i % 60:02d}+07:00")
+        q, d = _trade(state, 21_800 + i, when=at(f"09:20:{i % 60:02d}"))
         log.record(q, d)
     assert (await log.get_session("HPG", limit=6000))["count"] == 50
 
@@ -302,6 +316,6 @@ async def test_a_failing_persist_warns_once_per_symbol_then_stays_quiet():
     warnings = []
     with mock.patch.object(traded_log_module.logger, "warning", lambda *a: warnings.append(a)):
         for i in range(5):
-            q, d = _trade(state, 21_800 + i, when=f"2026-09-07T09:20:0{i}+07:00")
+            q, d = _trade(state, 21_800 + i, when=at(f"09:20:0{i}"))
             await log.persist("HPG", log.record(q, d))
     assert len(warnings) == 1
