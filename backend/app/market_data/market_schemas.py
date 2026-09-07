@@ -343,6 +343,13 @@ class MarketHealthResponse(BaseModel):
     last_tick_at: Optional[str] = None
     signalr_decode_error_count: int = 0
     signalr_reconnect_count: int = 0
+    # Stream-liveness watchdog. `silent_stream_reconnect_count` climbing means FiinQuant
+    # keeps dropping us without firing on_close; STALE with a 0 count and an inactive
+    # watchdog means the watchdog itself is not running.
+    silent_stream_reconnect_count: int = 0
+    stream_watchdog_active: bool = False
+    stream_silence_reconnect_seconds: float = 0.0
+    trade_tick_age_seconds: Optional[float] = None
     realtime_universe: Dict[str, Any] = Field(default_factory=dict)
     market_session: str = "UNKNOWN"
     market_session_active: bool = False
