@@ -615,3 +615,16 @@ select:focus-visible,
 .ai-file-feedback button { color: var(--accent); background: none; border: none; font: inherit; cursor: pointer; text-decoration: underline; }
 .ai-file-preview summary { cursor: pointer; color: var(--t-75); }
 .ai-file-preview pre { max-height: 100px; overflow: auto; white-space: pre-wrap; background: var(--bg); padding: 6px; font: inherit; }
+
+/* Traded log (time & sales). Scrolls inside the panel; the header row stays put. */
+.instrument-tape { max-height: 240px; overflow-y: auto; }
+.instrument-tape-row {
+  display: grid;
+  grid-template-columns: 58px 1fr 1fr 1fr 1fr 26px;
+  gap: 2px 6px;
+  padding: 2px 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--border-19);
+}
+.instrument-tape-row:last-child { border-bottom: 0; }

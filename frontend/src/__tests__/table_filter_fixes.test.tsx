@@ -11,6 +11,11 @@ import {
 import { MARKET_COLOR, priceBandColor } from "@/components/common/grid_table";
 import { columnOrder } from "@/components/common/watchlist_layout";
 
+// This suite is about columns; the tape has its own tests.
+vi.mock("@/data/query/use_traded_log", () => ({
+  useTradedLog: () => ({ items: [], sessionDate: null, sideBasis: null, isLoading: false, isError: false }),
+}));
+
 const fixture = vi.hoisted(() => {
   const items = [
     { symbol: "HPG", instrumentType: "STOCK" },

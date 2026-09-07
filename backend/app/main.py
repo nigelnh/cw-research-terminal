@@ -28,6 +28,7 @@ from app.instruments.research_universe import resolve_default_research_universe
 from app.quant.quant_router import quant_router
 from app.enrichment.router import research_router
 from app.me import me_router
+from app.market_data.traded_log import traded_log
 from app.quant.quant_engine import live_quant_engine
 from app.quant.historical_volatility_service import historical_volatility_service
 from app.persistence import database as persistence_db
@@ -165,6 +166,18 @@ async def lifespan(app: FastAPI):
         await subscription_manager.initialize()
     except Exception as e:
         logger.warning(f"Market provider initialization warning: {e}")
+
+    # Traded log (time & sales). Shares the warm-cache Redis client so the tape survives a
+    # restart - Railway redeploys several times a session - and is retired at 08:00 ICT.
+    try:
+        redis_client = getattr(subscription_manager.store, "_client", None)
+        if redis_client is not None:
+            traded_log.set_redis(redis_client)
+            restored = await traded_log.restore(subscription_manager.get_desired_symbols())
+            if restored:
+                logger.info("Traded log restored for %d symbols.", restored)
+    except Exception as e:  # noqa: BLE001 - the tape is a convenience, never a blocker
+        logger.warning("Traded-log restore skipped: %s", e)
 
     # ---- Historical read path (Step 7) ----
     # The direct provider is always available for provider-direct mode / non-daily / unseeded.

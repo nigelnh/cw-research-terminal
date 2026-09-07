@@ -6,8 +6,9 @@ import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
 import type { CorporateActionItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
+import { useTradedLog } from "@/data/query/use_traded_log";
 import { TradingChart } from "@/components/common/trading_chart";
-import { DASH, fmtIV, fmtPrice, dteDisplay } from "@/components/common/grid_table";
+import { DASH, fmtIV, fmtPrice, fmtVol, dteDisplay } from "@/components/common/grid_table";
 import { RealtimeValue, type FlashTone } from "@/components/common/realtime_value";
 
 import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, QUOTE_COLUMN_PULSE_FIELD, quoteCell, type QuoteTableValues } from "@/components/common/quote_columns";
@@ -112,13 +113,32 @@ const TS_HEAD: React.CSSProperties = {
 };
 
 /**
- * TRADED LOGS panel (OVERVIEW tab). There is no live trade feed yet, so this is an
- * honest empty state — session-gated per the UX data contract. Tracked as a follow-up.
+ * TRADED LOGS panel (OVERVIEW tab) - server-side time & sales.
+ *
+ * The tape is kept until 08:00 ICT the morning after its session, so this stays populated
+ * after the close instead of going blank at 15:00. The B/S column is DERIVED from the last
+ * known book (at/through the ask = buyer crossed, at/through the bid = seller); a print
+ * inside the spread is left blank rather than guessed, and the header says so.
  */
-function TimeSalesPanel({ live }: { live: boolean }) {
+function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
+  const { items, sessionDate, isLoading, isError } = useTradedLog(symbol, live);
+  const cellStyle: React.CSSProperties = { textAlign: "right", fontVariantNumeric: "tabular-nums" };
+  const note = isError
+    ? "Traded logs unavailable."
+    : isLoading
+      ? "Loading…"
+      : live
+        ? "No matches yet this session."
+        : "No matches recorded for the last session.";
+
   return (
     <div className="mono instrument-data-panel">
-      <h3 className="instrument-section-heading">TRADED LOGS</h3>
+      <h3 className="instrument-section-heading">
+        TRADED LOGS
+        {sessionDate && (
+          <span style={{ marginLeft: 8, fontSize: 9, color: "var(--t-46)" }}>{sessionDate}</span>
+        )}
+      </h3>
       <div
         style={{
           display: "grid",
@@ -136,13 +156,49 @@ function TimeSalesPanel({ live }: { live: boolean }) {
         <span style={TS_HEAD}>+/-</span>
         <span style={TS_HEAD}>%CHG</span>
         <span style={TS_HEAD}>VOL</span>
-        <span style={{ textAlign: "right" }}>B/S</span>
+        <span style={{ textAlign: "right" }} title="Aggressor side, derived from the order book. The exchange publishes no per-match buy/sell flag, so a print inside the spread is left blank.">
+          B/S
+        </span>
       </div>
-      <div style={{ fontSize: 10.5, color: "var(--t-42)", padding: "8px 10px", lineHeight: 1.5 }}>
-        {live
-          ? "Live trade feed not yet wired — pending backend support."
-          : "Traded logs unavailable outside a live session."}
-      </div>
+      {items.length === 0 ? (
+        <div style={{ fontSize: 10.5, color: "var(--t-42)", padding: "8px 10px", lineHeight: 1.5 }}>
+          {note}
+        </div>
+      ) : (
+        <div className="instrument-tape">
+          {items.map((row) => {
+            const tone =
+              row.change == null || row.change === 0
+                ? "var(--flat)"
+                : row.change > 0
+                  ? "var(--up)"
+                  : "var(--down)";
+            return (
+              <div key={`${row.ts}:${row.price}:${row.volume ?? ""}`} className="instrument-tape-row">
+                <span style={{ borderRight: "1px solid var(--border-row)", paddingRight: 4, color: "var(--t-70)" }}>
+                  {row.time}
+                </span>
+                <span style={{ ...cellStyle, color: tone }}>{fmtPrice(row.price)}</span>
+                <span style={{ ...cellStyle, color: tone }}>
+                  {row.change == null ? DASH : `${row.change > 0 ? "+" : row.change < 0 ? "\u2212" : ""}${fmtPrice(Math.abs(row.change))}`}
+                </span>
+                <span style={{ ...cellStyle, color: tone }}>
+                  {row.change_percent == null ? DASH : `${row.change_percent > 0 ? "+" : ""}${(row.change_percent * 100).toFixed(2)}%`}
+                </span>
+                <span style={{ ...cellStyle, color: "var(--t-92)" }}>{fmtVol(row.volume)}</span>
+                <span
+                  style={{
+                    textAlign: "right",
+                    color: row.side === "B" ? "var(--up)" : row.side === "S" ? "var(--down)" : "var(--t-42)",
+                  }}
+                >
+                  {row.side ?? DASH}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -411,7 +467,7 @@ export function InstrumentPanel({
                 />
               )}
             </div>
-            {!isIndex && <TimeSalesPanel live={marketSessionActive} />}
+            {!isIndex && <TimeSalesPanel symbol={instrument.symbol} live={marketSessionActive} />}
           </div>
         </div>
       )}
