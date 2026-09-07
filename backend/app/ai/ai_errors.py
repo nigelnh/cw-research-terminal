@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from app.ai.openrouter_client import (
     AiAuthenticationError,
     AiConfigurationError,
+    AiModelNotFoundError,
     AiModelUnavailableError,
     AiProviderError,
     AiRateLimitError,
@@ -26,7 +27,8 @@ class AiErrorCode(str, Enum):
     AI_DISABLED = "AI_DISABLED"                 # feature off / no API key on this server
     AI_BUDGET_EXCEEDED = "AI_BUDGET_EXCEEDED"   # process-local daily request budget hit
     RATE_LIMITED = "RATE_LIMITED"               # local limiter / concurrency gate (this server)
-    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"     # configured model 404/5xx at the provider
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"     # configured model 5xx at the provider
+    MODEL_NOT_FOUND = "MODEL_NOT_FOUND"         # configured model slug unknown (404) - misconfiguration
     UPSTREAM_AUTH_ERROR = "UPSTREAM_AUTH_ERROR" # provider 401/403 (bad/exhausted key)
     UPSTREAM_TIMEOUT = "UPSTREAM_TIMEOUT"       # provider did not respond in time
     UPSTREAM_RATE_LIMIT = "UPSTREAM_RATE_LIMIT" # provider 429
@@ -43,6 +45,13 @@ _USER_MESSAGE: dict[AiErrorCode, str] = {
     AiErrorCode.AI_BUDGET_EXCEEDED: "The AI assistant has reached its daily usage limit. Try again tomorrow.",
     AiErrorCode.RATE_LIMITED: "The AI assistant is busy right now. Please retry in a moment.",
     AiErrorCode.MODEL_UNAVAILABLE: "The AI model is temporarily unavailable. Please try again shortly.",
+    # Deliberately does NOT say "try again" - a retired slug never comes back. The concrete
+    # message naming the model is substituted in by user_message() when the exception is
+    # available; this generic form is the fallback.
+    AiErrorCode.MODEL_NOT_FOUND: (
+        "The AI model this server is configured to use no longer exists at the provider. "
+        "This is a server configuration problem, not an outage."
+    ),
     AiErrorCode.UPSTREAM_AUTH_ERROR: "The AI service is unavailable (provider authentication).",
     AiErrorCode.UPSTREAM_TIMEOUT: "The AI response timed out. Please try again.",
     AiErrorCode.UPSTREAM_RATE_LIMIT: "The AI provider is rate-limiting requests. Please retry in a moment.",
@@ -58,6 +67,7 @@ _HTTP_STATUS: dict[AiErrorCode, int] = {
     AiErrorCode.AI_BUDGET_EXCEEDED: 429,
     AiErrorCode.RATE_LIMITED: 503,
     AiErrorCode.MODEL_UNAVAILABLE: 503,
+    AiErrorCode.MODEL_NOT_FOUND: 503,
     AiErrorCode.UPSTREAM_AUTH_ERROR: 502,
     AiErrorCode.UPSTREAM_TIMEOUT: 504,
     AiErrorCode.UPSTREAM_RATE_LIMIT: 429,
@@ -80,6 +90,8 @@ def classify(exc: BaseException, *, stream_started: bool = False) -> AiErrorCode
         return AiErrorCode.UPSTREAM_AUTH_ERROR
     if isinstance(exc, AiRateLimitError):
         return AiErrorCode.UPSTREAM_RATE_LIMIT
+    if isinstance(exc, AiModelNotFoundError):
+        return AiErrorCode.MODEL_NOT_FOUND
     if isinstance(exc, AiModelUnavailableError):
         return AiErrorCode.MODEL_UNAVAILABLE
     if isinstance(exc, AiTimeoutError):
@@ -101,7 +113,15 @@ def classify(exc: BaseException, *, stream_started: bool = False) -> AiErrorCode
     return AiErrorCode.STREAM_INTERRUPTED if stream_started else AiErrorCode.INTERNAL_ERROR
 
 
-def user_message(code: AiErrorCode) -> str:
+def user_message(code: AiErrorCode, exc: BaseException | None = None) -> str:
+    """Short, safe text for the user.
+
+    A retired model is the one case worth naming outright: the generic wording sent people
+    to retry something that could never succeed, and the model slug is not a secret - it is
+    the single fact that turns an opaque failure into an actionable one.
+    """
+    if code is AiErrorCode.MODEL_NOT_FOUND and isinstance(exc, AiModelNotFoundError):
+        return exc.message
     return _USER_MESSAGE.get(code, _USER_MESSAGE[AiErrorCode.INTERNAL_ERROR])
 
 
