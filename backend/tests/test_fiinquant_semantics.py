@@ -8,18 +8,35 @@ from app.market_data.market_schemas import CanonicalQuote
 from app.market_data.trading_calendar import MarketPhase, VN_TZ, market_phase
 
 
-def test_trade_mapping_preserves_zero_and_separates_match_session_totals():
+def test_trade_mapping_separates_match_size_from_session_totals():
+    """Session totals keep a literal zero (the transport does no zero-as-missing
+    coercion). `MatchVolume` is the ONE exception, and deliberately so: it is the size of
+    the most recent match, and a frame carrying 0 means "nothing matched in this frame",
+    not "the last match was 0 lots". Writing that 0 through put a bogus 0 in the TRD_AMT
+    column - see tests/test_traded_quantity_sourcing.py."""
     quote, _ = MarketState().apply_trade_event({
         "Ticker": "HPG", "TradingDate": "2026-09-03T09:16:00+07:00",
         "Close": 27_000, "Reference": 27_000, "MatchVolume": 0,
         "TotalMatchVolume": 1_234_567, "TotalMatchValue": 33_333_309_000,
     })
     assert quote.last_price == 27_000
-    assert quote.traded_quantity == 0
+    assert quote.traded_quantity is None  # no match observed, not a zero-sized match
     assert quote.total_volume == 1_234_567
     assert quote.trading_value == 33_333_309_000
     assert quote.reference_price == 27_000
     assert quote.trade_timestamp == quote.source_timestamp
+
+
+def test_session_totals_still_preserve_a_literal_zero():
+    """The no-zero-coercion rule is unchanged for every cumulative field: a symbol that
+    genuinely has not traded today reports 0, and 0 must survive as 0."""
+    quote, _ = MarketState().apply_trade_event({
+        "Ticker": "HPG", "TradingDate": "2026-09-03T09:16:00+07:00",
+        "Close": 27_000, "Reference": 27_000,
+        "TotalMatchVolume": 0, "TotalMatchValue": 0,
+    })
+    assert quote.total_volume == 0
+    assert quote.trading_value == 0
 
 
 def test_book_update_does_not_advance_trade_time_or_make_a_trade():

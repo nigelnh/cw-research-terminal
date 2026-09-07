@@ -115,16 +115,31 @@ export function priceColor(
   v: number | null | undefined,
   ref: number | null | undefined | PriceColorRef,
 ): string {
+  return MARKET_COLOR[priceTone(v, ref)];
+}
+
+/**
+ * The band a price sits in, as a token name rather than a colour.
+ *
+ * `priceColor` is the same decision rendered as a CSS value; this returns the name so a
+ * surface can key something OTHER than text colour off the identical rule - the realtime
+ * flash does, so a tick that lands on the ceiling flashes magenta instead of generic green.
+ * One decision, two consumers: the flash can never disagree with the digits it sits behind.
+ */
+export function priceTone(
+  v: number | null | undefined,
+  ref: number | null | undefined | PriceColorRef,
+): keyof typeof MARKET_COLOR {
   const r: PriceColorRef = typeof ref === "object" && ref !== null ? ref : { ref: ref as number | null };
   const refNum = r.ref;
   if (v === null || v === undefined || Number.isNaN(v) || refNum === null || refNum === undefined) {
-    return MARKET_COLOR.null;
+    return "null";
   }
-  if (typeof r.ceiling === "number" && v >= r.ceiling) return MARKET_COLOR.ceiling;
-  if (typeof r.floor === "number" && v <= r.floor) return MARKET_COLOR.floor;
-  if (v > refNum) return MARKET_COLOR.up;
-  if (v < refNum) return MARKET_COLOR.down;
-  return MARKET_COLOR.flat;
+  if (typeof r.ceiling === "number" && v >= r.ceiling) return "ceiling";
+  if (typeof r.floor === "number" && v <= r.floor) return "floor";
+  if (v > refNum) return "up";
+  if (v < refNum) return "down";
+  return "flat";
 }
 
 /* --------------------------------------------------------------- sort + pin */

@@ -162,8 +162,14 @@ textarea::placeholder {
   animation-fill-mode: both;
 }
 td.realtime-flash { display: table-cell; border-radius: 0; }
+/* The wash uses the SAME band the digits use (priceTone -> MARKET_COLOR), so a tick that
+   lands on the ceiling flashes magenta and one back at the reference flashes flat-yellow.
+   A green wash under a magenta ceiling price was the old, contradictory behaviour. */
 .realtime-flash-up { animation-name: realtime-flash-up; }
 .realtime-flash-down { animation-name: realtime-flash-down; }
+.realtime-flash-flat { animation-name: realtime-flash-flat; }
+.realtime-flash-ceiling { animation-name: realtime-flash-ceiling; }
+.realtime-flash-floor { animation-name: realtime-flash-floor; }
 @keyframes realtime-flash-up {
   0%, 35% { background-color: color-mix(in srgb, var(--up) 42%, transparent); }
   to { background-color: transparent; }
@@ -172,10 +178,25 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
   0%, 35% { background-color: color-mix(in srgb, var(--down) 42%, transparent); }
   to { background-color: transparent; }
 }
+@keyframes realtime-flash-flat {
+  0%, 35% { background-color: color-mix(in srgb, var(--flat) 42%, transparent); }
+  to { background-color: transparent; }
+}
+@keyframes realtime-flash-ceiling {
+  0%, 35% { background-color: color-mix(in srgb, var(--price-ceiling) 42%, transparent); }
+  to { background-color: transparent; }
+}
+@keyframes realtime-flash-floor {
+  0%, 35% { background-color: color-mix(in srgb, var(--price-floor) 42%, transparent); }
+  to { background-color: transparent; }
+}
 @media (prefers-reduced-motion: reduce) {
   .realtime-flash { animation: none; box-shadow: none; }
   .realtime-flash-up { background-color: color-mix(in srgb, var(--up) 38%, transparent); }
   .realtime-flash-down { background-color: color-mix(in srgb, var(--down) 38%, transparent); }
+  .realtime-flash-flat { background-color: color-mix(in srgb, var(--flat) 38%, transparent); }
+  .realtime-flash-ceiling { background-color: color-mix(in srgb, var(--price-ceiling) 38%, transparent); }
+  .realtime-flash-floor { background-color: color-mix(in srgb, var(--price-floor) 38%, transparent); }
 }
 
 .bg-background { background-color: var(--bg); }

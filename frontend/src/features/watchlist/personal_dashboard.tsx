@@ -410,6 +410,7 @@ export function PersonalDashboard({
             </td>
           ) : <RealtimeValue as="td" key={column.key} title={QUOTE_COLUMN_HINTS[column.key]}
             pulse={r.pulses?.[QUOTE_COLUMN_PULSE_FIELD[column.key] ?? ""]}
+            tone={cell.tone}
             style={{ ...TD, color: cell.color }}>
             {r.kind === "stock" && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : cell.text}
           </RealtimeValue>;

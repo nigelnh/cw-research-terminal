@@ -1,6 +1,6 @@
 import { useMarketOverview, type IndexOverview, type VolumeLeader } from "@/data/query/use_market_overview";
 import { DASH, fmtPrice, fmtVol } from "@/components/common/grid_table";
-import { PolledRealtimeValue } from "@/components/common/realtime_value";
+import { PolledRealtimeValue, type FlashTone } from "@/components/common/realtime_value";
 
 const ORDER = ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"];
 const number = (value: number | null | undefined) => value == null ? DASH : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -12,6 +12,17 @@ const compact = (value: number | null | undefined) => {
   return fmtVol(value);
 };
 const tone = (n: number | null | undefined) => n == null ? "var(--t-50)" : n > 0 ? "var(--up)" : n < 0 ? "var(--down)" : "var(--flat)";
+/** Same decision as `tone`, as a flash-tone token so the wash matches the digits. */
+const flashTone = (n: number | null | undefined): FlashTone | undefined =>
+  n == null ? undefined : n > 0 ? "up" : n < 0 ? "down" : "flat";
+const leaderFlashTone = (state: VolumeLeader["market_state"]): FlashTone | undefined => {
+  if (state === "CEILING") return "ceiling";
+  if (state === "FLOOR") return "floor";
+  if (state === "REFERENCE") return "flat";
+  if (state === "UP") return "up";
+  if (state === "DOWN") return "down";
+  return undefined;
+};
 const marketTone = (state: VolumeLeader["market_state"]) => {
   if (state === "CEILING") return "var(--price-ceiling)";
   if (state === "FLOOR") return "var(--price-floor)";
@@ -207,10 +218,10 @@ function IndexCard({ item }: { item: IndexOverview }) {
     <div className="index-card-main">
       <strong className="heading">{item.symbol}</strong>
       <span style={{ color: tone(item.change) }}>
-        <PolledRealtimeValue value={item.value} resetKey={sessionKey}>{number(item.value)}</PolledRealtimeValue>{" "}
+        <PolledRealtimeValue value={item.value} resetKey={sessionKey} tone={flashTone(item.change)}>{number(item.value)}</PolledRealtimeValue>{" "}
         <small>
-          <PolledRealtimeValue value={item.change} resetKey={sessionKey}>{prefix}{number(item.change)}</PolledRealtimeValue>{" "}(
-          <PolledRealtimeValue value={item.change_percent} resetKey={sessionKey}>{prefix}{item.change_percent == null ? DASH : `${item.change_percent.toFixed(2)}%`}</PolledRealtimeValue>)
+          <PolledRealtimeValue value={item.change} resetKey={sessionKey} tone={flashTone(item.change)}>{prefix}{number(item.change)}</PolledRealtimeValue>{" "}(
+          <PolledRealtimeValue value={item.change_percent} resetKey={sessionKey} tone={flashTone(item.change_percent)}>{prefix}{item.change_percent == null ? DASH : `${item.change_percent.toFixed(2)}%`}</PolledRealtimeValue>)
         </small>
       </span>
     </div>
@@ -231,7 +242,7 @@ function LeaderTable({ title, rows }: { title: string; rows: VolumeLeader[] }) {
     <div className="leader-rows">
       {rows.length === 0 ? <div className="overview-unavailable">DATA UNAVAILABLE</div> : rows.map((row, index) => <div className="leader-row" key={row.symbol}>
         <i style={{ width: `${Math.max(3, row.volume / peak * 100)}%` }} />
-        <span>{index + 1}. <b style={{ color: marketTone(row.market_state) }}>{row.symbol}</b></span><span><PolledRealtimeValue value={row.volume} resetKey={row.as_of?.slice(0, 10)}>{fmtVol(row.volume)}</PolledRealtimeValue></span><span><PolledRealtimeValue value={row.price} resetKey={row.as_of?.slice(0, 10)} style={{ color: marketTone(row.market_state) }}>{fmtPrice(row.price)}</PolledRealtimeValue></span>
+        <span>{index + 1}. <b style={{ color: marketTone(row.market_state) }}>{row.symbol}</b></span><span><PolledRealtimeValue value={row.volume} resetKey={row.as_of?.slice(0, 10)}>{fmtVol(row.volume)}</PolledRealtimeValue></span><span><PolledRealtimeValue value={row.price} resetKey={row.as_of?.slice(0, 10)} tone={leaderFlashTone(row.market_state)} style={{ color: marketTone(row.market_state) }}>{fmtPrice(row.price)}</PolledRealtimeValue></span>
       </div>)}
     </div>
   </section>;

@@ -427,9 +427,21 @@ class MarketState:
         if tot_vol is None:
             tot_vol = raw_event.get("total_volume")
 
+        # TRD_AMT: the size of the most recent match. `MatchVolume` is the canonical
+        # source (Trading_Data_Stream, docs 2.1) and always wins when the frame carries a
+        # real one. Two observed realities are handled here:
+        #   * A frame can carry MatchVolume = 0 - "no match in THIS frame", not "the last
+        #     match was 0 lots". Writing it through displayed a bogus 0 in the column.
+        #   * HOSE covered-warrant trade frames arrive without a MatchVolume field at all,
+        #     while stocks get one, so CW rows never advanced past None.
         traded_qty = raw_event.get("MatchVolume")
         if traded_qty is None:
             traded_qty = raw_event.get("TradedVolume")
+        try:
+            if traded_qty is not None and float(traded_qty) <= 0:
+                traded_qty = None
+        except (TypeError, ValueError):
+            traded_qty = None
 
         tot_val = raw_event.get("TotalMatchValue")
         if tot_val is None:
@@ -532,6 +544,19 @@ class MarketState:
             if change_pct is not None and q.price_change_percent != change_pct:
                 q.price_change_percent = change_pct
                 diff["price_change_percent"] = q.price_change_percent
+
+            # Fallback for feeds that omit MatchVolume (HOSE CW trade frames): the advance
+            # in this session's cumulative matched volume IS the quantity matched since the
+            # previous frame. Same quantity, same units, observed - not an estimate. Must be
+            # read BEFORE total_volume is overwritten below, and only within one session
+            # (a rollover already reset the counter via _prepare_intraday_session).
+            if traded_qty is None and tot_vol is not None and q.total_volume is not None:
+                try:
+                    advance = float(tot_vol) - float(q.total_volume)
+                    if advance > 0:
+                        traded_qty = int(advance) if float(advance).is_integer() else advance
+                except (TypeError, ValueError):
+                    pass
 
             if tot_vol is not None and q.total_volume != tot_vol:
                 q.total_volume = tot_vol
