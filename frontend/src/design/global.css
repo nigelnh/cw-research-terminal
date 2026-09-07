@@ -170,6 +170,7 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
 .realtime-flash-flat { animation-name: realtime-flash-flat; }
 .realtime-flash-ceiling { animation-name: realtime-flash-ceiling; }
 .realtime-flash-floor { animation-name: realtime-flash-floor; }
+.realtime-flash-neutral { animation-name: realtime-flash-neutral; }
 @keyframes realtime-flash-up {
   0%, 35% { background-color: color-mix(in srgb, var(--up) 42%, transparent); }
   to { background-color: transparent; }
@@ -190,6 +191,12 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
   0%, 35% { background-color: color-mix(in srgb, var(--price-floor) 42%, transparent); }
   to { background-color: transparent; }
 }
+/* White-text columns (IV, VOLUME): the value moved, but not in a direction worth
+   colouring. A pale grey wash marks the change without implying up or down. */
+@keyframes realtime-flash-neutral {
+  0%, 35% { background-color: color-mix(in srgb, var(--t-92) 16%, transparent); }
+  to { background-color: transparent; }
+}
 @media (prefers-reduced-motion: reduce) {
   .realtime-flash { animation: none; box-shadow: none; }
   .realtime-flash-up { background-color: color-mix(in srgb, var(--up) 38%, transparent); }
@@ -197,6 +204,7 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
   .realtime-flash-flat { background-color: color-mix(in srgb, var(--flat) 38%, transparent); }
   .realtime-flash-ceiling { background-color: color-mix(in srgb, var(--price-ceiling) 38%, transparent); }
   .realtime-flash-floor { background-color: color-mix(in srgb, var(--price-floor) 38%, transparent); }
+  .realtime-flash-neutral { background-color: color-mix(in srgb, var(--t-92) 14%, transparent); }
 }
 
 .bg-background { background-color: var(--bg); }

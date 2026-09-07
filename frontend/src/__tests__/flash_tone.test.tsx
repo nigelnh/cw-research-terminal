@@ -101,3 +101,25 @@ describe("quoteCell — TRD_AMT follows the matched price", () => {
     expect(quoteCell(row(30), "floor").tone).toBe("floor");
   });
 });
+
+describe("white-text columns flash neutral, not up/down", () => {
+  it("IV and VOLUME carry the neutral tone", () => {
+    for (const key of ["ivBid", "ivTrade", "ivAsk", "vol"] as const) {
+      expect(quoteCell(row(27), key).tone).toBe("neutral");
+    }
+  });
+
+  it("a rising IV is not washed green", () => {
+    const { container } = render(
+      <RealtimeValue pulse={pulse} tone="neutral">34.2%</RealtimeValue>,
+    );
+    const cls = (container.firstElementChild as HTMLElement).className;
+    expect(cls).toContain("realtime-flash-neutral");
+    expect(cls).not.toContain("realtime-flash-up");
+  });
+
+  it("price columns keep their band tone, so the two languages stay distinct", () => {
+    expect(quoteCell(row(30), "last").tone).toBe("ceiling");
+    expect(quoteCell(row(27), "vol").tone).toBe("neutral");
+  });
+});

@@ -35,8 +35,13 @@ function useVisibilityEpoch(): number {
   return epoch;
 }
 
-/** Flash palette. Mirrors `MARKET_COLOR` so the wash can never contradict the digits. */
-export type FlashTone = "up" | "down" | "flat" | "ceiling" | "floor" | "null";
+/**
+ * Flash palette. The band tones mirror `MARKET_COLOR` so the wash can never contradict the
+ * digits. `neutral` is for columns whose text is plain white because the value has no
+ * up/down meaning - implied vols and cumulative volume: a rising IV is not "good news",
+ * so washing it green was reading a direction into it that the number does not carry.
+ */
+export type FlashTone = "up" | "down" | "flat" | "ceiling" | "floor" | "neutral" | "null";
 
 export function RealtimeValue({
   pulse,
