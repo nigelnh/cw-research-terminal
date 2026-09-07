@@ -8,6 +8,8 @@ from app.market_data.providers.fiinquant_normalization import number, timestamp
 from app.market_data.trading_calendar import VN_TZ
 
 _MINUTES = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60}
+# Matches the chart's `interval` string, which is how the browser store keys patches.
+_DAILY_TIMEFRAME = "1D"
 
 
 class LiveBarBuilder:
@@ -71,7 +73,67 @@ class LiveBarBuilder:
             patches.append({"type": "bar_patch", "symbol": symbol,
                             "timeframe": timeframe, "bar": dict(bar),
                             "ts": int(dt.timestamp() * 1000)})
+
+        daily = self._daily_bar(symbol, raw, dt, price)
+        if daily is not None:
+            patches.append({"type": "bar_patch", "symbol": symbol,
+                            "timeframe": _DAILY_TIMEFRAME, "bar": daily,
+                            "ts": int(dt.timestamp() * 1000)})
         return patches
+
+    def _daily_bar(
+        self, symbol: str, raw: dict, dt: datetime, price: float
+    ) -> dict[str, Any] | None:
+        """Today's forming candle for the 1D chart.
+
+        The panel chart is 1D, and only the intraday timeframes had a live bucket - so the
+        newest candle was always yesterday's completed bar while the header showed a live
+        price. This closes that gap.
+
+        It prefers the session aggregates the trade frame already carries (Open/High/Low
+        and the cumulative TotalMatchVolume / TotalMatchValue) over re-deriving them from
+        the ticks we happened to observe: those are the exchange's own numbers, so the
+        candle stays correct across a reconnect that made us miss part of the session.
+        Anything the frame omits falls back to accumulating from what we have seen.
+
+        `date` is the plain ICT session date, matching the REST daily bars, so the merge
+        replaces today's row instead of appending a duplicate.
+        """
+        session = dt.astimezone(VN_TZ).date().isoformat()
+        key = (symbol, _DAILY_TIMEFRAME, session)
+        bar = self._bars.get(key)
+
+        open_ = number(raw, "Open", "OpenPrice")
+        high = number(raw, "High", "HighPrice", "HighestPrice")
+        low = number(raw, "Low", "LowPrice", "LowestPrice")
+        total_vol = number(raw, "TotalMatchVolume", "TotalVolume", "Total_Vol")
+        total_val = number(raw, "TotalMatchValue", "TotalValue")
+
+        if bar is None:
+            bar = {
+                "symbol": symbol, "date": session,
+                "open": open_ if open_ and open_ > 0 else price,
+                "high": high if high and high > 0 else price,
+                "low": low if low and low > 0 else price,
+                "close": price,
+                "volume": total_vol, "value": total_val,
+                "price_basis": "RAW", "source": "FIINQUANT_TRADE_STREAM",
+                "session_date": session, "complete": False,
+            }
+            self._bars[key] = bar
+        else:
+            if open_ and open_ > 0:
+                bar["open"] = open_
+            # A provider high/low always wins; otherwise widen with the observed trade.
+            bar["high"] = high if high and high > 0 else max(bar["high"], price)
+            bar["low"] = low if low and low > 0 else min(bar["low"], price)
+            bar["close"] = price
+            # Cumulative totals are absolute, never summed.
+            if total_vol is not None:
+                bar["volume"] = total_vol
+            if total_val is not None:
+                bar["value"] = total_val
+        return dict(bar)
 
 
 live_bar_builder = LiveBarBuilder()
