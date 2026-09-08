@@ -377,6 +377,26 @@ def seconds_until_next_trading_session(now: Optional[datetime] = None) -> float:
     return max(0.0, (next_trading_session_open(cur) - cur).total_seconds())
 
 
+def seconds_until_display_rollover(now: Optional[datetime] = None) -> float:
+    """Seconds until the next 08:00 ICT on a trading day - the app's DATA boundary.
+
+    Not the same instant as the next session OPEN, and conflating the two is a real bug:
+    an off-session cache stretched to the 09:00 open keeps serving the previous session
+    between 08:00 and 09:00, while the dashboard and watchlist have already rolled to the
+    new one at 08:00. The board then disagrees with itself for an hour every morning -
+    index cards showing yesterday's close beside a watchlist that has gone blank.
+    """
+    cur = _as_vn(now)
+    d = cur.date()
+    for _ in range(40):
+        if is_trading_day(d):
+            boundary = datetime.combine(d, time(8), tzinfo=VN_TZ)
+            if boundary > cur:
+                return (boundary - cur).total_seconds()
+        d = d + timedelta(days=1)
+    return 0.0
+
+
 def trading_sessions_between(start: date, end: date) -> list[date]:
     """Trading days in ``[start, end]`` inclusive."""
     if start > end:

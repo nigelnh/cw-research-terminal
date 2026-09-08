@@ -210,6 +210,9 @@ class FiinQuantProvider(MarketDataProvider):
         self._seconds_to_next_session: Callable[[], float] = (
             market_session.seconds_until_next_trading_session
         )
+        self._seconds_to_display_rollover: Callable[[], float] = (
+            market_session.seconds_until_display_rollover
+        )
 
         # ---- Historical provider health & circuit breaker ----
         self._historical_circuit_open_until: float = 0.0
@@ -1913,7 +1916,15 @@ class FiinQuantProvider(MarketDataProvider):
         if self._market_is_active() or not settled:
             return active_ttl
         try:
-            return max(active_ttl, float(self._seconds_to_next_session()))
+            # Never past the 08:00 display rollover. The stretch is only sound while
+            # "nothing has changed" is true, and at 08:00 the app moves to a new session:
+            # holding a previous-session payload past that point makes the index cards
+            # disagree with the watchlist for the whole 08:00-09:00 hour.
+            stretch = min(
+                float(self._seconds_to_next_session()),
+                float(self._seconds_to_display_rollover()),
+            )
+            return max(active_ttl, stretch)
         except Exception:  # noqa: BLE001 - never let a calendar bug wedge the cache
             return active_ttl
 
