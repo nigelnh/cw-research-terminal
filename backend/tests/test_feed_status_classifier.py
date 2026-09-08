@@ -5,6 +5,8 @@ bare substrings: "no bars for HPG at 21500" classified as a 500, and "volume 140
 403. A false DATASET_FORBIDDEN blocks that scope for 900 seconds, so a price containing the
 digits 403 could have taken a panel dark for a quarter of an hour.
 """
+import json
+
 import pytest
 
 from app.market_data.feed_status import (
@@ -108,3 +110,39 @@ def test_the_wire_shape_never_carries_internal_retry_clocks():
     assert wire["lastDataAt"] == "2026-09-07T14:45:00+07:00"
     assert "retryAt" not in wire
     assert all("retryAt" not in d for d in wire["datasets"])
+
+
+# --------------------------------------------------------------------------- wording
+def test_the_expiry_notice_reports_what_was_observed_and_prescribes_nothing():
+    """An earlier wording told the operator the account "needs renewal". That was a guess
+    about FiinQuant's product, not something this server observed - the evidence shows only
+    that the entitlement window ended and that logging in again does not extend it. A
+    header that prescribes the wrong remedy is worse than one that reports the fact."""
+    text = MESSAGES["ENTITLEMENT_EXPIRED"].lower()
+    for prescription in ("renew", "renewal", "subscribe", "upgrade", "pay", "contact"):
+        assert prescription not in text, f"message prescribes a remedy: {prescription!r}"
+    assert "not active" in text
+
+
+def test_the_end_date_is_carried_when_it_is_known():
+    """The date is the one fact that makes the notice actionable, and it is not sensitive."""
+    access = FeedAccess()
+    access.record("history", "Service has expired.", detail="Access ended 2026-09-07.")
+    assert "2026-09-07" in access.wire(fresh=False, active=True, last_data_at=None)["message"]
+
+
+def test_it_reads_correctly_without_a_date():
+    access = FeedAccess()
+    access.record("history", "Service has expired.")
+    message = access.wire(fresh=False, active=True, last_data_at=None)["message"]
+    assert message == MESSAGES["ENTITLEMENT_EXPIRED"]
+    assert not message.endswith(" ")
+
+
+def test_no_token_claim_other_than_the_end_date_can_reach_the_wire():
+    """inspect_session decodes a JWT; only the expiry may leave the process."""
+    access = FeedAccess()
+    access.record("history", "Service has expired.", detail="Access ended 2026-09-07.")
+    blob = json.dumps(access.wire(fresh=False, active=True, last_data_at=None))
+    for claim in ("xuannhan", "@", "CUSTOMER", "FiinQuant.Trial", "eyJ", "Individual"):
+        assert claim not in blob

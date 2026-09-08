@@ -11,7 +11,12 @@ from typing import Any
 
 
 MESSAGES = {
-    "ENTITLEMENT_EXPIRED": "Market data access has expired. The data provider account needs renewal.",
+    # States what was observed, and stops there. An earlier wording said the account
+    # "needs renewal", which was a guess about the provider's product: the evidence only
+    # shows that the entitlement window ended and that logging in again does not extend it.
+    # What restores access is FiinQuant's business, not something this server can know, and
+    # a header that prescribes the wrong remedy is worse than one that reports the fact.
+    "ENTITLEMENT_EXPIRED": "Market data access is not active for this provider account.",
     "AUTH_REQUIRED": "Market data provider authentication is unavailable.",
     "DATASET_FORBIDDEN": "This dataset is not available under the provider account's permissions.",
     "RATE_LIMITED": "The market data provider is rate limiting requests.",
@@ -68,7 +73,7 @@ class FeedAccess:
         self._lock = threading.RLock()
         self._errors: dict[str, dict] = {}
 
-    def record(self, scope: str, error: Any) -> str | None:
+    def record(self, scope: str, error: Any, *, detail: str | None = None) -> str | None:
         code = classify_provider_error(error)
         if code is None:
             return None
@@ -77,8 +82,11 @@ class FeedAccess:
         elif code == "AUTH_REQUIRED":
             scope = "authentication"
         with self._lock:
+            message = MESSAGES[code]
+            if detail:
+                message = f"{message} {detail}"
             self._errors[scope] = {
-                "code": code, "scope": scope, "message": MESSAGES[code],
+                "code": code, "scope": scope, "message": message,
                 "checkedAt": datetime.now(timezone.utc).isoformat(),
                 "retryAt": time.monotonic() + (900 if code in ("ENTITLEMENT_EXPIRED", "DATASET_FORBIDDEN") else 60),
             }
@@ -96,7 +104,12 @@ class FeedAccess:
             end = datetime.strptime(claims["end_date"], "%d/%m/%Y").date()
             from app.market_data.trading_calendar import _as_vn
             if end < _as_vn(None).date():
-                self.record("market_data", "ENTITLEMENT_EXPIRED")
+                # The end date is the one fact that makes this actionable, and it is not
+                # sensitive. No other claim from the token reaches the wire.
+                self.record(
+                    "market_data", "ENTITLEMENT_EXPIRED",
+                    detail=f"Access ended {end.isoformat()}.",
+                )
         except (ValueError, KeyError, IndexError, TypeError):
             pass
 
