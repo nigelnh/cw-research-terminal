@@ -11,6 +11,8 @@ watchdog loop acts on - through the injectable calendar seams. No wall-clock, no
 network.
 """
 
+import asyncio
+import contextlib
 import time
 
 import pytest
@@ -38,6 +40,15 @@ def _stream_up_for(p: FiinQuantProvider, seconds: float) -> None:
 
 def _last_tick_seconds_ago(p: FiinQuantProvider, seconds: float) -> None:
     p._current_stream_last_tick_at_ms = int((time.time() - seconds) * 1000)
+
+
+async def _wait_until(pred, timeout: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return True
+        await asyncio.sleep(0.02)
+    return pred()
 
 
 async def test_silent_stream_past_the_budget_is_reported():
@@ -164,6 +175,91 @@ async def test_market_health_endpoint_surfaces_the_watchdog():
         "trade_tick_age_seconds",
     ):
         assert key in body, f"{key} missing from /api/market/health"
+
+
+# --------------------------------------------------------------------------- #
+# Progressive silence budget - a feed that stays dead through forced reconnects
+# must be re-probed on a widening interval, not torn down every 90s all session.
+# --------------------------------------------------------------------------- #
+async def test_silence_budget_starts_at_the_base_and_doubles_per_escalation():
+    p = _provider(silence=90.0)
+    assert p._watchdog_effective_silence_budget() == 90.0
+    p._silent_watchdog_escalation = 1
+    assert p._watchdog_effective_silence_budget() == 180.0
+    p._silent_watchdog_escalation = 3
+    assert p._watchdog_effective_silence_budget() == 720.0
+
+
+async def test_silence_budget_is_capped():
+    p = _provider(silence=90.0)
+    p._watchdog_silence_budget_cap_seconds = 1800.0
+    p._silent_watchdog_escalation = 10  # 90 * 1024 - far past the cap
+    assert p._watchdog_effective_silence_budget() == 1800.0
+
+
+async def test_watchdog_loop_widens_the_budget_after_a_silent_forced_reconnect(monkeypatch):
+    """The production failure mode: the feed never delivers a frame. Each forced reconnect
+    that still yields nothing must push the next judgement further out - the loop increments
+    the escalation and consults `_watchdog_effective_silence_budget`."""
+    p = _provider(silence=0.3)
+    p._watchdog_silence_budget_cap_seconds = 30.0
+    p._stream_watchdog_interval_seconds = 0.02
+    _stream_up_for(p, 100)
+    p._current_stream_last_tick_at_ms = None  # never ticked
+
+    budgets_at_reconnect: list[float] = []
+
+    def _fake_reconnect(*_args):
+        budgets_at_reconnect.append(p._watchdog_effective_silence_budget())
+        # A forced reconnect builds a fresh (still silent) stream.
+        p._current_stream_started_at_monotonic = time.monotonic()
+
+    monkeypatch.setattr(p, "_schedule_reconnect", _fake_reconnect)
+
+    task = asyncio.create_task(p._stream_watchdog())
+    try:
+        await _wait_until(lambda: len(budgets_at_reconnect) >= 2, timeout=8.0)
+    finally:
+        p._shutting_down = True
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert len(budgets_at_reconnect) >= 2
+    assert budgets_at_reconnect[-1] > budgets_at_reconnect[0]
+    assert p._silent_watchdog_escalation >= 2
+
+
+async def test_watchdog_escalation_snaps_back_when_a_tick_arrives(monkeypatch):
+    p = _provider(silence=90.0)  # budget well above the age that accrues during the test
+    p._silent_watchdog_escalation = 5
+    p._watchdog_last_seen_tick_at_ms = None
+    p._stream_watchdog_interval_seconds = 0.02
+    _stream_up_for(p, 600)
+    p._current_stream_last_tick_at_ms = int(time.time() * 1000)  # a frame just landed
+
+    monkeypatch.setattr(p, "_schedule_reconnect", lambda *_a: None)
+
+    task = asyncio.create_task(p._stream_watchdog())
+    try:
+        await _wait_until(lambda: p._silent_watchdog_escalation == 0, timeout=2.0)
+    finally:
+        p._shutting_down = True
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert p._silent_watchdog_escalation == 0
+
+
+async def test_health_exposes_the_escalation_and_reauth_counters():
+    p = _provider(silence=90.0)
+    p._silent_watchdog_escalation = 2
+    health = p.get_health()
+    assert health["watchdog_silence_escalation"] == 2
+    assert health["watchdog_effective_silence_budget_seconds"] == 360.0
+    assert health["consecutive_stream_start_failures"] == 0
+    assert health["reauth_pending"] is False
 
 
 async def test_watchdog_exits_when_there_is_nothing_left_to_watch():

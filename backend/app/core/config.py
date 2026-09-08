@@ -58,6 +58,35 @@ class Settings(BaseSettings):
     FIINQUANT_STREAM_WATCHDOG_INTERVAL_SECONDS: float = Field(
         default=15.0, description="How often the stream-liveness watchdog samples tick age"
     )
+    FIINQUANT_STREAM_SILENCE_BUDGET_CAP_SECONDS: float = Field(
+        default=1800.0,
+        description=(
+            "Upper bound on the watchdog's silence budget. After each forced reconnect that "
+            "still yields no tick the budget doubles from "
+            "FIINQUANT_STREAM_SILENCE_RECONNECT_SECONDS; this caps it. A feed that is "
+            "genuinely gone (expired entitlement, provider outage) is then re-probed roughly "
+            "every 30 min instead of every 90s all session - each probe being a full stream "
+            "teardown/rebuild against a one-connection account. Resets to the base on any tick."
+        ),
+    )
+    FIINQUANT_REAUTH_MIN_INTERVAL_SECONDS: float = Field(
+        default=60.0,
+        description=(
+            "Minimum seconds between FiinQuant login() calls. The snapshot poll, "
+            "set_subscriptions and the reconnect worker each call connect() when they see a "
+            "dropped session; the account allows ONE concurrent connection, so every fresh "
+            "token evicts the live SignalR streams. A session the SDK reports explicitly "
+            "invalid (is_login False) bypasses this floor and re-auths at once."
+        ),
+    )
+    FIINQUANT_STREAM_FAILURES_BEFORE_REAUTH: int = Field(
+        default=3,
+        description=(
+            "Consecutive failed SignalR stream restarts on a nominally-valid session before "
+            "the provider forces one re-authentication. A stream that will not start is the "
+            "real 'the token is dead' signal; a REST endpoint answering 401 is not."
+        ),
+    )
 
     # Trading calendar (Step 13C). Optional JSON to add/remove HOSE closure dates without a
     # code change, e.g. {"extra_closures": ["2026-07-01"], "force_open": ["2026-05-03"]}.
