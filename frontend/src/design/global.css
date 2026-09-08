@@ -113,10 +113,14 @@ body,
 .global-search-results button[aria-selected="true"], .global-search-results button:hover { background: var(--panel-3); }
 .global-search-results button span:nth-child(2) { color: var(--t-46); }
 .global-search-results button strong { color: var(--accent); font: 10px var(--font-display); text-align: right; }
-.terminal-header-end { min-width: 0; justify-self: end; white-space: nowrap; display: flex;
-  align-items: center; gap: 12px; overflow: hidden; }
-/* `nowrap` + a 1fr track means any child that will not shrink overflows LEFTWARDS,
-   under the centred search box. Anything long in here must be able to truncate. */
+.terminal-header-end { min-width: 0; justify-self: stretch; justify-content: flex-end;
+  white-space: nowrap; display: flex; align-items: center; gap: 12px; overflow: hidden; }
+/* `justify-self: end` sized this box to its CONTENT rather than its track, so it grew to
+   781px inside a 560px column and hung 221px to the left - underneath the centred search
+   box, which paints over it and swallowed the clock. `min-width: 0` cannot help there:
+   a content-sized grid item is never asked to shrink. It must fill the track
+   (`stretch`) and right-align its children instead. Measured in the browser: the clock
+   moved from 711 to 932, clear of the search box ending at 916. */
 .terminal-header-end > [role="status"] { min-width: 0; flex: 0 1 auto; overflow: hidden;
   text-overflow: ellipsis; }
 

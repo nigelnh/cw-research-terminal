@@ -10,6 +10,8 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const feed = { current: null as Record<string, unknown> | null };
 vi.mock("@/data/market_session_store", () => ({
@@ -82,5 +84,37 @@ describe("header feed notice", () => {
     feed.current = null;
     header();
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+/**
+ * A layout guard, asserted against the stylesheet source.
+ *
+ * The first version of this file asserted the notice's own inline styles and passed while
+ * the header was still visibly broken: the overlap was never about the notice's shrinking
+ * rules, it was that `.terminal-header-end` used `justify-self: end`, which sizes a grid
+ * item to its CONTENT instead of its track. The box grew to 781px inside a 560px column
+ * and hung to the left, under the search box. Style-property assertions are not layout
+ * assertions, and happy-dom has no layout engine to catch this - so this pins the rule
+ * itself, and the geometry was verified in a real browser.
+ */
+describe("header end-group layout", () => {
+  // Read from disk: vitest stubs CSS imports, so `?raw` yields an empty string here.
+  const globalCss = readFileSync(resolve(process.cwd(), "src/design/global.css"), "utf8");
+  const from = globalCss.indexOf(".terminal-header-end {");
+  const rule = globalCss.slice(from, globalCss.indexOf("}", from) + 1);
+
+  it("fills its grid track rather than sizing to its content", () => {
+    expect(rule).toContain("justify-self: stretch");
+    expect(rule).not.toContain("justify-self: end");
+  });
+
+  it("right-aligns inside the track, so nothing hangs into the search column", () => {
+    expect(rule).toContain("justify-content: flex-end");
+  });
+
+  it("still clips rather than spilling", () => {
+    expect(rule).toContain("overflow: hidden");
+    expect(rule).toContain("min-width: 0");
   });
 });
