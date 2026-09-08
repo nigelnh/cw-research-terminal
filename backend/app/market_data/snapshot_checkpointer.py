@@ -155,7 +155,7 @@ class SnapshotCheckpointer:
         if not symbols:
             return 0
         now = datetime.now(cal.VN_TZ)
-        session_date = cal.latest_completed_trading_session(now) if not cal.is_trading_day(now.date()) or now.time() < cal.MORNING_START else now.date()
+        session_date = cal.reference_session_date(now)
         source = "SESSION_CLOSE" if final else "REALTIME_CHECKPOINT"
         quality = "FINAL" if final else "INTRADAY_CHECKPOINT"
 

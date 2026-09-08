@@ -1,3 +1,4 @@
+import { useMarketContext, marketNow } from "@/data/market_session_store";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/data/auth";
 import { SignInDialog } from "@/features/auth/sign_in_dialog";
@@ -29,6 +30,15 @@ interface AppHeaderProps {
   onJump?: (option: GlobalSearchOption) => void;
 }
 
+function FeedNotice() {
+  const { feedStatus } = useMarketContext();
+  if (!feedStatus || ["AVAILABLE", "SESSION_PAUSED"].includes(feedStatus.code)) return null;
+  return <div role="status" title={feedStatus.lastDataAt ? `Last data: ${feedStatus.lastDataAt}` : undefined}
+    style={{ color: "var(--flat)", fontSize: 11, maxWidth: 430 }}>
+    {feedStatus.message}
+  </div>;
+}
+
 const VN_TZ = "Asia/Ho_Chi_Minh";
 
 /**
@@ -36,9 +46,9 @@ const VN_TZ = "Asia/Ho_Chi_Minh";
  * the once-per-second tick re-renders only this span, not the whole header.
  */
 function HeaderClock() {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => marketNow());
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    const id = window.setInterval(() => setNow(marketNow()), 1000);
     return () => window.clearInterval(id);
   }, []);
   const d = new Date(now);
@@ -327,7 +337,8 @@ export function AppHeader({
           <span style={{ width: 6, height: 6, background: feedTone }} aria-hidden />
           {feedLabel}
         </span>}
-        <SignInControl />
+        <FeedNotice />
+      <SignInControl />
       </div>
     </header>
   );

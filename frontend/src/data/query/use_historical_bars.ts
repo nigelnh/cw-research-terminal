@@ -1,3 +1,5 @@
+import { mergeHistoricalBars } from "@/domain/historical/merge_bars";
+import { useMarketContext } from "@/data/market_session_store";
 import { useQuery } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import type { HistoricalBar } from "@/domain/models";
@@ -40,12 +42,17 @@ export function useHistoricalBars({
   enabled = true,
 }: UseHistoricalBarsArgs): HistoricalBarsResult {
   const sym = (symbol ?? "").trim().toUpperCase();
+  const { sessionContext } = useMarketContext();
   const active = enabled && sym.length > 0;
 
   const query = useQuery({
     queryKey: queryKeys.history.bars({ symbol: sym, timeframe, interval, adjusted }),
     queryFn: ({ signal }) => fetchHistoricalBars({ symbol: sym, timeframe, interval, adjusted }, signal),
     enabled: active,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   useSyncExternalStore(liveBarStore.subscribe, liveBarStore.getRevision, liveBarStore.getRevision);
@@ -58,9 +65,7 @@ export function useHistoricalBars({
   // shared key (same `YYYY-MM-DD` date for 1D) since it is the fresher of the two.
   const live = !adjusted && ["1m", "5m", "15m", "30m", "1h", "1D"].includes(String(interval))
     ? liveBarStore.get(sym, String(interval)) : [];
-  const byTime = new Map(completed.map((bar) => [bar.date, bar]));
-  live.forEach((bar) => byTime.set(bar.date, bar));
-  const bars = [...byTime.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const bars = mergeHistoricalBars(completed, live, sessionContext?.displaySessionDate);
   return {
     bars,
     isLoading: active && query.isLoading,

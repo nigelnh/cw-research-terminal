@@ -1,3 +1,4 @@
+import { aggregateProvenance } from "./merge_bars";
 /**
  * Canonical OHLCV Local Aggregation Engine (PROJECT_DESIGN)
  *
@@ -100,7 +101,8 @@ export function aggregateDailyToWeekly(bars: HistoricalBar[]): HistoricalBar[] {
       high: maxHigh === -Infinity ? firstBar.high : maxHigh,
       low: minLow === Infinity ? firstBar.low : minLow,
       close: lastBar.close,
-      volume: totalVol,
+      volume: valid.every(b => b.volume != null) ? totalVol : null,
+      ...aggregateProvenance(valid),
     });
   }
 
@@ -153,7 +155,8 @@ export function aggregateDailyToMonthly(bars: HistoricalBar[]): HistoricalBar[] 
       high: maxHigh === -Infinity ? firstBar.high : maxHigh,
       low: minLow === Infinity ? firstBar.low : minLow,
       close: lastBar.close,
-      volume: totalVol,
+      volume: valid.every(b => b.volume != null) ? totalVol : null,
+      ...aggregateProvenance(valid),
     });
   }
 
@@ -214,7 +217,8 @@ export function aggregateIntradayBars(
       high: maxHigh === -Infinity ? firstBar.high : maxHigh,
       low: minLow === Infinity ? firstBar.low : minLow,
       close: lastBar.close,
-      volume: totalVol,
+      volume: valid.every(b => b.volume != null) ? totalVol : null,
+      ...aggregateProvenance(valid),
     });
   }
 

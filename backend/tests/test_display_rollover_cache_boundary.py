@@ -80,9 +80,9 @@ def test_an_unsettled_payload_still_ignores_both_boundaries():
     assert p._cache_ttl(15.0, settled=False) == 15.0
 
 
-def test_the_active_ttl_remains_a_floor():
+def test_ttl_expires_at_rollover_even_below_active_floor():
     p = _provider(active=False, to_open=1.0, to_roll=2.0)
-    assert p._cache_ttl(15.0) == 15.0
+    assert p._cache_ttl(15.0) == 1.0
 
 
 def test_a_calendar_fault_never_wedges_the_cache():
@@ -128,7 +128,7 @@ def test_the_service_cache_takes_the_open_once_the_rollover_has_passed(monkeypat
 
 def test_the_service_keeps_its_60s_floor_and_unsettled_retry(monkeypatch):
     monkeypatch.setattr(market_session, "is_trading_active", lambda: False)
-    assert _service(active=False, to_open=5.0, to_roll=5.0)._ttl_seconds() == 60.0
+    assert _service(active=False, to_open=5.0, to_roll=5.0)._ttl_seconds() == 5.0
     assert _service(active=False, to_open=17.5 * 3600, to_roll=16.5 * 3600,
                     settled=False)._ttl_seconds() == 60.0
 

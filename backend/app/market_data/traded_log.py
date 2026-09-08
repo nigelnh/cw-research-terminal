@@ -26,7 +26,7 @@ from typing import Any, Deque, Dict, List, Optional
 
 from app.core.config import settings
 from app.market_data.market_schemas import CanonicalQuote
-from app.market_data.trading_calendar import VN_TZ
+from app.market_data.trading_calendar import VN_TZ, reference_session_date, seconds_until_display_rollover
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 #: fails with WRONGTYPE, which - being caught, as a cache fault must be - would have
 #: silently disabled persistence until the old key's TTL expired. A new prefix means the
 #: two shapes can never meet, and yesterday's keys simply age out.
-KEY_PREFIX = "cw_research:traded_log:v2"
+KEY_PREFIX = "cw_research:traded_log:v3"
 #: The tape is kept until this hour on the following day, matching the dashboard's own
 #: 08:00 ICT data rollover.
 ROLLOVER_HOUR_ICT = 8
@@ -43,11 +43,7 @@ ROLLOVER_HOUR_ICT = 8
 
 def seconds_until_rollover(now: Optional[datetime] = None) -> int:
     """Seconds from ``now`` until the next 08:00 ICT. Always at least a minute."""
-    current = (now or datetime.now(VN_TZ)).astimezone(VN_TZ)
-    target = current.replace(hour=ROLLOVER_HOUR_ICT, minute=0, second=0, microsecond=0)
-    if current >= target:
-        target = target + timedelta(days=1)
-    return max(60, int((target - current).total_seconds()))
+    return max(1, int(seconds_until_display_rollover(now)))
 
 
 def classify_side(price: float, bid: Optional[float], ask: Optional[float]) -> Optional[str]:
@@ -100,8 +96,8 @@ class TradedLog:
         self._redis = client
 
     @staticmethod
-    def _key(symbol: str) -> str:
-        return f"{KEY_PREFIX}:{symbol.strip().upper()}"
+    def _key(symbol: str, session_date: str | None = None) -> str:
+        return f"{KEY_PREFIX}:{symbol.strip().upper()}:{session_date or reference_session_date().isoformat()}"
 
     # ------------------------------------------------------------------ write
     def record(self, quote: CanonicalQuote, diff: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -110,7 +106,7 @@ class TradedLog:
         A trade frame that only restates session totals (no new match timestamp) must not
         produce a print, or every 20s poll would add a duplicate row.
         """
-        if "trade_timestamp" not in diff:
+        if not any(k in diff for k in ("trade_timestamp", "traded_quantity", "total_volume")):
             return None
         price = quote.last_price
         if price is None or price <= 0:
@@ -124,6 +120,8 @@ class TradedLog:
             stamp_ms / 1000.0, tz=VN_TZ
         ).date().isoformat()
 
+        if session != reference_session_date().isoformat():
+            return None
         # A new session starts a fresh tape; yesterday's prints never blend into today's.
         if self._session.get(symbol) != session:
             previous = self._session.get(symbol)
@@ -149,13 +147,16 @@ class TradedLog:
             "change": change,
             "change_percent": change_pct,
             "volume": diff.get("traded_quantity", quote.traded_quantity),
-            "side": classify_side(price, quote.bid1_price, quote.ask1_price),
+            "side": classify_side(price, quote.bid1_price, quote.ask1_price)
+                if quote.book_timestamp and 0 <= stamp_ms - quote.book_timestamp <= 180000 else None,
+            "cumulative_volume": quote.total_volume,
             "session_date": session,
         }
 
+        entry["id"] = "|".join(str(entry.get(k, "")) for k in ("session_date", "ts", "price", "volume", "cumulative_volume"))
         tape = self._log.setdefault(symbol, deque(maxlen=self._memory))
         # The same match can be re-delivered after a reconnect; never print it twice.
-        if tape and tape[-1]["ts"] == entry["ts"] and tape[-1]["price"] == entry["price"]:
+        if any(p.get("id") == entry["id"] for p in tape):
             return None
         tape.append(entry)
         return entry
@@ -173,11 +174,12 @@ class TradedLog:
         if self._redis is None:
             return
         symbol = symbol.upper()
-        key = self._key(symbol)
+        key = self._key(symbol, entry["session_date"])
         try:
             if symbol in self._pending_resets:
                 self._pending_resets.discard(symbol)
-                await self._redis.delete(key)
+                # Session is part of the key; old and new writers cannot erase one another.
+                pass
             pipe = self._redis.pipeline()
             pipe.rpush(key, json.dumps(entry))
             # Bound the stored tape the same way the in-memory deque is bounded.
@@ -214,7 +216,7 @@ class TradedLog:
         """
         if self._redis is None or not symbols:
             return 0
-        today = datetime.now(VN_TZ).date().isoformat()
+        today = reference_session_date().isoformat()
         restored = 0
         for symbol in symbols:
             sym = symbol.upper()
@@ -231,7 +233,7 @@ class TradedLog:
                 except (TypeError, ValueError):
                     continue
                 # A key surviving past the rollover would otherwise blend sessions.
-                if item.get("session_date") and item["session_date"] <= today:
+                if item.get("session_date") and item["session_date"] == today:
                     items.append(item)
             if not items:
                 continue
@@ -246,12 +248,16 @@ class TradedLog:
         """Newest-first prints for one symbol."""
         sym = symbol.strip().upper()
         tape = self._log.get(sym)
-        items = list(tape)[-limit:][::-1] if tape else []
+        day = reference_session_date().isoformat()
+        items = [p for p in list(tape or []) if p.get("session_date") == day][-limit:][::-1]
         return {
             "symbol": sym,
-            "session_date": self._session.get(sym),
+            "session_date": day,
             "items": items,
             "count": len(items),
+            "coverage": "OBSERVED_WINDOW",
+            "retained_limit": self._max,
+            "truncated": len(items) >= min(limit, self._max),
             # The exchange publishes no per-match aggressor flag; see classify_side.
             "side_basis": "DERIVED_FROM_BOOK",
         }
@@ -278,23 +284,25 @@ class TradedLog:
             # was attached after the backend started); memory is the better answer.
             return self.get(sym, limit=limit)
 
-        today = datetime.now(VN_TZ).date().isoformat()
+        today = reference_session_date().isoformat()
         items: List[Dict[str, Any]] = []
         for raw in raw_items:
             try:
                 item = json.loads(raw)
             except (TypeError, ValueError):
                 continue
-            if item.get("session_date") and item["session_date"] > today:
+            if item.get("session_date") != today:
                 continue
             items.append(item)
         items.sort(key=lambda i: i.get("ts") or 0, reverse=True)
         return {
             "symbol": sym,
-            "session_date": (items[0].get("session_date") if items else None)
-            or self._session.get(sym),
+            "session_date": today,
             "items": items,
             "count": len(items),
+            "coverage": "OBSERVED_WINDOW",
+            "retained_limit": self._max,
+            "truncated": len(items) >= min(limit, self._max),
             "side_basis": "DERIVED_FROM_BOOK",
         }
 

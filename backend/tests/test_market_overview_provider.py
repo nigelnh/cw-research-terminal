@@ -1,5 +1,11 @@
 import pytest
 from unittest.mock import AsyncMock
+from datetime import datetime
+from app.market_data.trading_calendar import VN_TZ
+
+@pytest.fixture(autouse=True)
+def provider_clock(monkeypatch):
+    monkeypatch.setattr("app.market_data.market_session.market_session.get_vn_now", lambda: datetime(2026, 9, 8, 16, tzinfo=VN_TZ))
 
 from app.market_data.providers.fiinquant_provider import FiinQuantProvider
 
@@ -24,6 +30,7 @@ class _PriceStatistics:
             "totalMatchVolume": 20.0 if s == "AAA" else 15.0,
             "totalMatchValue": 2000.0 if s == "AAA" else 1500.0,
             "percentPriceChange": 0.02 if s == "AAA" else -0.02,
+            "close": 100,
         } for s in tickers])
 
 
@@ -53,8 +60,8 @@ class _Session:
     def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
         rows = []
         for symbol in tickers:
-            rows.append({"ticker": symbol, "timestamp": "2026-09-01", "close": 100, "volume": 10, "value": 1000})
-            rows.append({"ticker": symbol, "timestamp": "2026-09-02", "close": 102, "volume": 20 if symbol == "AAA" else 15, "value": 2000})
+            rows.append({"ticker": symbol, "timestamp": "2026-09-07", "close": 100, "volume": 10, "value": 1000})
+            rows.append({"ticker": symbol, "timestamp": "2026-09-08", "close": 102, "volume": 20 if symbol == "AAA" else 15, "value": 2000})
         return _Result(rows)
 
 
@@ -62,22 +69,22 @@ class _Session:
 async def test_overview_queries_intraday_in_explicit_ict_not_sdk_host_clock(monkeypatch):
     from datetime import datetime
     from app.market_data.market_session import market_session, VN_TZ
-    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 2, 9, 28, tzinfo=VN_TZ))
+    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 8, 9, 28, tzinfo=VN_TZ))
 
     class MorningSession(_Session):
         def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
             if by == "5m":
                 assert "period" not in kwargs
-                assert kwargs["from_date"] == "2026-09-02 09:00"
-                assert kwargs["to_date"] == "2026-09-02 09:28"
+                assert kwargs["from_date"] == "2026-09-08 09:00"
+                assert kwargs["to_date"] == "2026-09-08 09:28"
                 assert kwargs["lasted"] is True
                 assert kwargs["realtime"] is False
-                return _Result([{"ticker": symbol, "timestamp": "2026-09-02 09:20",
+                return _Result([{"ticker": symbol, "timestamp": "2026-09-08 09:20",
                                  "close": 101, "volume": 7, "value": 700} for symbol in tickers])
             result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
             for row in result.rows:
-                if row["timestamp"] == "2026-09-02":
-                    row["timestamp"] = "2026-09-02 09:27"
+                if row["timestamp"] == "2026-09-08":
+                    row["timestamp"] = "2026-09-08 09:27"
             return result
 
     provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
@@ -86,8 +93,8 @@ async def test_overview_queries_intraday_in_explicit_ict_not_sdk_host_clock(monk
     result = await provider.get_market_overview([])
     for item in result["indices"]:
         assert item["value"] == 102  # newer daily snapshot beats older 5m close
-        assert item["as_of"] == "2026-09-02T09:27:00+07:00"
-        assert item["sparkline"] == [{"timestamp": "2026-09-02T09:20:00+07:00", "value": 101, "reference": 100, "volume": 7}]
+        assert item["as_of"] == "2026-09-08T09:27:00+07:00"
+        assert item["sparkline"] == [{"timestamp": "2026-09-08T09:20:00+07:00", "value": 101, "reference": 100, "volume": 7}]
         assert item["update_mode"] == "POLLED"
         assert item["provenance"]["sparkline"]["timeframe"] == "5m"
 
@@ -96,13 +103,13 @@ async def test_overview_queries_intraday_in_explicit_ict_not_sdk_host_clock(monk
 async def test_overview_after_hours_queries_the_observed_session_not_today(monkeypatch):
     from datetime import datetime
     from app.market_data.market_session import market_session, VN_TZ
-    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 3, 8, 30, tzinfo=VN_TZ))
+    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 9, 8, 30, tzinfo=VN_TZ))
 
     class OvernightSession(_Session):
         def Fetch_Trading_Data(self, *, by, **kwargs):
             if by == "5m":
-                assert kwargs["from_date"] == "2026-09-02 09:00"
-                assert kwargs["to_date"] == "2026-09-02 15:00"
+                assert kwargs["from_date"] == "2026-09-08 09:00"
+                assert kwargs["to_date"] == "2026-09-08 15:00"
             return super().Fetch_Trading_Data(by=by, **kwargs)
     provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
     provider._session = OvernightSession()
@@ -152,7 +159,7 @@ async def test_overview_ignores_preopen_zero_reset_and_normalizes_vietnam_time()
     class ResetSession(_Session):
         def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
             result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
-            result.rows.extend({"ticker": symbol, "timestamp": "2026-09-03 08:22",
+            result.rows.extend({"ticker": symbol, "timestamp": "2026-09-09 08:22",
                                 "close": 0, "volume": 0, "value": 0} for symbol in tickers)
             return result
 
@@ -161,9 +168,9 @@ async def test_overview_ignores_preopen_zero_reset_and_normalizes_vietnam_time()
     provider._is_connected = True
     result = await provider.get_market_overview(["CAAA2601"])
     for item in result["indices"] + result["top_stock_volume"] + result["top_cw_volume"]:
-        assert item["as_of"] == "2026-09-02T00:00:00+07:00"
+        assert item["as_of"] == "2026-09-08T00:00:00+07:00"
         assert item.get("value", item.get("price")) == 102
-    assert result["top_cw_volume"][0]["market_state"] == "UP"
+    assert result["top_cw_volume"][0]["market_state"] == "UNAVAILABLE"
 
 
 @pytest.mark.asyncio
@@ -173,9 +180,9 @@ async def test_cw_ranking_falls_back_to_the_last_session_after_the_close():
     class GappedSession(_Session):
         def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
             result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
-            # No current-session (2026-09-02) row for the CW — only the prior day.
+            # No current-session (2026-09-08) row for the CW — only the prior day.
             result.rows = [row for row in result.rows
-                           if not (row["ticker"] == "CAAA2601" and row["timestamp"] == "2026-09-02")]
+                           if not (row["ticker"] == "CAAA2601" and row["timestamp"] == "2026-09-08")]
             return result
 
     provider = FiinQuantProvider(username="test", password="test", max_symbols=33)
@@ -183,7 +190,7 @@ async def test_cw_ranking_falls_back_to_the_last_session_after_the_close():
     provider._is_connected = True
     result = await provider.get_market_overview(["CAAA2601"])
     assert result["top_cw_volume"][0]["symbol"] == "CAAA2601"
-    assert result["top_cw_volume"][0]["as_of"] == "2026-09-01T00:00:00+07:00"
+    assert result["top_cw_volume"][0]["as_of"] == "2026-09-07T00:00:00+07:00"
     assert result["components"]["top_cw_volume"] == "AVAILABLE"
     # Breadth / stock leaders are the slow background sweep — never refreshed here.
     assert result["components"]["breadth"] == "UNAVAILABLE"
@@ -200,22 +207,22 @@ async def test_cw_leader_color_survives_a_week_long_quiet_stretch(monkeypatch):
     color at all (the bug this pins: live prod showed 4/5 CW leaders uncolored)."""
     from datetime import datetime
     from app.market_data.market_session import market_session, VN_TZ
-    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 4, 20, 0, tzinfo=VN_TZ))
+    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 10, 20, 0, tzinfo=VN_TZ))
 
     class SparseSession(_Session):
         def Fetch_Trading_Data(self, *, tickers, by, **kwargs):
             result = super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
             if by != "1d":
                 return result
-            # CAAA2601 last traded 2026-08-20, then not again until 2026-09-03 - an
-            # 11-day gap. A 6-day lookback from "today" (2026-09-04) would miss the
+            # CAAA2601 last traded 2026-08-20, then not again until 2026-09-09 - an
+            # 11-day gap. A 6-day lookback from "today" (2026-09-10) would miss the
             # 08-20 print entirely and leave no prior close to compare against.
             result.rows = [row for row in result.rows if row["ticker"] != "CAAA2601"]
             result.rows += [
                 # 100 -> 105: up, but clear of the mock's ceiling/floor (110/90) so this
                 # exercises the plain price-vs-reference UP branch, not CEILING.
                 {"ticker": "CAAA2601", "timestamp": "2026-08-20", "close": 100, "volume": 500, "value": 50_000},
-                {"ticker": "CAAA2601", "timestamp": "2026-09-03", "close": 105, "volume": 900, "value": 99_000},
+                {"ticker": "CAAA2601", "timestamp": "2026-09-09", "close": 105, "volume": 900, "value": 99_000},
             ]
             from_date = kwargs.get("from_date")
             if from_date:
@@ -229,8 +236,8 @@ async def test_cw_leader_color_survives_a_week_long_quiet_stretch(monkeypatch):
     row = result["top_cw_volume"][0]
     assert row["symbol"] == "CAAA2601"
     assert row["price"] == 105
-    assert row["reference"] == 100
-    assert row["market_state"] == "UP"
+    assert row["reference"] is None
+    assert row["market_state"] == "UNAVAILABLE"
 
 
 @pytest.mark.asyncio
@@ -313,7 +320,7 @@ async def test_overview_cache_stays_short_lived_until_stock_leaders_settle():
 
     # Only a few seconds pass - the old fixed 300s TTL, and a naively-stretched off-session
     # TTL, would BOTH still be serving the incomplete cached snapshot right now.
-    provider._overview_cache_at -= 20
+    provider._overview_cache_at -= 61
     second = await provider.get_market_overview(["CAAA2601"])
     assert CountingSession.calls > calls_after_first  # retried, did not wait for next session
     assert second["components"]["top_stock_volume"] == "AVAILABLE"
@@ -334,7 +341,7 @@ async def test_overview_cache_stays_short_lived_until_the_chart_covers_the_open(
     field. Should keep retrying on the short TTL until a chart covering the open lands."""
     from datetime import datetime
     from app.market_data.market_session import market_session, VN_TZ
-    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 2, 15, 5, tzinfo=VN_TZ))
+    monkeypatch.setattr(market_session, "get_vn_now", lambda: datetime(2026, 9, 8, 15, 5, tzinfo=VN_TZ))
 
     class LateOpenSession(_Session):
         calls = 0
@@ -344,7 +351,7 @@ async def test_overview_cache_stays_short_lived_until_the_chart_covers_the_open(
             LateOpenSession.calls += 1
             if by == "5m":
                 start = "09:00" if LateOpenSession.starts_at_open else "11:05"
-                return _Result([{"ticker": symbol, "timestamp": f"2026-09-02 {start}",
+                return _Result([{"ticker": symbol, "timestamp": f"2026-09-08 {start}",
                                  "close": 101, "volume": 7, "value": 700} for symbol in tickers])
             return super().Fetch_Trading_Data(tickers=tickers, by=by, **kwargs)
 
@@ -356,15 +363,15 @@ async def test_overview_cache_stays_short_lived_until_the_chart_covers_the_open(
     await provider._refresh_index_breadth()  # settle stock leaders so only the chart matters
 
     first = await provider.get_market_overview([])
-    assert first["indices"][0]["sparkline"][0]["timestamp"] == "2026-09-02T11:05:00+07:00"
+    assert first["indices"][0]["sparkline"][0]["timestamp"] == "2026-09-08T11:05:00+07:00"
     calls_after_first = LateOpenSession.calls
 
     # A clean fetch (covering the open) lands moments later.
     LateOpenSession.starts_at_open = True
-    provider._overview_cache_at -= 20  # only a few seconds pass
+    provider._overview_cache_at -= 61  # only a few seconds pass
     second = await provider.get_market_overview([])
     assert LateOpenSession.calls > calls_after_first  # retried, did not wait for next session
-    assert second["indices"][0]["sparkline"][0]["timestamp"] == "2026-09-02T09:00:00+07:00"
+    assert second["indices"][0]["sparkline"][0]["timestamp"] == "2026-09-08T09:00:00+07:00"
 
     # Now that it's settled, a later request survives a real multi-hour gap without refetching.
     calls_after_second = LateOpenSession.calls
@@ -475,15 +482,15 @@ async def test_session_reference_data_uses_previous_close_and_requested_session_
 
     from datetime import date
 
-    result = await provider.get_session_reference_data(["AAA", "CAAA2601"], date(2026, 9, 2))
+    result = await provider.get_session_reference_data(["AAA", "CAAA2601"], date(2026, 9, 8))
 
     assert result["AAA"] == {
-        "session_date": "2026-09-02",
-        "reference_price": 100.0,
+        "session_date": "2026-09-08",
+        "reference_price": None,
         "ceiling_price": 110.0,
         "floor_price": 90.0,
     }
-    assert result["CAAA2601"]["reference_price"] == 100.0
+    assert result["CAAA2601"]["reference_price"] is None
 
 
 @pytest.mark.asyncio
@@ -530,7 +537,7 @@ async def test_overview_returns_truthfully_stale_cache_when_reconnect_fails():
         }],
         "top_stock_volume": [{"symbol": "HPG", "volume": 10}],
         "top_cw_volume": [],
-        "as_of": "2026-09-02T15:00:00+07:00",
+        "as_of": "2026-09-08T15:00:00+07:00",
         "source": "FIINQUANT",
         "availability": "AVAILABLE",
         "components": {"indices": "AVAILABLE", "top_stock_volume": "AVAILABLE"},

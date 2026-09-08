@@ -1,3 +1,4 @@
+import { acceptMarketContext, useMarketContext, type SessionContext, type FeedStatus } from "@/data/market_session_store";
 import { useQuery } from "@tanstack/react-query";
 import { backendClient } from "@/data/backend/backend_client";
 import { queryKeys } from "./query_keys";
@@ -37,6 +38,9 @@ export interface VolumeLeader {
   as_of: string | null;
 }
 export interface MarketOverviewData {
+  sessionContext?: SessionContext;
+  feedStatus?: FeedStatus | null;
+  unavailable_reason?: string;
   indices: IndexOverview[];
   top_stock_volume: VolumeLeader[];
   top_cw_volume: VolumeLeader[];
@@ -53,9 +57,10 @@ export interface MarketOverviewData {
 }
 
 export function useMarketOverview() {
+  const { sessionContext } = useMarketContext();
   return useQuery<MarketOverviewData>({
-    queryKey: queryKeys.marketOverview,
-    queryFn: ({ signal }) => backendClient.getMarketOverview(signal),
+    queryKey: [...queryKeys.marketOverview, sessionContext?.displaySessionDate],
+    queryFn: async ({ signal }) => { const data = await backendClient.getMarketOverview(signal); acceptMarketContext(data); return data; },
     staleTime: 60_000,
     refetchInterval: (query) => overviewRefetchInterval(query.state.data),
     // A market surface must not rot while the tab sits in the background. React Query

@@ -134,7 +134,7 @@ const TAPE_PAGE = 300;
  * spread is left blank rather than guessed, and the header says so.
  */
 function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
-  const { items, isLoading, isError } = useTradedLog(symbol, live);
+  const { items, isLoading, isError, coverage, truncated, sessionDate } = useTradedLog(symbol, live);
   const [visible, setVisible] = useState(TAPE_PAGE);
   // A different instrument is a different tape; start it at the top again.
   useEffect(() => setVisible(TAPE_PAGE), [symbol]);
@@ -159,6 +159,7 @@ function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
   return (
     <div className="mono instrument-data-panel">
       <h3 className="instrument-section-heading">TRADED LOGS</h3>
+      <div className="muted" style={{ fontSize: 10 }}>{coverage} · {sessionDate ?? "Session unavailable"}{truncated ? " · Earlier prints omitted" : ""}</div>
       <div
         style={{
           display: "grid",
@@ -283,14 +284,12 @@ export function InstrumentPanel({
 
   const ref = q?.referencePrice ?? null;
   const pick = (k: string): number | null => {
-    const fromCw = (cw as Record<string, unknown> | undefined)?.[k];
-    if (typeof fromCw === "number") return fromCw;
     const fromAn = (an as Record<string, unknown> | null)?.[k];
     if (typeof fromAn === "number") return fromAn;
     return null;
   };
   const moneynessCat =
-    cw?.moneynessCategory ?? (an as { moneynessCategory?: string } | null)?.moneynessCategory ?? null;
+    (an as { moneynessCategory?: string } | null)?.moneynessCategory ?? null;
 
   const conflicting = instrument?.metadataVerification === "CONFLICTING";
 

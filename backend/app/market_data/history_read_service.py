@@ -175,7 +175,8 @@ class HistoryReadService:
         if inst is None:
             return [], "UNAVAILABLE"
 
-        price_basis = "RAW" if inst.instrument_type == "CW" else ("ADJUSTED" if adjusted else "RAW")
+        adjusted = adjusted and inst.instrument_type != "CW"
+        price_basis = "ADJUSTED" if adjusted else "RAW"
         rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
         return _to_wire(rows, price_basis), "POSTGRES"
 
@@ -212,6 +213,11 @@ class HistoryReadService:
             session_day = date.fromisoformat(quote.market_session_date[:10])
         except ValueError:
             return None
+        from app.market_data.trading_calendar import reference_session_date, _as_vn
+        if session_day != reference_session_date():
+            return None
+        if adjusted or price_basis != "RAW":
+            return None
         if not (req_from <= session_day <= req_to):
             return None
 
@@ -230,7 +236,8 @@ class HistoryReadService:
             # requested basis, not a RAW bar smuggled into an ADJUSTED series.
             price_basis=price_basis,
             adjusted=adjusted,
-            source="REALTIME_SESSION",
+            source="REALTIME_SESSION", complete=False,
+            as_of=datetime.fromtimestamp(quote.trade_timestamp / 1000, VN_TZ).isoformat() if quote.trade_timestamp else None,
             session_date=session_day.isoformat(),
         )
 
@@ -247,6 +254,8 @@ class HistoryReadService:
 
         Only whole bars are returned; a snapshot missing any OHLCV field is a gap.
         """
+        if adjusted or price_basis != "RAW":
+            return []  # observed RAW prices cannot be relabelled as adjusted history
         if self._sm is None or not settings.SNAPSHOT_ENABLED:
             return []
         try:
@@ -270,7 +279,8 @@ class HistoryReadService:
                 volume=float(v),
                 value=float(r.trading_value) if r.trading_value is not None else None,
                 price_basis=price_basis, adjusted=adjusted,
-                source="OBSERVED_SESSION", session_date=day,
+                source="OBSERVED_SESSION", session_date=day, complete=False,
+                as_of=r.trade_timestamp.isoformat() if r.trade_timestamp else None,
             ))
         return out
 
@@ -331,7 +341,8 @@ class HistoryReadService:
                 sym, timeframe, from_date, to_date, adjusted, tf, req_from, req_to
             )
 
-        price_basis = "RAW" if inst.instrument_type == "CW" else ("ADJUSTED" if adjusted else "RAW")
+        adjusted = adjusted and inst.instrument_type != "CW"
+        price_basis = "ADJUSTED" if adjusted else "RAW"
         rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
         assessment = await self._assess(inst, tf, price_basis, req_from, req_to, rows)
 
@@ -394,6 +405,8 @@ class HistoryReadService:
         applies when there is something to return; with nothing, the provider's own error
         still surfaces.
         """
+        is_cw = len(sym) == 8 and sym.startswith("C")
+        adjusted = adjusted and not is_cw
         price_basis = "ADJUSTED" if adjusted else "RAW"
         try:
             bars = await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
@@ -520,6 +533,8 @@ class HistoryReadService:
             "error_class": outcome.error_class, "at": datetime.now(VN_TZ).isoformat(),
         }
         if outcome.status == "FILLED":
+            from app.quant.quant_engine import live_quant_engine
+            live_quant_engine.invalidate_eod()
             self._counters["gap_fills_filled"] += 1
             self._fill_failure_until.pop(stream_key, None)
         elif outcome.status == "OUT_OF_HORIZON":

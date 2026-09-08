@@ -28,7 +28,7 @@ vi.mock("lightweight-charts", () => ({
       chart.series.push(series);
       return series;
     },
-    timeScale: () => ({ fitContent: vi.fn(), setVisibleLogicalRange: vi.fn() }),
+    timeScale: () => ({ getVisibleLogicalRange: () => null, fitContent: vi.fn(), setVisibleLogicalRange: vi.fn() }),
     priceScale: () => ({ applyOptions: vi.fn() }),
     subscribeCrosshairMove: (listener: typeof chart.hover) => {
       chart.hover = listener;

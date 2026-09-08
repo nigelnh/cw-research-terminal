@@ -52,6 +52,11 @@ export const VENDOR_NATIVE_INTERVALS: ReadonlySet<string> = new Set([
 ]);
 
 export interface OHLCVReadout {
+  source?: string | null;
+  sessionDate?: string | null;
+  priceBasis?: string | null;
+  asOf?: string | null;
+  complete?: boolean;
   symbol: string;
   interval: ChartInterval;
   timestamp: string; // ISO or date string

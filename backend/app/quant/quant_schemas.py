@@ -89,6 +89,10 @@ class HistoricalVolatilityPoint(BaseModel):
 
 
 class WarrantAnalytics(BaseModel):
+    session_date: Optional[str] = None
+    input_provenance: Dict[str, Any] = Field(default_factory=dict)
+    terms_version: Optional[str] = None
+    stale: bool = False
     symbol: str = Field(..., description="Covered Warrant symbol (e.g. CHPG2602)")
     underlying_symbol: str = Field(..., description="Underlying equity symbol (e.g. HPG)")
     calculated_at: str = Field(..., description="ISO 8601 timestamp of calculation")

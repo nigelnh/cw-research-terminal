@@ -12,6 +12,12 @@ from app.market_data.market_overview_service import MarketOverviewService
 
 pytestmark = pytest.mark.asyncio
 
+@pytest.fixture(autouse=True)
+def fixed_session(monkeypatch):
+    from datetime import date
+    monkeypatch.setattr("app.market_data.market_overview_service.reference_session_date", lambda *a: date(2026, 9, 3))
+
+
 
 def overview(*, settled: bool = True, sparkline_start: str | None = None):
     """A settled payload (the default) mirrors a provider result where the background
@@ -23,7 +29,8 @@ def overview(*, settled: bool = True, sparkline_start: str | None = None):
     ICT timestamp - only the chart-completeness test needs this; every other caller leaves
     it unset so the index carries no sparkline at all (trivially chart-settled)."""
     index = {"symbol": "VNINDEX", "value": 1200, "as_of": "2026-09-03",
-             "session_date": "2026-09-03", "stale": False}
+             "session_date": "2026-09-03", "stale": False,
+             "provenance": {"price": {"session_date": "2026-09-03"}}}
     if sparkline_start is not None:
         index["sparkline"] = [{"timestamp": sparkline_start, "value": 1200, "reference": 1190}]
     return {

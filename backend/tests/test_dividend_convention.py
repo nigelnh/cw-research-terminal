@@ -170,7 +170,7 @@ async def test_engine_uses_effective_adjusted_strike_and_q_zero_no_double_count(
         symbol="CHPG2602", issuer="TCBS", underlying_symbol="HPG",
         initial_strike_price=29000.0, initial_exercise_ratio=4.0,        # pre-adjustment
         effective_strike_price=25885.0, effective_exercise_ratio=3.5704,  # post-HPG-dividend adjustment
-        strike_price=25885.0, exercise_ratio=3.5704, is_adjusted=True,
+        strike_price=25885.0, exercise_ratio=3.5704, is_adjusted=True, terms_effective_date="2026-08-01",
         maturity_date="2026-12-19", last_trading_date="2026-12-17",
         status=InstrumentLifecycleStatus.ACTIVE, data_quality=DataQualityStatus.COMPLETE,
         evidence_level=LifecycleEvidenceLevel.CURRENT_EXCHANGE_LIST,

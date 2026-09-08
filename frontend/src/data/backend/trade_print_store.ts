@@ -1,3 +1,4 @@
+import { marketSessionStore } from "@/data/market_session_store";
 /**
  * Live time & sales, fed by the WebSocket.
  *
@@ -9,6 +10,8 @@
  * so an unbounded map would grow all session.
  */
 export interface TradePrint {
+  id?: string;
+  cumulative_volume?: number | null;
   ts: number;
   time: string;
   price: number;
@@ -19,6 +22,8 @@ export interface TradePrint {
   session_date: string;
 }
 
+export const tradePrintKey = (p: TradePrint) => p.id ?? `${p.session_date}|${p.ts}|${p.price}|${p.volume ?? ""}|${p.cumulative_volume ?? ""}`;
+
 type Listener = () => void;
 
 // A session's worth of live prints, so the tape a long-open tab shows does not
@@ -26,6 +31,7 @@ type Listener = () => void;
 const MAX_PER_SYMBOL = 8000;
 const prints = new Map<string, TradePrint[]>();
 const listeners = new Set<Listener>();
+const identities = new Map<string, Set<string>>();
 let revision = 0;
 
 const key = (symbol: string) => symbol.trim().toUpperCase();
@@ -36,15 +42,23 @@ export function acceptTradePrintMessage(message: unknown): void {
   const entry = m?.print;
   if (!sym || !entry || typeof entry.ts !== "number" || typeof entry.price !== "number") return;
 
-  const tape = prints.get(sym) ?? [];
+  const day = marketSessionStore.getSnapshot().sessionContext?.displaySessionDate;
+  if (day && entry.session_date !== day) return;
+  const previous = prints.get(sym);
+  const tape = previous?.[0]?.session_date === entry.session_date ? previous : [];
+  const seen = tape === previous ? identities.get(sym)! : new Set<string>();
+  const identity = tradePrintKey(entry);
   // The same match can be re-delivered after a reconnect, and the REST backfill overlaps
   // with whatever arrived while it was in flight.
-  if (tape.some((p) => p.ts === entry.ts && p.price === entry.price && p.volume === entry.volume)) {
+  if (seen.has(identity)) {
     return;
   }
-  tape.push(entry);
-  tape.sort((a, b) => b.ts - a.ts);
-  prints.set(sym, tape.slice(0, MAX_PER_SYMBOL));
+  seen.add(identity);
+  if (!tape.length || entry.ts >= tape[0].ts) tape.unshift(entry);
+  else { tape.push(entry); tape.sort((a, b) => b.ts - a.ts); }
+  if (tape.length > MAX_PER_SYMBOL) seen.delete(tradePrintKey(tape.pop()!));
+  prints.set(sym, tape);
+  identities.set(sym, seen);
   revision++;
   listeners.forEach((fn) => fn());
 }
@@ -62,6 +76,7 @@ export const tradePrintStore = {
   /** Drops a symbol's tape when its session rolls over. */
   clear(symbol: string) {
     prints.delete(key(symbol));
+    identities.delete(key(symbol));
     revision++;
     listeners.forEach((fn) => fn());
   },

@@ -90,16 +90,15 @@ export function MarketExplorer() {
   const contextEnvelope = useMemo<ResearchContextEnvelope>(() => {
     let selectedContext = null;
     if (selected) {
-      const qv = selected.quote ?? selected.cw?.quote;
-      const cw = selected.cw;
+      const qv = selectedDashRow?.quote;
+      const cw = selectedDashRow?.analytics;
       const lastPrice = qv?.lastPrice;
       const bidPrice = qv?.bidPrice;
       const askPrice = qv?.askPrice;
       const chgPct = qv?.priceChangePercent;
       const volume = qv?.totalVolume;
       const underlyingPrice =
-        cw?.underlyingPrice ??
-        (selected.underlyingSymbol ? quotes.get(selected.underlyingSymbol)?.lastPrice ?? null : null);
+        cw?.modelInputs?.underlying_price ?? null;
       const { abs: spread, pct: spreadPercent } = computeSpread(bidPrice, askPrice);
 
       selectedContext = {
@@ -185,6 +184,7 @@ export function MarketExplorer() {
     marketPhase,
     marketSessionActive,
     dashMeta,
+    selectedDashRow,
   ]);
 
   const goToTab = (tab: Tab) => setTabParam(tab, "push");

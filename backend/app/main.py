@@ -370,6 +370,7 @@ async def root_health():
     health_data = subscription_manager.provider.get_health()
     store_health = await subscription_manager.store.health()
     from app.market_data.market_session import market_session
+    from app.market_data.trading_calendar import session_context
     sess_status = market_session.get_session_status().value
     sess_active = market_session.is_trading_active()
     realtime_universe_health = subscription_manager.get_universe_health()
@@ -387,6 +388,8 @@ async def root_health():
         "service": "cw-research-backend",
         "environment": settings.ENVIRONMENT,
         "ai_enabled": settings.AI_ENABLED,
+        "sessionContext": session_context(),
+        "feedStatus": health_data.get("feedStatus"),
         "market_provider": health_data.get("provider", "unknown"),
         "market_upstream_status": health_data.get("upstream_status", "UNKNOWN"),
         "feed_fresh": health_data.get("feed_fresh", False),

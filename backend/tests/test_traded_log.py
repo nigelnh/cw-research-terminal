@@ -20,8 +20,16 @@ pytestmark = pytest.mark.asyncio  # async cases; the pure helpers below are sync
 # that is correctly rejected as a late callback from a retired stream. Hard-coding today's
 # date therefore makes these tests pass on the day they are written and fail at the next
 # ICT midnight - which is exactly what happened.
-TODAY = market_session.get_vn_now().date()
+TODAY = datetime(2026, 9, 8).date()
 TOMORROW = TODAY + timedelta(days=1)
+
+
+@pytest.fixture(autouse=True)
+def tape_clock(monkeypatch):
+    current = [datetime(2026, 9, 8, 9, 20, tzinfo=VN_TZ)]
+    monkeypatch.setattr(market_session, "get_vn_now", lambda: current[0])
+    monkeypatch.setattr(traded_log_module, "reference_session_date", lambda *a: current[0].date())
+    return current
 
 
 def at(clock: str, day=None) -> str:
@@ -31,7 +39,7 @@ def at(clock: str, day=None) -> str:
 
 def _state_with_book(bid=21_850, ask=21_900):
     s = MarketState()
-    s.apply_bidask_event({"Ticker": "HPG", "Best1Bid": bid, "Best1Ask": ask})
+    s.apply_bidask_event({"Ticker": "HPG", "TradingDate": at("09:20:00"), "Best1Bid": bid, "Best1Ask": ask})
     return s
 
 
@@ -116,11 +124,12 @@ async def test_the_tape_is_newest_first_and_bounded():
     assert [i["price"] for i in items] == [21_950, 21_900, 21_850]  # newest first, capped
 
 
-async def test_a_new_session_starts_a_clean_tape():
+async def test_a_new_session_starts_a_clean_tape(tape_clock):
     state = _state_with_book()
     log = TradedLog(max_entries=10)
     q, d = _trade(state, 21_900)
     log.record(q, d)
+    tape_clock[0] = datetime.combine(TOMORROW, datetime.min.time(), tzinfo=VN_TZ).replace(hour=9, minute=16)
     q2, d2 = _trade(state, 22_000, when=at("09:16:00", TOMORROW))
     log.record(q2, d2)
     tape = log.get("HPG")
@@ -235,7 +244,7 @@ async def test_a_stored_tape_from_an_earlier_session_is_not_restored_into_today(
     assert log.get("HPG")["count"] == 0
 
 
-async def test_a_session_rollover_clears_the_stored_tape():
+async def test_a_session_rollover_clears_the_stored_tape(tape_clock):
     state = _state_with_book()
     redis = _FakeRedis()
     log = TradedLog(max_entries=100)
@@ -246,12 +255,14 @@ async def test_a_session_rollover_clears_the_stored_tape():
     key = TradedLog._key("HPG")
     assert len(redis.lists[key]) == 1
 
+    tape_clock[0] = datetime.combine(TOMORROW, datetime.min.time(), tzinfo=VN_TZ).replace(hour=9, minute=16)
     q2, d2 = _trade(state, 22_000, when=at("09:16:00", TOMORROW))
     entry = log.record(q2, d2)
     await log.persist("HPG", entry)
     # yesterday's print is gone, today's is the only one stored
     assert len(redis.lists[key]) == 1
-    assert json.loads(redis.lists[key][0])["session_date"] == TOMORROW.isoformat()
+    assert json.loads(redis.lists[key][0])["session_date"] == TODAY.isoformat()
+    assert json.loads(redis.lists[TradedLog._key("HPG")][0])["session_date"] == TOMORROW.isoformat()
 
 
 async def test_the_endpoint_reads_the_shared_tape_not_this_process_memory():
@@ -294,7 +305,7 @@ async def test_the_key_version_isolates_the_list_shape_from_the_old_blob():
     """The v1 keys held one JSON string. A list op against a string raises WRONGTYPE, and
     since a cache fault is swallowed by design, sharing the prefix would have silently
     disabled persistence until those keys expired."""
-    assert TradedLog._key("HPG") == "cw_research:traded_log:v2:HPG"
+    assert TradedLog._key("HPG") == f"cw_research:traded_log:v3:HPG:{TODAY}"
 
 
 async def test_a_failing_persist_warns_once_per_symbol_then_stays_quiet():

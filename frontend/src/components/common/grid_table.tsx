@@ -1,3 +1,4 @@
+import { marketSessionStore, marketNow } from "@/data/market_session_store";
 /**
  * Grid Terminal — shared table primitives.
  *
@@ -44,24 +45,24 @@ export function fmtRatio(v: number | null | undefined): string {
  * date. Past dates -> "EXP".
  */
 export function dteDisplay(
-  lastTradingDate: string | null | undefined,
+  _lastTradingDate: string | null | undefined,
   maturityDate: string | null | undefined,
   backendDte?: number | null,
 ): string {
   if (typeof backendDte === "number") return backendDte >= 0 ? String(backendDte) : "EXP";
-  const n = daysUntil(lastTradingDate || maturityDate);
+  const n = daysUntil(maturityDate, new Date(marketSessionStore.getSnapshot().sessionContext?.displaySessionDate ? `${marketSessionStore.getSnapshot().sessionContext!.displaySessionDate}T12:00:00+07:00` : marketNow()));
   if (n === null) return DASH;
   return n >= 0 ? String(n) : "EXP";
 }
 
 /** Numeric DTE for sorting. */
 export function dteNumber(
-  lastTradingDate: string | null | undefined,
+  _lastTradingDate: string | null | undefined,
   maturityDate: string | null | undefined,
   backendDte?: number | null,
 ): number | null {
   if (typeof backendDte === "number") return backendDte;
-  return daysUntil(lastTradingDate || maturityDate);
+  return daysUntil(maturityDate, new Date(marketSessionStore.getSnapshot().sessionContext?.displaySessionDate ? `${marketSessionStore.getSnapshot().sessionContext!.displaySessionDate}T12:00:00+07:00` : marketNow()));
 }
 
 /* ------------------------------------------------------------------ colours */

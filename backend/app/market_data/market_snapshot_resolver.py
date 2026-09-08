@@ -23,6 +23,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
+from decimal import Decimal, ROUND_FLOOR, ROUND_CEILING
 from time import monotonic
 from typing import Any, Optional
 from weakref import WeakValueDictionary
@@ -177,65 +178,57 @@ class MarketSnapshotResolver:
                 for sym in clean
             )
         )
+        for row in rows:
+            display = reference_session_date(now).isoformat()
+            for attr, fields in (("quote_prov", _QUOTE_FIELDS[3:]), ("book_prov", _BOOK_FIELDS),
+                                 ("reference_prov", _QUOTE_FIELDS[:3])):
+                if getattr(row, attr).session_date != display:
+                    row.values.update({f: None for f in fields})
+                    setattr(row, attr, FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE,
+                        session_date=display, note="No confirmed observation for the display session"))
+            if row.reference_prov.session_date != row.quote_prov.session_date or row.values.get("reference_price") is None:
+                row.values["price_change"] = row.values["price_change_percent"] = None
         await self._derive_cw_bands(rows)
         return rows
 
-    @staticmethod
-    def _round_tick(value: float, tick: float = 10.0) -> float:
-        return round(value / tick) * tick
-
     async def _derive_cw_bands(self, rows: list[ResolvedRow]) -> None:
-        """FiinQuant ``get_ceilingfloor`` returns no rows for covered warrants, so a CW's
-        session limit is reconstructed from the underlying's limit move divided by the
-        conversion ratio (the HOSE rule). Only when every input is present."""
         by_symbol = {r.symbol: r for r in rows}
         for row in rows:
-            if row.instrument_type != "CW":
+            if row.instrument_type != "CW" or row.reference_prov.source != DataSource.SESSION_REFERENCE:
                 continue
-            cw_ref = row.values.get("reference_price")
-            if (
-                cw_ref is None
-                or row.values.get("ceiling_price") is not None
-                or row.values.get("floor_price") is not None
-            ):
+            ref = row.values.get("reference_price")
+            sd = row.reference_prov.session_date
+            spec = await instrument_registry.get_instrument(row.symbol)
+            if ref is None or not sd or spec is None or str(spec.metadata_verification.value) != "VERIFIED_CURRENT":
                 continue
-
-            und = (row.underlying_symbol or "").upper()
-            spec = None
-            if not und:
-                spec = await instrument_registry.get_instrument(row.symbol)
-                und = (spec.underlying_symbol or "").upper() if spec else ""
-            if not und:
+            if (spec.is_adjusted and not spec.terms_effective_date) or (spec.terms_effective_date and spec.terms_effective_date > sd):
                 continue
-
-            u_row = by_symbol.get(und)
-            u_ref = u_row.values.get("reference_price") if u_row else None
-            u_ceil = u_row.values.get("ceiling_price") if u_row else None
-            u_floor = u_row.values.get("floor_price") if u_row else None
-            if u_ref is None or u_ceil is None or u_floor is None:
-                q = market_state.get_quote(und)
-                if q is not None:
-                    u_ref = u_ref if u_ref is not None else q.reference_price
-                    u_ceil = u_ceil if u_ceil is not None else q.ceiling_price
-                    u_floor = u_floor if u_floor is not None else q.floor_price
-            if u_ref is None or u_ceil is None or u_floor is None:
-                continue
-
-            if spec is None:
-                spec = await instrument_registry.get_instrument(row.symbol)
-            ratio = getattr(spec, "effective_ratio", None) if spec is not None else None
+            ratio = spec.effective_ratio
             if not ratio or ratio <= 0:
                 continue
-
-            up_move = (u_ceil - u_ref) / ratio
-            dn_move = (u_ref - u_floor) / ratio
-            row.values["ceiling_price"] = self._round_tick(cw_ref + up_move)
-            row.values["floor_price"] = max(10.0, self._round_tick(cw_ref - dn_move))
-            if row.reference_prov.state != DataTemporalState.UNAVAILABLE:
-                row.reference_prov = replace(
-                    row.reference_prov,
-                    note="bands derived from the underlying limit ÷ conversion ratio",
-                )
+            und = spec.underlying_symbol.upper()
+            u = by_symbol.get(und)
+            if u is not None and u.reference_prov.session_date == sd and u.reference_prov.source == DataSource.SESSION_REFERENCE:
+                ur, uc, uf = (u.values.get(k) for k in ("reference_price", "ceiling_price", "floor_price"))
+            else:
+                q = market_state.get_quote(und)
+                if q is None or q.reference_session_date != sd:
+                    continue
+                ur, uc, uf = q.reference_price, q.ceiling_price, q.floor_price
+            if ur is None or ur <= 0:
+                continue
+            r, cr, tick = Decimal(str(ref)), Decimal(str(ratio)), Decimal(10)
+            derived = []
+            for field, bound, rounding in (("ceiling_price", uc, ROUND_FLOOR), ("floor_price", uf, ROUND_CEILING)):
+                if row.values.get(field) is not None or bound is None:
+                    continue
+                if (field == "ceiling_price" and bound < ur) or (field == "floor_price" and bound > ur):
+                    continue
+                raw = r + (Decimal(str(bound)) - Decimal(str(ur))) / cr
+                row.values[field] = float(max(tick, (raw / tick).to_integral_value(rounding=rounding) * tick))
+                derived.append(field)
+            if derived:
+                row.reference_prov = replace(row.reference_prov, note="HOSE derived " + ", ".join(derived) + "; confirmed same-session references and effective ratio")
 
     async def resolve_analytics_rows(
         self, symbols: list[str], *, now: Optional[datetime] = None
@@ -369,11 +362,6 @@ class MarketSnapshotResolver:
                 row.values["reference_price"] = None
                 row.values["ceiling_price"] = None
                 row.values["floor_price"] = None
-            if row.values.get("reference_price") is None and sd == now.date().isoformat() and sd > latest_session.isoformat():
-                await self._fill_live_reference(
-                    row, sym, inst_type=inst_type, snapshot=snapshot,
-                    latest_session=latest_session, now=now, trace=trace,
-                )
             if diag:
                 row.diag = {"chosen": "LIVE", "trace": trace}
             return row
@@ -481,7 +469,6 @@ class MarketSnapshotResolver:
             if not eligible_bars:
                 eligible_bars = bars
             last_bar = eligible_bars[-1]
-            prev_close = eligible_bars[-2].close if len(eligible_bars) >= 2 else None
             bar_session = _parse_date(last_bar.date)
             bar_stale = bar_session is not None and bar_session < latest_session
             sd = bar_session.isoformat() if bar_session else None
@@ -498,21 +485,6 @@ class MarketSnapshotResolver:
             _fill("low_price", last_bar.low)
             _fill("total_volume", int(last_bar.volume) if last_bar.volume is not None else None)
             _fill("trading_value", last_bar.value)
-            if row.values.get("reference_price") is None:
-                _fill("reference_price", prev_close)
-                if prev_close is not None:
-                    prev_session = _parse_date(bars[-2].date)
-                    ref_as_of = (
-                        f"{prev_session.isoformat()}T15:00:00+07:00"
-                        if prev_session else None
-                    )
-                    row.reference_prov = FieldProvenance(
-                        DataTemporalState.LAST_SESSION if not bar_stale else DataTemporalState.HISTORICAL,
-                        DataSource.PRIOR_CLOSE,
-                        ref_as_of,
-                        sd,
-                        stale=bool(bar_stale),
-                    )
             resolved_close = row.values.get("last_price")
             resolved_reference = row.values.get("reference_price")
             if (resolved_close is not None and resolved_reference not in (None, 0)
@@ -577,66 +549,30 @@ class MarketSnapshotResolver:
         )
         trace.append("A:SESSION_REFERENCE_STATIC")
 
-    async def _fill_live_reference(
-        self,
-        row: ResolvedRow,
-        sym: str,
-        *,
-        inst_type: str,
-        snapshot,
-        latest_session: date,
-        now: datetime,
-        trace: list[str],
-    ) -> None:
-        """Fill only today's reference price; session bands are never inferred."""
-        if row.values.get("reference_price") is not None:
-            return
-        reference = None
-        as_of = None
-        if snapshot is not None and snapshot.session_date == latest_session:
-            reference = _num(snapshot.last_price)
-            as_of = snapshot.captured_at.isoformat() if snapshot.captured_at else None
-            if reference is not None:
-                trace.append("B:PRIOR_CLOSE_SNAPSHOT")
-        if reference is None:
-            bars = await self._recent_daily_bars(sym, inst_type, now=now)
-            eligible = [bar for bar in bars if (_parse_date(bar.date) or latest_session) <= latest_session]
-            if eligible:
-                latest = eligible[-1]
-                reference = latest.close
-                session = _parse_date(latest.date)
-                as_of = f"{session.isoformat()}T15:00:00+07:00" if session else None
-                trace.append("C:PRIOR_CLOSE_EOD")
-        if reference is not None:
-            row.values["reference_price"] = reference
-            row.reference_prov = FieldProvenance(
-                DataTemporalState.DERIVED,
-                DataSource.PRIOR_CLOSE,
-                as_of,
-                now.date().isoformat(),
-            )
-        else:
-            row.reference_prov = FieldProvenance(
-                DataTemporalState.UNAVAILABLE,
-                DataSource.NONE,
-                note="current-session reference metadata unavailable",
-            )
-
     async def _attach_analytics(
         self, row: ResolvedRow, sym: str, *, now: datetime, latest_session: date, session_active: bool
     ) -> None:
         from app.quant.quant_engine import live_quant_engine
 
-        # Live analytics while the session is active and the engine has a fresh value.
-        if session_active:
-            live = live_quant_engine.get_analytics(sym)
-            if live is not None and live.is_available:
+        display = reference_session_date(now)
+        # A current-session view must never silently fall back to a completed session.
+        if display > latest_session:
+            live = await live_quant_engine.resolve_display_analytics(sym, now=now, sessionmaker=self._sm)
+            if live is not None and live.is_available and live.session_date == display.isoformat():
                 row.analytics = _analytics_wire(live)
+                stamps = [p.get("asOf") for p in live.input_provenance.values() if isinstance(p, dict) and p.get("asOf")]
+                fresh = bool(session_active and stamps and all(
+                    0 <= (now - datetime.fromisoformat(stamp)).total_seconds() <= 180 for stamp in stamps
+                ))
                 row.analytics_prov = FieldProvenance(
-                    DataTemporalState.LIVE, DataSource.QUANT_LIVE,
-                    as_of=live.calculated_at, session_date=now.date().isoformat(),
+                    DataTemporalState.LIVE if fresh else DataTemporalState.SESSION_SNAPSHOT,
+                    DataSource.QUANT_LIVE, as_of=min(stamps) if stamps else None,
+                    session_date=display.isoformat(), stale=session_active and not fresh,
                 )
-                return
+            else:
+                row.analytics_prov = FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE,
+                    session_date=display.isoformat(), note="Awaiting valid current-session pricing inputs")
+            return
 
         # EOD analytics for the last completed session (temporally aligned inputs).
         try:
@@ -655,7 +591,7 @@ class MarketSnapshotResolver:
             row.analytics = _analytics_wire(eod)
             row.analytics_prov = FieldProvenance(
                 DataTemporalState.LAST_SESSION, DataSource.QUANT_EOD,
-                as_of=eod.calculated_at, session_date=latest_session.isoformat(),
+                as_of=eod.input_provenance.get("trade", {}).get("asOf"), session_date=latest_session.isoformat(),
             )
         else:
             row.analytics_prov = FieldProvenance(
@@ -674,7 +610,7 @@ class MarketSnapshotResolver:
         """
         now = now or datetime.now(cal.VN_TZ)
         latest_session = cal.latest_completed_trading_session(now).isoformat()
-        basis = "RAW" if inst_type == "CW" else "ADJUSTED"
+        basis = "RAW"
         key = (sym, basis, latest_session)
         cached = self._history_cache.get(key)
         if cached is not None and cached[0] > monotonic():
@@ -716,7 +652,7 @@ class MarketSnapshotResolver:
         to_d = (now or datetime.now(cal.VN_TZ)).date()
         from_d = to_d - timedelta(days=20)
         # CW prices must remain RAW. Underlying series use ADJUSTED consistently with HV.
-        adjusted = inst_type != "CW"
+        adjusted = False
         try:
             if settings.DASHBOARD_FALLBACK_GAPFILL:
                 bars = await history_read_service.get_history(
@@ -737,11 +673,17 @@ class MarketSnapshotResolver:
 def _analytics_wire(a) -> dict[str, Any]:
     g = a.greeks
     return {
-        "isAvailable": bool(a.is_available),
+        "calculatedAt": a.calculated_at,
         "unavailableReason": a.unavailable_reason,
         "ivBid": a.iv_bid,
         "ivTrade": a.iv_trade,
         "ivAsk": a.iv_ask,
+        "sessionDate": a.session_date,
+        "inputProvenance": a.input_provenance,
+        "termsVersion": a.terms_version,
+        "isAvailable": a.is_available,
+        "stale": a.stale,
+        "modelInputs": a.model_inputs.model_dump() if a.model_inputs else None,
         "ivMid": a.iv_mid,
         "historicalVolatility": a.historical_volatility,
         "theoreticalPrice": (g.theoretical_price if g else None),

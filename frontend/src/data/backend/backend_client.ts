@@ -1,3 +1,4 @@
+import type { SessionContext, FeedStatus } from "@/data/market_session_store";
 import { config } from "@/config";
 import type {
   CompanyProfileResponse,
@@ -236,6 +237,8 @@ export class BackendClient {
     symbols: string[],
     signal?: AbortSignal,
   ): Promise<{
+    sessionContext?: SessionContext;
+    feedStatus?: FeedStatus | null;
     rows: any[];
     as_of: string;
     market_session: string;
@@ -255,6 +258,8 @@ export class BackendClient {
     symbols: string[],
     signal?: AbortSignal,
   ): Promise<{
+    sessionContext?: SessionContext;
+    feedStatus?: FeedStatus | null;
     rows: Array<{
       Symbol: string;
       analytics: Record<string, any> | null;
@@ -286,6 +291,9 @@ export class BackendClient {
     session_date: string | null;
     count: number;
     side_basis: string;
+    coverage: string;
+    truncated: boolean;
+    retained_limit: number;
     market_session: string;
     items: Array<{
       ts: number;

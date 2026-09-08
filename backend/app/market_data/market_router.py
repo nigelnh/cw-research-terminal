@@ -45,6 +45,8 @@ async def market_health():
 
     return MarketHealthResponse(
         status="ok",
+        sessionContext=cal.session_context(),
+        feedStatus=health_data.get("feedStatus"),
         provider=health_data.get("provider", "unknown"),
         authenticated=bool(health_data.get("authenticated", False)),
         upstream_status=str(health_data.get("upstream_status", "UNKNOWN")),
@@ -183,6 +185,8 @@ async def get_dashboard_rows(
     return {
         "rows": wire_rows,
         "as_of": now.isoformat(),
+        "sessionContext": cal.session_context(now),
+        "feedStatus": subscription_manager.provider.get_health().get("feedStatus"),
         "market_session": cal.session_status(now).value,
         "market_session_active": cal.is_trading_active(now),
         "market_phase": cal.market_phase(now).value,
@@ -205,6 +209,8 @@ async def get_dashboard_analytics(
     return {
         "rows": rows,
         "as_of": now.isoformat(),
+        "sessionContext": cal.session_context(now),
+        "feedStatus": subscription_manager.provider.get_health().get("feedStatus"),
         "market_session": cal.session_status(now).value,
         "market_session_active": cal.is_trading_active(now),
         "latest_completed_session": cal.latest_completed_trading_session(now).isoformat(),
@@ -349,6 +355,7 @@ async def get_traded_log(symbol: str, limit: int = Query(default=200, ge=1, le=8
     if not (1 <= len(sym) <= 12) or not sym.isalnum():
         raise HTTPException(status_code=400, detail=f"invalid symbol: {symbol!r}")
     payload = await traded_log.get_session(sym, limit=limit)
+    payload["sessionContext"] = cal.session_context()
     payload["market_session"] = cal.session_status(cal._as_vn(None)).value
     return payload
 
@@ -364,6 +371,8 @@ async def get_symbol_diagnostics(symbol: str):
     return {
         "symbol": sym,
         "as_of": now.isoformat(),
+        "sessionContext": cal.session_context(now),
+        "feedStatus": subscription_manager.provider.get_health().get("feedStatus"),
         "latest_completed_session": cal.latest_completed_trading_session(now).isoformat(),
         "market_session": cal.session_status(now).value,
         "market_phase": cal.market_phase(now).value,

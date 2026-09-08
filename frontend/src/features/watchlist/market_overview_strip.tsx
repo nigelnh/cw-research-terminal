@@ -254,7 +254,7 @@ export function MarketOverviewStrip({ indicesOnly = false }: { indicesOnly?: boo
   if (!query.data) return <div className="market-overview-state mono">MARKET OVERVIEW UNAVAILABLE</div>;
   const data = query.data;
   if (data.availability === "UNAVAILABLE" && data.indices.length === 0) {
-    return <div className="market-overview-state mono">{data.refreshing ? "MARKET OVERVIEW UPDATING…" : "MARKET OVERVIEW UNAVAILABLE"}</div>;
+    return <div className="market-overview-state mono">{data.unavailable_reason ?? (data.refreshing ? "MARKET OVERVIEW UPDATING…" : "MARKET OVERVIEW UNAVAILABLE")}</div>;
   }
   const indices = ORDER.map(symbol => data.indices.find(x => x.symbol === symbol) ?? ({ symbol, value: null, change: null, change_percent: null, volume: null, trading_value: null, advancing: null, ceiling: null, unchanged: null, declining: null, floor: null, as_of: null, sparkline: [] }));
   return <div className={`market-overview-wrap${indicesOnly ? " indices-only" : ""}`}>

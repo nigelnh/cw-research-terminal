@@ -65,7 +65,7 @@ def _wire(sessionmaker_, monkeypatch):
 async def test_aligned_session_produces_analytics(sessionmaker_):
     await instrument_registry.initialize(current_date="2026-08-28")
     await _bar(sessionmaker_, "CVPB2615", "CW", "RAW", _D, 900.0)
-    await _bar(sessionmaker_, "VPB", "STOCK", "ADJUSTED", _D, 22000.0)
+    await _bar(sessionmaker_, "VPB", "STOCK", "RAW", _D, 22000.0)
 
     a = await live_quant_engine.compute_eod_analytics("CVPB2615", _D, sessionmaker=sessionmaker_)
     assert a.is_available is True
@@ -85,12 +85,13 @@ async def test_eod_analytics_seeds_iv_bid_ask_from_last_known_book(sessionmaker_
     exact session's own close."""
     await instrument_registry.initialize(current_date="2026-08-28")
     await _bar(sessionmaker_, "CVPB2615", "CW", "RAW", _D, 900.0)
-    await _bar(sessionmaker_, "VPB", "STOCK", "ADJUSTED", _D, 22000.0)
+    await _bar(sessionmaker_, "VPB", "STOCK", "RAW", _D, 22000.0)
 
     from app.market_data.market_schemas import CanonicalQuote
 
     last_book = CanonicalQuote(symbol="CVPB2615", instrument_type="CW",
-                                bid1_price=880.0, ask1_price=920.0)
+                                bid1_price=880.0, ask1_price=920.0, market_session_date=_D.isoformat(),
+                                book_timestamp=int(datetime(2026, 8, 28, 14, 45, tzinfo=_VN).timestamp() * 1000))
     monkeypatch.setattr(
         live_quant_engine, "_market_state_getter",
         lambda sym: last_book if sym == "CVPB2615" else None,
@@ -108,7 +109,7 @@ async def test_missing_underlying_leg_is_eod_input_missing(sessionmaker_):
     await instrument_registry.initialize(current_date="2026-08-28")
     await _bar(sessionmaker_, "CVPB2615", "CW", "RAW", _D, 900.0)
     # underlying bar for _D deliberately NOT seeded (only the previous day)
-    await _bar(sessionmaker_, "VPB", "STOCK", "ADJUSTED", _DM1, 21000.0)
+    await _bar(sessionmaker_, "VPB", "STOCK", "RAW", _DM1, 21000.0)
 
     a = await live_quant_engine.compute_eod_analytics("CVPB2615", _D, sessionmaker=sessionmaker_)
     assert a.is_available is False
@@ -119,7 +120,7 @@ async def test_missing_underlying_leg_is_eod_input_missing(sessionmaker_):
 async def test_does_not_mix_cw_dm1_with_underlying_d(sessionmaker_):
     await instrument_registry.initialize(current_date="2026-08-28")
     await _bar(sessionmaker_, "CVPB2615", "CW", "RAW", _DM1, 850.0)   # CW only on D-1
-    await _bar(sessionmaker_, "VPB", "STOCK", "ADJUSTED", _D, 22000.0)  # underlying only on D
+    await _bar(sessionmaker_, "VPB", "STOCK", "RAW", _D, 22000.0)  # underlying only on D
 
     a = await live_quant_engine.compute_eod_analytics("CVPB2615", _D, sessionmaker=sessionmaker_)
     # session_date=D: CW leg for D is absent -> no analytics, never uses the D-1 CW close.
@@ -130,7 +131,7 @@ async def test_does_not_mix_cw_dm1_with_underlying_d(sessionmaker_):
 async def test_conflicting_metadata_still_gated(sessionmaker_):
     await instrument_registry.initialize(current_date="2026-08-28")
     await _bar(sessionmaker_, "CTCB2601", "CW", "RAW", _D, 500.0)
-    await _bar(sessionmaker_, "TCB", "STOCK", "ADJUSTED", _D, 34000.0)
+    await _bar(sessionmaker_, "TCB", "STOCK", "RAW", _D, 34000.0)
 
     a = await live_quant_engine.compute_eod_analytics("CTCB2601", _D, sessionmaker=sessionmaker_)
     assert a.is_available is False

@@ -28,10 +28,7 @@ def reference_session_date(now: datetime | None = None) -> date:
     The display rolls at 08:00 ICT on trading days, not at midnight. Weekends and
     holidays retain the last completed session. This is also the intraday reset boundary.
     """
-    current = cal._as_vn(now)
-    if cal.is_trading_day(current.date()) and current.time() >= time(8):
-        return current.date()
-    return cal.latest_completed_trading_session(current)
+    return cal.reference_session_date(now)
 
 
 async def refresh_session_references(

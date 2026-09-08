@@ -66,7 +66,7 @@ async def get_quant(symbol: str) -> Dict[str, Any]:
 
     # Covered Warrant: delegate to canonical LiveQuantEngine
     try:
-        analytics = await live_quant_engine.compute_warrant_analytics(sym_clean)
+        analytics = await live_quant_engine.resolve_display_analytics(sym_clean)
     except Exception as e:
         logger.error(f"Error computing warrant analytics for {sym_clean}: {e}")
         return {
@@ -74,36 +74,13 @@ async def get_quant(symbol: str) -> Dict[str, Any]:
             "instrument_type": "CW",
             "status": "ERROR",
             "is_available": False,
-            "unavailable_reason": str(e),
+            "unavailable_reason": "COMPUTATION_UNAVAILABLE",
             "missing_inputs": ["computation_error"],
             "provenance": "PROJECT_QUANT_ENGINE",
         }
 
-    basis = "LIVE"
-    as_of_session: str | None = None
-
-    # The live path only produces analytics for the current live session - outside trading
-    # hours it returns MARKET_INPUT_SESSION_MISMATCH because the last observed book belongs
-    # to a prior session. Fall back to temporally-aligned EOD analytics for the last
-    # completed session: the SAME source the watchlist IV columns and the instrument
-    # panel's OPTIONS ANALYTICS already display (market_snapshot_resolver._attach_analytics
-    # does exactly this live->EOD hop). Without it the AI reports "IV unavailable" while
-    # the numbers sit on screen next to it.
-    if not analytics.is_available:
-        last_session = latest_completed_trading_session(datetime.now(VN_TZ))
-        try:
-            eod = await live_quant_engine.compute_eod_analytics(sym_clean, last_session)
-        except Exception as e:  # noqa: BLE001 - EOD is best-effort; keep the live result
-            logger.info("get_quant EOD fallback for %s failed: %s", sym_clean, e)
-            eod = None
-        if eod is not None:
-            # On a closed market the EOD read is authoritative whether or not it solved -
-            # its unavailable_reason (e.g. METADATA_NOT_VERIFIED_CURRENT) is more actionable
-            # than the live path's session-mismatch.
-            analytics = eod
-            if eod.is_available:
-                basis = "LAST_COMPLETED_SESSION"
-                as_of_session = last_session.isoformat()
+    as_of_session = analytics.session_date
+    basis = "LAST_COMPLETED_SESSION" if as_of_session and as_of_session <= latest_completed_trading_session(datetime.now(VN_TZ)).isoformat() else "CURRENT_SESSION"
 
     if not analytics.is_available:
         missing_inputs = _determine_missing_inputs(analytics.unavailable_reason or "INCOMPLETE_INPUTS")
@@ -148,5 +125,9 @@ async def get_quant(symbol: str) -> Dict[str, Any]:
         "greeks_volatility_source": g.volatility_source.value if g and g.volatility_source else "UNAVAILABLE",
         "volatility_source": g.volatility_source.value if g and g.volatility_source else "UNAVAILABLE",
         "calculated_at": analytics.calculated_at,
+        "session_date": analytics.session_date,
+        "input_provenance": analytics.input_provenance,
+        "terms_version": analytics.terms_version,
+        "stale": analytics.stale,
         "provenance": "PROJECT_QUANT_ENGINE",
     }

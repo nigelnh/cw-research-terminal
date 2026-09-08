@@ -14,12 +14,14 @@ pytestmark = pytest.mark.asyncio
 
 
 def _spec(underlying="HPG", ratio=2.0):
-    return SimpleNamespace(underlying_symbol=underlying, effective_ratio=ratio)
+    return SimpleNamespace(underlying_symbol=underlying, effective_ratio=ratio,
+        metadata_verification=SimpleNamespace(value="VERIFIED_CURRENT"), is_adjusted=False, terms_effective_date=None)
 
 
 def _underlying_row():
     return ResolvedRow(
         symbol="HPG", instrument_type="STOCK",
+        reference_prov=FieldProvenance(DataTemporalState.DERIVED, DataSource.SESSION_REFERENCE, session_date="2026-09-08"),
         values={"reference_price": 21600.0, "ceiling_price": 23100.0, "floor_price": 20100.0},
     )
 
@@ -29,7 +31,7 @@ def _cw_row(**values):
     base.update(values)
     return ResolvedRow(
         symbol="CHPG2627", instrument_type="CW", underlying_symbol="HPG", values=base,
-        reference_prov=FieldProvenance(DataTemporalState.DERIVED, DataSource.SESSION_REFERENCE),
+        reference_prov=FieldProvenance(DataTemporalState.DERIVED, DataSource.SESSION_REFERENCE, session_date="2026-09-08"),
     )
 
 
@@ -43,7 +45,7 @@ async def test_bands_derived_from_underlying_limit_over_ratio(monkeypatch):
     # 1100 + (23100 - 21600) / 2 = 1850 ; 1100 - (21600 - 20100) / 2 = 350
     assert cw.values["ceiling_price"] == 1850.0
     assert cw.values["floor_price"] == 350.0
-    assert "underlying" in (cw.reference_prov.note or "")
+    assert "effective ratio" in (cw.reference_prov.note or "")
 
 
 async def test_bands_left_null_when_ratio_is_missing(monkeypatch):
