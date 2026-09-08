@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from app.market_data.market_session import market_session
+from app.market_data.session_reference import reference_session_date
 
 logger = logging.getLogger(__name__)
 
@@ -156,18 +157,42 @@ class MarketOverviewService:
                 "payload": result, "cached_at": self._cached_at,
             })
 
+    @staticmethod
+    def _payload_session(result: dict[str, Any]) -> str | None:
+        """The session the cached cards actually describe, from their own provenance."""
+        dates = [
+            ((item.get("provenance") or {}).get("price") or {}).get("session_date")
+            for item in result.get("indices", [])
+        ]
+        real = sorted(d for d in dates if d)
+        return real[-1] if real else None
+
     def _payload(self) -> dict[str, Any]:
         refreshing = self._refresh_task is not None and not self._refresh_task.done()
         if self._cache is None:
-            return {
-                "indices": [], "top_stock_volume": [], "top_cw_volume": [],
-                "as_of": None, "source": "FIINQUANT", "availability": "UNAVAILABLE",
-                "market_session_active": market_session.is_trading_active(),
-                "market_phase": market_session.get_market_phase().value,
-                "stock_scope": "HOSE (VNINDEX constituents)",
-                "cw_scope": "active CW registry", "refreshing": refreshing,
-            }
+            return self._empty_payload(refreshing)
         result = copy.deepcopy(self._cache)
+
+        # Past the 08:00 rollover, a payload from an earlier session is not "stale data",
+        # it is the WRONG DAY. Marking it stale and serving it anyway is what left index
+        # cards reading VN30 1,963.01 from 2026-09-07 at 08:44 the next morning, beside a
+        # watchlist that had already blanked - the board disagreeing with itself. Expiring
+        # the cache faster cannot fix this: the refresh it triggers only replaces the
+        # payload if the provider answers, so with the feed down the old cards persisted
+        # indefinitely. The session it belongs to is what decides, not its age.
+        payload_session = self._payload_session(result)
+        display_session = reference_session_date().isoformat()
+        if payload_session is not None and payload_session < display_session:
+            empty = self._empty_payload(refreshing)
+            empty.update({
+                "session_date": display_session,
+                "previous_session_date": payload_session,
+                "unavailable_reason": (
+                    "awaiting the new session; the last data is from " + payload_session
+                ),
+            })
+            return empty
+
         age = max(0.0, time.time() - self._cached_at)
         ttl = self._ttl_seconds()
         stale = age >= ttl or bool(result.get("stale"))
@@ -181,6 +206,17 @@ class MarketOverviewService:
             for item in result.get("indices", []):
                 item["stale"] = True
         return result
+
+    @staticmethod
+    def _empty_payload(refreshing: bool) -> dict[str, Any]:
+        return {
+            "indices": [], "top_stock_volume": [], "top_cw_volume": [],
+            "as_of": None, "source": "FIINQUANT", "availability": "UNAVAILABLE",
+            "market_session_active": market_session.is_trading_active(),
+            "market_phase": market_session.get_market_phase().value,
+            "stock_scope": "HOSE (VNINDEX constituents)",
+            "cw_scope": "active CW registry", "refreshing": refreshing,
+        }
 
     async def get(self, symbols: list[str]) -> dict[str, Any]:
         if self._provider is None:
