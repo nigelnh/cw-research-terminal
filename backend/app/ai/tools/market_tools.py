@@ -10,6 +10,7 @@ import logging
 from app.instruments.instrument_registry import instrument_registry
 from app.market_data.market_state import market_state
 from app.market_data.market_session import market_session
+from app.market_data.trading_calendar import session_context
 from app.market_data.market_subscription_manager import subscription_manager
 
 logger = logging.getLogger(__name__)
@@ -53,186 +54,58 @@ def get_market_status() -> Dict[str, Any]:
         "cache_available": bool(subscription_manager.store.is_available()),
         "server_time_vn": vn_now.strftime("%Y-%m-%d %H:%M:%S (VN UTC+7)"),
         "provenance": "APP_MARKET_SESSION",
+        "feedStatus": health.get("feedStatus"),
+        "sessionContext": session_context(vn_now),
     }
 
 
-def get_quote(symbol: str) -> Dict[str, Any]:
-    """
-    Returns canonical market data for a symbol from MarketState.
-    Preserves raw VND units for stocks/CWs and decimal percentages.
-    """
-    if not symbol or not isinstance(symbol, str):
-        return {
-            "symbol": "",
-            "status": "INVALID_ARGUMENT",
-            "message": "Symbol must be a non-empty string.",
-            "provenance": "APP_VALIDATION",
-        }
-
-    sym_clean = symbol.strip().upper()
-    quote = market_state.get_quote(sym_clean)
-    sess_status = market_session.get_session_status().value
-    quote_eligible = market_session.is_display_eligible(
-        (quote.trade_received_timestamp or quote.received_timestamp) if quote else None
-    )
-    inst_type = quote.instrument_type if quote else None
-
-    if not quote:
-        return {
-            "symbol": sym_clean,
-            "status": "UNAVAILABLE",
-            "message": f"No live price quote is currently available in MarketState for {sym_clean}.",
-            "market_session": sess_status,
-            "quote_display_eligible": quote_eligible,
-            "data_source": "NONE",
-            "provenance": "MARKET_STATE",
-        }
-
-    # Calculate spread and spread percentage if bid/ask available
-    spread: Optional[float] = None
-    spread_pct: Optional[float] = None
-    if quote.bid1_price is not None and quote.ask1_price is not None:
-        diff = quote.ask1_price - quote.bid1_price
-        if diff >= 0:
-            spread = diff
-            midpoint = (quote.bid1_price + quote.ask1_price) / 2.0
-            if midpoint > 0:
-                spread_pct = diff / midpoint
-
-    data_source = "REDIS_WARM_CACHE" if getattr(quote, "is_restored_from_cache", False) else "FIINQUANT_REALTIME"
-    cache_state = "REDIS_RESTORED" if getattr(quote, "is_restored_from_cache", False) else "LIVE"
-
+def _row_payload(row) -> Dict[str, Any]:
+    values = row.values
+    bid, ask = values.get("bid1_price"), values.get("ask1_price")
+    spread = ask - bid if bid is not None and ask is not None and ask >= bid else None
+    midpoint = (bid + ask) / 2 if bid is not None and ask is not None and spread is not None else None
     return {
-        "symbol": sym_clean,
-        "instrument_type": inst_type,
-        "last_price": quote.last_price,
-        "reference_price": quote.reference_price,
-        "change": quote.price_change,
-        "change_percent": quote.price_change_percent,
-        "open_price": quote.open_price,
-        "high_price": quote.high_price,
-        "low_price": quote.low_price,
-        "average_price": quote.average_price,
-        "total_volume": quote.total_volume,
-        "traded_quantity": quote.traded_quantity,
-        "trading_value": quote.trading_value,
-        "bid1_price": quote.bid1_price,
-        "bid1_quantity": quote.bid1_quantity,
-        "ask1_price": quote.ask1_price,
-        "ask1_quantity": quote.ask1_quantity,
-        "spread": spread,
-        "spread_percent": spread_pct,
-        "source_timestamp": quote.source_timestamp,
-        "trade_timestamp": quote.trade_timestamp,
-        "book_timestamp": quote.book_timestamp,
-        "reference_timestamp": quote.reference_timestamp,
-        "provider_market_status": quote.provider_market_status,
-        "received_timestamp": quote.received_timestamp,
-        "market_session": sess_status,
-        "market_phase": market_session.get_market_phase().value,
-        "quote_display_eligible": quote_eligible,
-        "data_source": data_source,
-        "cache_state": cache_state,
-        "provenance": data_source,
+        "symbol": row.symbol, "instrument_type": row.instrument_type,
+        "underlying_symbol": row.underlying_symbol or instrument_registry.underlying_of(row.symbol),
+        **values,
+        "change": values.get("price_change"), "change_percent": values.get("price_change_percent"),
+        "spread": spread, "spread_percent": spread / midpoint if midpoint and spread is not None else None,
+        "status": "AVAILABLE" if any(values.get(k) is not None for k in ("last_price", "bid1_price", "ask1_price")) else "UNAVAILABLE",
+        "session_date": row.quote_prov.session_date,
+        "quote_display_eligible": row.is_realtime_eligible,
+        "data_source": row.quote_prov.source.value,
+        "cache_state": row.quote_prov.state.value,
+        "provenance": row.to_wire()["provenance"],
     }
 
 
-def get_order_book(symbol: str) -> Dict[str, Any]:
-    """
-    Returns the currently available canonical top-3 order book depth from MarketState.
-    Strictly read-only; does NOT manufacture depth beyond available fields.
-    """
-    if not symbol or not isinstance(symbol, str):
-        return {
-            "symbol": "",
-            "status": "INVALID_ARGUMENT",
-            "message": "Symbol must be a non-empty string.",
-            "provenance": "APP_VALIDATION",
-        }
+async def get_quote(symbol: str) -> Dict[str, Any]:
+    """Same resolved instrument view as REST/UI, in RAW VND and decimal percentages."""
+    if not isinstance(symbol, str) or not symbol.strip():
+        return {"symbol": "", "status": "INVALID_ARGUMENT", "message": "Symbol must be a non-empty string."}
+    from app.market_data.market_snapshot_resolver import market_snapshot_resolver
+    from app.market_data.trading_calendar import session_context
+    rows = await market_snapshot_resolver.resolve_rows([symbol], enrich_snapshot_history=False)
+    return {**_row_payload(rows[0]), "sessionContext": session_context()}
 
-    sym_clean = symbol.strip().upper()
-    quote = market_state.get_quote(sym_clean)
 
-    if not quote:
-        return {
-            "symbol": sym_clean,
-            "status": "UNAVAILABLE",
-            "message": f"No order book depth available in MarketState for {sym_clean}.",
-            "provenance": "MARKET_STATE",
-        }
-
-    data_source = "REDIS_WARM_CACHE" if getattr(quote, "is_restored_from_cache", False) else "FIINQUANT_REALTIME"
-
-    return {
-        "symbol": sym_clean,
-        "bids": [
-            {"level": 1, "price": quote.bid1_price, "quantity": quote.bid1_quantity},
-            {"level": 2, "price": quote.bid2_price, "quantity": quote.bid2_quantity},
-            {"level": 3, "price": quote.bid3_price, "quantity": quote.bid3_quantity},
-        ],
-        "asks": [
-            {"level": 1, "price": quote.ask1_price, "quantity": quote.ask1_quantity},
-            {"level": 2, "price": quote.ask2_price, "quantity": quote.ask2_quantity},
-            {"level": 3, "price": quote.ask3_price, "quantity": quote.ask3_quantity},
-        ],
-        "source_timestamp": quote.source_timestamp,
-        "received_timestamp": quote.received_timestamp,
-        "data_source": data_source,
-        "provenance": data_source,
+async def get_order_book(symbol: str) -> Dict[str, Any]:
+    quote = await get_quote(symbol)
+    if quote.get("status") == "INVALID_ARGUMENT":
+        return quote
+    return {**quote,
+        "bids": [{"level": n, "price": quote.get(f"bid{n}_price"), "quantity": quote.get(f"bid{n}_quantity")} for n in (1, 2, 3)],
+        "asks": [{"level": n, "price": quote.get(f"ask{n}_price"), "quantity": quote.get(f"ask{n}_quantity")} for n in (1, 2, 3)],
     }
 
 
-def get_dashboard_snapshot(watched_symbols: Optional[List[str]] = None) -> Dict[str, Any]:
-    """
-    Returns the canonical market snapshot of all currently monitored primary instruments.
-    Reads directly from in-memory MarketState without making new vendor subscription calls.
-    """
-    symbols_to_check = watched_symbols if (watched_symbols and len(watched_symbols) > 0) else _live_universe()
-
-    items = []
-    for s in symbols_to_check:
-        sym_clean = s.strip().upper()
-        q = market_state.get_quote(sym_clean)
-        inst_type = q.instrument_type if q else None
-
-        spread: Optional[float] = None
-        spread_pct: Optional[float] = None
-        if q and q.bid1_price is not None and q.ask1_price is not None:
-            diff = q.ask1_price - q.bid1_price
-            if diff >= 0:
-                spread = diff
-                if q.bid1_price > 0:
-                    spread_pct = diff / q.bid1_price
-
-        # For a CW, the underlying it's written on - so a "rank the warrants on HPG"
-        # question can be answered by filtering this list, not by another tool call.
-        und = (q.underlying_symbol if q else None) or instrument_registry.underlying_of(sym_clean)
-
-        items.append({
-            "symbol": sym_clean,
-            "instrument_type": inst_type,
-            "underlying_symbol": und.upper() if und else None,
-            "last_price": q.last_price if q else None,
-            "reference_price": q.reference_price if q else None,
-            "change": q.price_change if q else None,
-            "change_percent": q.price_change_percent if q else None,
-            "bid1_price": q.bid1_price if q else None,
-            "ask1_price": q.ask1_price if q else None,
-            "spread": spread,
-            "spread_percent": spread_pct,
-            "total_volume": q.total_volume if q else None,
-            "trading_value": q.trading_value if q else None,
-            "data_source": ("REDIS_WARM_CACHE" if getattr(q, "is_restored_from_cache", False) else "FIINQUANT_REALTIME") if q else "NONE",
-            "is_available": q is not None,
-        })
-
-    sess_status = market_session.get_session_status().value
-    quote_eligible = market_session.is_trading_active()
-
-    return {
-        "universe_size": len(items),
-        "market_session": sess_status,
-        "quote_display_eligible": quote_eligible,
-        "instruments": items,
-        "provenance": "MARKET_STATE",
-    }
+async def get_dashboard_snapshot(watched_symbols: Optional[List[str]] = None, symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+    from app.market_data.market_snapshot_resolver import market_snapshot_resolver
+    from app.market_data.trading_calendar import session_context
+    symbols = watched_symbols or symbols or _live_universe()
+    rows = await market_snapshot_resolver.resolve_rows(symbols, enrich_snapshot_history=False)
+    items = [{**_row_payload(row), "is_available": row.quote_prov.source.value != "NONE"} for row in rows]
+    return {"universe_size": len(items), "instruments": items,
+            "sessionContext": session_context(), "provenance": "RESOLVED_INSTRUMENT_VIEW",
+            "market_session": market_session.get_session_status().value,
+            "quote_display_eligible": market_session.is_trading_active()}

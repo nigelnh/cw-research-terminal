@@ -1,3 +1,5 @@
+import { acceptMarketContext, useMarketContext, marketNow } from "@/data/market_session_store";
+import { resolveDashboardAnalytics } from "./resolve_dashboard_analytics";
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { MarketQuote } from "@/domain/models";
@@ -57,14 +59,15 @@ const EMPTY_META: DashboardMeta = {
  * query refetches when `marketSessionActive` flips).
  */
 export function useDashboardData(symbols: string[]): UseDashboardDataResult {
-  const { quotes, marketSessionActive, marketPhase, isRealtimeTracked } = useResearchMarket();
+  const { quotes, warrants, marketSessionActive, marketPhase, isRealtimeTracked } = useResearchMarket();
+  const { sessionContext } = useMarketContext();
   const qc = useQueryClient();
 
   const sortedKey = [...new Set(symbols.map((s) => s.toUpperCase()))].sort();
   const query = useQuery({
-    queryKey: ["dashboard-rows", sortedKey],
+    queryKey: ["dashboard-rows", sortedKey, sessionContext?.displaySessionDate],
     enabled: sortedKey.length > 0,
-    queryFn: ({ signal }) => backendClient.getDashboardRows(sortedKey, signal),
+    queryFn: async ({ signal }) => { const data = await backendClient.getDashboardRows(sortedKey, signal); acceptMarketContext(data); return data; },
     staleTime: 30_000,
     refetchInterval: marketSessionActive ? 30_000 : 5 * 60_000,
     // Rows the WebSocket does not carry (anything resolved SESSION_SNAPSHOT - most thin
@@ -76,9 +79,10 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
     refetchOnWindowFocus: true,
   });
   const analyticsQuery = useQuery({
-    queryKey: ["dashboard-analytics", sortedKey],
+    queryKey: ["dashboard-analytics", sortedKey, sessionContext?.displaySessionDate],
     enabled: sortedKey.length > 0,
-    queryFn: ({ signal }) => backendClient.getDashboardAnalytics(sortedKey, signal),
+    queryFn: async ({ signal }) => { const data = await backendClient.getDashboardAnalytics(sortedKey, signal); acceptMarketContext(data); return data; },
+    refetchInterval: 30_000,
     // Live analytics arrive over WS. This read is the independently hydrated EOD/current
     // cache and may finish later without delaying the quote table.
     staleTime: marketSessionActive ? 30_000 : 5 * 60_000,
@@ -91,25 +95,6 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
     qc.invalidateQueries({ queryKey: ["dashboard-rows"] });
     qc.invalidateQueries({ queryKey: ["dashboard-analytics"] });
   }, [marketSessionActive, marketPhase, qc]);
-
-  // 08:00 is a data rollover, not a trading-phase change. Refresh open overnight tabs
-  // even if there are no new ticks; the server calendar decides weekends/holidays.
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    const schedule = () => {
-      const now = Date.now();
-      const day = new Date(now + 7 * 3600_000).toISOString().slice(0, 10);
-      let next = Date.parse(`${day}T08:00:00+07:00`);
-      if (next <= now) next += 86400_000;
-      timer = setTimeout(() => {
-        qc.invalidateQueries({ queryKey: ["dashboard-rows"] });
-        qc.invalidateQueries({ queryKey: ["dashboard-analytics"] });
-        schedule();
-      }, next - now);
-    };
-    schedule();
-    return () => clearTimeout(timer);
-  }, [qc]);
 
   const data = query.data;
   const fallbackBySymbol = new Map<string, any>();
@@ -142,26 +127,18 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
         ? { analytics: { ...analyticsFallback.provenance } }
         : {}),
     };
-    const resolved = resolveDashboardQuote(fallbackQuote, live, provenance, marketSessionActive);
-    const analytics = analyticsFallback?.analytics ?? fb?.analytics ?? null;
-    // IV and the Greeks are computed FROM the prices in this row. The two come from
-    // separate endpoints with separate session policies, so after the 08:00 ICT rollover
-    // the price row correctly blanks for the new session while the quant read still
-    // answers with the previous session's EOD figures - leaving a row showing IV_BID
-    // 42.5% beside an empty BID_PRC. A derived number outliving the number it was derived
-    // from reads as live data, so it is dropped rather than shown undated.
-    const analyticsSession = provenance.analytics?.sessionDate ?? null;
-    const rowSession = provenance.quote?.sessionDate ?? null;
-    const strandedByRollover =
-      Boolean(analyticsSession && rowSession && analyticsSession < rowSession) &&
-      resolved.quote.lastPrice == null &&
-      resolved.quote.bidPrice == null &&
-      resolved.quote.askPrice == null;
+    const resolved = resolveDashboardQuote(fallbackQuote, live, provenance, marketSessionActive, marketNow(), sessionContext?.displaySessionDate);
+    const cw = warrants?.get(sym);
+    const analytics = resolveDashboardAnalytics(
+      [cw?.analyticsSnapshot, analyticsFallback?.analytics, fb?.analytics], resolved.quote,
+      sessionContext?.displaySessionDate ?? resolved.provenance.quote.sessionDate,
+      cw?.underlyingSymbol ? quotes.get(cw.underlyingSymbol) : undefined,
+    );
 
     return {
       symbol: sym,
       ...resolved,
-      analytics: strandedByRollover ? null : analytics,
+      analytics,
       trackedRealtime: Boolean(fb?.tracked_realtime ?? isRealtimeTracked(sym)),
     };
   };

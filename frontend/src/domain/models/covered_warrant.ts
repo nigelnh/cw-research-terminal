@@ -32,6 +32,7 @@ export interface CoveredWarrant {
 
   // Real-time Quantitative Greeks & Valuation
   analyticsCalculatedAt?: string | null;
+  analyticsSnapshot?: Record<string, any> | null;
   modelDte?: number | null;
   modelRiskFreeRate?: number | null;
   greeksVolatilitySource?: string | null;

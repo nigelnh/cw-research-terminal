@@ -82,7 +82,9 @@ describe("dashboard reload hydration", () => {
       analytics.resolve({
         rows: [{
           Symbol: "CHPG2617",
-          analytics: { ivTrade: 0.42, dte: 31 },
+          analytics: { ivTrade: 0.42, dte: 31, sessionDate: "2026-09-03",
+            modelInputs: { underlying_price: 25000, market_last: 440 },
+            inputProvenance: { underlying: { sessionDate: "2026-09-03" }, trade: { sessionDate: "2026-09-03" } } },
           provenance: { state: "LAST_SESSION", source: "QUANT_EOD" },
         }],
         as_of: "2026-09-04T07:00:02+07:00",
@@ -93,7 +95,7 @@ describe("dashboard reload hydration", () => {
       await analytics.promise;
     });
 
-    await waitFor(() => expect(result.current.getRow("CHPG2617")?.analytics).toEqual({
+    await waitFor(() => expect(result.current.getRow("CHPG2617")?.analytics).toMatchObject({
       ivTrade: 0.42,
       dte: 31,
     }));

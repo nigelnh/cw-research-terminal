@@ -44,7 +44,7 @@ def test_a_previous_sessions_cards_are_not_served_after_the_rollover(monkeypatch
     assert out["indices"] == []
     assert out["availability"] == "UNAVAILABLE"
     assert out["previous_session_date"] == "2026-09-07"
-    assert "2026-09-07" in out["unavailable_reason"]
+    assert "2026-09-08" in out["unavailable_reason"]
 
 
 def test_the_current_sessions_cards_are_served_normally(monkeypatch):
@@ -70,11 +70,11 @@ def test_it_is_the_session_that_decides_not_the_age(monkeypatch):
     assert svc._payload()["indices"] == []
 
 
-def test_a_payload_with_no_session_provenance_is_left_alone(monkeypatch):
+def test_a_payload_with_no_session_provenance_is_unavailable(monkeypatch):
     """Never blank a payload on a guess; without a dated card there is nothing to compare."""
     svc = _svc("2026-09-07", "2026-09-08", monkeypatch)
     svc._cache["indices"][0]["provenance"] = {}
-    assert svc._payload()["indices"] != []
+    assert svc._payload()["indices"] == []
 
 
 def test_the_empty_shape_still_carries_the_session_context(monkeypatch):

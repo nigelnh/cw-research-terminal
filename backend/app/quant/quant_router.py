@@ -101,7 +101,7 @@ async def get_warrant_analytics(symbol: str):
     sym_upper = symbol.strip().upper()
     if not (1 <= len(sym_upper) <= 32) or not sym_upper.replace(".", "").isalnum():
         raise HTTPException(status_code=400, detail=f"invalid symbol: {symbol!r}")
-    analytics = await live_quant_engine.compute_warrant_analytics(sym_upper)
+    analytics = await live_quant_engine.resolve_display_analytics(sym_upper)
     return analytics
 
 

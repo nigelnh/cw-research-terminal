@@ -71,7 +71,7 @@ class LiveBarBuilder:
                 bar["volume"] = None if bar["volume"] is None or qty is None else bar["volume"] + qty
                 bar["value"] = None if bar["value"] is None or match_value is None else bar["value"] + match_value
             patches.append({"type": "bar_patch", "symbol": symbol,
-                            "timeframe": timeframe, "bar": dict(bar),
+                            "timeframe": timeframe, "bar": {**bar, "as_of": dt.isoformat()},
                             "ts": int(dt.timestamp() * 1000)})
 
         daily = self._daily_bar(symbol, raw, dt, price)
@@ -133,6 +133,7 @@ class LiveBarBuilder:
                 bar["volume"] = total_vol
             if total_val is not None:
                 bar["value"] = total_val
+        bar["as_of"] = dt.isoformat()
         return dict(bar)
 
 

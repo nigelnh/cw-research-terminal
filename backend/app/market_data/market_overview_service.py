@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from app.market_data.market_session import market_session
 from app.market_data.session_reference import reference_session_date
+from app.market_data.trading_calendar import session_context
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ class MarketOverviewService:
             # cache uses. This layer is the one that persists, so without the cap a
             # payload built yesterday afternoon survived a restart and was still being
             # served at 08:51 the next morning, an hour after the board had rolled.
-            return max(60.0, min(
+            return max(0.0, min(
                 float(self._seconds_to_next_session()),
                 float(self._seconds_to_display_rollover()),
             ))
@@ -168,6 +169,13 @@ class MarketOverviewService:
         return real[-1] if real else None
 
     def _payload(self) -> dict[str, Any]:
+        result = self._session_payload()
+        result["sessionContext"] = session_context()
+        health = self._provider.get_health() if callable(getattr(self._provider, "get_health", None)) else {}
+        result["feedStatus"] = health.get("feedStatus")
+        return result
+
+    def _session_payload(self) -> dict[str, Any]:
         refreshing = self._refresh_task is not None and not self._refresh_task.done()
         if self._cache is None:
             return self._empty_payload(refreshing)
@@ -182,13 +190,31 @@ class MarketOverviewService:
         # indefinitely. The session it belongs to is what decides, not its age.
         payload_session = self._payload_session(result)
         display_session = reference_session_date().isoformat()
-        if payload_session is not None and payload_session < display_session:
+        # Validate every card and every leaderboard independently, including future or
+        # undated legacy payloads. One fresh index cannot legitimize yesterday's peers.
+        def day(item):
+            price = (item.get("provenance") or {}).get("price") or {}
+            return price.get("session_date") or item.get("session_date") or (item.get("as_of") or "")[:10]
+        for key in ("indices", "top_stock_volume", "top_cw_volume"):
+            result[key] = [item for item in result.get(key, []) if day(item) == display_session]
+        for item in result["indices"]:
+            for group, fields in {
+                "breadth": ("advancing", "ceiling", "unchanged", "declining", "floor"),
+                "totals": ("volume", "trading_value"),
+            }.items():
+                prov = (item.get("provenance") or {}).get(group)
+                if not prov or prov.get("session_date") != display_session:
+                    item.update({field: None for field in fields})
+                    item["availability"] = "PARTIAL"
+            item["sparkline"] = [p for p in item.get("sparkline", [])
+                                 if isinstance(p, dict) and str(p.get("timestamp", ""))[:10] == display_session]
+        if not any(result[key] for key in ("indices", "top_stock_volume", "top_cw_volume")):
             empty = self._empty_payload(refreshing)
             empty.update({
                 "session_date": display_session,
                 "previous_session_date": payload_session,
                 "unavailable_reason": (
-                    "awaiting the new session; the last data is from " + payload_session
+                    "Awaiting confirmed data for session " + display_session
                 ),
             })
             return empty
@@ -224,7 +250,7 @@ class MarketOverviewService:
             self.configure(subscription_manager.provider, subscription_manager.store)
         await self._load()
         ttl = self._ttl_seconds()
-        if self._cache is None or time.time() - self._cached_at >= ttl:
+        if self._cache is None or time.time() - self._cached_at >= ttl or self._payload_session(self._cache) != reference_session_date().isoformat():
             self.start_refresh(symbols)
         if self._cache is None and self._refresh_task is not None:
             try:

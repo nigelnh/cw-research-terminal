@@ -39,7 +39,9 @@ function row(quoteSession: string, values: Record<string, unknown> = {}) {
 }
 const analyticsRow = (session: string) => ({
   Symbol: "CHPG2617",
-  analytics: { ivBid: 0.425187, ivTrade: 0.444546, ivAsk: 0.450964, isAvailable: true },
+  analytics: { ivBid: 0.425187, ivTrade: 0.444546, ivAsk: 0.450964, isAvailable: true,
+    sessionDate: session, modelInputs: { underlying_price: 25000, market_bid: 1120, market_last: 1130, market_ask: 1140 },
+    inputProvenance: { underlying: { sessionDate: session }, trade: { sessionDate: session }, book: { sessionDate: session } } },
   provenance: { state: "LAST_SESSION", source: "QUANT_EOD", sessionDate: session },
 });
 
@@ -64,17 +66,20 @@ describe("analytics stranded by the 08:00 rollover", () => {
   });
 
   it("keeps IV when it belongs to the same session as the row", async () => {
-    rows.dashboard = [row("2026-09-07")];
+    rows.dashboard = [row("2026-09-07", { Traded: 1.13, Bid1_Prc: 1.12, Ask1_Prc: 1.14 })];
     rows.analytics = [analyticsRow("2026-09-07")];
     const get = await firstRow();
     await vi.waitFor(() => expect(get()?.analytics?.ivBid).toBeCloseTo(0.425187));
   });
 
-  it("keeps IV whenever the row still carries a price it could have come from", async () => {
-    // A last-session row showing yesterday's close SHOULD still show yesterday's IV.
+  it("rejects previous-session IV even if the new row has prices", async () => {
+    // Stricter than the first version of this rule, deliberately: if the row's quote has
+    // rolled to a new session, any price on it is a NEW price, so an IV computed from the
+    // previous session's prices does not describe it. The earlier comment here claimed the
+    // opposite and contradicted the assertion below.
     rows.dashboard = [row("2026-09-08", { Traded: 1130, Bid1_Prc: 1120, Ask1_Prc: 1140 })];
     rows.analytics = [analyticsRow("2026-09-07")];
     const get = await firstRow();
-    await vi.waitFor(() => expect(get()?.analytics?.ivBid).toBeCloseTo(0.425187));
+    await vi.waitFor(() => expect(get()?.analytics).toBeNull());
   });
 });

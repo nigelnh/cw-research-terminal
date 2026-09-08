@@ -670,6 +670,9 @@ async def test_engine_event_driven_computation_and_missing_trade():
         last_price=None,
     )
 
+    for quote in (und_quote, cw_quote):
+        quote.market_session_date = "2026-08-28"
+        quote.trade_timestamp = quote.book_timestamp = int(datetime(2026, 8, 28, 15, tzinfo=VN_TZ).timestamp() * 1000)
     engine.set_market_state_getter(lambda s: und_quote if s == "HPG" else cw_quote)
 
     analytics = await engine.compute_warrant_analytics(

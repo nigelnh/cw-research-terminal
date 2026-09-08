@@ -248,6 +248,8 @@ class HistoricalBar(BaseModel):
     value: Optional[float] = Field(default=None, description="Total traded value in VND")
     price_basis: Optional[Literal["RAW", "ADJUSTED"]] = None
     source: str = "FIINQUANT"
+    as_of: Optional[str] = None
+    complete: bool = True
     session_date: Optional[str] = None
     adjusted: bool = Field(default=True, description="Whether prices are adjusted for corporate actions")
 
@@ -324,6 +326,8 @@ class HistoricalCircuitOpenError(HistoricalDataError):
 
 
 class MarketHealthResponse(BaseModel):
+    sessionContext: Dict[str, Any] = Field(default_factory=dict)
+    feedStatus: Optional[Dict[str, Any]] = None
     status: str = "ok"
     provider: str
     authenticated: bool

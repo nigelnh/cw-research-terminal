@@ -210,32 +210,32 @@ export function PersonalDashboard({
           const fb = row?.analytics ?? null;
           const spec = getSpec(item.symbol);
           const underlying = spec?.underlyingSymbol || item.underlyingSymbol || cw?.underlyingSymbol || null;
-          const last = quote?.lastPrice ?? cw?.quote?.lastPrice ?? null;
-          const pctRaw = quote?.priceChangePercent ?? cw?.quote?.priceChangePercent ?? null;
+          const last = quote?.lastPrice ?? null;
+          const pctRaw = quote?.priceChangePercent ?? null;
           const lastTradingDate = spec?.lastTradingDate ?? null;
           const maturityDate = spec?.maturityDate ?? null;
           return {
             symbol: item.symbol,
             underlying,
             issuer: spec?.issuer ?? null,
-            bid: quote?.bidPrice ?? cw?.quote?.bidPrice ?? null,
-            ask: quote?.askPrice ?? cw?.quote?.askPrice ?? null,
+            bid: quote?.bidPrice ?? null,
+            ask: quote?.askPrice ?? null,
             last,
-            tradedQuantity: quote?.tradedQuantity ?? cw?.quote?.tradedQuantity ?? null,
-            change: quote?.priceChange ?? cw?.quote?.priceChange ?? null,
-            ref: quote?.referencePrice ?? cw?.quote?.referencePrice ?? null,
-            ceiling: quote?.ceilingPrice ?? cw?.quote?.ceilingPrice ?? null,
-            floor: quote?.floorPrice ?? cw?.quote?.floorPrice ?? null,
+            tradedQuantity: quote?.tradedQuantity ?? null,
+            change: quote?.priceChange ?? null,
+            ref: quote?.referencePrice ?? null,
+            ceiling: quote?.ceilingPrice ?? null,
+            floor: quote?.floorPrice ?? null,
             chgPct: typeof pctRaw === "number" ? pctRaw * 100 : null,
-            vol: quote?.totalVolume ?? cw?.quote?.totalVolume ?? null,
+            vol: quote?.totalVolume ?? null,
             strike: spec?.strikePrice ?? null,
             ratio: typeof spec?.exerciseRatio === "number" ? spec.exerciseRatio : null,
             dte: dteNumber(lastTradingDate, maturityDate, fb?.dte),
             dteText: dteDisplay(lastTradingDate, maturityDate, fb?.dte),
             lastTradingDate,
-            ivBid: cw?.ivBid ?? fb?.ivBid ?? null,
-            ivTrade: cw?.ivTrade ?? fb?.ivTrade ?? null,
-            ivAsk: cw?.ivAsk ?? fb?.ivAsk ?? null,
+            ivBid: fb?.ivBid ?? null,
+            ivTrade: fb?.ivTrade ?? null,
+            ivAsk: fb?.ivAsk ?? null,
             conflicting: spec?.metadataVerification === "CONFLICTING",
             pulses: {
               ...(quote?.realtimePulses ?? cw?.quote?.realtimePulses ?? {}),
@@ -359,12 +359,12 @@ export function PersonalDashboard({
     const selected = selectedSymbol === r.symbol;
     return (
       <tr
+        title={(() => { const row = getRow(r.symbol); const p = row?.provenance?.quote; return p ? `${p.stale ? "STALE" : row?.displayState} · ${p.sessionDate ?? "Session unavailable"} · ${p.asOf ?? "Time unavailable"}` : "Data unavailable"; })()}
         key={r.symbol}
         data-symbol={r.symbol}
         className={`watchlist-row${r.kind === "cw" ? " watchlist-cw" : ""}${dropTarget === r.symbol ? " is-drop-target" : ""}${searched.highlighted.has(r.symbol) ? " is-search-match" : ""}${selected ? " is-selected" : ""}`}
         tabIndex={0}
         draggable
-        title="Drag to reorder; Alt + ↑/↓ to move"
         onDragStart={(e) => {
           if ((e.target as HTMLElement).closest("button")) { e.preventDefault(); return; }
           drag.current = { type: "row", key: r.symbol };

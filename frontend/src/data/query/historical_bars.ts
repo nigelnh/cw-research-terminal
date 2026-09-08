@@ -4,6 +4,7 @@
  * BackendHistoricalDataProvider.getHistoricalBars().
  */
 
+import { marketNow } from "@/data/market_session_store";
 import type { HistoricalBar } from "@/domain/models";
 import type { ChartInterval } from "@/domain/historical/types";
 import { coarsenBarsToInterval } from "@/domain/historical/aggregation";
@@ -64,11 +65,18 @@ export async function fetchHistoricalBars(
   client: BackendClient = backendClient
 ): Promise<HistoricalBar[]> {
   const sym = req.symbol.trim().toUpperCase();
-  const { backendTimeframe } = resolveDataset(req.timeframe);
+  let { backendTimeframe } = resolveDataset(req.timeframe);
   const targetInterval = (req.interval ||
     (req.timeframe.toUpperCase() === "1D" ? "5m" : req.timeframe.toUpperCase() === "5D" ? "30m" : "1D")) as ChartInterval;
 
-  const raw = await client.getMarketHistory(sym, backendTimeframe, undefined, undefined, req.adjusted, signal);
+  const requested = String(targetInterval);
+  if (["1m", "5m", "15m", "30m", "1h"].includes(requested)) backendTimeframe = requested;
+  const intraday = ["1m", "5m", "15m", "30m", "1h"].includes(backendTimeframe);
+  const days = ({ "1D": 4, "5D": 10, "1M": 35, "3M": 100, "6M": 190 } as Record<string, number>)[req.timeframe.toUpperCase()] ?? 366;
+  const vnDate = (ms: number) => new Date(ms + 7 * 3600000).toISOString().slice(0, 10);
+  const raw = await client.getMarketHistory(sym, backendTimeframe,
+    intraday ? vnDate(marketNow() - days * 86400000) : undefined,
+    intraday ? vnDate(marketNow()) : undefined, req.adjusted, signal);
   const mapped = (raw || []).map(mapRawCWDataToHistoricalBar);
   const sliced = sliceBars(mapped, req.timeframe);
   return coarsenBarsToInterval(sliced, targetInterval, backendTimeframe);

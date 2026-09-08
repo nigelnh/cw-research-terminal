@@ -6,11 +6,13 @@ for active complete warrants based on realtime market price updates.
 
 import asyncio
 import logging
+import hashlib
 from datetime import date, datetime, time as dtime, timezone, timedelta
 from time import monotonic
 from typing import Callable, Dict, Optional, Set, Tuple, TYPE_CHECKING
 
 from app.core.config import settings
+from app.market_data.trading_calendar import reference_session_date, is_trading_active
 from app.instruments.instrument_schemas import (
     CoveredWarrantSpecification,
     InstrumentLifecycleStatus,
@@ -138,6 +140,7 @@ class LiveQuantEngine:
         # successful reads for hours, but negative reads only briefly so a just-finished
         # ingestion can become visible.  The in-flight maps coalesce simultaneous browser
         # tabs into one computation/query per key.
+        self._eod_epoch = 0
         self._eod_cache: Dict[Tuple[str, str], Tuple[float, WarrantAnalytics]] = {}
         self._eod_inflight: Dict[Tuple[str, str], asyncio.Task] = {}
         self._eod_close_cache: Dict[Tuple[str, str, str], Tuple[float, Optional[float]]] = {}
@@ -227,9 +230,24 @@ class LiveQuantEngine:
         if task is not None and not task.done():
             task.cancel()
 
-    def get_analytics(self, symbol: str) -> Optional[WarrantAnalytics]:
+    def get_analytics(self, symbol: str, *, now: Optional[datetime] = None) -> Optional[WarrantAnalytics]:
         """Returns the latest cached quantitative analytics for a symbol."""
-        return self._analytics_cache.get(symbol.strip().upper())
+        value = self._analytics_cache.get(symbol.strip().upper())
+        return value if value is not None and (now is None or value.session_date == reference_session_date(now).isoformat()) else None
+
+    async def resolve_display_analytics(self, symbol: str, *, now=None, sessionmaker=None) -> WarrantAnalytics:
+        from app.market_data.trading_calendar import latest_completed_trading_session
+        current = now or get_vietnam_now()
+        display = reference_session_date(current)
+        if display <= latest_completed_trading_session(current):
+            result = await self.compute_eod_analytics(symbol, display, sessionmaker=sessionmaker)
+        else:
+            result = await self.compute_warrant_analytics(symbol)
+        if result.session_date and result.session_date != display.isoformat():
+            return WarrantAnalytics(symbol=symbol, underlying_symbol=result.underlying_symbol,
+                calculated_at=current.isoformat(), session_date=display.isoformat(),
+                is_available=False, unavailable_reason="MARKET_INPUT_SESSION_MISMATCH")
+        return result
 
     async def compute_warrant_analytics(
         self,
@@ -254,6 +272,10 @@ class LiveQuantEngine:
             cw_symbol, spec, cw_state, und_state, as_of=as_of, max_hv_as_of=max_hv_as_of
         )
         resolved = spec or await instrument_registry.get_instrument(cw_symbol.strip().upper())
+        valuation_time = as_of or get_vietnam_now()
+        analytics.session_date = (valuation_time.date() if as_of else reference_session_date(valuation_time)).isoformat()
+        if resolved is not None:
+            analytics.terms_version = hashlib.sha256(resolved.model_dump_json().encode()).hexdigest()[:16]
         if resolved is not None:
             cstate, tradable = derive_contract_state(resolved.last_trading_date, resolved.maturity_date, now=as_of)
         else:
@@ -270,24 +292,18 @@ class LiveQuantEngine:
     async def compute_eod_analytics(
         self, cw_symbol: str, session_date: "date", *, sessionmaker=None
     ) -> WarrantAnalytics:
-        """Temporally-aligned analytics for one completed trading session.
-
-        Both legs are read for the SAME ``session_date`` from ``market_bars``: the CW close
-        (RAW) and the underlying close (ADJUSTED). T / DTE / lifecycle are evaluated at
-        15:00 ICT of that date. Produces IV-trade (CW last + underlying close are known),
-        Greeks, theoretical value, moneyness, DTE. IV-bid / IV-ask / IV-mid have no EOD
-        equivalent - a daily bar carries no order book - so they're seeded from the most
-        recently observed bid1/ask1 instead (via the market-state getter, the same
-        last-known book already shown in the dashboard's BID_PRC/ASK_PRC columns), not
-        necessarily from this exact session's own close. HV uses the latest available
-        HV_22 estimate (documented approximation - HV_22 moves negligibly in one session).
+        """Value both legs at RAW closes of the selected session and effective terms.
+        HV uses confirmed adjusted history through that date. Book IV is available only
+        with an observed book from the same session; a daily bar supplies no book.
         """
         cw_sym = cw_symbol.strip().upper()
         cache_key = (cw_sym, session_date.isoformat())
+        spec = await instrument_registry.get_instrument(cw_sym)
+        version = hashlib.sha256(spec.model_dump_json().encode()).hexdigest()[:16] if spec else None
         cached = self._eod_cache.get(cache_key)
         if cached is not None:
             expires_at, value = cached
-            if expires_at > monotonic():
+            if expires_at > monotonic() and value.terms_version == version:
                 return value
             self._eod_cache.pop(cache_key, None)
 
@@ -321,11 +337,18 @@ class LiveQuantEngine:
         *,
         sessionmaker=None,
     ) -> WarrantAnalytics:
+        epoch = self._eod_epoch
         result = await self._compute_eod_analytics_uncached(
             cw_sym, session_date, sessionmaker=sessionmaker
         )
+        result.session_date = session_date.isoformat()
+        terms = await instrument_registry.get_instrument(cw_sym)
+        if result.terms_version is None and terms is not None:
+            result.terms_version = hashlib.sha256(terms.model_dump_json().encode()).hexdigest()[:16]
+        if epoch != self._eod_epoch:
+            return result
         ttl = (
-            settings.QUANT_EOD_CACHE_TTL_SECONDS
+            min(60, settings.QUANT_EOD_CACHE_TTL_SECONDS)
             if result.is_available
             else settings.QUANT_EOD_UNAVAILABLE_CACHE_TTL_SECONDS
         )
@@ -362,7 +385,7 @@ class LiveQuantEngine:
 
         cw_close, und_close = await asyncio.gather(
             self._get_eod_close(sm, cw_sym, session_date, price_basis="RAW"),
-            self._get_eod_close(sm, und_sym, session_date, price_basis="ADJUSTED"),
+            self._get_eod_close(sm, und_sym, session_date, price_basis="RAW"),
         )
         missing = []
         if cw_close is None:
@@ -380,18 +403,25 @@ class LiveQuantEngine:
                                   market_session_date=session_text)
         und_state = CanonicalQuote(symbol=und_sym, instrument_type="STOCK", last_price=und_close,
                                    market_session_date=session_text)
-        # IV_TRADE/moneyness/Greeks use the session's own close (above) for temporal
-        # correctness. IV_BID/IV_ASK have no EOD equivalent - a daily bar carries no order
-        # book - so there is nothing session-aligned to use; seed them from the most
-        # recently observed book instead, the same last-known bid1/ask1 already shown in
-        # the dashboard's own BID_PRC/ASK_PRC columns (live-tick state, warm-cache-restored
-        # across a restart), rather than leaving IV_BID/IV_ASK blank. `compute_warrant_
-        # analytics` already guards a non-positive/missing price down to None per side.
+        # Only the observed book from this exact session is eligible for EOD IV.
         if self._market_state_getter:
-            last_book = self._market_state_getter(cw_sym)
-            if last_book:
-                cw_state.bid1_price = last_book.bid1_price
-                cw_state.ask1_price = last_book.ask1_price
+            book = self._market_state_getter(cw_sym)
+            if book and book.market_session_date == session_text and book.book_timestamp:
+                cw_state.bid1_price, cw_state.ask1_price = book.bid1_price, book.ask1_price
+                cw_state.book_timestamp = book.book_timestamp
+        if cw_state.book_timestamp is None:
+            try:
+                from app.persistence.repositories.snapshot_repository import SnapshotRepository
+                async with sm() as db_session:
+                    snap = await SnapshotRepository(db_session).get_for_session(cw_sym, session_date)
+                if snap is not None and snap.book_timestamp is not None:
+                    stamp = snap.book_timestamp
+                    if stamp.astimezone(VN_TZ).date() == session_date:
+                        cw_state.bid1_price, cw_state.ask1_price = snap.bid1_price, snap.ask1_price
+                        cw_state.book_timestamp = int(stamp.timestamp() * 1000)
+            except Exception:
+                logger.info("EOD book unavailable for %s at %s", cw_sym, session_date)
+        cw_state.trade_timestamp = und_state.trade_timestamp = int(as_of.timestamp() * 1000)
         return await self.compute_warrant_analytics(
             cw_sym, spec=spec, cw_state=cw_state, und_state=und_state, as_of=as_of,
             max_hv_as_of=session_date,
@@ -438,11 +468,14 @@ class LiveQuantEngine:
         *,
         price_basis: str,
     ) -> Optional[float]:
+        epoch = self._eod_epoch
         value = await self._eod_close(
             sessionmaker, symbol, session_date, price_basis=price_basis
         )
+        if epoch != self._eod_epoch:
+            return value
         ttl = (
-            settings.QUANT_EOD_CACHE_TTL_SECONDS
+            min(60, settings.QUANT_EOD_CACHE_TTL_SECONDS)
             if value is not None
             else settings.QUANT_EOD_UNAVAILABLE_CACHE_TTL_SECONDS
         )
@@ -515,7 +548,7 @@ class LiveQuantEngine:
         except Exception:  # noqa: BLE001
             return None
         for b in filled:
-            if (b.session_date or b.date[:10]) == session_iso and b.close:
+            if (b.session_date or b.date[:10]) == session_iso and b.close and b.complete and b.source != "OBSERVED_SESSION":
                 return float(b.close)
         return None
 
@@ -585,6 +618,10 @@ class LiveQuantEngine:
                 unavailable_reason=f"METADATA_NOT_VERIFIED_CURRENT ({spec.metadata_verification})",
             )
 
+        if (spec.is_adjusted and not spec.terms_effective_date) or (spec.terms_effective_date and spec.terms_effective_date > _now.date().isoformat()):
+            return WarrantAnalytics(symbol=cw_sym, underlying_symbol=und_sym, calculated_at=now_iso,
+                is_available=False, unavailable_reason="TERMS_NOT_VERIFIED_FOR_SESSION")
+
         eff_strike = spec.effective_strike
         if not eff_strike or eff_strike <= 0:
             return WarrantAnalytics(
@@ -635,7 +672,7 @@ class LiveQuantEngine:
         # Resolve Underlying Spot Price S (prefer last_price -> bid1_price -> ref_price)
         S: Optional[float] = None
         if und_state:
-            S = und_state.last_price or und_state.bid1_price or und_state.reference_price
+            S = und_state.last_price
 
         if not S or S <= 0:
             return WarrantAnalytics(
@@ -646,7 +683,7 @@ class LiveQuantEngine:
                 unavailable_reason="UNDERLYING_SPOT_PRICE_UNAVAILABLE",
             )
 
-        expected_session = _now.date().isoformat()
+        expected_session = (_now.date() if as_of else reference_session_date(_now)).isoformat()
         if (cw_state and cw_state.market_session_date and cw_state.market_session_date != expected_session) or (
             und_state and und_state.market_session_date and und_state.market_session_date != expected_session
         ):
@@ -681,6 +718,42 @@ class LiveQuantEngine:
         bid_price: Optional[float] = cw_state.bid1_price if cw_state else None
         ask_price: Optional[float] = cw_state.ask1_price if cw_state else None
         last_price: Optional[float] = cw_state.last_price if cw_state else None
+
+        def input_origin(state, stamp):
+            return {"sessionDate": state.market_session_date if state else None,
+                    "asOf": datetime.fromtimestamp(stamp / 1000, VN_TZ).isoformat() if stamp else None,
+                    "source": "EOD" if as_of else "OBSERVED_QUOTE", "priceBasis": "RAW"}
+        cw_trade_ts = (cw_state.trade_timestamp or cw_state.source_timestamp) if cw_state else None
+        cw_book_ts = cw_state.book_timestamp if cw_state else None
+        und_ts = (und_state.trade_timestamp or und_state.source_timestamp) if und_state else None
+        provenance = {"underlying": input_origin(und_state, und_ts),
+                      "trade": input_origin(cw_state, cw_trade_ts), "book": input_origin(cw_state, cw_book_ts)}
+        if bid_price is not None and ask_price is not None and ask_price < bid_price:
+            bid_price = ask_price = None
+        if as_of is None and self._market_state_getter:
+            def valid(stamp, state):
+                return bool(stamp and state and state.market_session_date == expected_session
+                            and datetime.fromtimestamp(stamp / 1000, VN_TZ).date().isoformat() == expected_session
+                            and stamp <= _now.timestamp() * 1000)
+            if not valid(und_ts, und_state):
+                return WarrantAnalytics(symbol=cw_sym, underlying_symbol=und_sym, calculated_at=now_iso,
+                    is_available=False, unavailable_reason="UNDERLYING_OBSERVATION_UNAVAILABLE")
+            if not valid(cw_trade_ts, cw_state):
+                last_price = None
+            if not valid(cw_book_ts, cw_state):
+                bid_price = ask_price = None
+            required = [ts for ts in (und_ts, cw_trade_ts if last_price else None, cw_book_ts if bid_price or ask_price else None) if ts]
+            if is_trading_active(_now) and any(_now.timestamp() * 1000 - ts > 180000 for ts in required):
+                cached = self.get_analytics(cw_sym, now=_now)
+                if (cached and cached.is_available and cached.model_inputs
+                        and cached.terms_version == hashlib.sha256(spec.model_dump_json().encode()).hexdigest()[:16]
+                        and cached.model_inputs.underlying_price == S
+                        and cached.model_inputs.market_last == last_price
+                        and cached.model_inputs.market_bid == bid_price
+                        and cached.model_inputs.market_ask == ask_price):
+                    return cached.model_copy(update={"stale": True}, deep=True)
+                return WarrantAnalytics(symbol=cw_sym, underlying_symbol=und_sym, calculated_at=now_iso,
+                    is_available=False, unavailable_reason="STALE_PRICING_INPUTS")
 
         # 7. Solve Implied Volatilities (Bid, Ask, Trade, Mid)
         iv_bid, _ = solve_implied_volatility(
@@ -804,12 +877,20 @@ class LiveQuantEngine:
             model_price_at_iv_mid=model_price_mid,
             greeks=greeks,
             model_inputs=inputs,
+            input_provenance=provenance,
         )
         return analytics
 
     # ------------------------------------------------------------------ #
     # Latest-wins scheduling (all sync methods run on the loop thread)
     # ------------------------------------------------------------------ #
+    def invalidate_eod(self) -> None:
+        self._eod_epoch += 1
+        self._eod_cache.clear()
+        self._eod_close_cache.clear()
+        self._eod_inflight.clear()
+        self._eod_close_inflight.clear()
+
     def startup(self) -> None:
         """Re-arm the scheduler (clears a prior ``shutdown``). Called from app startup."""
         self._shutting_down = False

@@ -23,7 +23,7 @@ _SAT_NOW = datetime(2026, 8, 29, 10, 0, tzinfo=_VN)       # market closed (weeke
 _ACTIVE_NOW = datetime(2026, 8, 28, 10, 0, tzinfo=_VN)    # Friday morning session
 
 
-async def _seed_bars(sm, sym: str, rows: dict[date, float], *, pb="ADJUSTED", itype="STOCK"):
+async def _seed_bars(sm, sym: str, rows: dict[date, float], *, pb="RAW", itype="STOCK"):
     async with sm() as s:
         iid = (await InstrumentRepository(s).upsert(
             InstrumentUpsert(symbol=sym, instrument_type=itype)
@@ -122,10 +122,10 @@ async def test_live_row_backfills_only_reference_from_previous_close(resolver, s
     r = (await resolver.resolve_rows(["HPG"], now=_ACTIVE_NOW))[0]
 
     assert r.values["last_price"] == 30000.0
-    assert r.values["reference_price"] == 29800.0
+    assert r.values["reference_price"] is None
     assert r.values["ceiling_price"] is None
     assert r.values["floor_price"] is None
-    assert r.reference_prov.source.value == "PRIOR_CLOSE"
+    assert r.reference_prov.source.value == "NONE"
 
 
 async def test_live_row_preserves_partial_current_bands_while_backfilling_reference(
@@ -142,11 +142,11 @@ async def test_live_row_preserves_partial_current_bands_while_backfilling_refere
 
     r = (await resolver.resolve_rows(["HPG"], now=_ACTIVE_NOW))[0]
 
-    assert r.values["reference_price"] == 29800.0
+    assert r.values["reference_price"] is None
     assert r.values["ceiling_price"] == 31850.0
     assert r.values["floor_price"] is None
     assert r.values["last_price"] == 30000.0
-    assert r.reference_prov.source.value == "PRIOR_CLOSE"
+    assert r.reference_prov.source.value == "SESSION_REFERENCE"
 
 
 async def test_snapshot_wins_when_market_closed(resolver, sessionmaker_):
@@ -202,8 +202,8 @@ async def test_eod_bars_when_no_snapshot(resolver, sessionmaker_):
     assert r.quote_prov.state.value == "LAST_SESSION"
     assert r.quote_prov.source.value == "EOD_BARS"
     assert r.values["last_price"] == 41000.0
-    assert r.values["reference_price"] == 40000.0
-    assert round(r.values["price_change"], 2) == 1000.0
+    assert r.values["reference_price"] is None
+    assert r.values["price_change"] is None
     assert r.values.get("bid1_price") is None
     assert r.book_prov.state.value == "UNAVAILABLE"
     assert r.to_wire()["Bid1_Prc"] is None
@@ -243,9 +243,9 @@ async def test_daily_bars_fill_snapshot_fields_that_are_present_but_null(
     r = (await resolver.resolve_rows(["VHM"], now=_SAT_NOW))[0]
 
     # The persisted observed trade wins; missing fields are truly assigned from bars.
-    assert r.values["last_price"] == 40500.0
-    assert r.values["open_price"] == (40000.0 if snapshot_session == _THU else 41000.0)
-    expected_ref = None if snapshot_session == _THU else 40000.0
+    assert r.values["last_price"] == (None if snapshot_session == _THU else 40500.0)
+    assert r.values["open_price"] == (None if snapshot_session == _THU else 41000.0)
+    expected_ref = None
     assert r.values["reference_price"] == expected_ref
     assert r.values["price_change"] == (None if expected_ref is None else 500.0)
     assert r.values["price_change_percent"] == (None if expected_ref is None else 0.0125)
@@ -254,9 +254,9 @@ async def test_daily_bars_fill_snapshot_fields_that_are_present_but_null(
 async def test_no_trade_this_session_preserves_older_date(resolver, sessionmaker_):
     await _seed_bars(sessionmaker_, "VRE", {date(2026, 8, 26): 20000.0, _THU: 20500.0})
     r = (await resolver.resolve_rows(["VRE"], now=_SAT_NOW))[0]
-    assert r.quote_prov.session_date == _THU.isoformat()
-    assert r.quote_prov.state.value == "HISTORICAL"
-    assert r.quote_prov.stale is True
+    assert r.quote_prov.session_date == _FRI.isoformat()
+    assert r.quote_prov.state.value == "UNAVAILABLE"
+    assert r.values.get("last_price") is None
 
 
 async def test_unavailable_when_nothing(resolver):

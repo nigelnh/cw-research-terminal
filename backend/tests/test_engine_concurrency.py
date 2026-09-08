@@ -430,6 +430,15 @@ async def test_G_scheduled_path_matches_direct_compute_numerically():
     eng.set_historical_vol_getter(hv.get_estimate)
     eng.set_market_state_getter(lambda s: {"CHPG2602": cw, "HPG": und}.get(s))
 
+    from app.quant.quant_engine import get_vietnam_now
+    from app.market_data.trading_calendar import reference_session_date, VN_TZ
+    from datetime import datetime, time
+    day = reference_session_date(get_vietnam_now())
+    stamp = int(min(get_vietnam_now(), datetime.combine(day, time(15), tzinfo=VN_TZ)).timestamp() * 1000)
+    for quote in (cw, und):
+        quote.market_session_date = day.isoformat()
+        quote.trade_timestamp = quote.book_timestamp = stamp
+
     # 1. direct (already-verified) path
     direct = await eng.compute_warrant_analytics("CHPG2602", spec=spec, cw_state=cw, und_state=und)
 

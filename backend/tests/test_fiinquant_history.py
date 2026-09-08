@@ -150,7 +150,7 @@ async def test_auth_failure_opens_circuit_breaker_and_cooldown_blocks_subsequent
     with pytest.raises(HistoricalAuthError) as exc_info:
         await p.get_historical_bars("HPG", timeframe="1D")
     assert not isinstance(exc_info.value, HistoricalCircuitOpenError)
-    assert "auth failure" in str(exc_info.value).lower()
+    assert "AUTH_REQUIRED" in str(exc_info.value)
     health = p.get_health()
     assert health["historical_circuit_open"] is True
     assert health["historical_status"] == "DEGRADED"
@@ -195,7 +195,7 @@ async def test_entitlement_failure_classification():
     with pytest.raises(HistoricalEntitlementError) as exc_info:
         await p.get_historical_bars("SPECIAL_TICKER", timeframe="1D")
 
-    assert "entitlement failure" in str(exc_info.value).lower()
+    assert "DATASET_FORBIDDEN" in str(exc_info.value)
     assert p.get_health()["historical_status"] == "DEGRADED"
 
 
@@ -214,7 +214,7 @@ async def test_upstream_server_error_classification():
     with pytest.raises(HistoricalUpstreamError) as exc_info:
         await p.get_historical_bars("HPG", timeframe="1D")
 
-    assert "upstream server error" in str(exc_info.value).lower()
+    assert "UPSTREAM_UNAVAILABLE" in str(exc_info.value)
 
 
 async def test_transport_error_classification():

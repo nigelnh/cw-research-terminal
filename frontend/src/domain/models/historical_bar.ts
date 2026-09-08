@@ -16,6 +16,7 @@ export interface HistoricalBar {
   source?: string | null;
   sessionDate?: string | null;
   complete?: boolean;
+  asOf?: string | null;
 }
 
 export interface UnderlyingClosePoint {

@@ -156,6 +156,8 @@ export function TradingChart({
       symbol: displaySym,
       interval,
       timestamp: latestBar.date,
+      source: latestBar.source, sessionDate: latestBar.sessionDate,
+      priceBasis: latestBar.priceBasis, asOf: latestBar.asOf, complete: latestBar.complete,
       open: latestBar.open,
       high: latestBar.high,
       low: latestBar.low,
@@ -391,10 +393,13 @@ export function TradingChart({
       const data = param.seriesData.get(activeSeries) as any;
       if (data && data.open !== undefined) {
         const chg = data.close - data.open;
+        const hovered = (mode === "UNDERLYING" ? effectiveUndBars : effectiveCwBars).find(b => Number(toChartTime(b.date)) === Number(param.time));
         setHoveredReadout({
           symbol: mode === "UNDERLYING" ? underlyingSymbol || symbol : symbol,
           interval,
-          timestamp: String(param.time),
+          timestamp: hovered?.date ?? String(param.time),
+          source: hovered?.source, sessionDate: hovered?.sessionDate,
+          priceBasis: hovered?.priceBasis, asOf: hovered?.asOf, complete: hovered?.complete,
           open: data.open,
           high: data.high,
           low: data.low,
@@ -431,16 +436,13 @@ export function TradingChart({
     const s = candleSeriesRef.current;
     if (!s) return;
     const src = mode === "UNDERLYING" ? effectiveUndBars : effectiveCwBars;
-    const b = src[src.length - 1];
-    if (!b || b.open === null || b.high === null || b.low === null || b.close === null) return;
-    const time = toChartTime(b.date);
-    if (Number(time) <= 0) return;
-    s.update({ time, open: b.open, high: b.high, low: b.low, close: b.close });
-    const v = volumeSeriesRef.current;
-    if (v && b.volume !== null && b.volume >= 0) {
-      v.update({ time, value: b.volume, color: b.close >= b.open ? VOL_UP : VOL_DOWN });
-    }
-  }, [effectiveCwBars, effectiveUndBars, mode, toChartTime]);
+    const range = chartInstanceRef.current?.timeScale().getVisibleLogicalRange();
+    const shaped = candleFrom(src);
+    s.setData(shaped.candles);
+    volumeSeriesRef.current?.setData(shaped.volume);
+    if (range) chartInstanceRef.current?.timeScale().setVisibleLogicalRange(range);
+
+  }, [effectiveCwBars, effectiveUndBars, mode, candleFrom]);
 
   const handleResetZoom = () => chartInstanceRef.current?.timeScale().fitContent();
 
@@ -476,6 +478,7 @@ export function TradingChart({
             </span>
           </div>
 
+          {activeReadout && <span style={{ fontSize: 9, color: "var(--t-62)" }} title={activeReadout.asOf ?? "Observation time unavailable"}>{activeReadout.sessionDate ?? activeReadout.timestamp} · {activeReadout.priceBasis ?? "Basis unavailable"} · {activeReadout.source ?? "Source unavailable"}{activeReadout.complete === false ? " · PARTIAL" : ""}</span>}
           {activeReadout && activeReadout.open !== null && (
             <div
               style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--muted-foreground)", fontSize: "10.5px" }}

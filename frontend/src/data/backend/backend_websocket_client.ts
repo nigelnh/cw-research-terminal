@@ -1,3 +1,5 @@
+import { acceptMarketContext, marketSessionStore } from "@/data/market_session_store";
+import { normalizeAnalytics } from "@/data/query/resolve_dashboard_analytics";
 import { config, normalizeWsUrl } from "@/config";
 import type {
   GatewayConnectionState,
@@ -455,6 +457,7 @@ export class BackendWebSocketClient {
   private routeIncomingMessage(msg: any): void {
     switch (msg.type) {
       case "status": {
+        acceptMarketContext(msg);
         const nextSessionKey = String(
           msg.market_session_date ?? msg.session_date ?? msg.market_session ?? "",
         );
@@ -640,6 +643,8 @@ export class BackendWebSocketClient {
         if (!sym || !msg.analytics) break;
 
         const an = msg.analytics;
+        const display = marketSessionStore.getSnapshot().sessionContext?.displaySessionDate;
+        if (display && an.session_date !== display) break;
         const existing = this.warrantsMap.get(sym);
         if (existing) {
           const g = an.greeks || {};
@@ -659,6 +664,7 @@ export class BackendWebSocketClient {
           };
           const updatedCw: CoveredWarrant = {
             ...existing,
+            analyticsSnapshot: normalizeAnalytics(an),
             analyticsCalculatedAt:
               an.calculated_at ?? existing.analyticsCalculatedAt ?? null,
             modelDte: an.model_inputs?.days_to_expiry ?? null,

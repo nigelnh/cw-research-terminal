@@ -1,3 +1,4 @@
+import { marketSessionStore } from "@/data/market_session_store";
 import type { HistoricalBar } from "@/domain/models";
 
 type Listener = () => void;
@@ -9,6 +10,8 @@ const key = (symbol: string, timeframe: string) => `${symbol.toUpperCase()}|${ti
 export function acceptLiveBarMessage(message: any): void {
   const b = message?.bar;
   if (!b || !message.symbol || !message.timeframe || b.price_basis !== "RAW") return;
+  const display = marketSessionStore.getSnapshot().sessionContext?.displaySessionDate;
+  if (display && b.session_date !== display) return;
   const mapped: HistoricalBar = {
     symbol: String(message.symbol).toUpperCase(), date: String(b.date),
     open: Number.isFinite(b.open) ? b.open : null,
@@ -18,9 +21,13 @@ export function acceptLiveBarMessage(message: any): void {
     volume: Number.isFinite(b.volume) ? b.volume : null,
     value: Number.isFinite(b.value) ? b.value : null,
     priceBasis: "RAW", source: String(b.source || "FIINQUANT_TRADE_STREAM"),
-    sessionDate: b.session_date ?? null, complete: false,
+    sessionDate: b.session_date ?? null, complete: false, asOf: b.as_of ?? (message.ts ? new Date(message.ts).toISOString() : null),
   };
-  bars.set(`${key(mapped.symbol, message.timeframe)}|${mapped.date}`, mapped);
+  const barKey = `${key(mapped.symbol, message.timeframe)}|${mapped.date}`;
+  const previous = bars.get(barKey);
+  if (previous?.asOf && (!mapped.asOf || Date.parse(mapped.asOf) < Date.parse(previous.asOf))) return;
+  if (display) for (const [k, bar] of bars) if (bar.sessionDate !== display) bars.delete(k);
+  bars.set(barKey, mapped);
   revision++;
   listeners.forEach((listener) => listener());
 }

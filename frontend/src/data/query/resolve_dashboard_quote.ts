@@ -18,7 +18,7 @@ export function isQuoteTimestampEligible(stamp: string | null, now = Date.now())
 /** Merge independently dated observations, not whole quote objects or receipt clocks. */
 export function resolveDashboardQuote(
   fallback: MarketQuote, live: MarketQuote | undefined, source: RowProvenance,
-  active: boolean, now = Date.now(),
+  active: boolean, now = Date.now(), displaySession?: string,
 ): { quote: MarketQuote; provenance: RowProvenance; displayState: DisplayState } {
   const quote = { ...fallback };
   const provenance = { ...source, quote: { ...source.quote }, book: { ...source.book } };
@@ -40,7 +40,15 @@ export function resolveDashboardQuote(
       Object.fromEntries(keys.filter(key => from?.[key] != null).map(key => [key, from![key]])),
     );
   };
-  if (live && session && session <= today) {
+  if (displaySession) {
+    for (const [group, fields] of [["quote", TRADE], ["book", BOOK], ["reference", REFERENCE]] as const) {
+      if (provenance[group]?.sessionDate !== displaySession) {
+        copy(fields);
+        provenance[group] = { state: "UNAVAILABLE", source: "NONE", sessionDate: displaySession };
+      }
+    }
+  }
+  if (live && session && session <= today && (!displaySession || session === displaySession)) {
     for (const [group, fields, stamp, hasObservation] of [
       ["quote", TRADE, quoteTimestamp(live), live.lastPrice !== null],
       ["book", BOOK, live.bookTimestamp ? new Date(live.bookTimestamp).toISOString() : null,
@@ -71,13 +79,16 @@ export function resolveDashboardQuote(
       provenance.reference = { state: "UNAVAILABLE", source: "NONE", sessionDate: session };
     }
   }
-  if (live?.referenceSessionDate && live.referenceSessionDate <= today &&
+  if (live?.referenceSessionDate && (!displaySession || live.referenceSessionDate === displaySession) && live.referenceSessionDate <= today &&
       (!provenance.reference?.sessionDate || live.referenceSessionDate >= provenance.reference.sessionDate) &&
       (!provenance.reference?.asOf || !live.referenceTimestamp || live.referenceTimestamp >= Date.parse(provenance.reference.asOf))) {
     copyDefined(REFERENCE, live);
     provenance.reference = { state: "DERIVED", source: "SESSION_REFERENCE",
       sessionDate: live.referenceSessionDate,
       asOf: live.referenceTimestamp ? new Date(live.referenceTimestamp).toISOString() : null };
+  }
+  if (provenance.reference?.sessionDate !== provenance.quote.sessionDate || quote.referencePrice == null) {
+    quote.priceChange = quote.priceChangePercent = null;
   }
   const states = [provenance.quote.state, provenance.book.state].filter(state => state !== "UNAVAILABLE");
   const displayState: DisplayState = !states.length ? "UNAVAILABLE"

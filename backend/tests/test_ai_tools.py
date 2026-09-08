@@ -42,7 +42,13 @@ class MockHttpxResponse:
 
 
 @pytest.fixture(autouse=True)
-def setup_market_and_instrument_state():
+def setup_market_and_instrument_state(monkeypatch):
+    from app.market_data.trading_calendar import reference_session_date
+    from app.market_data.market_session import market_session
+    now = market_session.get_vn_now()
+    session = reference_session_date(now).isoformat()
+    timestamp = int(now.timestamp() * 1000)
+
     # Hydrate canonical HPG quote into MarketState
     hpg_quote = CanonicalQuote(
         symbol="HPG",
@@ -67,7 +73,9 @@ def setup_market_and_instrument_state():
         bid3_quantity=442000,
         ask3_price=22100.0,
         ask3_quantity=411100,
-        source_timestamp=1700000000,
+        source_timestamp=timestamp, trade_timestamp=timestamp, book_timestamp=timestamp,
+        received_timestamp=timestamp, reference_timestamp=timestamp,
+        market_session_date=session, reference_session_date=session,
     )
     market_state.restore_quote(hpg_quote)
 
@@ -82,14 +90,17 @@ def setup_market_and_instrument_state():
         ask1_price=300.0,
         ask1_quantity=100,
         underlying_symbol="HPG",
-        source_timestamp=1700000000,
+        source_timestamp=timestamp, trade_timestamp=timestamp, book_timestamp=timestamp,
+        received_timestamp=timestamp, reference_timestamp=timestamp,
+        market_session_date=session, reference_session_date=session,
     )
     market_state.restore_quote(chpg_quote)
 
 
-def test_1_and_2_get_quote_matches_canonical_market_state_values():
+@pytest.mark.asyncio
+async def test_1_and_2_get_quote_matches_canonical_market_state_values():
     """1 & 2. Copilot can access HPG MarketState data and values match canonical state."""
-    quote_data = get_quote("HPG")
+    quote_data = await get_quote("HPG")
 
     assert quote_data["symbol"] == "HPG"
     assert quote_data["instrument_type"] == "STOCK"
@@ -99,16 +110,17 @@ def test_1_and_2_get_quote_matches_canonical_market_state_values():
     assert quote_data["ask1_price"] == 22000.0
     assert quote_data["spread"] == 50.0
     assert quote_data["total_volume"] == 8143000
-    assert quote_data["data_source"] == "FIINQUANT_REALTIME"
-    assert quote_data["provenance"] == "FIINQUANT_REALTIME"
+    assert quote_data["data_source"] == "LIVE_FEED"
+    assert quote_data["provenance"]["quote"]["source"] == "LIVE_FEED"
 
 
-def test_3_get_dashboard_snapshot_reads_memory_without_new_subscriptions():
+@pytest.mark.asyncio
+async def test_3_get_dashboard_snapshot_reads_memory_without_new_subscriptions():
     """3. Dashboard snapshot reads current universe from memory without triggering new provider requests."""
-    snapshot = get_dashboard_snapshot(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"])
+    snapshot = await get_dashboard_snapshot(["HPG", "NVL", "VHM", "CVHM2615", "CHPG2541"])
 
     assert snapshot["universe_size"] == 5
-    assert snapshot["provenance"] == "MARKET_STATE"
+    assert snapshot["provenance"] == "RESOLVED_INSTRUMENT_VIEW"
 
     hpg = next(item for item in snapshot["instruments"] if item["symbol"] == "HPG")
     assert hpg["last_price"] == 22000.0
@@ -142,7 +154,10 @@ async def test_5_and_6_get_quant_delegates_and_returns_structured_missing_inputs
 
 
 @pytest.mark.asyncio
-async def test_6b_get_quant_serves_last_completed_session_when_live_is_session_gated():
+async def test_6b_get_quant_serves_last_completed_session_when_live_is_session_gated(monkeypatch):
+    from datetime import datetime
+    from app.market_data.trading_calendar import VN_TZ
+    monkeypatch.setattr("app.quant.quant_engine.get_vietnam_now", lambda: datetime(2026, 9, 6, 8, tzinfo=VN_TZ))
     """Outside trading hours the live path returns MARKET_INPUT_SESSION_MISMATCH. get_quant
     must then fall back to the last completed session's EOD analytics - the SAME numbers
     the watchlist IV columns and the instrument panel already show - not report IV as
@@ -162,7 +177,7 @@ async def test_6b_get_quant_serves_last_completed_session_when_live_is_session_g
     )
     eod_ok = WarrantAnalytics(
         symbol="CHPG2617", underlying_symbol="HPG",
-        calculated_at="2026-09-04T15:00:00+07:00", is_available=True,
+        calculated_at="2026-09-04T15:00:00+07:00", session_date="2026-09-04", is_available=True,
         moneyness=0.85433, moneyness_category=MoneynessCategory.OTM,
         iv_bid=0.41216, iv_trade=0.431195, iv_ask=0.431195, iv_mid=0.421697,
         historical_volatility=0.2494, theoretical_price=157.26,
@@ -195,7 +210,10 @@ async def test_6b_get_quant_serves_last_completed_session_when_live_is_session_g
 
 
 @pytest.mark.asyncio
-async def test_6c_get_quant_reports_unavailable_only_when_both_live_and_eod_decline():
+async def test_6c_get_quant_reports_unavailable_only_when_both_live_and_eod_decline(monkeypatch):
+    from datetime import datetime
+    from app.market_data.trading_calendar import VN_TZ
+    monkeypatch.setattr("app.quant.quant_engine.get_vietnam_now", lambda: datetime(2026, 9, 6, 8, tzinfo=VN_TZ))
     """If the last-session EOD compute also declines (e.g. unverified metadata), the tool
     surfaces that reason - not a fabricated number and not the raw session-mismatch."""
     from app.quant.quant_schemas import WarrantAnalytics
@@ -444,7 +462,7 @@ async def test_18b_which_cw_on_an_underlying_scopes_the_snapshot_to_that_underly
 @pytest.mark.asyncio
 async def test_18c_dashboard_snapshot_rows_carry_underlying_symbol_for_cws():
     await instrument_registry.initialize(current_date="2026-08-28")
-    snap = get_dashboard_snapshot(["HPG", "CHPG2541"])
+    snap = await get_dashboard_snapshot(["HPG", "CHPG2541"])
     cw = next(i for i in snap["instruments"] if i["symbol"] == "CHPG2541")
     assert cw["underlying_symbol"] == "HPG"
     stock = next(i for i in snap["instruments"] if i["symbol"] == "HPG")

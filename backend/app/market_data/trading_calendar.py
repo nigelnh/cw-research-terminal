@@ -397,6 +397,28 @@ def seconds_until_display_rollover(now: Optional[datetime] = None) -> float:
     return 0.0
 
 
+def reference_session_date(now: Optional[datetime] = None) -> date:
+    """The displayed session, independent of the matching phase and host timezone."""
+    cur = _as_vn(now)
+    if is_trading_day(cur.date()) and cur.time() >= time(8):
+        return cur.date()
+    return latest_completed_trading_session(cur)
+
+
+def session_context(now: Optional[datetime] = None) -> dict:
+    """One wire contract for HTTP, sockets, caches and research tools."""
+    cur = _as_vn(now)
+    return {
+        "serverTime": cur.isoformat(),
+        "displaySessionDate": reference_session_date(cur).isoformat(),
+        "latestCompletedSession": latest_completed_trading_session(cur).isoformat(),
+        "marketPhase": market_phase(cur).value,
+        "marketSessionActive": is_trading_active(cur),
+        "nextRolloverAt": (cur + timedelta(seconds=seconds_until_display_rollover(cur))).isoformat(),
+        "calendarConfidence": calendar_confidence(cur.date()),
+    }
+
+
 def trading_sessions_between(start: date, end: date) -> list[date]:
     """Trading days in ``[start, end]`` inclusive."""
     if start > end:

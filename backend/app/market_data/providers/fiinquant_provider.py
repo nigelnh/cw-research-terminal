@@ -10,7 +10,10 @@ from typing import Iterator, List, Dict, Any, Optional, Callable, Set
 from datetime import date, datetime, timedelta, timezone
 
 from app.core.config import settings
+from app.market_data.feed_status import FeedAccess, MESSAGES, classify_provider_error, redact_provider_text
+from app.market_data.providers.sdk_output import capture_sdk_output
 from app.market_data.market_session import market_session
+from app.market_data.trading_calendar import reference_session_date
 from app.market_data.providers.fiinquant_normalization import normalize_event, number, first, timestamp
 from app.market_data.market_schemas import (
     CIRCUIT_REASON_AUTH,
@@ -131,6 +134,7 @@ class FiinQuantProvider(MarketDataProvider):
         self.password = password or settings.FIINQUANT_PASSWORD
         self.max_symbols = max_symbols or settings.FIINQUANT_MAX_REALTIME_SYMBOLS
 
+        self._access = FeedAccess()
         self._session: Any = None
         self._trade_stream: Any = None
         self._bidask_stream: Any = None
@@ -239,6 +243,31 @@ class FiinQuantProvider(MarketDataProvider):
         self._valuation_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
         self._ratios_cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
         self._reference_lock = asyncio.Lock()
+
+    def _sdk_call(self, scope, fn, *args):
+        blocked = self._access.blocked(scope)
+        if blocked:
+            error = HistoricalAuthError if blocked == "AUTH_REQUIRED" else HistoricalEntitlementError if blocked in ("ENTITLEMENT_EXPIRED", "DATASET_FORBIDDEN") else HistoricalRateLimitError if blocked == "RATE_LIMITED" else HistoricalUpstreamError
+            raise error(f"{blocked}: {MESSAGES[blocked]}")
+        try:
+            with capture_sdk_output() as output:
+                result = fn(*args)
+            code = classify_provider_error(output.getvalue())
+            if code:
+                error = HistoricalAuthError if code == "AUTH_REQUIRED" else HistoricalEntitlementError if code in ("ENTITLEMENT_EXPIRED", "DATASET_FORBIDDEN") else HistoricalRateLimitError if code == "RATE_LIMITED" else HistoricalUpstreamError
+                raise error(f"{code}: {MESSAGES[code]}")
+            if result is not None and (not isinstance(result, (list, dict)) or len(result) > 0):
+                self._access.success(scope)
+            return result
+        except Exception as exc:
+            code = self._access.record(scope, exc)
+            if code == "AUTH_REQUIRED":
+                self._is_connected = False
+            self._notify_status_change()
+            if code:
+                error = HistoricalAuthError if code == "AUTH_REQUIRED" else HistoricalEntitlementError if code in ("ENTITLEMENT_EXPIRED", "DATASET_FORBIDDEN") else HistoricalRateLimitError if code == "RATE_LIMITED" else HistoricalUpstreamError
+                raise error(f"{code}: {MESSAGES[code]}") from None
+            raise
 
     def set_event_callback(self, callback: Callable[[str, Dict[str, Any], str], None]) -> None:
         self._event_callback = callback
@@ -412,11 +441,12 @@ class FiinQuantProvider(MarketDataProvider):
             return True  # idempotent: already authenticated with a live valid session
 
         self._ensure_loop()
-        session = await asyncio.to_thread(self._create_session)
+        session = await asyncio.to_thread(self._sdk_call, "authentication", self._create_session)
         self._tame_sdk_side_effects()
 
         if session is not None:
             self._session = session
+            self._access.inspect_session(session)
             self._is_connected = True
             self._upstream_status = "CONNECTED"
             self._generation += 1
@@ -952,7 +982,7 @@ class FiinQuantProvider(MarketDataProvider):
         current_task = asyncio.current_task()
         try:
             while not self._shutting_down and self._active_symbols:
-                delay = self._compute_reconnect_delay()
+                delay = max(self._compute_reconnect_delay(), self._access.retry_after("stream"))
                 try:
                     session_active = self._market_is_active()
                 except Exception:  # noqa: BLE001 - health logging must not wedge recovery
@@ -976,6 +1006,7 @@ class FiinQuantProvider(MarketDataProvider):
                     # Reuse an authenticated session. Re-authenticate only after it expires.
                     is_valid_session = (
                         self._session is not None
+                        and self._is_connected
                         and getattr(self._session, "is_login", False)
                     )
                     if not is_valid_session:
@@ -1095,7 +1126,16 @@ class FiinQuantProvider(MarketDataProvider):
             self._maybe_notify_feed_live(int(time.time() * 1000))
             return True
 
-    def _start_new_streams_sync(
+    def _start_new_streams_sync(self, symbols, stream_generation):
+        denied = self._access.blocked("stream")
+        if denied:
+            return MESSAGES[denied]
+        with capture_sdk_output() as output:
+            error = self._start_new_streams_impl(symbols, stream_generation)
+        code = self._access.record("stream", output.getvalue() or error or "")
+        return MESSAGES[code] if code else redact_provider_text(error) if error else None
+
+    def _start_new_streams_impl(
         self,
         clean_symbols: List[str],
         stream_generation: int,
@@ -1271,6 +1311,7 @@ class FiinQuantProvider(MarketDataProvider):
         )
 
         return {
+            "feedStatus": self._access.wire(fresh=feed_fresh, active=session_active, last_data_at=_iso_timestamp(last_tick_ms)),
             "provider": "fiinquant",
             "authenticated": self._is_connected,
             "upstream_status": computed_status,
@@ -1363,17 +1404,17 @@ class FiinQuantProvider(MarketDataProvider):
             by_param = "1d"
             default_days = 360
 
-        default_from = (datetime.now() - timedelta(days=default_days)).strftime("%Y-%m-%d")
+        default_from = (market_session.get_vn_now() - timedelta(days=default_days)).strftime("%Y-%m-%d")
         f_date = from_date or default_from
-        t_date = to_date or datetime.now().strftime("%Y-%m-%d")
+        t_date = to_date or market_session.get_vn_now().strftime("%Y-%m-%d")
 
         # Range verification: if explicit range > 365 calendar days, raise HistoricalRangeLimitError (do NOT clamp silently)
         if from_date is not None:
             try:
                 dt_from = datetime.strptime(f_date, "%Y-%m-%d").date()
-                dt_to = datetime.strptime(t_date, "%Y-%m-%d").date() if to_date else datetime.now().date()
+                dt_to = datetime.strptime(t_date, "%Y-%m-%d").date() if to_date else market_session.get_vn_now().date()
                 span_days = (dt_to - dt_from).days
-                now_date = datetime.now().date()
+                now_date = market_session.get_vn_now().date()
                 lookback_days = (now_date - dt_from).days
                 if span_days > 365 or lookback_days > 365:
                     raise HistoricalRangeLimitError(
@@ -1410,7 +1451,7 @@ class FiinQuantProvider(MarketDataProvider):
         def _fetch() -> List[HistoricalBar]:
             captured_output = io.StringIO()
             try:
-                with contextlib.redirect_stdout(captured_output), contextlib.redirect_stderr(captured_output):
+                with capture_sdk_output(captured_output):
                     res = self._session.Fetch_Trading_Data(
                         realtime=False,
                         tickers=[sym],
@@ -1423,6 +1464,9 @@ class FiinQuantProvider(MarketDataProvider):
                     df = res.get_data() if hasattr(res, "get_data") else res
 
                 captured_text = captured_output.getvalue()
+                if "service has expired" in captured_text.lower():
+                    raise HistoricalEntitlementError("ENTITLEMENT_EXPIRED: Service has expired")
+                captured_text = redact_provider_text(captured_text)
                 if (df is None or len(df) == 0) and captured_text:
                     if "TimeFrameLimitFailed" in captured_text or "365 days" in captured_text:
                         raise HistoricalRangeLimitError(f"Upstream timeframe limit exceeded for {sym}: {captured_text}")
@@ -1462,7 +1506,7 @@ class FiinQuantProvider(MarketDataProvider):
             except HistoricalRangeLimitError:
                 raise
             except Exception as exc:
-                exc_str = str(exc)
+                exc_str = redact_provider_text(exc)
                 exc_cls = exc.__class__.__name__
 
                 # 1. Range limit failure (e.g. TimeFrameLimitFailed from gateway) - DO NOT open circuit breaker
@@ -1481,7 +1525,7 @@ class FiinQuantProvider(MarketDataProvider):
                     raise HistoricalAuthError(f"FiinQuant auth failure for {sym}: {exc_str}") from exc
 
                 # 3. Entitlement failure (403 forbidden without TimeFrameLimitFailed)
-                if "403" in exc_str or "Forbidden" in exc_str:
+                if "403" in exc_str or "Forbidden" in exc_str or "ENTITLEMENT_EXPIRED" in exc_str:
                     self._historical_last_status = "DEGRADED"
                     self._historical_last_error = f"Entitlement failure: {exc_str}"
                     logger.error("Historical entitlement failure for %s: %s", sym, exc)
@@ -1506,7 +1550,7 @@ class FiinQuantProvider(MarketDataProvider):
                 logger.warning("Historical transport error for %s: %s: %s", sym, exc_cls, exc_str)
                 raise HistoricalTransportError(f"Transport error fetching {sym}: {exc_str}") from exc
 
-        return await asyncio.to_thread(_fetch)
+        return await asyncio.to_thread(self._sdk_call, "history", _fetch)
 
     async def get_stock_profiles(self, symbols: List[str]) -> List[Dict[str, Any]]:
         """Batch BasicInfor reads, cached per symbol for a day; no new streams."""
@@ -1531,7 +1575,7 @@ class FiinQuantProvider(MarketDataProvider):
                         value = [value]
                     return value if isinstance(value, list) else []
 
-                records = await asyncio.to_thread(fetch)
+                records = await asyncio.to_thread(self._sdk_call, "profiles", fetch)
                 def clean(value):
                     return value.strip() if isinstance(value, str) and value.strip() else None
 
@@ -1591,7 +1635,7 @@ class FiinQuantProvider(MarketDataProvider):
                         value = value.to_dict(orient="records")
                     return value if isinstance(value, list) else []
 
-                records = await asyncio.to_thread(fetch)
+                records = await asyncio.to_thread(self._sdk_call, "valuation", fetch)
                 newest: Dict[str, Dict[str, Any]] = {}
                 for row in records:
                     if not isinstance(row, dict):
@@ -1643,7 +1687,7 @@ class FiinQuantProvider(MarketDataProvider):
                 )
                 return value if isinstance(value, list) else []
 
-            records = await asyncio.to_thread(fetch)
+            records = await asyncio.to_thread(self._sdk_call, "fundamentals", fetch)
             rows: List[Dict[str, Any]] = []
             for row in records:
                 if not isinstance(row, dict):
@@ -1672,7 +1716,7 @@ class FiinQuantProvider(MarketDataProvider):
     async def get_session_reference_data(
         self, symbols: List[str], session_date: date
     ) -> Dict[str, Dict[str, Any]]:
-        """Fetch previous close and exchange bands without consuming stream slots."""
+        """Fetch explicitly dated exchange references and bands without new streams."""
         clean_symbols = sorted({s.strip().upper() for s in symbols if s.strip()})
         if not clean_symbols:
             return {}
@@ -1724,26 +1768,9 @@ class FiinQuantProvider(MarketDataProvider):
                 return None
 
             def fetch() -> Dict[str, Dict[str, Any]]:
-                historical_rows: List[Dict[str, Any]] = []
                 band_rows: List[Dict[str, Any]] = []
                 captured = io.StringIO()
-                with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
-                    try:
-                        from_date = (session_date - timedelta(days=30)).isoformat()
-                        to_date = (session_date - timedelta(days=1)).isoformat()
-                        for start in range(0, len(clean_symbols), 100):
-                            result = self._session.Fetch_Trading_Data(
-                                realtime=False,
-                                tickers=clean_symbols[start:start + 100],
-                                fields=["close"],
-                                by="1d",
-                                from_date=from_date,
-                                to_date=to_date,
-                                adjusted=False,
-                            )
-                            historical_rows.extend(records(result))
-                    except Exception as exc:  # one source can fail while bands remain usable
-                        logger.warning("FiinQuant previous-close snapshot unavailable: %s", exc)
+                with capture_sdk_output(captured):
                     try:
                         stats = self._session.PriceStatistics()
                         for start in range(0, len(clean_symbols), 100):
@@ -1756,29 +1783,21 @@ class FiinQuantProvider(MarketDataProvider):
                     except Exception as exc:
                         logger.warning("FiinQuant session price bands unavailable: %s", exc)
 
-                history_by: Dict[str, List[Dict[str, Any]]] = {}
-                for row in historical_rows:
-                    symbol = key(row) or (clean_symbols[0] if len(clean_symbols) == 1 else "")
-                    if symbol and stamp(row)[:10] < session_date.isoformat():
-                        history_by.setdefault(symbol, []).append(row)
                 bands_by: Dict[str, Dict[str, Any]] = {}
                 for row in band_rows:
                     symbol = key(row) or (clean_symbols[0] if len(clean_symbols) == 1 else "")
-                    if not symbol:
+                    if not symbol or stamp(row)[:10] != session_date.isoformat():
                         continue
                     if symbol not in bands_by or stamp(row) > stamp(bands_by[symbol]):
                         bands_by[symbol] = row
 
                 result: Dict[str, Dict[str, Any]] = {}
                 for symbol in clean_symbols:
-                    history = sorted(history_by.get(symbol, []), key=stamp)
-                    previous = history[-1] if history else {}
                     band = bands_by.get(symbol, {})
                     reference = number(
                         band, "referenceValue", "referencePrice", "Reference", "ReferencePrice"
                     )
-                    if reference is None:
-                        reference = number(previous, "close", "Close", "closePrice", "ClosePrice")
+                    # Prior close is not confirmed current REF.
                     ceiling = number(band, "ceilingValue", "ceilingPrice", "CeilingPrice")
                     floor = number(band, "floorValue", "floorPrice", "FloorPrice")
                     if reference is None and ceiling is None and floor is None:
@@ -1792,7 +1811,7 @@ class FiinQuantProvider(MarketDataProvider):
                 return result
 
             try:
-                return await asyncio.to_thread(fetch)
+                return await asyncio.to_thread(self._sdk_call, "reference", fetch)
             finally:
                 self._tame_sdk_side_effects()
 
@@ -1844,7 +1863,7 @@ class FiinQuantProvider(MarketDataProvider):
             def fetch() -> Dict[str, Dict[str, Any]]:
                 rows: List[Dict[str, Any]] = []
                 captured = io.StringIO()
-                with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+                with capture_sdk_output(captured):
                     try:
                         for start in range(0, len(clean), 100):
                             res = self._session.Fetch_Trading_Data(
@@ -1873,7 +1892,6 @@ class FiinQuantProvider(MarketDataProvider):
                     ticker_rows.sort(key=stamp)
                     positive = [r for r in ticker_rows if (number(r, "close", "Close") or 0) > 0]
                     today = [r for r in positive if stamp(r)[:10] == sd]
-                    prior = [r for r in positive if stamp(r)[:10] < sd]
                     if not today:
                         continue
                     bar = today[-1]
@@ -1884,13 +1902,13 @@ class FiinQuantProvider(MarketDataProvider):
                         "low_price": number(bar, "low", "Low"),
                         "total_volume": number(bar, "volume", "Volume"),
                         "trading_value": number(bar, "value", "Value"),
-                        "reference_price": number(prior[-1], "close", "Close") if prior else None,
+                        "reference_price": number(bar, "referencePrice", "referenceValue"),
                         "as_of": stamp(bar),
                     }
                 return out
 
             try:
-                return await asyncio.to_thread(fetch)
+                return await asyncio.to_thread(self._sdk_call, "session_snapshot", fetch)
             finally:
                 self._tame_sdk_side_effects()
 
@@ -1926,13 +1944,18 @@ class FiinQuantProvider(MarketDataProvider):
                 float(self._seconds_to_next_session()),
                 float(self._seconds_to_display_rollover()),
             )
-            return max(active_ttl, stretch)
+            return max(0.0, stretch)
         except Exception:  # noqa: BLE001 - never let a calendar bug wedge the cache
             return active_ttl
 
     def _ensure_breadth_refresh(self) -> None:
         """Kick a background breadth recompute if the cache is stale and none is running."""
-        ttl = self._cache_ttl(90.0)
+        if self._access.blocked("breadth"):
+            return
+        ttl = self._cache_ttl(60.0)
+        from app.market_data.trading_calendar import reference_session_date
+        if getattr(self, "_breadth_session", None) != reference_session_date(market_session.get_vn_now()).isoformat():
+            self._breadth_cache_at = 0
         if self._breadth_cache_at and time.monotonic() - self._breadth_cache_at < ttl:
             return
         if self._breadth_task is not None and not self._breadth_task.done():
@@ -1946,12 +1969,18 @@ class FiinQuantProvider(MarketDataProvider):
 
     async def _refresh_index_breadth(self) -> None:
         started = time.monotonic()
+        from app.market_data.trading_calendar import reference_session_date
+        requested_session = reference_session_date(market_session.get_vn_now()).isoformat()
         try:
-            breadth, stock_leaders = await asyncio.to_thread(self._compute_index_breadth)
+            breadth, stock_leaders = await asyncio.to_thread(self._sdk_call, "breadth", self._compute_index_breadth)
         except Exception as exc:  # noqa: BLE001 - breadth is optional, never fatal
             logger.warning("FiinQuant index breadth refresh failed: %s: %s", type(exc).__name__, exc)
             return
+        if requested_session != reference_session_date(market_session.get_vn_now()).isoformat():
+            return
         if breadth:
+            self._breadth_session = requested_session
+            self._breadth_as_of = market_session.get_vn_now().isoformat()
             self._breadth_cache = breadth
             self._stock_leaders_cache = stock_leaders
             self._breadth_cache_at = time.monotonic()
@@ -1974,9 +2003,10 @@ class FiinQuantProvider(MarketDataProvider):
         """
         if not self._session:
             return {}, []
-        vn_today = market_session.get_vn_now().date().isoformat()
+        from app.market_data.trading_calendar import reference_session_date
+        vn_today = reference_session_date(market_session.get_vn_now()).isoformat()
         captured = io.StringIO()
-        with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+        with capture_sdk_output(captured):
             members: Dict[str, set] = {}
             for grp in self._INDEX_GROUPS:
                 try:
@@ -2048,7 +2078,7 @@ class FiinQuantProvider(MarketDataProvider):
             p = fnum(row, "percentPriceChange")
             return {
                 "symbol": tk, "volume": vol,
-                "price": round(val / vol) if val else None,
+                "price": fnum(row, "close", "price", "lastPrice"),
                 "reference": None, "ceiling": None, "floor": None,
                 "market_state": (
                     "CEILING" if p is not None and p >= self._HOSE_LIMIT
@@ -2101,15 +2131,18 @@ class FiinQuantProvider(MarketDataProvider):
         its early bars, because a sweep/fetch hadn't finished or hiccuped when it was
         built - in which case it stays on the short TTL until a clean result lands.
         """
+        from app.market_data.trading_calendar import reference_session_date
+        request_display_session = reference_session_date(market_session.get_vn_now()).isoformat()
         self._ensure_breadth_refresh()
         settled = bool(self._overview_cache) and (
             self._overview_cache.get("components", {}).get("top_stock_volume") == "AVAILABLE"
         ) and self._sparkline_settled(self._overview_cache)
-        ttl = self._cache_ttl(15.0, settled=settled)
+        ttl = self._cache_ttl(60.0, settled=settled)
         if (
             self._overview_cache
             and self._session
             and self._is_connected
+            and self._overview_cache.get("display_session") == reference_session_date(market_session.get_vn_now()).isoformat()
             and time.monotonic() - self._overview_cache_at < ttl
         ):
             return self._overview_cache
@@ -2118,7 +2151,8 @@ class FiinQuantProvider(MarketDataProvider):
                 self._overview_cache
                 and self._session
                 and self._is_connected
-                and time.monotonic() - self._overview_cache_at < ttl
+                and self._overview_cache.get("display_session") == reference_session_date(market_session.get_vn_now()).isoformat()
+            and time.monotonic() - self._overview_cache_at < ttl
             ):
                 return self._overview_cache
             if not self._session or not self._is_connected:
@@ -2204,7 +2238,7 @@ class FiinQuantProvider(MarketDataProvider):
                 daily: List[Dict[str, Any]] = []
                 intraday: List[Dict[str, Any]] = []
                 bands: List[Dict[str, Any]] = []
-                with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+                with capture_sdk_output(captured):
                     try:
                         # Only the 4 index symbols + the watched CWs — the ~430 HOSE
                         # constituents (breadth + stock leaders) are a separate background
@@ -2271,7 +2305,7 @@ class FiinQuantProvider(MarketDataProvider):
 
                 # Breadth is maintained on its own background cadence (see
                 # `_refresh_index_breadth`) because it costs ~430 per-ticker requests.
-                breadth_by = dict(self._breadth_cache)
+                breadth_by = dict(self._breadth_cache) if getattr(self, "_breadth_session", None) == session_date else {}
                 if not any(sum(b.values()) for b in breadth_by.values()):
                     unavailable_components.add("breadth")
 
@@ -2332,8 +2366,8 @@ class FiinQuantProvider(MarketDataProvider):
                             "totals": {"source": "FIINQUANT", "as_of": stamp(latest) or None,
                                        "session_date": latest_day or None,
                                        "availability": "AVAILABLE" if latest else "UNAVAILABLE"},
-                            "breadth": {"source": "DERIVED_CONSTITUENTS", "as_of": stamp(current) or None,
-                                        "session_date": latest_day or None,
+                            "breadth": {"source": "DERIVED_CONSTITUENTS", "as_of": getattr(self, "_breadth_as_of", None),
+                                        "session_date": getattr(self, "_breadth_session", None),
                                         "availability": "AVAILABLE" if has_breadth else "UNAVAILABLE"},
                             "sparkline": {"source": "FIINQUANT", "as_of": stamp(intraday_bars[-1]) if intraday_bars else None,
                                           "session_date": latest_day or None, "timeframe": "5m",
@@ -2359,7 +2393,8 @@ class FiinQuantProvider(MarketDataProvider):
                         previous = prior_bars[-1] if prior_bars else {}
                         volume = num(row, "volume", "Volume")
                         if volume is None: continue
-                        price, reference = num(row, "close", "Close"), num(previous, "close", "Close")
+                        price = num(row, "close", "Close")
+                        reference = num(row, "referencePrice", "referenceValue")
                         band_row = bands_by.get(symbol, {})
                         if stamp(band_row)[:10] != session_date:
                             band_row = {}
@@ -2395,9 +2430,10 @@ class FiinQuantProvider(MarketDataProvider):
                 # Stock leaders: background get_overview sweep (session totals, survive the
                 # close). CW leaders: the local 1d fetch (get_overview omits CWs), which
                 # falls back to the most recent bar per CW so the panel is never empty.
-                stock_leaders = list(self._stock_leaders_cache)
+                stock_leaders = list(self._stock_leaders_cache) if getattr(self, "_breadth_session", None) == session_date else []
                 cw_leaders = leaders(clean_cws)
                 return {
+                    "display_session": request_display_session,
                     "indices": indices,
                     "top_stock_volume": stock_leaders,
                     "top_cw_volume": cw_leaders,
@@ -2422,7 +2458,7 @@ class FiinQuantProvider(MarketDataProvider):
                 }
 
             try:
-                result = await asyncio.to_thread(build)
+                result = await asyncio.to_thread(self._sdk_call, "overview", build)
             except Exception:
                 cached = self._stale_market_overview_payload()
                 if cached is not None:

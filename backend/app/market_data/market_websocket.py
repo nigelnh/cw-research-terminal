@@ -10,6 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.config import settings
 from app.market_data.market_session import market_session
 from app.market_data.market_state import market_state
+from app.market_data.trading_calendar import session_context
 from app.market_data.market_subscription_manager import subscription_manager
 from app.security.client_ip import resolve_client_ip
 from app.security.observability import security_counters
@@ -79,10 +80,13 @@ class MarketConnectionManager:
         sess_status = market_session.get_session_status().value
         sess_active = market_session.is_trading_active()
         phase = market_session.get_market_phase().value
-        session_date = market_session.get_vn_now().date().isoformat()
+        context = session_context(market_session.get_vn_now())
+        session_date = context["displaySessionDate"]
         universe_health = subscription_manager.get_universe_health()
         return {
             "type": "status",
+            "sessionContext": context,
+            "feedStatus": health.get("feedStatus"),
             "gateway_connected": True,
             "authenticated": bool(health.get("authenticated", False)),
             "upstream_status": up_status,

@@ -30,6 +30,7 @@ def _quote(**over):
 
 @pytest.fixture
 def state(monkeypatch):
+    monkeypatch.setattr("app.market_data.trading_calendar.reference_session_date", lambda *a: date(2026, 9, 7))
     from app.market_data.market_state import market_state
 
     store: dict = {}
