@@ -6,7 +6,7 @@ import threading
 
 from app.market_data.market_schemas import CanonicalQuote
 from app.market_data.market_session import VN_TZ, market_session
-from app.market_data.providers.fiinquant_normalization import normalize_event
+from app.market_data.providers.provider_normalization import normalize_event
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +454,11 @@ class MarketState:
         has_explicit_session = self._explicit_event_session_date(raw_event) is not None
 
         # Parse source timestamp in ms
-        source_ts = _source_ms(trading_date, ts_str)
+        # Timestamp is the observation instant.  TradingDate identifies the
+        # session and is only a fallback for providers that do not expose an
+        # intraday timestamp; preferring it would collapse every observation to
+        # midnight and make freshness/provenance materially wrong.
+        source_ts = _source_ms(ts_str, trading_date)
 
         diff: Dict[str, Any] = {}
 
@@ -485,7 +489,7 @@ class MarketState:
             traded_qty = _integer(traded_qty)
             tot_val = _number(tot_val)
 
-            # FiinQuant emits Close/OHLC=0 at the pre-open session reset before any
+            # Some board sources emit Close/OHLC=0 at the pre-open reset before any
             # execution. This is not a zero-priced trade. Keep real zero totals, but do
             # not create a last match, trade timestamp, TRD_AMT, or -100% price change.
             if match_price is not None and match_price <= 0:
@@ -645,7 +649,7 @@ class MarketState:
         ts_str = raw_event.get("Timestamp")
         reference_session_date = self._event_session_date(raw_event)
         has_explicit_session = self._explicit_event_session_date(raw_event) is not None
-        source_ts = _source_ms(raw_event.get("TradingDate"), ts_str)
+        source_ts = _source_ms(ts_str, raw_event.get("TradingDate"))
         provider_market_status = raw_event.get("MarketStatus")
 
         diff: Dict[str, Any] = {}

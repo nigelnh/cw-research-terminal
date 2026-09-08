@@ -14,7 +14,7 @@ from app.market_data.feed_status import FeedAccess, MESSAGES, classify_provider_
 from app.market_data.providers.sdk_output import capture_sdk_output
 from app.market_data.market_session import market_session
 from app.market_data.trading_calendar import reference_session_date
-from app.market_data.providers.fiinquant_normalization import normalize_event, number, first, timestamp
+from app.market_data.providers.provider_normalization import normalize_event, number, first, timestamp
 from app.market_data.market_schemas import (
     CIRCUIT_REASON_AUTH,
     CIRCUIT_REASON_RATE_LIMIT,

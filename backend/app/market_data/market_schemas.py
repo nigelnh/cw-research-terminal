@@ -247,7 +247,7 @@ class HistoricalBar(BaseModel):
     volume: float
     value: Optional[float] = Field(default=None, description="Total traded value in VND")
     price_basis: Optional[Literal["RAW", "ADJUSTED"]] = None
-    source: str = "FIINQUANT"
+    source: str = "MARKET_PROVIDER"
     as_of: Optional[str] = None
     complete: bool = True
     session_date: Optional[str] = None
@@ -331,6 +331,10 @@ class MarketHealthResponse(BaseModel):
     status: str = "ok"
     provider: str
     authenticated: bool
+    transport_mode: str = "UNKNOWN"
+    access_tier: str = "UNVERIFIED"
+    api_key_configured: bool = False
+    license_verified: Optional[bool] = None
     upstream_status: str
     trade_stream_connected: bool
     bid_ask_stream_connected: bool
@@ -347,13 +351,17 @@ class MarketHealthResponse(BaseModel):
     last_tick_at: Optional[str] = None
     signalr_decode_error_count: int = 0
     signalr_reconnect_count: int = 0
-    # Stream-liveness watchdog. `silent_stream_reconnect_count` climbing means FiinQuant
-    # keeps dropping us without firing on_close; STALE with a 0 count and an inactive
-    # watchdog means the watchdog itself is not running.
+    # Legacy stream-liveness fields remain additive for older clients. Polling providers
+    # expose transport_mode=POLLING and leave these counters at zero.
     silent_stream_reconnect_count: int = 0
     stream_watchdog_active: bool = False
     stream_silence_reconnect_seconds: float = 0.0
     trade_tick_age_seconds: Optional[float] = None
+    request_count: int = 0
+    request_failure_count: int = 0
+    quote_poll_seconds: Optional[float] = None
+    tape_sweep_seconds: Optional[float] = None
+    min_request_interval_seconds: Optional[float] = None
     realtime_universe: Dict[str, Any] = Field(default_factory=dict)
     market_session: str = "UNKNOWN"
     market_session_active: bool = False

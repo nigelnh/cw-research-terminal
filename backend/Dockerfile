@@ -1,8 +1,8 @@
 # CW Research Terminal — backend (FastAPI, single Uvicorn worker).
 #
-# IMPORTANT: exactly ONE process / ONE worker in production. FiinQuantProvider owns
-# persistent SignalR connections and shared in-memory market state; a second worker
-# would open duplicate upstream connections against a limited account allowance.
+# IMPORTANT: exactly ONE process / ONE worker in production. VnstockProvider owns
+# the shared polling budget and in-memory market state; a second worker would duplicate
+# upstream requests against the same account allowance.
 # See STEP 11 §1 and DEPLOYMENT.md.
 
 FROM python:3.13-slim AS base
@@ -14,8 +14,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Runtime libs: libgomp1 is required by numpy/scipy wheels pulled in transitively by
-# the FiinQuant SDK. No compilers — every dependency ships a manylinux wheel.
+# Runtime libs: libgomp1 is required by numerical-analysis wheels. No compilers are
+# needed because every dependency ships a manylinux wheel.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
@@ -39,5 +39,5 @@ ENV PORT=8501
 EXPOSE 8501
 
 # The entrypoint runs Alembic (idempotent) then exec's Uvicorn so it becomes PID 1
-# and receives SIGTERM directly for a graceful provider/SignalR shutdown.
+# and receives SIGTERM directly for a graceful provider shutdown.
 ENTRYPOINT ["/app/entrypoint.sh"]

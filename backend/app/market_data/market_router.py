@@ -49,6 +49,10 @@ async def market_health():
         feedStatus=health_data.get("feedStatus"),
         provider=health_data.get("provider", "unknown"),
         authenticated=bool(health_data.get("authenticated", False)),
+        transport_mode=str(health_data.get("transport_mode", "UNKNOWN")),
+        access_tier=str(health_data.get("access_tier", "UNVERIFIED")),
+        api_key_configured=bool(health_data.get("api_key_configured", False)),
+        license_verified=health_data.get("license_verified"),
         upstream_status=str(health_data.get("upstream_status", "UNKNOWN")),
         trade_stream_connected=bool(health_data.get("trade_stream_connected", False)),
         bid_ask_stream_connected=bool(health_data.get("bid_ask_stream_connected", False)),
@@ -69,6 +73,11 @@ async def market_health():
         stream_watchdog_active=bool(health_data.get("stream_watchdog_active", False)),
         stream_silence_reconnect_seconds=float(health_data.get("stream_silence_reconnect_seconds", 0.0)),
         trade_tick_age_seconds=health_data.get("trade_tick_age_seconds"),
+        request_count=int(health_data.get("request_count", 0)),
+        request_failure_count=int(health_data.get("request_failure_count", 0)),
+        quote_poll_seconds=health_data.get("quote_poll_seconds"),
+        tape_sweep_seconds=health_data.get("tape_sweep_seconds"),
+        min_request_interval_seconds=health_data.get("min_request_interval_seconds"),
         realtime_universe=universe_health,
         market_session=sess_status,
         market_session_active=sess_active,
@@ -226,7 +235,7 @@ async def get_stock_profiles(symbols: str = Query(..., max_length=1000)):
     try:
         provider_rows = await subscription_manager.provider.get_stock_profiles(syms)
     except Exception as exc:  # entitlement and provider failures both fall through to PostgreSQL
-        logger.warning("FiinQuant stock profiles unavailable; using persisted profiles: %s", exc)
+        logger.warning("Provider stock profiles unavailable; using persisted profiles: %s", exc)
 
     persisted = {}
     try:
@@ -261,7 +270,8 @@ async def get_stock_profiles(symbols: str = Query(..., max_length=1000)):
             (not upstream.get("name") and bool(fallback_name))
             or (not upstream.get("exchange") and bool(fallback_exchange))
         )
-        sources = (["FIINQUANT"] if used_provider else []) + (
+        provider_source = str(upstream.get("source") or "VNSTOCK").upper()
+        sources = ([provider_source] if used_provider else []) + (
             [str(fallback.source or "COMPANY_PROFILES").upper()] if used_fallback else []
         )
         populated = sum(value is not None for value in (name, short_name, exchange))
@@ -285,11 +295,8 @@ async def get_stock_profiles(symbols: str = Query(..., max_length=1000)):
 async def get_fundamentals(symbol: str):
     """Valuation and recent quarterly statement lines for one equity.
 
-    Deliberately partial, and says which parts and why. This FiinQuant tier serves
-    `get_stock_valuation` (P/E, P/B) and a `get_ratios` call that returns only Revenue,
-    net profit attributable to the parent, and EBIT - an explicit `fields` list makes the
-    SDK raise and return nothing. So EPS / ROE / ROA / ROIC / gross margin have no source
-    here, and `unavailable` names them rather than leaving silent blanks.
+    Deliberately partial, and says which parts and why. The active provider supplies only
+    fields that can be traced to its current company-ratio response.
     """
     sym = symbol.strip().upper()
     if not re.fullmatch(r"[A-Z][A-Z0-9]{1,11}", sym):
@@ -310,20 +317,25 @@ async def get_fundamentals(symbol: str):
         errors.append("ratios")
 
     latest = quarters[-1] if quarters else {}
+    available_metrics = {
+        field: latest.get(field) for field in ("roe", "roa", "roic", "gross_margin")
+    }
     return {
         "symbol": sym,
         "pe": valuation.get("pe"),
         "pb": valuation.get("pb"),
         "valuation_as_of": valuation.get("as_of"),
         "net_margin": latest.get("net_margin"),
+        **available_metrics,
         "latest_period": latest.get("period"),
         "quarters": quarters,
         # Named, not silently blank: the UI shows the reason on each empty row.
         "unavailable": {
-            field: "not served by the current market-data entitlement"
+            field: "not served by the current market-data source"
             for field in ("eps", "roe", "roa", "roic", "gross_margin")
+            if field == "eps" or available_metrics.get(field) is None
         },
-        "source": "FIINQUANT",
+        "source": "VNSTOCK_VCI",
         "errors": errors,
     }
 

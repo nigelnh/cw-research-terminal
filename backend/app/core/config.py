@@ -35,8 +35,39 @@ class Settings(BaseSettings):
     AI_HISTORY_MAX_LOOKBACK_DAYS: int = Field(default=120, description="Max calendar span the AI get_history tool may request")
     AI_HISTORY_MAX_POINTS: int = Field(default=60, description="Max OHLCV rows the AI get_history tool returns (older rows downsampled)")
 
-    # Market Data Provider Configuration (FiinQuant)
-    MARKET_DATA_PROVIDER: str = Field(default="fiinquant", description="Active provider: 'fiinquant'")
+    # Market data provider. Vnstock Community is polled because the public package does
+    # not expose a streaming transport. One backend process owns the polling lifecycle;
+    # browsers only subscribe to the normalized server-side state.
+    MARKET_DATA_PROVIDER: str = Field(default="vnstock", description="Active provider: 'vnstock'")
+    MARKET_DATA_MAX_SYMBOLS: int = Field(default=60, description="Maximum server-owned market universe")
+    MARKET_DATA_DEBOUNCE_MS: int = Field(default=300, description="Subscription debounce delay in milliseconds")
+    VNSTOCK_ENABLED: bool = Field(default=True, description="Enable the Vnstock market-data adapter")
+    VNSTOCK_API_KEY: str = Field(default="", description="Vnstock API key (server-side only; never returned or logged)")
+    VNSTOCK_QUOTE_POLL_SECONDS: float = Field(
+        default=5.0,
+        description="Seconds between batched KBS price-board observations while the provider is active",
+    )
+    VNSTOCK_TAPE_SWEEP_SECONDS: float = Field(
+        default=120.0,
+        description="Seconds to sweep the subscribed universe once for confirmed trade prints",
+    )
+    VNSTOCK_TAPE_PAGE_SIZE: int = Field(default=100, description="Recent confirmed prints read per symbol and sweep")
+    VNSTOCK_MIN_REQUEST_INTERVAL_SECONDS: float = Field(
+        default=1.2,
+        description="Process-wide upstream request floor (50/min maximum, leaving room below Community's 60/min quota)",
+    )
+    VNSTOCK_FEED_FRESHNESS_SECONDS: float = Field(
+        default=15.0,
+        description="Maximum age of a successful board observation while the exchange is active",
+    )
+    VNSTOCK_MAX_CONCURRENT_CALLS: int = Field(
+        default=4,
+        description="Maximum blocking Vnstock calls delegated through asyncio.to_thread",
+    )
+
+    # Legacy adapter settings are retained so historical FiinQuant-specific tests and old
+    # environment files still parse during migration. Runtime provider selection no longer
+    # uses them.
     FIINQUANT_USERNAME: str = Field(default="", description="FiinQuant account username (server-side only)")
     FIINQUANT_PASSWORD: str = Field(default="", description="FiinQuant account password (server-side only)")
     FIINQUANT_MAX_REALTIME_SYMBOLS: int = Field(default=33, description="Maximum realtime subscription capacity")

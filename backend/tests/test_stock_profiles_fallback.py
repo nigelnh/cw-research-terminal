@@ -70,5 +70,5 @@ async def test_stock_profiles_merge_provider_and_persisted_fields(monkeypatch):
     assert item["name"] == "Hoa Phat Group"
     assert item["short_name"] == "HPG"
     assert item["exchange"] == "HOSE"
-    assert item["source"] == "FIINQUANT+VNDIRECT"
+    assert item["source"] == "VNSTOCK+VNDIRECT"
     assert item["availability"] == "AVAILABLE"

@@ -19,6 +19,9 @@ _aio = pytest.mark.asyncio
 def _prod(monkeypatch, **overrides):
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "PUBLIC_RATE_LIMIT_ENABLED", True)
+    # A deployed Vnstock poller must receive its key through the environment. Keep the
+    # normal production fixture valid; individual tests can explicitly clear it.
+    monkeypatch.setattr(settings, "VNSTOCK_API_KEY", "test-vnstock-key")
     for k, v in overrides.items():
         monkeypatch.setattr(settings, k, v)
 
@@ -138,6 +141,20 @@ def test_enabled_features_missing_config_flagged(monkeypatch):
     assert "DATABASE_URL" in joined
     assert "OPENROUTER_API_KEY" in joined
     assert "AUTH_TEST_HS256_SECRET" in joined
+
+
+def test_vnstock_realtime_requires_deployment_key(monkeypatch):
+    _prod(
+        monkeypatch,
+        CORS_ALLOWED_ORIGINS="https://app.example.com",
+        ALLOWED_HOSTS="app.example.com",
+        MARKET_DATA_PROVIDER="vnstock",
+        VNSTOCK_ENABLED=True,
+        PUBLIC_REALTIME_ENABLED=True,
+        VNSTOCK_API_KEY="",
+    )
+    joined = " ".join(collect_production_problems(settings, rate_limiter_mode="redis"))
+    assert "VNSTOCK_API_KEY" in joined
 
 
 def test_enforce_raises_with_all_problems(monkeypatch):

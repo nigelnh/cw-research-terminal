@@ -54,7 +54,11 @@ class MarketDataProvider(ABC):
     def set_event_callback(self, callback: Callable[[str, Dict[str, Any], str], None]) -> None:
         """
         Registers a callback for normalized live events.
-        Signature: callback(event_type: 'trade' | 'bidask', data: dict, symbol: str)
+        Signature: callback(event_type: 'trade' | 'bidask' | 'trade_print', data: dict, symbol: str)
+
+        ``trade_print`` is an optional confirmed time-and-sales observation. It is kept
+        separate from quote state so a polling provider may backfill an older real print
+        without rolling the current quote backwards.
         """
         pass
 
@@ -65,6 +69,16 @@ class MarketDataProvider(ABC):
     async def get_stock_profiles(self, symbols: List[str]) -> List[Dict[str, Any]]:
         """Read company names and exchanges without streaming subscriptions."""
         raise NotImplementedError("stock profiles are not supported by this provider")
+
+    async def get_stock_valuation(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Read the latest provider-confirmed valuation ratios for equities."""
+        raise NotImplementedError("stock valuation is not supported by this provider")
+
+    async def get_financial_ratios(
+        self, symbol: str, quarters: int = 8
+    ) -> List[Dict[str, Any]]:
+        """Read recent provider-confirmed financial ratios for one equity."""
+        raise NotImplementedError("financial ratios are not supported by this provider")
 
     async def get_session_reference_data(
         self, symbols: List[str], session_date: date

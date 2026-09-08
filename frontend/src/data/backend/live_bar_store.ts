@@ -20,7 +20,7 @@ export function acceptLiveBarMessage(message: any): void {
     close: Number.isFinite(b.close) ? b.close : null,
     volume: Number.isFinite(b.volume) ? b.volume : null,
     value: Number.isFinite(b.value) ? b.value : null,
-    priceBasis: "RAW", source: String(b.source || "FIINQUANT_TRADE_STREAM"),
+    priceBasis: "RAW", source: String(b.source || "MARKET_PROVIDER_LIVE"),
     sessionDate: b.session_date ?? null, complete: false, asOf: b.as_of ?? (message.ts ? new Date(message.ts).toISOString() : null),
   };
   const barKey = `${key(mapped.symbol, message.timeframe)}|${mapped.date}`;

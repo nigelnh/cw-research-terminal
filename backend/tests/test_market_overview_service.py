@@ -92,7 +92,7 @@ async def test_restart_restores_stale_snapshot_without_waiting_for_provider():
         assert result["indices"][0]["stale"] is True
         assert result["indices"][0]["session_date"] == "2026-09-03"
         assert result["as_of"] == "2026-09-03"
-        assert result["source"] == "FIINQUANT_CACHE"
+        assert result["source"] == "VNSTOCK_CACHE"
         assert result["refreshing"] is True
         assert result["cache_age_seconds"] >= 3600
         assert original == overview()  # adding stale metadata never mutates stored observations

@@ -27,6 +27,12 @@ MESSAGES = {
     "SESSION_PAUSED": "Matching is paused or the market is closed.",
 }
 
+# Failures below these prefixes describe optional components of one composite
+# response.  Two index groups failing the same VCI constituent endpoint are not
+# two independent observations that the whole market-data provider is down.
+# They remain in ``datasets`` so the owning cards can disclose partial coverage.
+_BANNER_PROMOTION_EXCLUDED_PREFIXES = ("overview_group_",)
+
 
 #: HTTP status codes must match as whole tokens. This classifier is fed CAPTURED SDK
 #: STDOUT, which is full of tickers, prices and volumes - a bare substring test read
@@ -155,18 +161,22 @@ class FeedAccess:
         with self._lock:
             errors = [{k: v for k, v in err.items() if k != "retryAt"} for err in self._errors.values()]
         global_error = next((e for e in errors if e["scope"] in ("market_data", "authentication")), None)
-        if global_error is None and len(errors) > 1:
+        promotion_errors = [
+            error for error in errors
+            if not error["scope"].startswith(_BANNER_PROMOTION_EXCLUDED_PREFIXES)
+        ]
+        if global_error is None and len(promotion_errors) > 1:
             # An account-wide condition is DISCOVERED, never assumed: when several
             # independent scopes are rejected the same way, that is the feed talking, not
             # one endpoint. A single failure only ever speaks for itself - `get_ceilingfloor`
             # is 401 for this account by design and must not headline as an auth outage.
             # This affects the banner only; blocking stays strictly per scope.
             counts: dict[str, int] = {}
-            for err in errors:
+            for err in promotion_errors:
                 counts[err["code"]] = counts.get(err["code"], 0) + 1
             worst, seen = max(counts.items(), key=lambda kv: kv[1])
             if seen > 1:
-                global_error = next(e for e in errors if e["code"] == worst)
+                global_error = next(e for e in promotion_errors if e["code"] == worst)
         code = "AVAILABLE" if fresh else "SESSION_PAUSED" if not active else "STALE" if last_data_at else "AWAITING_DATA"
         return {
             **(global_error or {"code": code, "scope": "market_data", "message": MESSAGES[code],

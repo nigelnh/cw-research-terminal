@@ -59,6 +59,15 @@ def _wire(sessionmaker_, monkeypatch):
     # the real `market_state` singleton via the app lifespan); pinning it here stops that
     # from leaking into these tests via cross-test/cross-file ordering.
     monkeypatch.setattr(live_quant_engine, "_market_state_getter", lambda sym: None)
+    # Missing-leg tests model an unavailable upstream explicitly. They must not depend on
+    # whether a developer's configured provider happens to answer during the test run.
+    async def _no_gapfill(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "app.market_data.history_read_service.history_read_service.get_history",
+        _no_gapfill,
+    )
     yield
 
 

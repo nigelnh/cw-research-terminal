@@ -1,6 +1,6 @@
 """IngestionService - resumable, quota-safe historical backfill + incremental sync.
 
-Ties together: a ``HistoricalBarProvider`` (FiinQuant, or another legitimate source later),
+Ties together a ``HistoricalBarProvider``,
 the Step-5 repositories, chunk planning, retry, throttling and PostgreSQL advisory locks.
 
 Durable unit of work = **one logical stream + one provider chunk**, committed in one

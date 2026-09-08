@@ -1,22 +1,24 @@
-import json
-import pytest
 import asyncio
-from unittest.mock import patch, MagicMock
+import json
+from datetime import datetime
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.market_data.market_schemas import HistoricalBar
 from app.market_data.market_state import MarketState
 from app.market_data.market_subscription_manager import SubscriptionManager
-from app.market_data.providers.fiinquant_provider import FiinQuantProvider
+from app.market_data.providers.vnstock_provider import VnstockProvider
+from app.market_data.trading_calendar import VN_TZ
 from tests.fixtures.mock_market_provider import MockMarketDataProvider
-from app.market_data.market_schemas import CanonicalQuote, HistoricalBar
 
 client = TestClient(app)
 
 
-def test_subscription_manager_defaults_to_live_fiinquant():
+def test_subscription_manager_defaults_to_vnstock():
     mgr = SubscriptionManager()
-    assert isinstance(mgr.provider, FiinQuantProvider)
+    assert isinstance(mgr.provider, VnstockProvider)
 
 
 def test_production_providers_package_contains_no_mock():
@@ -128,6 +130,31 @@ def test_market_state_bidask_normalization_and_merge():
     assert merged_quote.last_price == 55.0
     assert merged_quote.bid1_price == 50.0
     assert merged_quote.ask1_price == 60.0
+
+
+def test_observation_timestamp_wins_over_session_date_for_trade_and_book():
+    state = MarketState()
+    trade, _ = state.apply_trade_event({
+        "Ticker": "HPG",
+        "Close": 21_850,
+        "TradingDate": "2026-09-08",
+        "Timestamp": "2026-09-08T15:33:12+07:00",
+    })
+    book, _ = state.apply_bidask_event({
+        "Ticker": "HPG",
+        "Best1Bid": 21_800,
+        "Best1Ask": 21_850,
+        "TradingDate": "2026-09-08",
+        "Timestamp": "2026-09-08T15:33:13+07:00",
+    })
+
+    assert trade.trade_timestamp == int(
+        datetime(2026, 9, 8, 15, 33, 12, tzinfo=VN_TZ).timestamp() * 1000
+    )
+    assert book.book_timestamp == int(
+        datetime(2026, 9, 8, 15, 33, 13, tzinfo=VN_TZ).timestamp() * 1000
+    )
+    assert book.market_session_date == "2026-09-08"
 
 
 def test_subscription_manager_capacity_and_deduplication():
