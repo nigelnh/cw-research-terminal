@@ -226,3 +226,57 @@ async def test_snapshots_outside_the_window_are_not_pulled_in(state, snapshots):
         prior, "HPG", "1d", date(2026, 9, 1), date(2026, 9, 8),
         adjusted=False, price_basis="RAW",
     ) == prior
+
+
+# --------------------------------------------------------------------------- #
+# A provider outage must not discard sessions this server already observed.
+# --------------------------------------------------------------------------- #
+async def test_a_provider_outage_serves_observed_sessions_instead_of_a_503(state, snapshots, monkeypatch):
+    """During the 2026-09 entitlement lapse a CW chart answered `circuit breaker is OPEN
+    (AUTH_FAILURE)` while the snapshot store held that session's full OHLCV."""
+    from app.market_data.market_schemas import HistoricalCircuitOpenError
+
+    snapshots["CHPG2617"] = [_Snap("2026-09-07", 430, 440, 430, 430, 62_700)]
+    svc = HistoryReadService()
+
+    async def down(*_a, **_k):
+        raise HistoricalCircuitOpenError("circuit is OPEN (AUTH_FAILURE)", reason="AUTH_FAILURE")
+
+    monkeypatch.setattr(HistoryReadService, "_provider_direct", down)
+    bars = await svc._provider_direct_or_observed(
+        "CHPG2617", "1D", "2026-09-01", "2026-09-08", False, "1d", date(2026, 9, 1), date(2026, 9, 8)
+    )
+    assert [(b.date, b.close, b.source) for b in bars] == [("2026-09-07", 430.0, "OBSERVED_SESSION")]
+
+
+async def test_with_nothing_observed_the_providers_own_error_still_surfaces(state, snapshots, monkeypatch):
+    """The fallback fills a gap; it never converts a real outage into a silent empty chart."""
+    from app.market_data.market_schemas import HistoricalCircuitOpenError
+
+    svc = HistoryReadService()
+
+    async def down(*_a, **_k):
+        raise HistoricalCircuitOpenError("circuit is OPEN (AUTH_FAILURE)", reason="AUTH_FAILURE")
+
+    monkeypatch.setattr(HistoryReadService, "_provider_direct", down)
+    with pytest.raises(HistoricalCircuitOpenError):
+        await svc._provider_direct_or_observed(
+            "NOPE", "1D", "2026-09-01", "2026-09-08", False, "1d", date(2026, 9, 1), date(2026, 9, 8)
+        )
+
+
+async def test_a_bad_request_is_never_masked_by_the_fallback(state, snapshots, monkeypatch):
+    """A range-limit error is the caller's fault and must keep mapping to a 400."""
+    from app.market_data.market_schemas import HistoricalRangeLimitError
+
+    snapshots["HPG"] = [_Snap("2026-09-07", 21_800, 22_150, 21_550, 21_550, 19_957_800)]
+    svc = HistoryReadService()
+
+    async def bad(*_a, **_k):
+        raise HistoricalRangeLimitError("exceeds upstream timeframe limit")
+
+    monkeypatch.setattr(HistoryReadService, "_provider_direct", bad)
+    with pytest.raises(HistoricalRangeLimitError):
+        await svc._provider_direct_or_observed(
+            "HPG", "1D", "2020-01-01", "2026-09-08", False, "1d", date(2026, 9, 1), date(2026, 9, 8)
+        )
