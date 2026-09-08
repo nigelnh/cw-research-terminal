@@ -72,6 +72,8 @@ class FeedAccess:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._errors: dict[str, dict] = {}
+        #: Diagnostic only. Explains a real rejection; never causes one.
+        self._entitlement_note: str | None = None
 
     def record(self, scope: str, error: Any, *, detail: str | None = None) -> str | None:
         code = classify_provider_error(error)
@@ -83,8 +85,9 @@ class FeedAccess:
             scope = "authentication"
         with self._lock:
             message = MESSAGES[code]
-            if detail:
-                message = f"{message} {detail}"
+            note = detail or (self._entitlement_note if code == "ENTITLEMENT_EXPIRED" else None)
+            if note:
+                message = f"{message} {note}"
             self._errors[scope] = {
                 "code": code, "scope": scope, "message": message,
                 "checkedAt": datetime.now(timezone.utc).isoformat(),
@@ -93,8 +96,18 @@ class FeedAccess:
         return code
 
     def inspect_session(self, session: Any) -> None:
-        # These claims are diagnostic evidence, never an authorization decision or a
-        # browser payload. A valid login token does not prove dataset entitlement.
+        """Record what the token CLAIMS about entitlement. Never blocks anything.
+
+        This used to call `record()`, which meant a date field in a JWT became an
+        authorization decision: `blocked()` gates every SDK call and the stream startup, so
+        the app stopped talking to the provider entirely without a single request having
+        been refused. That is the opposite of the rule this module was written for - only
+        the provider gets to say no, and it says so by rejecting a call.
+
+        It also made the diagnosis unfalsifiable. With the stream never attempting to
+        connect, there was no way to tell an expired entitlement from any other reason a
+        connection might fail, because no connection was ever made.
+        """
         token = getattr(session, "access_token", None)
         if not isinstance(token, str):
             return
@@ -103,12 +116,11 @@ class FeedAccess:
             claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
             end = datetime.strptime(claims["end_date"], "%d/%m/%Y").date()
             from app.market_data.trading_calendar import _as_vn
-            if end < _as_vn(None).date():
-                # The end date is the one fact that makes this actionable, and it is not
-                # sensitive. No other claim from the token reaches the wire.
-                self.record(
-                    "market_data", "ENTITLEMENT_EXPIRED",
-                    detail=f"Access ended {end.isoformat()}.",
+            with self._lock:
+                # The date is the one fact that makes a later rejection actionable, and it
+                # is not sensitive. No other claim from the token is kept.
+                self._entitlement_note = (
+                    f"Access ended {end.isoformat()}." if end < _as_vn(None).date() else None
                 )
         except (ValueError, KeyError, IndexError, TypeError):
             pass

@@ -55,6 +55,14 @@ def test_entitlement_evidence_uses_existing_session_without_exposing_claims():
     access = FeedAccess()
     token = f"eyJhbGciOiJub25lIn0.{part}.signature"
     access.inspect_session(SimpleNamespace(access_token=token))
+    # Deliberately changed: an expired CLAIM must not block on its own. Blocking on a date
+    # field meant the stream never attempted a connection, so production logged
+    # "authentication successful ... CONNECTED" and then our own "access is not active" for
+    # a connection that was never made - and no rejection could ever falsify the diagnosis.
+    # The quota argument for pre-blocking survives anyway: one real attempt is made, and a
+    # genuine rejection then backs off for 900s, so this costs one request per 15 minutes.
+    assert access.blocked("history") is None
+    access.record("history", "Service has expired.")
     assert access.blocked("history") == "ENTITLEMENT_EXPIRED"
     wire = json.dumps(access.wire(fresh=False, active=True, last_data_at=None))
     assert "private" not in wire and part not in wire

@@ -5,6 +5,7 @@ bare substrings: "no bars for HPG at 21500" classified as a 500, and "volume 140
 403. A false DATASET_FORBIDDEN blocks that scope for 900 seconds, so a price containing the
 digits 403 could have taken a panel dark for a quarter of an hour.
 """
+import base64
 import json
 
 import pytest
@@ -146,3 +147,59 @@ def test_no_token_claim_other_than_the_end_date_can_reach_the_wire():
     blob = json.dumps(access.wire(fresh=False, active=True, last_data_at=None))
     for claim in ("xuannhan", "@", "CUSTOMER", "FiinQuant.Trial", "eyJ", "Individual"):
         assert claim not in blob
+
+
+# --------------------------------------------------------------------------- #
+# A token claim is evidence, not a verdict.
+#
+# `inspect_session` used to call `record()`, so a date field in a JWT became an
+# authorization decision: `blocked()` gates every SDK call and the stream startup, and the
+# app stopped contacting the provider without a single request having been refused.
+# Production logged "authentication successful ... Upstream: CONNECTED" immediately
+# followed by "stream startup failed: Market data access is not active" - our own message,
+# for a connection that was never attempted.
+# --------------------------------------------------------------------------- #
+class _Session:
+    def __init__(self, end_date: str):
+        claims = json.dumps({"end_date": end_date, "user_name": "someone@example.com",
+                             "role": "CUSTOMER", "list_package": "FiinQuant.Trial"})
+        body = base64.urlsafe_b64encode(claims.encode()).decode().rstrip("=")
+        self.access_token = f"eyJhbGciOiJIUzI1NiJ9.{body}.sig"
+
+
+def test_an_expired_claim_alone_never_blocks_a_call():
+    """The provider gets to say no. A date in a token does not."""
+    access = FeedAccess()
+    access.inspect_session(_Session("07/09/2020"))
+    assert access.blocked("stream") is None
+    assert access.blocked("history") is None
+
+
+def test_the_claim_still_explains_a_real_rejection():
+    access = FeedAccess()
+    access.inspect_session(_Session("07/09/2020"))
+    access.record("stream", "Service has expired.")
+    message = access.wire(fresh=False, active=True, last_data_at=None)["message"]
+    assert "2020-09-07" in message
+
+
+def test_a_rejection_without_a_claim_still_reads_correctly():
+    access = FeedAccess()
+    access.record("stream", "Service has expired.")
+    assert access.wire(fresh=False, active=True, last_data_at=None)["message"] == \
+        MESSAGES["ENTITLEMENT_EXPIRED"]
+
+
+def test_an_unexpired_claim_leaves_no_note_behind():
+    access = FeedAccess()
+    access.inspect_session(_Session("31/12/2099"))
+    access.record("stream", "Service has expired.")
+    assert access.wire(fresh=False, active=True, last_data_at=None)["message"] == \
+        MESSAGES["ENTITLEMENT_EXPIRED"]
+
+
+def test_a_malformed_token_is_ignored_rather_than_assumed_expired():
+    access = FeedAccess()
+    access.inspect_session(_Session("not-a-date"))
+    access.inspect_session(object())
+    assert access.blocked("stream") is None
