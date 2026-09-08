@@ -28,7 +28,25 @@ from datetime import date, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.config import settings
-from app.market_data.market_schemas import HistoricalBar
+from app.market_data.market_schemas import (
+    HistoricalAuthError,
+    HistoricalBar,
+    HistoricalCircuitOpenError,
+    HistoricalEntitlementError,
+    HistoricalRateLimitError,
+    HistoricalTransportError,
+    HistoricalUpstreamError,
+)
+
+#: Provider-side faults. A range/validation error is the caller's fault and still raises.
+_PROVIDER_FAULTS = (
+    HistoricalAuthError,
+    HistoricalCircuitOpenError,
+    HistoricalEntitlementError,
+    HistoricalRateLimitError,
+    HistoricalTransportError,
+    HistoricalUpstreamError,
+)
 from app.persistence.ingestion.service import GapFillOutcome, IngestionService
 from app.persistence.ingestion.trading_calendar import (
     expected_trading_days,
@@ -300,10 +318,8 @@ class HistoryReadService:
         req_from, req_to = self._resolve_window(from_date, to_date, tf)
 
         if self._mode() != "postgres_first" or not self._pg_timeframe(tf):
-            bars = await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
-            return await self._with_session_bar(
-                bars, sym, tf, req_from, req_to,
-                adjusted=adjusted, price_basis="ADJUSTED" if adjusted else "RAW",
+            return await self._provider_direct_or_observed(
+                sym, timeframe, from_date, to_date, adjusted, tf, req_from, req_to
             )
 
         assert self._sm is not None and self._ingestion is not None
@@ -311,10 +327,8 @@ class HistoryReadService:
             inst = await InstrumentRepository(session).get_by_symbol(sym)
         if inst is None:
             logger.info("history: %s not in instruments; serving provider-direct", sym)
-            bars = await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
-            return await self._with_session_bar(
-                bars, sym, tf, req_from, req_to,
-                adjusted=adjusted, price_basis="ADJUSTED" if adjusted else "RAW",
+            return await self._provider_direct_or_observed(
+                sym, timeframe, from_date, to_date, adjusted, tf, req_from, req_to
             )
 
         price_basis = "RAW" if inst.instrument_type == "CW" else ("ADJUSTED" if adjusted else "RAW")
@@ -366,6 +380,38 @@ class HistoryReadService:
         return await self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
     # ------------------------------------------------------------------ #
+    async def _provider_direct_or_observed(
+        self, sym, timeframe, from_date, to_date, adjusted, tf, req_from, req_to
+    ):
+        """Provider history, falling back to what this server observed if the provider is
+        down.
+
+        Returning 503 while holding real, dated bars of our own is the same mistake as
+        dropping them at the rollover: during the 2026-09 entitlement lapse a CW chart
+        answered `circuit breaker is OPEN (AUTH_FAILURE)` even though the snapshot store
+        held that session's full OHLCV for all 28 watched symbols. The fallback is honest
+        rather than silent - every bar it returns is tagged OBSERVED_SESSION - and it only
+        applies when there is something to return; with nothing, the provider's own error
+        still surfaces.
+        """
+        price_basis = "ADJUSTED" if adjusted else "RAW"
+        try:
+            bars = await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
+        except _PROVIDER_FAULTS as err:
+            observed = await self._with_session_bar(
+                [], sym, tf, req_from, req_to, adjusted=adjusted, price_basis=price_basis
+            )
+            if not observed:
+                raise
+            logger.warning(
+                "history: %s provider unavailable (%s); serving %d observed session(s)",
+                sym, type(err).__name__, len(observed),
+            )
+            return observed
+        return await self._with_session_bar(
+            bars, sym, tf, req_from, req_to, adjusted=adjusted, price_basis=price_basis
+        )
+
     async def _session_wrapped(self, rows, sym, tf, req_from, req_to, adjusted, price_basis):
         return await self._with_session_bar(
             _to_wire(rows, price_basis), sym, tf, req_from, req_to,
