@@ -59,11 +59,16 @@ class MarketOverviewService:
         self._seconds_to_next_session: Callable[[], float] = (
             market_session.seconds_until_next_trading_session
         )
+        self._seconds_to_display_rollover: Callable[[], float] = (
+            market_session.seconds_until_display_rollover
+        )
 
     def _ttl_seconds(self) -> float:
         """60s while trading is active; otherwise stretched to cover the whole closed
         stretch (lunch, evening, weekend, holiday) — the overview cannot change until the
-        next session opens, so there is nothing new to fetch in the meantime.
+        next session opens, so there is nothing new to fetch in the meantime — but never
+        past the 08:00 ICT display rollover, which is where the rest of the board moves to
+        a new session.
 
         Except: if the cached payload still lacks stock leaders, or an index chart is
         missing its early bars (the provider's background sweep hadn't finished, or an
@@ -79,7 +84,14 @@ class MarketOverviewService:
         if not settled:
             return 60.0
         try:
-            return max(60.0, float(self._seconds_to_next_session()))
+            # Never past the 08:00 display rollover - the same bound the provider's own
+            # cache uses. This layer is the one that persists, so without the cap a
+            # payload built yesterday afternoon survived a restart and was still being
+            # served at 08:51 the next morning, an hour after the board had rolled.
+            return max(60.0, min(
+                float(self._seconds_to_next_session()),
+                float(self._seconds_to_display_rollover()),
+            ))
         except Exception:  # noqa: BLE001 - never let a calendar bug wedge the cache
             return 300.0
 

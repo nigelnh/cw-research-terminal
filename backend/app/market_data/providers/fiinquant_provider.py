@@ -940,6 +940,8 @@ class FiinQuantProvider(MarketDataProvider):
         try:
             if self._market_is_active():
                 return base
+            # The OPEN is the right bound here, not the 08:00 data rollover: this paces a
+            # stream reconnect, and there is nothing to receive until trading resumes.
             secs_to_open = max(0.0, float(self._seconds_to_next_session()))
         except Exception:  # noqa: BLE001 - never let a calendar bug wedge reconnect
             return base
