@@ -681,3 +681,39 @@ async def test_T17_late_callbacks_from_retired_stream_do_not_restart_replacement
 
     await p.disconnect()
     assert await _wait_until(lambda: _alive_ping_threads() == 0)
+
+
+# --------------------------------------------------------------------------- #
+# T18 - repeated stream-start failures on a "valid" session force ONE re-auth
+# --------------------------------------------------------------------------- #
+async def test_T18_repeated_stream_start_failures_force_one_reauth(monkeypatch):
+    """A stream that will not start while the SDK still reports the session logged in is
+    the real dead-token signal. After `_stream_failures_before_reauth` failed restarts the
+    reconnect worker re-authenticates - once - and recovers, without a REST 401 ever being
+    what triggered it and without `_is_connected` being used as the intent carrier."""
+    p, _ = _make_provider(monkeypatch)
+    p._reconnect_backoffs = (0.01,)
+    p._reauth_min_interval_seconds = 0.0          # this test exercises the failure path
+    p._stream_failures_before_reauth = 2
+    await p.connect()
+    await p.set_subscriptions(["HPG"])
+    assert _FakeSession.created == 1
+    first_trade = p._trade_stream
+
+    # Fail the next two restart attempts; the third (after the forced re-auth) succeeds.
+    _FakeStream.start_failures_remaining = 2
+    first_trade.hub_connection.trigger_close()
+
+    assert await _wait_until(lambda: _FakeSession.created == 2, timeout=3.0)
+    assert await _wait_until(
+        lambda: p._trade_stream is not None
+        and p._trade_stream is not first_trade
+        and p._trade_stream.connected
+        and p._reconnect_task is None
+    )
+    assert p._force_reauth is False
+    assert p._consecutive_stream_start_failures == 0
+    assert p._upstream_status == "CONNECTED"
+
+    await p.disconnect()
+    assert await _wait_until(lambda: _alive_ping_threads() == 0)

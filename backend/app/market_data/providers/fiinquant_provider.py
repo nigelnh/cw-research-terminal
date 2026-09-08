@@ -146,6 +146,28 @@ class FiinQuantProvider(MarketDataProvider):
         self._upstream_status = "DISCONNECTED"
         self._last_error: Optional[str] = None
 
+        # ---- Re-authentication floor ----
+        # The 20s snapshot poll, set_subscriptions and the reconnect worker each call
+        # connect() when they notice a dropped session. The account permits ONE concurrent
+        # connection, so every fresh login() evicts the live SignalR streams the previous
+        # token owned. This paces unsolicited re-auth; a session the SDK reports explicitly
+        # invalid (is_login False) still re-authenticates immediately.
+        self._reauth_min_interval_seconds = float(
+            settings.FIINQUANT_REAUTH_MIN_INTERVAL_SECONDS
+        )
+        self._last_auth_attempt_monotonic: float = float("-inf")
+        # A stream that will not start on a nominally-valid session is the real "session is
+        # dead" signal (a REST endpoint answering 401 is not). After this many consecutive
+        # failed restarts the reconnect worker re-authenticates once, still subject to the
+        # floor above. `_force_reauth` is a narrow intent flag read only by the reconnect
+        # path - it does not disturb `_is_connected`, which stays owned by real login
+        # success/failure and disconnect.
+        self._consecutive_stream_start_failures = 0
+        self._stream_failures_before_reauth = int(
+            settings.FIINQUANT_STREAM_FAILURES_BEFORE_REAUTH
+        )
+        self._force_reauth = False
+
         # ---- SignalR lifecycle ownership ----
         self._lifecycle_lock = asyncio.Lock()
         self._generation = 0
@@ -200,6 +222,16 @@ class FiinQuantProvider(MarketDataProvider):
             settings.FIINQUANT_STREAM_WATCHDOG_INTERVAL_SECONDS
         )
         self._silent_stream_reconnect_count = 0
+        # Progressive backoff for a stream that stays silent through repeated forced
+        # reconnects. Without it the watchdog tears down and rebuilds a genuinely-dead feed
+        # (expired entitlement, provider outage) every FIINQUANT_STREAM_SILENCE_RECONNECT_
+        # SECONDS for the whole session. The enforced silence budget doubles per silent
+        # forced reconnect, capped, and snaps back to the base the moment any tick arrives.
+        self._silent_watchdog_escalation = 0
+        self._watchdog_silence_budget_cap_seconds = float(
+            settings.FIINQUANT_STREAM_SILENCE_BUDGET_CAP_SECONDS
+        )
+        self._watchdog_last_seen_tick_at_ms: Optional[int] = None
 
         # ---- Adapter-owned Reconnect State ----
         self._reconnect_task: Optional[asyncio.Task] = None
@@ -261,7 +293,15 @@ class FiinQuantProvider(MarketDataProvider):
             return result
         except Exception as exc:
             code = self._access.record(scope, exc)
-            if code == "AUTH_REQUIRED":
+            # Only a failure of the login call itself (scope "authentication") takes the
+            # whole connection down. A REST endpoint answering 401 - get_ceilingfloor does
+            # by account design, and a snapshot poll can race a token refresh - must not
+            # clear _is_connected: every path that calls connect() re-reads it, so one
+            # endpoint's 401 was minting a fresh login on the very next poll (~3x/min in
+            # production), and on a one-connection account each login evicts the SignalR
+            # streams. Same rule as feed_status' scope isolation - a rejection stays in the
+            # scope that produced it.
+            if code == "AUTH_REQUIRED" and scope == "authentication":
                 self._is_connected = False
             self._notify_status_change()
             if code:
@@ -437,8 +477,30 @@ class FiinQuantProvider(MarketDataProvider):
             return False
         if self._shutting_down:
             return False
-        if self._session is not None and getattr(self._session, "is_login", False) and self._is_connected:
+        if (
+            self._session is not None
+            and getattr(self._session, "is_login", False)
+            and self._is_connected
+            and not self._force_reauth
+        ):
             return True  # idempotent: already authenticated with a live valid session
+
+        # Re-auth floor. Unless the SDK reports this session explicitly invalid, do not mint
+        # a new token more often than _reauth_min_interval_seconds: a burst of callers each
+        # asking to reconnect otherwise logs in several times in seconds, and each new token
+        # drops the SignalR streams the previous one owns.
+        session_explicitly_invalid = (
+            self._session is not None and not getattr(self._session, "is_login", False)
+        )
+        if not session_explicitly_invalid:
+            since_last = time.monotonic() - self._last_auth_attempt_monotonic
+            if since_last < self._reauth_min_interval_seconds:
+                logger.debug(
+                    "FiinQuant re-auth suppressed: %.0fs since last attempt (floor %.0fs).",
+                    since_last, self._reauth_min_interval_seconds,
+                )
+                return False
+        self._last_auth_attempt_monotonic = time.monotonic()
 
         self._ensure_loop()
         session = await asyncio.to_thread(self._sdk_call, "authentication", self._create_session)
@@ -448,6 +510,8 @@ class FiinQuantProvider(MarketDataProvider):
             self._session = session
             self._access.inspect_session(session)
             self._is_connected = True
+            self._force_reauth = False
+            self._consecutive_stream_start_failures = 0
             self._upstream_status = "CONNECTED"
             self._generation += 1
             self._connect_count += 1
@@ -916,6 +980,23 @@ class FiinQuantProvider(MarketDataProvider):
             return stream_age
         return max(0.0, (time.time() * 1000 - last) / 1000.0)
 
+    def _watchdog_effective_silence_budget(self) -> float:
+        """The silence the watchdog currently tolerates before forcing a reconnect.
+
+        Starts at ``_stream_silence_reconnect_seconds`` and doubles after each forced
+        reconnect that still produced no tick, capped at
+        ``_watchdog_silence_budget_cap_seconds``. A feed that is genuinely gone (expired
+        entitlement, provider-side outage) is then re-probed on a widening interval instead
+        of every 90s for the whole session - each probe being a full stream teardown and
+        rebuild against a one-connection account. ``_stream_watchdog`` resets the escalation
+        to zero the moment any tick arrives.
+        """
+        base = self._stream_silence_reconnect_seconds
+        if self._silent_watchdog_escalation <= 0:
+            return base
+        widened = base * (2 ** self._silent_watchdog_escalation)
+        return min(widened, self._watchdog_silence_budget_cap_seconds)
+
     async def _stream_watchdog(self) -> None:
         """Force a reconnect when a 'connected' stream has gone silent mid-session.
 
@@ -933,18 +1014,35 @@ class FiinQuantProvider(MarketDataProvider):
                 # re-arms via `_ensure_stream_watchdog`, which is idempotent.
                 if not self._owned_streams and not self._active_symbols:
                     return
+                # A tick since the last sample means the feed is alive again: clear the
+                # escalation so the next lull is judged against the base budget.
+                last_tick = self._current_stream_last_tick_at_ms
+                if last_tick is not None and last_tick != self._watchdog_last_seen_tick_at_ms:
+                    if self._silent_watchdog_escalation:
+                        logger.info(
+                            "FiinQuant feed delivered a tick - resetting watchdog escalation "
+                            "(was %d).",
+                            self._silent_watchdog_escalation,
+                        )
+                    self._silent_watchdog_escalation = 0
+                self._watchdog_last_seen_tick_at_ms = last_tick
+
                 try:
                     age = self._silent_stream_age_seconds()
                 except Exception as err:  # noqa: BLE001 - the watchdog must never die
                     logger.warning("Stream watchdog check failed: %s", err)
                     continue
-                if age is None or age < self._stream_silence_reconnect_seconds:
+                budget = self._watchdog_effective_silence_budget()
+                if age is None or age < budget:
                     continue
                 self._silent_stream_reconnect_count += 1
+                self._silent_watchdog_escalation += 1
                 logger.warning(
-                    "FiinQuant stream silent for %.0fs during an active session while still "
-                    "reporting connected - forcing reconnect (generation %d, silent restarts %d).",
-                    age, self._stream_generation, self._silent_stream_reconnect_count,
+                    "FiinQuant stream silent for %.0fs (budget %.0fs) during an active session "
+                    "while still reporting connected - forcing reconnect (generation %d, silent "
+                    "restarts %d, escalation %d).",
+                    age, budget, self._stream_generation,
+                    self._silent_stream_reconnect_count, self._silent_watchdog_escalation,
                 )
                 # Reset the backoff: this is a fresh failure mode, not a retry of a
                 # connection that has been failing repeatedly.
@@ -1003,11 +1101,13 @@ class FiinQuantProvider(MarketDataProvider):
                     self._notify_status_change()
                     await self._retire_streams_locked()
 
-                    # Reuse an authenticated session. Re-authenticate only after it expires.
+                    # Reuse an authenticated session. Re-authenticate only after it expires
+                    # or after repeated stream-start failures asked us to (`_force_reauth`).
                     is_valid_session = (
                         self._session is not None
                         and self._is_connected
                         and getattr(self._session, "is_login", False)
+                        and not self._force_reauth
                     )
                     if not is_valid_session:
                         logger.info(
@@ -1033,13 +1133,33 @@ class FiinQuantProvider(MarketDataProvider):
 
                         if not self._owned_streams or err:
                             self._reconnect_backoff_index += 1
+                            self._consecutive_stream_start_failures += 1
                             self._upstream_status = "ERROR"
                             self._last_error = err
-                            logger.error("SignalR stream reconnect attempt failed: %s", err)
+                            logger.error(
+                                "SignalR stream reconnect attempt failed (%d in a row): %s",
+                                self._consecutive_stream_start_failures, err,
+                            )
+                            # A stream that will not start on a session the SDK still calls
+                            # valid is the real "the token is dead" signal. Ask the next pass
+                            # to re-authenticate; the floor in _connect_locked keeps that
+                            # from becoming a login storm during a real outage.
+                            if (
+                                not self._force_reauth
+                                and self._consecutive_stream_start_failures
+                                >= self._stream_failures_before_reauth
+                            ):
+                                logger.warning(
+                                    "%d consecutive stream restarts failed on a nominally "
+                                    "valid session - re-authenticating on the next attempt.",
+                                    self._consecutive_stream_start_failures,
+                                )
+                                self._force_reauth = True
                             self._notify_status_change()
                             retry = True
                         else:
                             self._reconnect_backoff_index = 0
+                            self._consecutive_stream_start_failures = 0
                             self._upstream_status = "CONNECTED"
                             self._last_error = None
                             logger.info(
@@ -1117,6 +1237,13 @@ class FiinQuantProvider(MarketDataProvider):
                 return False
 
             self._upstream_status = "CONNECTED"
+            # A deliberate (re)subscription is a clean slate: clear the silent-feed
+            # escalation and the failed-restart streak so the watchdog and the reconnect
+            # worker start from the base cadence again.
+            self._silent_watchdog_escalation = 0
+            self._watchdog_last_seen_tick_at_ms = None
+            self._consecutive_stream_start_failures = 0
+            self._force_reauth = False
             logger.info(
                 "FiinQuant streams active for %d symbols (generation %d): %s",
                 len(clean_symbols), gen, clean_symbols,
@@ -1349,6 +1476,18 @@ class FiinQuantProvider(MarketDataProvider):
                 self._stream_watchdog_task is not None and not self._stream_watchdog_task.done()
             ),
             "stream_silence_reconnect_seconds": self._stream_silence_reconnect_seconds,
+            # How far the watchdog has widened its silence budget (0 = base). A high value
+            # with silent_stream_reconnect_count climbing = the feed is genuinely gone and
+            # we are now re-probing it slowly rather than every 90s.
+            "watchdog_silence_escalation": self._silent_watchdog_escalation,
+            "watchdog_effective_silence_budget_seconds": self._watchdog_effective_silence_budget(),
+            "consecutive_stream_start_failures": self._consecutive_stream_start_failures,
+            "reauth_pending": self._force_reauth,
+            "seconds_since_last_auth_attempt": (
+                None
+                if self._last_auth_attempt_monotonic == float("-inf")
+                else round(max(0.0, time.monotonic() - self._last_auth_attempt_monotonic), 1)
+            ),
             "orphan_ping_threads_reaped": self._orphans_reaped,
             "signalr_adapter_supported_version": _SUPPORTED_SIGNALRCORE_VERSION,
             "signalr_adapter_runtime_version": self._signalrcore_version(),
