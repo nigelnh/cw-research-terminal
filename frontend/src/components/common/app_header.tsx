@@ -33,8 +33,15 @@ interface AppHeaderProps {
 function FeedNotice() {
   const { feedStatus } = useMarketContext();
   if (!feedStatus || ["AVAILABLE", "SESSION_PAUSED"].includes(feedStatus.code)) return null;
-  return <div role="status" title={feedStatus.lastDataAt ? `Last data: ${feedStatus.lastDataAt}` : undefined}
-    style={{ color: "var(--flat)", fontSize: 11, maxWidth: 430 }}>
+  // Truncates rather than pushing the group wider. The end column is a 1fr track with
+  // nowrap, so an unshrinkable child overflows LEFTWARDS and slides under the centred
+  // search box - which paints on top of it, hiding the clock entirely.
+  const detail = feedStatus.lastDataAt
+    ? `${feedStatus.message} Last data: ${feedStatus.lastDataAt}`
+    : feedStatus.message;
+  return <div role="status" title={detail}
+    style={{ color: "var(--flat)", fontSize: 11, minWidth: 0, flex: "0 1 auto",
+             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
     {feedStatus.message}
   </div>;
 }
@@ -338,7 +345,7 @@ export function AppHeader({
           {feedLabel}
         </span>}
         <FeedNotice />
-      <SignInControl />
+        <SignInControl />
       </div>
     </header>
   );

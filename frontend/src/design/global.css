@@ -113,7 +113,12 @@ body,
 .global-search-results button[aria-selected="true"], .global-search-results button:hover { background: var(--panel-3); }
 .global-search-results button span:nth-child(2) { color: var(--t-46); }
 .global-search-results button strong { color: var(--accent); font: 10px var(--font-display); text-align: right; }
-.terminal-header-end { min-width: 0; justify-self: end; white-space: nowrap; }
+.terminal-header-end { min-width: 0; justify-self: end; white-space: nowrap; display: flex;
+  align-items: center; gap: 12px; overflow: hidden; }
+/* `nowrap` + a 1fr track means any child that will not shrink overflows LEFTWARDS,
+   under the centred search box. Anything long in here must be able to truncate. */
+.terminal-header-end > [role="status"] { min-width: 0; flex: 0 1 auto; overflow: hidden;
+  text-overflow: ellipsis; }
 
 /* Typography & Numerics */
 .mono,
