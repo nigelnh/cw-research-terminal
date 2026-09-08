@@ -49,6 +49,10 @@ class MarketSession:
     def seconds_until_next_trading_session(self, dt: Optional[datetime] = None) -> float:
         return _cal.seconds_until_next_trading_session(dt)
 
+    def seconds_until_display_rollover(self, now=None) -> float:
+        """Seconds to the next 08:00 ICT on a trading day - the app's data boundary."""
+        return _cal.seconds_until_display_rollover(now)
+
     def is_display_eligible(
         self,
         received_timestamp_ms: Optional[int],
