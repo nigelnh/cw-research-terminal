@@ -134,7 +134,17 @@ async def test_overview_uses_snapshot_reads_without_changing_stream_subscription
     assert result["top_cw_volume"][0]["symbol"] == "CAAA2601"
     assert result["cw_scope"] == "active CW registry"
     assert result["source"] == "FIINQUANT"
-    assert result["availability"] == "AVAILABLE"
+    # Assert the components this fixture actually determines. Overall availability is NOT
+    # one of them: an index card needs intraday bars to be AVAILABLE, and between the 08:00
+    # rollover and the first bars after the 09:00 open the provider asks for an inverted
+    # window (09:00..now) and legitimately gets none - so the card is PARTIAL and so is the
+    # payload. Asserting AVAILABLE unconditionally made this pass or fail by the hour.
+    components = result["components"]
+    assert components["top_stock_volume"] == "AVAILABLE"
+    assert components["top_cw_volume"] == "AVAILABLE"
+    assert components["breadth"] == "AVAILABLE"
+    assert components["bands"] == "AVAILABLE"
+    assert result["availability"] in {"AVAILABLE", "PARTIAL"}
 
 
 @pytest.mark.asyncio

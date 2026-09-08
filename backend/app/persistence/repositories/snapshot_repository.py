@@ -96,6 +96,28 @@ class SnapshotRepository:
         )
         return (await self._s.execute(stmt)).scalars().first()
 
+    async def get_range(
+        self, symbol: str, start: date, end: date
+    ) -> list[InstrumentSnapshot]:
+        """Every persisted session for one symbol in [start, end], oldest first.
+
+        Feeds the chart: these are sessions the app itself observed. They matter most when
+        the provider cannot supply the completed daily bar - during an entitlement lapse,
+        or in the hours after a close before the bar is published - because otherwise a
+        session the terminal displayed all day simply vanishes from the chart at the next
+        08:00 rollover.
+        """
+        stmt = (
+            select(InstrumentSnapshot)
+            .where(
+                InstrumentSnapshot.symbol == symbol.strip().upper(),
+                InstrumentSnapshot.session_date >= start,
+                InstrumentSnapshot.session_date <= end,
+            )
+            .order_by(InstrumentSnapshot.session_date)
+        )
+        return list((await self._s.execute(stmt)).scalars())
+
     async def upsert(self, row: SnapshotRow) -> None:
         """Insert or update the (symbol, session_date) row, applying the regression guards."""
         sym = row.symbol.strip().upper()

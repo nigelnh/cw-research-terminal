@@ -49,7 +49,7 @@ async def test_todays_session_is_appended_when_the_series_stops_at_yesterday(sta
     beside it showed today's 21,550 close on 19.96M shares."""
     state["HPG"] = _quote()
     svc = HistoryReadService()
-    bars = svc._with_session_bar(
+    bars = await svc._with_session_bar(
         [_completed("2026-09-03", 21_600.0), _completed("2026-09-04", 21_700.0)],
         "HPG", "1d", date(2026, 9, 1), date(2026, 9, 7),
         adjusted=False, price_basis="RAW",
@@ -66,7 +66,7 @@ async def test_a_persisted_bar_for_the_same_day_always_wins(state):
     state["HPG"] = _quote()
     svc = HistoryReadService()
     settled = _completed("2026-09-07", 21_500.0)
-    bars = svc._with_session_bar(
+    bars = await svc._with_session_bar(
         [settled], "HPG", "1d",
         date(2026, 9, 1), date(2026, 9, 7),
         adjusted=False, price_basis="RAW",
@@ -108,7 +108,7 @@ async def test_intraday_timeframes_never_get_a_synthetic_daily_bar(state):
     state["HPG"] = _quote()
     svc = HistoryReadService()
     prior = [_completed("2026-09-04T09:15:00", 21_700.0)]
-    assert svc._with_session_bar(
+    assert await svc._with_session_bar(
         prior, "HPG", "5m",
         date(2026, 9, 1), date(2026, 9, 7),
         adjusted=False, price_basis="RAW",
@@ -117,8 +117,112 @@ async def test_intraday_timeframes_never_get_a_synthetic_daily_bar(state):
 
 async def test_an_unknown_symbol_is_simply_left_alone(state):
     svc = HistoryReadService()
-    assert svc._with_session_bar(
+    assert await svc._with_session_bar(
         [], "NOPE", "1d",
         date(2026, 9, 1), date(2026, 9, 7),
         adjusted=False, price_basis="RAW",
     ) == []
+
+
+# --------------------------------------------------------------------------- #
+# Sessions the app OBSERVED itself.
+#
+# The live-state bar alone was not enough: market_state is deliberately cleared at the
+# 08:00 ICT rollover, so a session it was the only source for vanished from the chart the
+# next morning. On 2026-09-08 the HPG chart's newest candle was 2026-09-04 again, because
+# 09-07 had never reached market_bars (the provider entitlement had lapsed) and the live
+# state that had been serving it was wiped at 08:00. The snapshot store still held it.
+# --------------------------------------------------------------------------- #
+class _Snap:
+    def __init__(self, day, o, h, l, c, v, value=None):
+        self.session_date = date.fromisoformat(day)
+        self.open_price, self.high_price, self.low_price = o, h, l
+        self.last_price, self.total_volume, self.trading_value = c, v, value
+
+
+@pytest.fixture
+def snapshots(monkeypatch):
+    store: dict[str, list] = {}
+
+    async def fake(self, symbol, req_from, req_to, *, adjusted, price_basis):
+        from app.market_data.market_schemas import HistoricalBar as HB
+
+        out = []
+        for s in store.get(symbol.upper(), []):
+            if not (req_from <= s.session_date <= req_to):
+                continue
+            if any(x is None or x <= 0 for x in (s.open_price, s.high_price, s.low_price, s.last_price)):
+                continue
+            if s.total_volume is None or s.total_volume <= 0:
+                continue
+            d = s.session_date.isoformat()
+            out.append(HB(date=d, open=s.open_price, high=s.high_price, low=s.low_price,
+                          close=s.last_price, volume=s.total_volume, value=s.trading_value,
+                          price_basis=price_basis, adjusted=adjusted,
+                          source="OBSERVED_SESSION", session_date=d))
+        return out
+
+    monkeypatch.setattr(HistoryReadService, "_observed_session_bars", fake)
+    return store
+
+
+async def test_a_session_only_the_app_saw_survives_the_0800_rollover(state, snapshots):
+    """The reported symptom: after 08:00 on 09-08 the chart's newest candle was 09-04 and
+    the whole of 09-07 - which the terminal had displayed all day - was gone."""
+    snapshots["HPG"] = [_Snap("2026-09-07", 21_800, 22_150, 21_550, 21_550, 19_957_800)]
+    svc = HistoryReadService()
+    bars = await svc._with_session_bar(
+        [_completed("2026-09-03", 21_600.0), _completed("2026-09-04", 21_700.0)],
+        "HPG", "1d", date(2026, 9, 1), date(2026, 9, 8),
+        adjusted=False, price_basis="RAW",
+    )
+    assert [b.date for b in bars] == ["2026-09-03", "2026-09-04", "2026-09-07"]
+    assert bars[-1].close == 21_550
+    assert bars[-1].volume == 19_957_800
+    assert bars[-1].source == "OBSERVED_SESSION"   # not passed off as the exchange's bar
+
+
+async def test_an_ingested_bar_outranks_what_this_server_happened_to_see(state, snapshots):
+    """Once the session is ingested the exchange's own bar is the authority."""
+    snapshots["HPG"] = [_Snap("2026-09-07", 21_800, 22_150, 21_550, 21_550, 19_957_800)]
+    svc = HistoryReadService()
+    official = _completed("2026-09-07", 21_560.0)
+    bars = await svc._with_session_bar(
+        [official], "HPG", "1d", date(2026, 9, 1), date(2026, 9, 8),
+        adjusted=False, price_basis="RAW",
+    )
+    assert bars == [official]
+
+
+async def test_the_running_session_still_wins_over_a_snapshot_of_itself(state, snapshots):
+    """Mid-session the live state is fresher than the last checkpoint written for it."""
+    state["HPG"] = _quote()                                     # session 2026-09-07
+    snapshots["HPG"] = [_Snap("2026-09-07", 21_800, 22_000, 21_600, 21_600, 12_000_000)]
+    svc = HistoryReadService()
+    bars = await svc._with_session_bar(
+        [], "HPG", "1d", date(2026, 9, 1), date(2026, 9, 8),
+        adjusted=False, price_basis="RAW",
+    )
+    assert len(bars) == 1
+    assert bars[0].source == "REALTIME_SESSION"   # live, not the checkpoint of itself
+    assert bars[0].close == 21_550                # the running close, not the stale 21,600
+
+
+async def test_a_snapshot_missing_ohlcv_is_a_gap_not_a_flat_candle(state, snapshots):
+    snapshots["HPG"] = [_Snap("2026-09-07", None, None, None, 21_550, 0)]
+    svc = HistoryReadService()
+    prior = [_completed("2026-09-04", 21_700.0)]
+    assert await svc._with_session_bar(
+        prior, "HPG", "1d", date(2026, 9, 1), date(2026, 9, 8),
+        adjusted=False, price_basis="RAW",
+    ) == prior
+
+
+async def test_snapshots_outside_the_window_are_not_pulled_in(state, snapshots):
+    snapshots["HPG"] = [_Snap("2026-08-14", 21_000, 21_100, 20_900, 21_050, 5_000_000)]
+    svc = HistoryReadService()
+    prior = [_completed("2026-09-04", 21_700.0)]
+    assert await svc._with_session_bar(
+        prior, "HPG", "1d", date(2026, 9, 1), date(2026, 9, 8),
+        adjusted=False, price_basis="RAW",
+    ) == prior

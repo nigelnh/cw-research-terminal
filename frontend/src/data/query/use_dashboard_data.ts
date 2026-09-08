@@ -143,10 +143,25 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
         : {}),
     };
     const resolved = resolveDashboardQuote(fallbackQuote, live, provenance, marketSessionActive);
+    const analytics = analyticsFallback?.analytics ?? fb?.analytics ?? null;
+    // IV and the Greeks are computed FROM the prices in this row. The two come from
+    // separate endpoints with separate session policies, so after the 08:00 ICT rollover
+    // the price row correctly blanks for the new session while the quant read still
+    // answers with the previous session's EOD figures - leaving a row showing IV_BID
+    // 42.5% beside an empty BID_PRC. A derived number outliving the number it was derived
+    // from reads as live data, so it is dropped rather than shown undated.
+    const analyticsSession = provenance.analytics?.sessionDate ?? null;
+    const rowSession = provenance.quote?.sessionDate ?? null;
+    const strandedByRollover =
+      Boolean(analyticsSession && rowSession && analyticsSession < rowSession) &&
+      resolved.quote.lastPrice == null &&
+      resolved.quote.bidPrice == null &&
+      resolved.quote.askPrice == null;
+
     return {
       symbol: sym,
       ...resolved,
-      analytics: analyticsFallback?.analytics ?? fb?.analytics ?? null,
+      analytics: strandedByRollover ? null : analytics,
       trackedRealtime: Boolean(fb?.tracked_realtime ?? isRealtimeTracked(sym)),
     };
   };

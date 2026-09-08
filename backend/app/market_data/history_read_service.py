@@ -216,21 +216,74 @@ class HistoryReadService:
             session_date=session_day.isoformat(),
         )
 
-    def _with_session_bar(
+    async def _observed_session_bars(
+        self, symbol: str, req_from: date, req_to: date, *, adjusted: bool, price_basis: str
+    ) -> list[HistoricalBar]:
+        """Completed sessions the app observed itself, from the persisted snapshot store.
+
+        The live-state bar alone was not enough. `market_state` is deliberately cleared at
+        the 08:00 ICT rollover, so a session it was the only source for disappears from the
+        chart the next morning - which is exactly what happened to 2026-09-07 once the
+        market-data entitlement lapsed and the provider could no longer supply that day's
+        completed bar either. The snapshot store still held it, dated and complete.
+
+        Only whole bars are returned; a snapshot missing any OHLCV field is a gap.
+        """
+        if self._sm is None or not settings.SNAPSHOT_ENABLED:
+            return []
+        try:
+            from app.persistence.repositories.snapshot_repository import SnapshotRepository
+
+            async with self._sm() as session:
+                rows = await SnapshotRepository(session).get_range(symbol, req_from, req_to)
+        except Exception as err:  # noqa: BLE001 - the chart must not fail on a cache read
+            logger.debug("history: snapshot range read failed for %s: %s", symbol, err)
+            return []
+
+        out: list[HistoricalBar] = []
+        for r in rows:
+            o, h, l = r.open_price, r.high_price, r.low_price
+            c, v = r.last_price, r.total_volume
+            if any(x is None or x <= 0 for x in (o, h, l, c)) or v is None or v <= 0:
+                continue
+            day = r.session_date.isoformat()
+            out.append(HistoricalBar(
+                date=day, open=float(o), high=float(h), low=float(l), close=float(c),
+                volume=float(v),
+                value=float(r.trading_value) if r.trading_value is not None else None,
+                price_basis=price_basis, adjusted=adjusted,
+                source="OBSERVED_SESSION", session_date=day,
+            ))
+        return out
+
+    async def _with_session_bar(
         self, bars: list[HistoricalBar], symbol: str, tf: str,
         req_from: date, req_to: date, *, adjusted: bool, price_basis: str,
     ) -> list[HistoricalBar]:
-        """Append today's bar to a daily series that stops short of it."""
+        """Fill sessions the completed-bar sources do not carry.
+
+        Two of them, in increasing authority: sessions the app observed and persisted, then
+        the session running right now. A bar already in the series always wins over both -
+        once a session is ingested, the exchange's own bar is the authority and these are
+        only what this server happened to see.
+        """
         if tf != "1d":
             return bars
-        bar = self._session_bar(symbol, req_from, req_to, adjusted=adjusted, price_basis=price_basis)
-        if bar is None:
+        # Authority, highest first: an ingested bar (the exchange's own), then the running
+        # session read live, then a persisted snapshot. Live outranks the snapshot for the
+        # SAME day because a checkpoint is only the last thing written for a session that
+        # is still moving.
+        merged = {b.date[:10]: b for b in bars}
+        live = self._session_bar(symbol, req_from, req_to, adjusted=adjusted, price_basis=price_basis)
+        if live is not None:
+            merged.setdefault(live.date, live)
+        for observed in await self._observed_session_bars(
+            symbol, req_from, req_to, adjusted=adjusted, price_basis=price_basis
+        ):
+            merged.setdefault(observed.date, observed)
+        if len(merged) == len(bars):
             return bars
-        # A completed bar for the same day always wins: once the session is ingested, the
-        # persisted bar is the exchange's own, and the live one is only a running total.
-        if any(b.date[:10] == bar.date for b in bars):
-            return bars
-        return [*bars, bar]
+        return sorted(merged.values(), key=lambda b: b.date)
 
     # ------------------------------------------------------------------ #
     async def get_history(
@@ -248,7 +301,7 @@ class HistoryReadService:
 
         if self._mode() != "postgres_first" or not self._pg_timeframe(tf):
             bars = await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
-            return self._with_session_bar(
+            return await self._with_session_bar(
                 bars, sym, tf, req_from, req_to,
                 adjusted=adjusted, price_basis="ADJUSTED" if adjusted else "RAW",
             )
@@ -259,7 +312,7 @@ class HistoryReadService:
         if inst is None:
             logger.info("history: %s not in instruments; serving provider-direct", sym)
             bars = await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
-            return self._with_session_bar(
+            return await self._with_session_bar(
                 bars, sym, tf, req_from, req_to,
                 adjusted=adjusted, price_basis="ADJUSTED" if adjusted else "RAW",
             )
@@ -271,14 +324,14 @@ class HistoryReadService:
         if assessment.covered or not settings.HISTORY_GAPFILL_ENABLED:
             self._counters["db_hit_reads" if assessment.covered else "db_partial_reads"] += 1
             self._counters["provider_calls_avoided"] += 1
-            return self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
+            return await self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
         stream_key = f"{sym}:{tf}:{price_basis}"
         if self._in_cooldown(stream_key):
             self._counters["gap_fills_suppressed_cooldown"] += 1
             logger.info("history: %s gap-fill suppressed (recent failure cooldown); serving DB partial", stream_key)
             self._counters["db_partial_reads"] += 1
-            return self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
+            return await self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
         # HTTP-layer global cap on how many DISTINCT streams may trigger a provider
         # gap-fill at once. This is SEPARATE from ingestion's own request throttling /
@@ -307,14 +360,14 @@ class HistoryReadService:
                 "history: %s gap-fill deferred (global concurrency cap %d reached); serving DB partial",
                 stream_key, settings.HISTORY_MAX_CONCURRENT_GAPFILLS,
             )
-            return self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
+            return await self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
         rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
-        return self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
+        return await self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
     # ------------------------------------------------------------------ #
-    def _session_wrapped(self, rows, sym, tf, req_from, req_to, adjusted, price_basis):
-        return self._with_session_bar(
+    async def _session_wrapped(self, rows, sym, tf, req_from, req_to, adjusted, price_basis):
+        return await self._with_session_bar(
             _to_wire(rows, price_basis), sym, tf, req_from, req_to,
             adjusted=adjusted, price_basis=price_basis,
         )
