@@ -87,24 +87,30 @@ def test_one_forbidden_dataset_does_not_black_out_the_whole_feed():
     assert access.blocked("history") is None
 
 
-def test_an_expired_entitlement_is_feed_wide():
+def test_an_expired_entitlement_is_discovered_scope_by_scope():
+    """Rewritten: it used to be assumed feed-wide from a single rejection, which is how one
+    REST endpoint silenced the tick stream. Each scope now finds out for itself."""
     access = FeedAccess()
     access.record("history", "Service has expired.")
+    assert access.blocked("history") == "ENTITLEMENT_EXPIRED"
+    assert access.blocked("overview") is None
+    access.record("overview", "Service has expired.")
     assert access.blocked("overview") == "ENTITLEMENT_EXPIRED"
 
 
-def test_a_success_clears_the_feed_wide_block_but_not_a_dataset_one():
+def test_a_success_clears_that_scope_and_any_feed_wide_block():
     access = FeedAccess()
-    access.record("history", "Service has expired.")
+    access.record("authentication", "401 Unauthorized")
     access.record("market_breadth", "403 forbidden")
+    assert access.blocked("history") == "AUTH_REQUIRED"
     access.success("history")
-    assert access.blocked("overview") is None
+    assert access.blocked("history") is None
     assert access.blocked("market_breadth") == "DATASET_FORBIDDEN"
 
 
 def test_the_wire_shape_never_carries_internal_retry_clocks():
     access = FeedAccess()
-    access.record("history", "Service has expired.")
+    access.record("market_data", "Service has expired.")
     wire = access.wire(fresh=False, active=True, last_data_at="2026-09-07T14:45:00+07:00")
     assert wire["code"] == "ENTITLEMENT_EXPIRED"
     assert wire["message"] == MESSAGES["ENTITLEMENT_EXPIRED"]
@@ -128,13 +134,13 @@ def test_the_expiry_notice_reports_what_was_observed_and_prescribes_nothing():
 def test_the_end_date_is_carried_when_it_is_known():
     """The date is the one fact that makes the notice actionable, and it is not sensitive."""
     access = FeedAccess()
-    access.record("history", "Service has expired.", detail="Access ended 2026-09-07.")
+    access.record("market_data", "Service has expired.", detail="Access ended 2026-09-07.")
     assert "2026-09-07" in access.wire(fresh=False, active=True, last_data_at=None)["message"]
 
 
 def test_it_reads_correctly_without_a_date():
     access = FeedAccess()
-    access.record("history", "Service has expired.")
+    access.record("market_data", "Service has expired.")
     message = access.wire(fresh=False, active=True, last_data_at=None)["message"]
     assert message == MESSAGES["ENTITLEMENT_EXPIRED"]
     assert not message.endswith(" ")
@@ -143,7 +149,7 @@ def test_it_reads_correctly_without_a_date():
 def test_no_token_claim_other_than_the_end_date_can_reach_the_wire():
     """inspect_session decodes a JWT; only the expiry may leave the process."""
     access = FeedAccess()
-    access.record("history", "Service has expired.", detail="Access ended 2026-09-07.")
+    access.record("market_data", "Service has expired.", detail="Access ended 2026-09-07.")
     blob = json.dumps(access.wire(fresh=False, active=True, last_data_at=None))
     for claim in ("xuannhan", "@", "CUSTOMER", "FiinQuant.Trial", "eyJ", "Individual"):
         assert claim not in blob
@@ -178,14 +184,14 @@ def test_an_expired_claim_alone_never_blocks_a_call():
 def test_the_claim_still_explains_a_real_rejection():
     access = FeedAccess()
     access.inspect_session(_Session("07/09/2020"))
-    access.record("stream", "Service has expired.")
+    access.record("market_data", "Service has expired.")
     message = access.wire(fresh=False, active=True, last_data_at=None)["message"]
     assert "2020-09-07" in message
 
 
 def test_a_rejection_without_a_claim_still_reads_correctly():
     access = FeedAccess()
-    access.record("stream", "Service has expired.")
+    access.record("market_data", "Service has expired.")
     assert access.wire(fresh=False, active=True, last_data_at=None)["message"] == \
         MESSAGES["ENTITLEMENT_EXPIRED"]
 
@@ -193,7 +199,7 @@ def test_a_rejection_without_a_claim_still_reads_correctly():
 def test_an_unexpired_claim_leaves_no_note_behind():
     access = FeedAccess()
     access.inspect_session(_Session("31/12/2099"))
-    access.record("stream", "Service has expired.")
+    access.record("market_data", "Service has expired.")
     assert access.wire(fresh=False, active=True, last_data_at=None)["message"] == \
         MESSAGES["ENTITLEMENT_EXPIRED"]
 
@@ -203,3 +209,57 @@ def test_a_malformed_token_is_ignored_rather_than_assumed_expired():
     access.inspect_session(_Session("not-a-date"))
     access.inspect_session(object())
     assert access.blocked("stream") is None
+
+
+# --------------------------------------------------------------------------- #
+# One endpoint's rejection is not the feed's verdict.
+#
+# `get_ceilingfloor` returns 401 for this account (it serves stocks only, never covered
+# warrants). That 401 was rewritten to the feed-wide "authentication" key, and `blocked()`
+# consults that key for every scope - so the realtime tick stream, which had just
+# subscribed 30 symbols successfully, was refused on the strength of an unrelated REST
+# endpoint. Production, during an open session:
+#
+#   03:44:02  session price bands unavailable: 401
+#   03:44:02  FiinQuant streams active for 30 symbols
+#   03:44:05  Session trade snapshot unavailable: AUTH_REQUIRED   <- our own gate
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("code,error", [
+    ("AUTH_REQUIRED", "401, message='Unauthorized'"),
+    ("ENTITLEMENT_EXPIRED", "Service has expired."),
+    ("DATASET_FORBIDDEN", "You do not have permission to access this API."),
+])
+def test_a_rejected_endpoint_never_takes_the_realtime_stream_with_it(code, error):
+    access = FeedAccess()
+    access.record("profiles", error)
+    assert access.blocked("profiles") == code
+    assert access.blocked("stream") is None, "the tick stream must survive a REST rejection"
+    assert access.blocked("history") is None
+    assert access.blocked("overview") is None
+
+
+def test_only_a_failed_login_is_feed_wide():
+    """`_sdk_call("authentication", ...)` wraps session creation. That one earns it."""
+    access = FeedAccess()
+    access.record("authentication", "401 Unauthorized")
+    for scope in ("stream", "history", "profiles", "overview"):
+        assert access.blocked(scope) == "AUTH_REQUIRED"
+
+
+def test_the_header_does_not_claim_an_auth_failure_for_one_bad_dataset():
+    """The banner speaks for the feed; a single dataset speaks for itself."""
+    access = FeedAccess()
+    access.record("profiles", "401, message='Unauthorized'")
+    wire = access.wire(fresh=False, active=True, last_data_at=None)
+    assert wire["code"] != "AUTH_REQUIRED"
+    assert [d["scope"] for d in wire["datasets"]] == ["profiles"]
+
+
+def test_several_dead_datasets_still_leave_the_stream_alone():
+    access = FeedAccess()
+    access.record("profiles", "401 Unauthorized")
+    access.record("breadth", "You do not have permission to access MarketBreadth.")
+    access.record("valuation", "Service has expired.")
+    assert access.blocked("stream") is None
+    assert {d["scope"] for d in access.wire(
+        fresh=False, active=True, last_data_at=None)["datasets"]} == {"profiles", "breadth", "valuation"}

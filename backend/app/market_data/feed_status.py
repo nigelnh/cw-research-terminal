@@ -79,10 +79,16 @@ class FeedAccess:
         code = classify_provider_error(error)
         if code is None:
             return None
-        if code == "ENTITLEMENT_EXPIRED":
-            scope = "market_data"
-        elif code == "AUTH_REQUIRED":
-            scope = "authentication"
+        # The failure stays in the scope that produced it. Promoting it to a feed-wide
+        # key was how ONE endpoint took the whole terminal down: `get_ceilingfloor`
+        # returned 401 (it serves stocks only, never covered warrants), that was rewritten
+        # to scope "authentication", and `blocked()` consults that key for every other
+        # scope - so the realtime tick stream, which had just subscribed 30 symbols
+        # successfully, was refused on the strength of an unrelated REST endpoint.
+        #
+        # A genuine login failure is already recorded under "authentication" by the
+        # `_sdk_call("authentication", ...)` that wraps session creation, and that one
+        # SHOULD be feed-wide. Nothing else earns that.
         with self._lock:
             message = MESSAGES[code]
             note = detail or (self._entitlement_note if code == "ENTITLEMENT_EXPIRED" else None)
@@ -149,6 +155,18 @@ class FeedAccess:
         with self._lock:
             errors = [{k: v for k, v in err.items() if k != "retryAt"} for err in self._errors.values()]
         global_error = next((e for e in errors if e["scope"] in ("market_data", "authentication")), None)
+        if global_error is None and len(errors) > 1:
+            # An account-wide condition is DISCOVERED, never assumed: when several
+            # independent scopes are rejected the same way, that is the feed talking, not
+            # one endpoint. A single failure only ever speaks for itself - `get_ceilingfloor`
+            # is 401 for this account by design and must not headline as an auth outage.
+            # This affects the banner only; blocking stays strictly per scope.
+            counts: dict[str, int] = {}
+            for err in errors:
+                counts[err["code"]] = counts.get(err["code"], 0) + 1
+            worst, seen = max(counts.items(), key=lambda kv: kv[1])
+            if seen > 1:
+                global_error = next(e for e in errors if e["code"] == worst)
         code = "AVAILABLE" if fresh else "SESSION_PAUSED" if not active else "STALE" if last_data_at else "AWAITING_DATA"
         return {
             **(global_error or {"code": code, "scope": "market_data", "message": MESSAGES[code],
