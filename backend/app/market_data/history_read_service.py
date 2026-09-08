@@ -80,7 +80,7 @@ class HistoryReadService:
     def __init__(self) -> None:
         self._engine: AsyncEngine | None = None
         self._sm: async_sessionmaker[AsyncSession] | None = None
-        self._provider = None  # HistoricalBarProvider (FiinQuant) - always set
+        self._provider = None  # HistoricalBarProvider - always set
         self._ingestion: IngestionService | None = None
         self._fill_failure_until: dict[str, float] = {}
         self._counters: dict[str, int] = {
@@ -100,7 +100,7 @@ class HistoryReadService:
 
     # ------------------------------------------------------------------ #
     def set_provider(self, provider) -> None:
-        """The direct provider (FiinQuant). Set unconditionally so provider-direct always works."""
+        """Set the direct provider unconditionally so provider-direct reads always work."""
         self._provider = provider
 
     def configure(
@@ -485,7 +485,7 @@ class HistoryReadService:
         # on HISTORY_RECENT_RETRY_DAYS for why "the cursor already spans it" is not reliable
         # evidence of a confirmed gap this close to today (confirmed live: an EOD-analytics
         # gap-fill for VPB/FPT's ADJUSTED series kept reporting "FILLED" with zero rows
-        # inserted for the current session's close, hours after FiinQuant actually published
+        # inserted for the current session's close, after the provider actually published
         # it, because an earlier fill's `requested_ceiling` had already stamped the cursor
         # past that date the moment it was first (unsuccessfully) asked for).
         recent_floor = date.today() - timedelta(days=settings.HISTORY_RECENT_RETRY_DAYS)

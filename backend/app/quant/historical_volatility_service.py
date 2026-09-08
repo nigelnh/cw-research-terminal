@@ -17,7 +17,7 @@ Design contract
 * Refreshes are single-flighted per underlying: concurrent callers for the same symbol
   share exactly one upstream request.
 * The upstream source is abstracted behind ``HistoricalBarSource`` (one async method) so it
-  can later be swapped from the FiinQuant provider to a PostgreSQL-backed source WITHOUT
+  can later be swapped from the configured provider to a PostgreSQL-backed source WITHOUT
   changing the LiveQuantEngine or this class' public surface.
 
 Canonical window: HV_22 (22 trading sessions) - see ``app.core.config`` for the single
@@ -78,7 +78,7 @@ class VolEstimate:
 class HistoricalBarSource(Protocol):
     """Minimal async interface required from an upstream historical-bar provider.
 
-    ``FiinQuantProvider`` already satisfies this. A future PostgreSQL-backed source only
+    The configured provider already satisfies this. A future PostgreSQL-backed source only
     needs to implement this one coroutine.
     """
 

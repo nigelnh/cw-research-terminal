@@ -1,10 +1,10 @@
-"""Trade-only in-memory bar builder fed by the existing FiinQuant trade stream."""
+"""Trade-only in-memory bar builder fed by canonical provider trade observations."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any
 
-from app.market_data.providers.fiinquant_normalization import number, timestamp
+from app.market_data.providers.provider_normalization import number, timestamp
 from app.market_data.trading_calendar import VN_TZ
 
 _MINUTES = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60}
@@ -60,7 +60,7 @@ class LiveBarBuilder:
                     "symbol": symbol, "date": start.isoformat(),
                     "open": price, "high": price, "low": price, "close": price,
                     "volume": qty, "value": match_value,
-                    "price_basis": "RAW", "source": "FIINQUANT_TRADE_STREAM",
+                    "price_basis": "RAW", "source": str(raw.get("_provider_source") or "MARKET_TRADE_FEED"),
                     "session_date": start.date().isoformat(), "complete": False,
                 }
                 self._bars[key] = bar
@@ -117,7 +117,7 @@ class LiveBarBuilder:
                 "low": low if low and low > 0 else price,
                 "close": price,
                 "volume": total_vol, "value": total_val,
-                "price_basis": "RAW", "source": "FIINQUANT_TRADE_STREAM",
+                "price_basis": "RAW", "source": str(raw.get("_provider_source") or "MARKET_TRADE_FEED"),
                 "session_date": session, "complete": False,
             }
             self._bars[key] = bar

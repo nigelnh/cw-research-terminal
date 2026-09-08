@@ -149,7 +149,7 @@ The persistence tests spin up a disposable local PostgreSQL cluster and skip cle
 # backend
 cd backend
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp ../.env.example ../.env      # fill in FIINQUANT_USERNAME / FIINQUANT_PASSWORD (+ DB/Redis if used)
+cp ../.env.example ../.env      # fill in VNSTOCK_API_KEY (+ DB/Redis if used)
 .venv/bin/alembic upgrade head  # only if DATABASE_ENABLED=true
 .venv/bin/python -m app.main    # http://localhost:8501
 

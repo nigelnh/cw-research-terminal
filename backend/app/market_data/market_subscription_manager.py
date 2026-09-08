@@ -14,7 +14,7 @@ from app.market_data.market_state_store import MarketStateStore, NullMarketState
 from app.market_data.redis_market_state_store import RedisMarketStateStore
 from app.market_data.session_reference import reference_session_date, refresh_session_references
 from app.market_data.providers.base_market_provider import MarketDataProvider
-from app.market_data.providers.fiinquant_provider import FiinQuantProvider
+from app.market_data.providers.provider_factory import create_market_provider
 
 if TYPE_CHECKING:
     from app.instruments.research_universe import ResolvedResearchUniverse
@@ -46,10 +46,10 @@ class SubscriptionManager:
     ):
         self.state = state or market_state
         self.store = store or market_state_store
-        self.max_symbols = max_symbols or settings.FIINQUANT_MAX_REALTIME_SYMBOLS
-        self.debounce_ms = debounce_ms if debounce_ms is not None else settings.FIINQUANT_DEBOUNCE_MS
+        self.max_symbols = max_symbols or settings.MARKET_DATA_MAX_SYMBOLS
+        self.debounce_ms = debounce_ms if debounce_ms is not None else settings.MARKET_DATA_DEBOUNCE_MS
 
-        self.provider = provider or FiinQuantProvider(max_symbols=self.max_symbols)
+        self.provider = provider or create_market_provider(max_symbols=self.max_symbols)
 
         self._desired_symbols: Set[str] = set()
         self._active_symbols: Set[str] = set()
@@ -110,6 +110,26 @@ class SubscriptionManager:
         try:
             if self._server_owned and self._event_session_date(raw_data) > reference_session_date().isoformat():
                 # Do not let an early next-session reset erase the overnight close.
+                return
+            if event_type == "trade_print":
+                # Polling providers can backfill confirmed exchange prints after the
+                # batched board observation has already advanced quote state. Applying an
+                # older print to MarketState would correctly be rejected as stale, but the
+                # time-and-sales tape should still retain that real print. Keep this event
+                # on its own path: it cannot mutate quote, analytics or live bars.
+                quote = self.state.get_quote(symbol)
+                printed = traded_log.record_provider_print(symbol, raw_data, quote=quote)
+                if printed is not None:
+                    asyncio.ensure_future(traded_log.persist(symbol, printed))
+                    message = {
+                        "type": "trade_print", "symbol": symbol,
+                        "print": printed, "ts": printed["ts"],
+                    }
+                    for listener in self._patch_listeners:
+                        try:
+                            listener(message)
+                        except Exception as err:  # noqa: BLE001
+                            logger.warning("Error broadcasting confirmed trade print: %s", err)
                 return
             if event_type == "trade":
                 quote, diff = self.state.apply_trade_event(raw_data)
@@ -303,7 +323,7 @@ class SubscriptionManager:
 
     async def _run_session_trade_poll(self) -> None:
         """Seed the trade group (last price + session OHLC / volume / value) for universe
-        symbols that have not ticked on ``Trading_Data_Stream`` yet this session — sparsely
+        symbols that have not received an observation yet this session — sparsely
         traded covered warrants otherwise show a live order book but no trade at all. A
         real stream tick always wins via ``apply_trade_event``'s stale-timestamp guard.
         """

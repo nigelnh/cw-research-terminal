@@ -23,7 +23,7 @@ class DataTemporalState(str, Enum):
 
 
 class DataSource(str, Enum):
-    LIVE_FEED = "LIVE_FEED"                  # FiinQuant SignalR -> MarketState
+    LIVE_FEED = "LIVE_FEED"                  # active provider -> MarketState
     REDIS_WARM = "REDIS_WARM"                # warm-cache restore (still same-session)
     SNAPSHOT_FINAL = "SNAPSHOT_FINAL"        # instrument_snapshots, quality=FINAL (session close)
     SNAPSHOT_CHECKPOINT = "SNAPSHOT_CHECKPOINT"  # instrument_snapshots, mid-session checkpoint

@@ -255,6 +255,24 @@ def test_the_header_does_not_claim_an_auth_failure_for_one_bad_dataset():
     assert [d["scope"] for d in wire["datasets"]] == ["profiles"]
 
 
+def test_optional_overview_groups_never_promote_to_a_feed_wide_banner():
+    access = FeedAccess()
+    access.record("overview_group_vnfinlead", "upstream_unavailable")
+    access.record("overview_group_vndiamond", "upstream_unavailable")
+
+    wire = access.wire(
+        fresh=False,
+        active=False,
+        last_data_at="2026-09-08T08:33:12+00:00",
+    )
+
+    assert wire["code"] == "SESSION_PAUSED"
+    assert {item["scope"] for item in wire["datasets"]} == {
+        "overview_group_vnfinlead",
+        "overview_group_vndiamond",
+    }
+
+
 def test_several_dead_datasets_still_leave_the_stream_alone():
     access = FeedAccess()
     access.record("profiles", "401 Unauthorized")

@@ -176,10 +176,22 @@ def test_provenance_prose_is_still_allowed():
     assert not _forbidden_token_hits(benign)
 
 
-def test_fiinquant_is_the_only_market_data_provider_implementation():
+def test_vnstock_is_the_only_selectable_market_data_provider():
     providers_dir = _REPO_ROOT / "backend/app/market_data/providers"
     impls = sorted(
         p.name for p in providers_dir.glob("*_provider.py")
         if p.name not in ("base_market_provider.py",)
     )
-    assert impls == ["fiinquant_provider.py"], f"unexpected market-data provider implementation(s): {impls}"
+    # FiinQuant remains as a directly imported regression target while the migration is
+    # reviewed, but it is no longer exported or selectable at runtime. Vnstock is the sole
+    # provider returned by the production factory.
+    assert impls == ["fiinquant_provider.py", "vnstock_provider.py"], (
+        f"unexpected market-data provider implementation(s): {impls}"
+    )
+
+    from app.market_data.providers.provider_factory import create_market_provider
+    from app.market_data.providers.vnstock_provider import VnstockProvider
+
+    assert isinstance(create_market_provider("vnstock"), VnstockProvider)
+    with pytest.raises(ValueError, match="Unsupported MARKET_DATA_PROVIDER"):
+        create_market_provider("fiinquant")

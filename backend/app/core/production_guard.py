@@ -95,6 +95,17 @@ def collect_production_problems(settings, *, rate_limiter_mode: str | None = Non
     if settings.DATABASE_ENABLED and not settings.DATABASE_URL.strip():
         p.append("DATABASE_ENABLED=true but DATABASE_URL is empty.")
 
+    # Community without a key is limited below the polling budget configured for this
+    # terminal. Local onboarding may use ~/.vnstock/api_key.json, but deployed containers
+    # must receive the key explicitly and must never bake that file into the image.
+    if (
+        settings.MARKET_DATA_PROVIDER.strip().lower() == "vnstock"
+        and settings.VNSTOCK_ENABLED
+        and settings.PUBLIC_REALTIME_ENABLED
+        and not settings.VNSTOCK_API_KEY.strip()
+    ):
+        p.append("Vnstock realtime is enabled but VNSTOCK_API_KEY is empty.")
+
     # ---- Auth (only when a protected surface is intentionally enabled) ----
     if settings.auth_configured():
         if settings.SUPABASE_URL.strip() and not settings.supabase_jwks_url():

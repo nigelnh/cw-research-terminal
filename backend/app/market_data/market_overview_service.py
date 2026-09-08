@@ -1,4 +1,4 @@
-"""Bounded HTTP reads around the slow, polled FiinQuant market-wide overview."""
+"""Bounded HTTP reads around the slow, polled market-wide overview."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ _SESSION_OPEN_MIN = 9 * 60
 
 def _sparkline_settled(cache: dict[str, Any]) -> bool:
     """False if any index's chart is missing its early bars - a fetch that raced a
-    FiinQuant hiccup and came back starting well after 09:00 ICT (confirmed live:
+    provider hiccup and came back starting well after 09:00 ICT (confirmed live:
     production served exactly this - a chart starting ~11:05 instead of 09:00 - frozen for
     the rest of the closed stretch once the off-session TTL stretch made it "settled" by
     the stock-leaders check alone). >20 min of slack covers a merely-late opening tick
@@ -228,7 +228,7 @@ class MarketOverviewService:
             "market_phase": market_session.get_market_phase().value,
         })
         if stale:
-            result.update({"stale": True, "source": "FIINQUANT_CACHE", "availability": "PARTIAL"})
+            result.update({"stale": True, "source": "VNSTOCK_CACHE", "availability": "PARTIAL"})
             for item in result.get("indices", []):
                 item["stale"] = True
         return result
@@ -237,7 +237,7 @@ class MarketOverviewService:
     def _empty_payload(refreshing: bool) -> dict[str, Any]:
         return {
             "indices": [], "top_stock_volume": [], "top_cw_volume": [],
-            "as_of": None, "source": "FIINQUANT", "availability": "UNAVAILABLE",
+            "as_of": None, "source": "VNSTOCK", "availability": "UNAVAILABLE",
             "market_session_active": market_session.is_trading_active(),
             "market_phase": market_session.get_market_phase().value,
             "stock_scope": "HOSE (VNINDEX constituents)",

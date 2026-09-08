@@ -119,13 +119,13 @@ def _resolve_db_url(args) -> str:
 
 async def _make_service(args):
     from app.persistence import database as db
-    from app.market_data.providers.fiinquant_provider import FiinQuantProvider
+    from app.market_data.providers.provider_factory import create_market_provider
     from app.persistence.ingestion.retry import RetryPolicy
     from app.persistence.ingestion.service import IngestionService
 
     engine = db.create_engine_from_url(_resolve_db_url(args))
     sm = db.configure(engine)
-    provider = FiinQuantProvider()  # historical SDK path only; no SignalR stream is ever started
+    provider = create_market_provider()  # historical adapter; live pollers are never started
     service = IngestionService(
         engine=engine, sessionmaker=sm, bar_provider=provider, retry_policy=RetryPolicy.from_settings()
     )

@@ -503,10 +503,10 @@ class LiveQuantEngine:
         """The session's close: a direct PostgreSQL read via the caller's own
         ``sessionmaker`` first, then one controlled gap-fill on a miss.
 
-        FiinQuant routinely lags publishing a session's *final* daily bar for hours after
+        The upstream may lag publishing a session's *final* daily bar for hours after
         the close (sometimes into the next calendar day) - a plain DB read done right after
         close, before this app's own bar ever landed, used to fail with EOD_INPUT_MISSING
-        even though the exact same day's close was already sitting in FiinQuant the whole
+        even though the exact same day's close was already available upstream the whole
         time. On a miss (and only then), this falls back to
         ``history_read_service.get_history`` - the same Postgres-first-with-gap-fill path
         the dashboard's own EOD fallback already uses for this exact situation

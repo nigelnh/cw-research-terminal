@@ -110,8 +110,11 @@ Secrets are set in the Railway/Vercel dashboards, never committed. `DATABASE_URL
 | `DATABASE_REQUIRE_ON_STARTUP` | no | `true` — refuse to serve without the DB in production |
 | `HISTORY_SOURCE_MODE` | no | `auto` (→ postgres_first) |
 | `PUBLIC_REALTIME_ENABLED` | no | `true` |
-| `FIINQUANT_USERNAME` | **yes** | market data account |
-| `FIINQUANT_PASSWORD` | **yes** | market data account |
+| `MARKET_DATA_PROVIDER` | no | `vnstock` |
+| `VNSTOCK_API_KEY` | **yes** | Vnstock Community account key; server-side only |
+| `VNSTOCK_QUOTE_POLL_SECONDS` | no | `5` |
+| `VNSTOCK_TAPE_SWEEP_SECONDS` | no | `120` |
+| `VNSTOCK_MIN_REQUEST_INTERVAL_SECONDS` | no | `1.2` (shared 50 req/min ceiling) |
 | `AI_ENABLED` | no | `true` |
 | `AI_PUBLIC_ENABLED` | no | `true` if OpenRouter configured + capped, else `false` |
 | `OPENROUTER_API_KEY` | **yes** | AI provider key |
@@ -127,8 +130,8 @@ Must **not** be set in production: `AUTH_TEST_HS256_SECRET`, `ALLOW_SINGLE_PROCE
 
 ### ingest-cron service (Railway) — same image
 
-Same DB/Redis/FiinQuant vars as backend. `DATABASE_ENABLED=true`, `DATABASE_URL` ref,
-`FIINQUANT_USERNAME` / `FIINQUANT_PASSWORD`. Start command overrides the entrypoint —
+Same DB/Redis/Vnstock vars as backend. `DATABASE_ENABLED=true`, `DATABASE_URL` ref,
+`VNSTOCK_API_KEY` set as a secret. Start command overrides the entrypoint —
 see §7.
 
 ### frontend project (Vercel)

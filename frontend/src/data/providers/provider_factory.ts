@@ -20,7 +20,7 @@ export interface ResearchProviders {
 }
 
 /**
- * Creates provider suite connected to live FastAPI backend and upstream FiinQuant feed.
+ * Creates the provider suite connected to the FastAPI market-data gateway.
  * Strictly operates against real market data with zero mock fallback.
  */
 export function createProviders(_mode?: string): ResearchProviders {

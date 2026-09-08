@@ -605,7 +605,7 @@ class MarketSnapshotResolver:
         """Session-scoped L1/Redis fallback cache, separate from live quote state.
 
         Incomplete legacy snapshots may need an actual historical close. Those reads must
-        not hit FiinQuant again on every reload or after a backend restart. Never cache a
+        not hit the upstream provider again on every reload or after a backend restart. Never cache a
         future/current incomplete session under the last-completed-session key.
         """
         now = now or datetime.now(cal.VN_TZ)

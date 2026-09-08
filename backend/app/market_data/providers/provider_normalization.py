@@ -1,10 +1,10 @@
-"""FiinQuant transport boundary. No price scaling, no zero-as-missing coercions.
+"""Canonical event helpers shared by every market-data transport.
 
-Prices are VND (indices are points), quantities are units, value is VND. Timestamp
-strings without an offset are exchange-local, never the server's local timezone.
+Prices are raw VND (indices are points), quantities are units, and values are VND.
+Timestamp strings without an offset are exchange-local, never the server's timezone.
 """
-from datetime import datetime
 import math
+from datetime import datetime
 from typing import Any
 
 from app.market_data.trading_calendar import VN_TZ

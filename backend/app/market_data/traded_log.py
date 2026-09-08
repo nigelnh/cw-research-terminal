@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections import deque
 from datetime import datetime, time as dt_time, timedelta
 from typing import Any, Deque, Dict, List, Optional
@@ -161,6 +162,86 @@ class TradedLog:
         tape.append(entry)
         return entry
 
+    def record_provider_print(
+        self,
+        symbol: str,
+        raw: Dict[str, Any],
+        *,
+        quote: Optional[CanonicalQuote] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Append one provider-confirmed print without mutating the latest quote.
+
+        A polling board snapshot is never accepted here. The caller must supply the
+        timestamp, matched quantity and price returned by the provider's trade-history
+        endpoint. Dedup includes cumulative volume because KBS can publish multiple same-
+        second, same-price and same-size matches after normalizing away subsecond digits.
+        """
+        sym = symbol.strip().upper()
+        stamp = raw.get("Timestamp")
+        try:
+            dt = datetime.fromisoformat(str(stamp).strip().replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=VN_TZ)
+            stamp_ms = int(dt.timestamp() * 1000)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        session = str(raw.get("TradingDate") or dt.astimezone(VN_TZ).date().isoformat())[:10]
+        if session != reference_session_date().isoformat():
+            return None
+        try:
+            price = float(raw.get("Close"))
+            volume = int(float(raw.get("MatchVolume")))
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(price) or price <= 0 or volume <= 0:
+            return None
+        cumulative = raw.get("TotalMatchVolume")
+        try:
+            cumulative = int(float(cumulative)) if cumulative is not None else None
+        except (TypeError, ValueError):
+            cumulative = None
+        ref = quote.reference_price if quote is not None else None
+        change = raw.get("Change")
+        try:
+            change = float(change) if change is not None and math.isfinite(float(change)) else None
+        except (TypeError, ValueError):
+            change = None
+        if change is None and ref not in (None, 0):
+            change = price - float(ref)
+        side_text = str(raw.get("Side") or "").strip().lower()
+        side = "B" if side_text in ("b", "buy", "ato_buy", "atc_buy") else (
+            "S" if side_text in ("s", "sell", "ato_sell", "atc_sell") else None
+        )
+        entry = {
+            "ts": stamp_ms,
+            "time": dt.astimezone(VN_TZ).strftime("%H:%M:%S"),
+            "price": price,
+            "change": change,
+            "change_percent": change / ref if change is not None and ref not in (None, 0) else None,
+            "volume": volume,
+            "side": side,
+            "side_basis": "PROVIDER",
+            "cumulative_volume": cumulative,
+            "session_date": session,
+        }
+        entry["id"] = str(raw.get("TradeId") or "|".join(
+            str(entry.get(k, "")) for k in (
+                "session_date", "ts", "price", "volume", "cumulative_volume"
+            )
+        ))
+
+        if self._session.get(sym) != session:
+            previous = self._session.get(sym)
+            self._session[sym] = session
+            self._log[sym] = deque(maxlen=self._memory)
+            if previous is not None:
+                self._pending_resets.add(sym)
+        tape = self._log.setdefault(sym, deque(maxlen=self._memory))
+        if any(item.get("id") == entry["id"] for item in tape):
+            return None
+        tape.append(entry)
+        return entry
+
     async def persist(self, symbol: str, entry: Dict[str, Any]) -> None:
         """Append ONE print to the symbol's Redis list. Never raises.
 
@@ -259,7 +340,7 @@ class TradedLog:
             "retained_limit": self._max,
             "truncated": len(items) >= min(limit, self._max),
             # The exchange publishes no per-match aggressor flag; see classify_side.
-            "side_basis": "DERIVED_FROM_BOOK",
+            "side_basis": self._side_basis(items),
         }
 
     async def get_session(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
@@ -303,8 +384,17 @@ class TradedLog:
             "coverage": "OBSERVED_WINDOW",
             "retained_limit": self._max,
             "truncated": len(items) >= min(limit, self._max),
-            "side_basis": "DERIVED_FROM_BOOK",
+            "side_basis": self._side_basis(items),
         }
+
+    @staticmethod
+    def _side_basis(items: List[Dict[str, Any]]) -> str:
+        bases = {item.get("side_basis", "DERIVED_FROM_BOOK") for item in items}
+        if bases == {"PROVIDER"}:
+            return "PROVIDER"
+        if len(bases) > 1:
+            return "MIXED"
+        return "DERIVED_FROM_BOOK"
 
     def tracked_symbols(self) -> List[str]:
         return sorted(self._log.keys())
