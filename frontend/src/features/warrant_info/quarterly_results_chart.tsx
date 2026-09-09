@@ -31,6 +31,10 @@ export function QuarterlyResultsChart({
   isError: boolean;
 }) {
   const theme = useChartTheme();
+  const plottableRows = useMemo(
+    () => rows.filter(row => row.revenue != null || row.net_profit != null),
+    [rows],
+  );
 
   const { data, options } = useMemo(() => {
     const revenue = token("--series-1", "#a0c4e1");
@@ -77,27 +81,27 @@ export function QuarterlyResultsChart({
     };
     return {
       data: {
-        labels: rows.map(r => r.period),
+        labels: plottableRows.map(r => r.period),
         datasets: [
           {
-            label: "Revenue", data: rows.map(r => r.revenue),
+            label: "Revenue", data: plottableRows.map(r => r.revenue),
             backgroundColor: revenue, borderWidth: 0, yAxisID: "y", maxBarThickness: 26,
           },
           {
-            label: "Net profit", data: rows.map(r => r.net_profit),
+            label: "Net profit", data: plottableRows.map(r => r.net_profit),
             backgroundColor: profit, borderWidth: 0, yAxisID: "y1", maxBarThickness: 14,
           },
         ],
       },
       options: opts,
     };
-  }, [rows, theme]);
+  }, [plottableRows, theme]);
 
   const empty = isError
     ? "Financial statements unavailable."
     : isLoading
       ? "Loading…"
-      : rows.length === 0
+      : plottableRows.length === 0
         ? "No quarterly statements for this symbol."
         : null;
 

@@ -223,6 +223,7 @@ class TradedLog:
             "side_basis": "PROVIDER",
             "cumulative_volume": cumulative,
             "session_date": session,
+            "source": str(raw.get("_provider_source") or "PROVIDER_TAPE"),
         }
         entry["id"] = str(raw.get("TradeId") or "|".join(
             str(entry.get(k, "")) for k in (
@@ -277,6 +278,25 @@ class TradedLog:
             else:
                 self._persist_failed.add(symbol)
                 logger.warning("Traded-log persist failed for %s: %s", symbol, err)
+
+    async def persist_many(self, symbol: str, entries: List[Dict[str, Any]]) -> None:
+        """Persist a bounded on-demand backfill in one Redis transaction."""
+        if self._redis is None or not entries:
+            return
+        sym = symbol.strip().upper()
+        session = str(entries[-1].get("session_date") or reference_session_date().isoformat())
+        key = self._key(sym, session)
+        try:
+            pipe = self._redis.pipeline()
+            pipe.rpush(key, *(json.dumps(entry) for entry in entries))
+            pipe.ltrim(key, -self._max, -1)
+            pipe.expire(key, seconds_until_rollover())
+            await pipe.execute()
+            self._persist_failed.discard(sym)
+        except Exception as err:  # noqa: BLE001 - memory remains a valid bounded fallback
+            if sym not in self._persist_failed:
+                self._persist_failed.add(sym)
+                logger.warning("Traded-log backfill persist failed for %s: %s", sym, err)
 
     async def _reset_redis_session(self, symbol: str) -> None:
         """Drop a symbol's stored tape when its session rolls over, so yesterday's prints
