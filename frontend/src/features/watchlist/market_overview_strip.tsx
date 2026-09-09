@@ -81,7 +81,16 @@ export function Sparkline({ values, reference }: { values: IndexOverview["sparkl
       p.x != null && Number.isFinite(p.x) && Number.isFinite(p.value))
     .map(p => ({ ...p, x: Math.min(100, Math.max(0, p.x)) }))
     .sort((a, b) => a.min - b.min);
-  if (!points.length) return <div className="overview-spark-empty">NO INTRADAY SERIES</div>;
+  if (!points.length) {
+    if (reference == null) return <div className="overview-spark-empty">NO INTRADAY SERIES</div>;
+    const referenceY = 17.5;
+    return <>
+      <svg className="overview-spark" role="img" aria-label="Session reference price" viewBox="0 0 100 32" preserveAspectRatio="none">
+        <line x1="0" y1={referenceY} x2="100" y2={referenceY} stroke="var(--accent)" strokeWidth="0.7" strokeDasharray="2 2" />
+      </svg>
+      <span className="overview-spark-ref" style={{ top: `${(referenceY / 32) * 100}%` }}>{number(reference)}</span>
+    </>;
+  }
   const seriesValues = points.map(p => p.value);
   const ref = points.find(p => p.reference != null)?.reference ?? reference ?? null;
   // Symmetric around the reference (not a plain min/max fit) so its line always lands
@@ -191,18 +200,19 @@ export function IntradayVolume({ values }: { values: IndexOverview["sparkline"] 
   );
 }
 
-function IndexCard({ item }: { item: IndexOverview }) {
+function IndexCard({ item, referenceOnly = false }: { item: IndexOverview; referenceOnly?: boolean }) {
   const prefix = item.change != null && item.change > 0 ? "+" : "";
   const sessionKey = item.as_of?.slice(0, 10) ?? null;
   const reasons = item.partial_reasons?.map(reason => ({
     BREADTH_UNAVAILABLE: "Market breadth unavailable (advancing/declining counts)",
     INTRADAY_UNAVAILABLE: "No intraday observations for this session",
     PRICE_UNAVAILABLE: "Index price unavailable", REFERENCE_UNAVAILABLE: "Session reference unavailable",
+    PRE_OPEN_REFERENCE_ONLY: "Pre-open: only today's session reference is available",
   }[reason] ?? reason)).join("; ");
   const asOf = item.as_of
     ? new Date(item.as_of).toLocaleTimeString("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" })
     : null;
-  const tag = item.stale ? "STALE" : asOf;
+  const tag = referenceOnly ? null : item.stale ? "STALE" : asOf;
   const tagTitle = [
     "Index path — 5-minute bars, 09:00–15:00 ICT.",
     asOf ? `As of ${asOf} ICT.` : "",
@@ -211,36 +221,42 @@ function IndexCard({ item }: { item: IndexOverview }) {
   ].filter(Boolean).join(" ");
   return <article className="index-card mono" aria-label={`${item.symbol} index overview`}>
     <div className="overview-spark-wrap">
-      <IntradayVolume values={item.sparkline || []} />
-      <Sparkline values={item.sparkline || []} reference={item.reference} />
+      <IntradayVolume values={referenceOnly ? [] : item.sparkline || []} />
+      <Sparkline values={referenceOnly ? [] : item.sparkline || []} reference={item.reference} />
       {tag && <span className={`overview-spark-tag${item.stale ? " is-stale" : ""}`} title={tagTitle}>{tag}</span>}
     </div>
     <div className="index-card-main">
       <strong className="heading">{item.symbol}</strong>
-      <span style={{ color: tone(item.change) }}>
+      {referenceOnly ? <span style={{ color: "var(--flat)" }}>
+        <small>REF</small>{" "}<PolledRealtimeValue value={item.reference} resetKey={item.session_date}>{number(item.reference)}</PolledRealtimeValue>
+      </span> : <span style={{ color: tone(item.change) }}>
         <PolledRealtimeValue value={item.value} resetKey={sessionKey} tone={flashTone(item.change)}>{number(item.value)}</PolledRealtimeValue>{" "}
         <small>
           <PolledRealtimeValue value={item.change} resetKey={sessionKey} tone={flashTone(item.change)}>{prefix}{number(item.change)}</PolledRealtimeValue>{" "}(
           <PolledRealtimeValue value={item.change_percent} resetKey={sessionKey} tone={flashTone(item.change_percent)}>{prefix}{item.change_percent == null ? DASH : `${item.change_percent.toFixed(2)}%`}</PolledRealtimeValue>)
         </small>
-      </span>
+      </span>}
     </div>
-    <div className="index-card-line"><span>VOL <PolledRealtimeValue value={item.volume} resetKey={sessionKey}>{compact(item.volume)}</PolledRealtimeValue></span><span>VAL <PolledRealtimeValue value={item.trading_value} resetKey={sessionKey}>{compact(item.trading_value)}</PolledRealtimeValue></span></div>
+    <div className="index-card-line"><span>VOL <PolledRealtimeValue value={referenceOnly ? null : item.volume} resetKey={sessionKey}>{compact(referenceOnly ? null : item.volume)}</PolledRealtimeValue></span><span>VAL <PolledRealtimeValue value={referenceOnly ? null : item.trading_value} resetKey={sessionKey}>{compact(referenceOnly ? null : item.trading_value)}</PolledRealtimeValue></span></div>
     <div className="index-card-breadth">
-      <span style={{ color: "var(--up)" }}><DirectionTriangle color="var(--up)" /> <PolledRealtimeValue value={item.advancing} resetKey={sessionKey}>{number(item.advancing)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.ceiling} resetKey={sessionKey} style={{ color: "var(--price-ceiling)" }}>({number(item.ceiling)})</PolledRealtimeValue></span>
-      <span style={{ color: "var(--flat)" }}>― <PolledRealtimeValue value={item.unchanged} resetKey={sessionKey}>{number(item.unchanged)}</PolledRealtimeValue></span>
-      <span style={{ color: "var(--down)" }}><DirectionTriangle down color="var(--down)" /> <PolledRealtimeValue value={item.declining} resetKey={sessionKey}>{number(item.declining)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.floor} resetKey={sessionKey} style={{ color: "var(--price-floor)" }}>({number(item.floor)})</PolledRealtimeValue></span>
+      {referenceOnly ? <><span>{DASH}</span><span>{DASH}</span><span>{DASH}</span></> : <>
+        <span style={{ color: "var(--up)" }}><DirectionTriangle color="var(--up)" /> <PolledRealtimeValue value={item.advancing} resetKey={sessionKey}>{number(item.advancing)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.ceiling} resetKey={sessionKey} style={{ color: "var(--price-ceiling)" }}>({number(item.ceiling)})</PolledRealtimeValue></span>
+        <span style={{ color: "var(--flat)" }}>― <PolledRealtimeValue value={item.unchanged} resetKey={sessionKey}>{number(item.unchanged)}</PolledRealtimeValue></span>
+        <span style={{ color: "var(--down)" }}><DirectionTriangle down color="var(--down)" /> <PolledRealtimeValue value={item.declining} resetKey={sessionKey}>{number(item.declining)}</PolledRealtimeValue> <PolledRealtimeValue as="small" value={item.floor} resetKey={sessionKey} style={{ color: "var(--price-floor)" }}>({number(item.floor)})</PolledRealtimeValue></span>
+      </>}
     </div>
   </article>;
 }
 
-function LeaderTable({ title, rows }: { title: string; rows: VolumeLeader[] }) {
+function LeaderTable({ title, rows, placeholders = false }: { title: string; rows: VolumeLeader[]; placeholders?: boolean }) {
   const peak = Math.max(...rows.map(r => r.volume), 1);
   return <section className="leader-panel mono">
     <div className="leader-title"><span className="heading">{title}</span></div>
     <div className="leader-head"><span>SYMBOL</span><span>VOLUME</span><span>TRD_PRC</span></div>
     <div className="leader-rows">
-      {rows.length === 0 ? <div className="overview-unavailable">DATA UNAVAILABLE</div> : rows.map((row, index) => <div className="leader-row" key={row.symbol}>
+      {rows.length === 0 && placeholders ? Array.from({ length: 5 }, (_, index) => <div className="leader-row" key={`placeholder-${index}`} aria-label="No ranked volume yet">
+        <span>{index + 1}. {DASH}</span><span>{DASH}</span><span>{DASH}</span>
+      </div>) : rows.length === 0 ? <div className="overview-unavailable">DATA UNAVAILABLE</div> : rows.map((row, index) => <div className="leader-row" key={row.symbol}>
         <i style={{ width: `${Math.max(3, row.volume / peak * 100)}%` }} />
         <span>{index + 1}. <b style={{ color: marketTone(row.market_state) }}>{row.symbol}</b></span><span><PolledRealtimeValue value={row.volume} resetKey={row.as_of?.slice(0, 10)}>{fmtVol(row.volume)}</PolledRealtimeValue></span><span><PolledRealtimeValue value={row.price} resetKey={row.as_of?.slice(0, 10)} tone={leaderFlashTone(row.market_state)} style={{ color: marketTone(row.market_state) }}>{fmtPrice(row.price)}</PolledRealtimeValue></span>
       </div>)}
@@ -256,12 +272,13 @@ export function MarketOverviewStrip({ indicesOnly = false }: { indicesOnly?: boo
   if (data.availability === "UNAVAILABLE" && data.indices.length === 0) {
     return <div className="market-overview-state mono">{data.unavailable_reason ?? (data.refreshing ? "MARKET OVERVIEW UPDATING…" : "MARKET OVERVIEW UNAVAILABLE")}</div>;
   }
-  const indices = ORDER.map(symbol => data.indices.find(x => x.symbol === symbol) ?? ({ symbol, value: null, change: null, change_percent: null, volume: null, trading_value: null, advancing: null, ceiling: null, unchanged: null, declining: null, floor: null, as_of: null, sparkline: [] }));
+  const referenceOnly = (data.market_phase ?? data.sessionContext?.marketPhase) === "PRE_OPEN";
+  const indices = ORDER.map(symbol => data.indices.find(x => x.symbol === symbol) ?? ({ symbol, value: null, change: null, change_percent: null, volume: null, trading_value: null, advancing: null, ceiling: null, unchanged: null, declining: null, floor: null, as_of: null, reference: null, sparkline: [] }));
   return <div className={`market-overview-wrap${indicesOnly ? " indices-only" : ""}`}>
-    <div className="index-viewer">{indices.map(item => <IndexCard item={item} key={item.symbol} />)}</div>
+    <div className="index-viewer">{indices.map(item => <IndexCard item={item} referenceOnly={referenceOnly} key={item.symbol} />)}</div>
     {!indicesOnly && <div className="top-exchange-viewer">
-      <LeaderTable title="Top Stock Trading Volume" rows={data.top_stock_volume} />
-      <LeaderTable title="Top Covered Warrants Trading Volume" rows={data.top_cw_volume} />
+      <LeaderTable title="Top Stock Trading Volume" rows={referenceOnly ? [] : data.top_stock_volume.filter(row => row.volume > 0)} placeholders={referenceOnly} />
+      <LeaderTable title="Top Covered Warrants Trading Volume" rows={referenceOnly ? [] : data.top_cw_volume.filter(row => row.volume > 0)} placeholders={referenceOnly} />
     </div>}
   </div>;
 }

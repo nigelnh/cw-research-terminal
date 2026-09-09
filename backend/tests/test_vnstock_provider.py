@@ -9,7 +9,7 @@ import pytest
 from app.market_data.market_schemas import CanonicalQuote
 from app.market_data.providers.vnstock_provider import VnstockProvider
 from app.market_data.traded_log import TradedLog
-from app.market_data.trading_calendar import VN_TZ
+from app.market_data.trading_calendar import VN_TZ, MarketPhase
 
 SESSION = "2026-09-08"
 STAMP_MS = int(datetime(2026, 9, 8, 10, 54, 59, tzinfo=VN_TZ).timestamp() * 1000)
@@ -279,6 +279,56 @@ async def test_overview_keeps_other_indices_when_one_dataset_fails(monkeypatch):
     assert by_symbol["VNDIAMOND"]["breadth_observed"] == 1
     assert result["availability"] == "PARTIAL"
     assert result["top_stock_volume"]
+
+
+@pytest.mark.asyncio
+async def test_preopen_overview_is_reference_only_and_does_not_rank_zero_volume_rows(monkeypatch):
+    def history(symbol, source, start, end, interval):
+        if interval == "1D":
+            return [{"time": "2026-09-08 15:00:00", "close": 1000, "volume": 10}]
+        return []
+
+    def board(symbols):
+        return [{
+            **board_row(symbol=symbol, session="09/09/2026"),
+            "close_price": 0,
+            "reference_price": 1000,
+            "volume_accumulated": 0,
+        } for symbol in symbols]
+
+    p = provider(
+        board_fetcher=board,
+        history_fetcher=history,
+        listing_fetcher=lambda: [{"symbol": "HPG", "exchange": "HSX", "type": "STOCK"}],
+        group_fetcher=lambda _: ["HPG"],
+    )
+    monkeypatch.setattr(
+        "app.market_data.providers.vnstock_provider.reference_session_date",
+        lambda *args, **kwargs: date(2026, 9, 9),
+    )
+    monkeypatch.setattr(
+        "app.market_data.providers.vnstock_provider.market_session.get_market_phase",
+        lambda: MarketPhase.PRE_OPEN,
+    )
+    monkeypatch.setattr(
+        "app.market_data.providers.vnstock_provider.market_session.is_trading_active",
+        lambda: False,
+    )
+
+    result = await p.get_market_overview(["CHPG2625"])
+
+    assert result["display_session"] == "2026-09-09"
+    assert result["top_stock_volume"] == []
+    assert result["top_cw_volume"] == []
+    assert result["availability"] == "PARTIAL"
+    for item in result["indices"]:
+        assert item["value"] is None
+        assert item["reference"] == 1000
+        assert item["sparkline"] == []
+        assert item["volume"] is None
+        assert item["advancing"] is None
+        assert item["declining"] is None
+        assert item["partial_reasons"][0] == "PRE_OPEN_REFERENCE_ONLY"
 
 
 def test_adapter_disables_vendor_agent_file_injection():

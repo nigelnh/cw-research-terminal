@@ -7,8 +7,9 @@ import copy
 import logging
 import math
 import time
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from app.market_data.market_session import market_session
 from app.market_data.session_reference import reference_session_date
@@ -145,8 +146,12 @@ class MarketOverviewService:
     async def _refresh(self, symbols: list[str]) -> None:
         await self._load()
         result = await self._provider.get_market_overview(symbols)
+        # At the 08:00 display rollover Vnstock can confirm today's official index
+        # references before the first index bar exists.  A reference-only overview is a
+        # valid pre-open payload and must replace yesterday's completed-session cache.
         usable = bool(result.get("top_stock_volume") or result.get("top_cw_volume")) or any(
-            item.get("value") is not None for item in result.get("indices", [])
+            item.get("value") is not None or item.get("reference") is not None
+            for item in result.get("indices", [])
         )
         if not usable:
             self._retry_at = time.monotonic() + 60

@@ -126,6 +126,23 @@ async def test_unavailable_refresh_preserves_last_good_snapshot():
     cache.save_market_overview.assert_not_called()
 
 
+async def test_reference_only_preopen_refresh_replaces_the_previous_session_cache():
+    payload = overview()
+    payload["indices"][0].update({"value": None, "reference": 1190})
+    payload["availability"] = "PARTIAL"
+    provider = SimpleNamespace(get_market_overview=AsyncMock(return_value=payload))
+    cache = store()
+    service = MarketOverviewService()
+    service.configure(provider, cache)
+
+    await service._refresh([])
+
+    assert service._cache is not None
+    assert service._cache["indices"][0]["value"] is None
+    assert service._cache["indices"][0]["reference"] == 1190
+    cache.save_market_overview.assert_awaited_once()
+
+
 async def _settle(service: MarketOverviewService) -> None:
     """Await any refresh `get()` just scheduled, so a following assertion on
     `await_count`/task-identity reflects what actually ran rather than a task that was

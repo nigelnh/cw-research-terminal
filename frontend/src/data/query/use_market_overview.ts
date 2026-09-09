@@ -25,7 +25,7 @@ export interface IndexOverview {
   sparkline: Array<
     number | { timestamp: string; value: number; reference?: number | null; volume?: number | null }
   >;
-  provenance?: Record<string, { source: string; as_of?: string | null; session_date?: string | null; availability?: string; timeframe?: string }>;
+  provenance?: Record<string, { source: string; as_of?: string | null; session_date?: string | null; observed_session_date?: string | null; availability?: string; timeframe?: string }>;
 }
 export interface VolumeLeader {
   symbol: string;
