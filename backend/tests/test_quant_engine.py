@@ -271,6 +271,110 @@ def test_independent_bid_ask_trade_ivs():
     assert iv_bid < iv_trade < iv_ask
 
 
+@pytest.mark.asyncio
+async def test_same_session_stale_prices_keep_iv_with_stale_provenance(monkeypatch):
+    """A quiet CW book is still the latest observed book for today's session.
+
+    Before this regression fix, the 180-second freshness gate returned
+    STALE_PRICING_INPUTS and blanked every IV when the underlying continued ticking.
+    """
+    now = datetime(2026, 9, 9, 9, 50, tzinfo=VN_TZ)
+    monkeypatch.setattr(_qe, "get_vietnam_now", lambda: now)
+    spec = CoveredWarrantSpecification(
+        symbol="CHPG2617",
+        issuer="MSVN",
+        underlying_symbol="HPG",
+        strike_price=25400.0,
+        exercise_ratio=4.0,
+        maturity_date="2027-03-25",
+        last_trading_date="2027-03-23",
+        listed_volume=20_000_000,
+        issue_price=1000.0,
+        status=InstrumentLifecycleStatus.ACTIVE,
+        data_quality=DataQualityStatus.COMPLETE,
+        evidence_level=LifecycleEvidenceLevel.CURRENT_EXCHANGE_LIST,
+        metadata_verification=MetadataVerificationStatus.VERIFIED_CURRENT,
+    )
+    stale_at = int((now - timedelta(minutes=10)).timestamp() * 1000)
+    live_at = int((now - timedelta(seconds=5)).timestamp() * 1000)
+    cw = CanonicalQuote(
+        symbol="CHPG2617",
+        instrument_type="CW",
+        last_price=450.0,
+        bid1_price=430.0,
+        ask1_price=440.0,
+        market_session_date="2026-09-09",
+        trade_timestamp=stale_at,
+        book_timestamp=stale_at,
+    )
+    underlying = CanonicalQuote(
+        symbol="HPG",
+        instrument_type="STOCK",
+        last_price=22000.0,
+        market_session_date="2026-09-09",
+        trade_timestamp=live_at,
+    )
+    engine = LiveQuantEngine()
+    engine.set_market_state_getter(lambda symbol: underlying if symbol == "HPG" else cw)
+
+    analytics = await engine.compute_warrant_analytics(
+        "CHPG2617", spec=spec, cw_state=cw, und_state=underlying
+    )
+
+    assert analytics.is_available is True
+    assert analytics.unavailable_reason is None
+    assert analytics.stale is True
+    assert analytics.iv_bid is not None
+    assert analytics.iv_trade is not None
+    assert analytics.iv_ask is not None
+    assert analytics.model_inputs is not None
+    assert analytics.model_inputs.underlying_price == 22000.0
+    assert analytics.model_inputs.market_bid == 430.0
+    assert analytics.input_provenance["book"]["sessionDate"] == "2026-09-09"
+    assert analytics.input_provenance["book"]["asOf"].startswith("2026-09-09T09:40")
+
+
+@pytest.mark.asyncio
+async def test_previous_session_prices_remain_ineligible_even_when_values_exist(monkeypatch):
+    now = datetime(2026, 9, 9, 9, 50, tzinfo=VN_TZ)
+    monkeypatch.setattr(_qe, "get_vietnam_now", lambda: now)
+    spec = CoveredWarrantSpecification(
+        symbol="CHPG2617",
+        issuer="MSVN",
+        underlying_symbol="HPG",
+        strike_price=25400.0,
+        exercise_ratio=4.0,
+        maturity_date="2027-03-25",
+        last_trading_date="2027-03-23",
+        listed_volume=20_000_000,
+        issue_price=1000.0,
+        status=InstrumentLifecycleStatus.ACTIVE,
+        data_quality=DataQualityStatus.COMPLETE,
+        evidence_level=LifecycleEvidenceLevel.CURRENT_EXCHANGE_LIST,
+        metadata_verification=MetadataVerificationStatus.VERIFIED_CURRENT,
+    )
+    old_at = int((now - timedelta(days=1)).timestamp() * 1000)
+    cw = CanonicalQuote(
+        symbol="CHPG2617", instrument_type="CW", last_price=450.0,
+        bid1_price=430.0, ask1_price=440.0, market_session_date="2026-09-08",
+        trade_timestamp=old_at, book_timestamp=old_at,
+    )
+    underlying = CanonicalQuote(
+        symbol="HPG", instrument_type="STOCK", last_price=22000.0,
+        market_session_date="2026-09-08", trade_timestamp=old_at,
+    )
+    engine = LiveQuantEngine()
+    engine.set_market_state_getter(lambda symbol: underlying if symbol == "HPG" else cw)
+
+    analytics = await engine.compute_warrant_analytics(
+        "CHPG2617", spec=spec, cw_state=cw, und_state=underlying
+    )
+
+    assert analytics.is_available is False
+    assert analytics.unavailable_reason == "MARKET_INPUT_SESSION_MISMATCH"
+    assert analytics.iv_bid is None
+
+
 def test_solver_root_bracketing_and_diagnostics():
     """
     Tests explicit solver diagnostic states:
