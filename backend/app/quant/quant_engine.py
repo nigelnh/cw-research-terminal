@@ -726,6 +726,7 @@ class LiveQuantEngine:
         cw_trade_ts = (cw_state.trade_timestamp or cw_state.source_timestamp) if cw_state else None
         cw_book_ts = cw_state.book_timestamp if cw_state else None
         und_ts = (und_state.trade_timestamp or und_state.source_timestamp) if und_state else None
+        pricing_inputs_stale = False
         provenance = {"underlying": input_origin(und_state, und_ts),
                       "trade": input_origin(cw_state, cw_trade_ts), "book": input_origin(cw_state, cw_book_ts)}
         if bid_price is not None and ask_price is not None and ask_price < bid_price:
@@ -744,6 +745,7 @@ class LiveQuantEngine:
                 bid_price = ask_price = None
             required = [ts for ts in (und_ts, cw_trade_ts if last_price else None, cw_book_ts if bid_price or ask_price else None) if ts]
             if is_trading_active(_now) and any(_now.timestamp() * 1000 - ts > 180000 for ts in required):
+                pricing_inputs_stale = True
                 cached = self.get_analytics(cw_sym, now=_now)
                 if (cached and cached.is_available and cached.model_inputs
                         and cached.terms_version == hashlib.sha256(spec.model_dump_json().encode()).hexdigest()[:16]
@@ -752,8 +754,14 @@ class LiveQuantEngine:
                         and cached.model_inputs.market_bid == bid_price
                         and cached.model_inputs.market_ask == ask_price):
                     return cached.model_copy(update={"stale": True}, deep=True)
-                return WarrantAnalytics(symbol=cw_sym, underlying_symbol=und_sym, calculated_at=now_iso,
-                    is_available=False, unavailable_reason="STALE_PRICING_INPUTS")
+
+                # A quiet symbol does not make its latest same-session observation
+                # unusable.  Order-book timestamps advance when the book changes, so a
+                # price can legitimately remain unchanged for longer than the freshness
+                # window.  Keep every input's observation time in provenance and mark the
+                # resulting analytics STALE instead of blanking IV across the terminal.
+                # The session/timestamp guards above still reject previous-session,
+                # future, or undated inputs before this point.
 
         # 7. Solve Implied Volatilities (Bid, Ask, Trade, Mid)
         iv_bid, _ = solve_implied_volatility(
@@ -862,6 +870,7 @@ class LiveQuantEngine:
             symbol=cw_sym,
             underlying_symbol=und_sym,
             calculated_at=now_iso,
+            stale=pricing_inputs_stale,
             is_available=True,
             unavailable_reason=None,
             moneyness=moneyness,
