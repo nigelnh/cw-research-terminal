@@ -692,14 +692,20 @@ class LiveQuantEngine:
                 is_available=False, unavailable_reason="MARKET_INPUT_SESSION_MISMATCH",
             )
 
-        K = eff_strike
-        CR = eff_ratio
-        r = settings.QUANT_RISK_FREE_RATE
+        # Provider and persistence adapters may surface numerics as ``Decimal`` (notably
+        # values restored from PostgreSQL).  The BSM implementation deliberately uses the
+        # stdlib ``math`` module and therefore needs one homogeneous float domain.  Normalize
+        # once at this boundary instead of letting a Decimal reach expressions such as
+        # ``sigma * sqrt(T)`` and fail the whole symbol's analytics calculation.
+        S = float(S)
+        K = float(eff_strike)
+        CR = float(eff_ratio)
+        r = float(settings.QUANT_RISK_FREE_RATE)
         # Dividend yield is pinned to the CW convention (q = 0): HOSE covered warrants are
         # dividend-protected via issuer strike/ratio adjustment, so a BSM q > 0 would
         # double-count the protection. See app.quant.dividend_convention. This SAME q is
         # used for the theoretical price, every IV inversion, and every Greek below.
-        q = CW_DIVIDEND_YIELD_CONVENTION.value
+        q = float(CW_DIVIDEND_YIELD_CONVENTION.value)
 
         # 5. Moneyness (S / K). `moneyness` is the raw numeric ratio; `moneyness_cat` is the
         #    categorical UI label, ATM iff |S/K - 1| <= QUANT_MONEYNESS_ATM_BAND (default 3%).
@@ -815,7 +821,7 @@ class LiveQuantEngine:
                 hv_estimate = self._historical_vol_getter(und_sym)
                 if (hv_estimate is not None and hv_estimate.value > 0
                         and (max_hv_as_of is None or hv_estimate.as_of <= max_hv_as_of)):
-                    theo_vol = hv_estimate.value
+                    theo_vol = float(hv_estimate.value)
                     theo_vol_src = hv_estimate.source_label
                     theo_price = round(bs_call_price_share(S, K, T, r, q, theo_vol) / CR, 2)
             except Exception as hve:
