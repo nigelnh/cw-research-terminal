@@ -1,10 +1,10 @@
 """Vnstock Community adapter for the terminal's canonical market-data contract.
 
-The public Vnstock package is an HTTP retrieval library rather than a realtime stream.
-This adapter owns one bounded polling lifecycle, rate-limits every upstream call across
-quote/history/tape/overview, and emits the same canonical events the rest of the terminal
-already consumes. KBS board values are raw VND, while Vnstock's KBS/VCI history and tape
-helpers expose non-index prices in thousands of VND; normalization happens here once.
+This adapter owns one public SSI iBoard WebSocket plus one bounded Vnstock HTTP polling
+lifecycle.  Push observations update trades and the three-level book; HTTP remains the
+authoritative reference/full-snapshot/recovery path and supplies confirmed tape prints.
+KBS board values are raw VND, while Vnstock's KBS/VCI history and tape helpers expose
+non-index prices in thousands of VND; normalization happens here once.
 """
 from __future__ import annotations
 
@@ -39,6 +39,12 @@ from app.market_data.market_schemas import (
 )
 from app.market_data.market_session import market_session
 from app.market_data.providers.base_market_provider import MarketDataProvider
+from app.market_data.providers.ssi_realtime import (
+    SSI_REALTIME_USER_AGENT,
+    SsiRealtimeParseError,
+    parse_realtime_frame,
+    subscription_message,
+)
 from app.market_data.trading_calendar import (
     VN_TZ,
     intraday_bar_is_complete,
@@ -143,7 +149,7 @@ def _raw_price(symbol: str, value: Any, *, already_raw: bool) -> float | None:
 
 
 class VnstockProvider(MarketDataProvider):
-    """Polling adapter backed by public Vnstock KBS/VCI sources."""
+    """Hybrid adapter backed by public SSI push and Vnstock KBS/VCI reads."""
 
     _PROFILE_TTL = 6 * 3600.0
     _FUNDAMENTAL_TTL = 6 * 3600.0
@@ -168,6 +174,12 @@ class VnstockProvider(MarketDataProvider):
         self._tape_page_size = max(1, min(1000, int(settings.VNSTOCK_TAPE_PAGE_SIZE)))
         self._freshness = max(self._quote_interval * 2, float(settings.VNSTOCK_FEED_FRESHNESS_SECONDS))
         self._request_floor = max(0.0, float(settings.VNSTOCK_MIN_REQUEST_INTERVAL_SECONDS))
+        self._realtime_enabled = bool(settings.VNSTOCK_REALTIME_ENABLED)
+        self._realtime_url = str(settings.VNSTOCK_REALTIME_URL).strip()
+        self._realtime_deadman = max(15.0, float(settings.VNSTOCK_REALTIME_DEADMAN_SECONDS))
+        self._realtime_reconnect_base = max(
+            1.0, float(settings.VNSTOCK_REALTIME_RECONNECT_BASE_SECONDS)
+        )
         self._api_key_present = bool(settings.VNSTOCK_API_KEY.strip()) or (
             Path.home() / ".vnstock" / "api_key.json"
         ).is_file()
@@ -189,6 +201,7 @@ class VnstockProvider(MarketDataProvider):
         self._generation = 0
         self._quote_task: asyncio.Task | None = None
         self._tape_task: asyncio.Task | None = None
+        self._realtime_task: asyncio.Task | None = None
         self._lifecycle_lock = asyncio.Lock()
         self._rate_lock = asyncio.Lock()
         self._call_semaphore = asyncio.Semaphore(max(1, int(settings.VNSTOCK_MAX_CONCURRENT_CALLS)))
@@ -196,6 +209,7 @@ class VnstockProvider(MarketDataProvider):
         self._board_lock = asyncio.Lock()
 
         self._last_board_check_monotonic: float | None = None
+        self._last_board_data_monotonic: float | None = None
         self._last_data_at_ms: int | None = None
         self._last_data_session: str | None = None
         self._last_trade_at_ms: int | None = None
@@ -203,6 +217,16 @@ class VnstockProvider(MarketDataProvider):
         self._last_error_code: str | None = None
         self._request_count = 0
         self._request_failures = 0
+        self._realtime_connected = False
+        self._realtime_connected_at_ms: int | None = None
+        self._last_realtime_message_monotonic: float | None = None
+        self._last_realtime_data_at_ms: int | None = None
+        self._realtime_message_count = 0
+        self._realtime_quote_count = 0
+        self._realtime_parse_errors = 0
+        self._realtime_reconnect_count = 0
+        self._realtime_session: str | None = None
+        self._realtime_observed_symbols: set[str] = set()
         self._seen_prints: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=4000))
         self._seen_print_sets: dict[str, set[str]] = defaultdict(set)
 
@@ -249,14 +273,18 @@ class VnstockProvider(MarketDataProvider):
     async def disconnect(self) -> None:
         async with self._lifecycle_lock:
             self._generation += 1
-            tasks = [task for task in (self._quote_task, self._tape_task) if task is not None]
-            self._quote_task = self._tape_task = None
+            tasks = [
+                task for task in (self._quote_task, self._tape_task, self._realtime_task)
+                if task is not None
+            ]
+            self._quote_task = self._tape_task = self._realtime_task = None
             for task in tasks:
                 task.cancel()
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             self._active_symbols = []
             self._connected = False
+            self._realtime_connected = False
         self._notify_status()
 
     async def set_subscriptions(self, symbols: list[str]) -> bool:
@@ -268,21 +296,199 @@ class VnstockProvider(MarketDataProvider):
         async with self._lifecycle_lock:
             self._generation += 1
             generation = self._generation
-            old = [task for task in (self._quote_task, self._tape_task) if task is not None]
+            old = [
+                task for task in (self._quote_task, self._tape_task, self._realtime_task)
+                if task is not None
+            ]
             for task in old:
                 task.cancel()
             if old:
                 await asyncio.gather(*old, return_exceptions=True)
             self._active_symbols = clean
-            self._quote_task = self._tape_task = None
+            self._quote_task = self._tape_task = self._realtime_task = None
+            self._realtime_connected = False
             if clean:
                 self._quote_task = asyncio.create_task(self._run_quote_poll(generation))
                 self._tape_task = asyncio.create_task(self._run_tape_sweep(generation))
+                if self._realtime_enabled and self._realtime_url:
+                    self._realtime_task = asyncio.create_task(self._run_realtime(generation))
         self._notify_status()
         return True
 
     def get_active_subscriptions(self) -> list[str]:
         return list(self._active_symbols)
+
+    # ----------------------------- realtime push ----------------------------
+    async def _run_realtime(self, generation: int) -> None:
+        """Own the supplemental SSI socket and reconnect only while matching is active.
+
+        The REST board remains running because the SSI frame has no trustworthy session
+        date, REF/bands, or session OHLC.  This channel contributes only a receipt-timed
+        last-price observation, cumulative totals, and a full three-level book snapshot.
+        """
+        import aiohttp
+
+        failures = 0
+        while self._connected and generation == self._generation:
+            if not market_session.is_trading_active():
+                self._realtime_connected = False
+                self._notify_status()
+                await asyncio.sleep(15.0)
+                continue
+            try:
+                timeout = aiohttp.ClientTimeout(total=None, sock_connect=10.0)
+                async with (
+                    aiohttp.ClientSession(
+                        timeout=timeout, headers={"User-Agent": SSI_REALTIME_USER_AGENT}
+                    ) as client,
+                    client.ws_connect(
+                        self._realtime_url,
+                        autoping=True,
+                        heartbeat=min(30.0, self._realtime_deadman / 2),
+                    ) as socket,
+                ):
+                        if generation != self._generation:
+                            return
+                        await socket.send_str(subscription_message(self._active_symbols))
+                        now_ms = int(time.time() * 1000)
+                        self._realtime_connected = True
+                        self._realtime_connected_at_ms = now_ms
+                        self._last_realtime_message_monotonic = time.monotonic()
+                        self._access.success("realtime")
+                        self._notify_status()
+
+                        while self._connected and generation == self._generation:
+                            if not market_session.is_trading_active():
+                                break
+                            try:
+                                message = await asyncio.wait_for(socket.receive(), timeout=15.0)
+                            except TimeoutError:
+                                silence = time.monotonic() - (
+                                    self._last_realtime_message_monotonic or time.monotonic()
+                                )
+                                if silence >= self._realtime_deadman:
+                                    raise TimeoutError("SSI realtime message silence")
+                                continue
+                            if message.type == aiohttp.WSMsgType.TEXT:
+                                self._last_realtime_message_monotonic = time.monotonic()
+                                self._realtime_message_count += 1
+                                if self._handle_realtime_text(
+                                    message.data, generation=generation
+                                ):
+                                    failures = 0
+                                    self._access.success("realtime")
+                            elif message.type in (
+                                aiohttp.WSMsgType.CLOSE,
+                                aiohttp.WSMsgType.CLOSED,
+                                aiohttp.WSMsgType.ERROR,
+                            ):
+                                break
+                if (
+                    self._connected
+                    and generation == self._generation
+                    and market_session.is_trading_active()
+                ):
+                    failures += 1
+                    self._realtime_reconnect_count += 1
+                    self._access.record("realtime", "upstream_unavailable")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - paced reconnect owns transient faults
+                failures += 1
+                self._realtime_reconnect_count += 1
+                code = self._access.record("realtime", exc)
+                if code is None:
+                    self._access.record("realtime", "upstream_unavailable")
+                logger.debug("SSI realtime unavailable: %s", type(exc).__name__)
+            finally:
+                self._realtime_connected = False
+                self._notify_status()
+
+            if self._connected and generation == self._generation:
+                delay = min(
+                    60.0,
+                    self._realtime_reconnect_base * (2 ** min(max(0, failures - 1), 5)),
+                )
+                await asyncio.sleep(delay)
+
+    def _handle_realtime_text(
+        self,
+        raw: str,
+        *,
+        generation: int | None = None,
+        received_at: datetime | None = None,
+    ) -> bool:
+        """Validate one frame and emit canonical events. Useful as a deterministic seam
+        for captured-frame regression tests; it performs no network I/O."""
+        if not isinstance(raw, str) or "|" not in raw:
+            return False
+        try:
+            quote = parse_realtime_frame(raw)
+        except SsiRealtimeParseError:
+            self._realtime_parse_errors += 1
+            return False
+        if generation is not None and generation != self._generation:
+            return False
+        symbol = quote["symbol"]
+        if symbol not in self._active_symbols:
+            return False
+
+        observed = (received_at or market_session.get_vn_now()).astimezone(VN_TZ)
+        if not market_session.is_trading_active(observed):
+            return False
+        session = reference_session_date(observed).isoformat()
+        if self._realtime_session != session:
+            self._realtime_session = session
+            self._realtime_observed_symbols.clear()
+        stamp = observed.isoformat()
+        stamp_ms = int(observed.timestamp() * 1000)
+        self._realtime_observed_symbols.add(symbol)
+        self._realtime_quote_count += 1
+        self._last_realtime_data_at_ms = stamp_ms
+        self._last_data_at_ms = max(self._last_data_at_ms or 0, stamp_ms)
+        self._last_data_session = session
+
+        bids, asks = quote["bids"], quote["asks"]
+        book_event = {
+            "Ticker": symbol,
+            **{f"Best{level}Bid": bids[level - 1]["price"] for level in (1, 2, 3)},
+            **{f"Best{level}BidVolume": bids[level - 1]["volume"] for level in (1, 2, 3)},
+            **{f"Best{level}Ask": asks[level - 1]["price"] for level in (1, 2, 3)},
+            **{f"Best{level}AskVolume": asks[level - 1]["volume"] for level in (1, 2, 3)},
+            "TradingDate": session,
+            "Timestamp": stamp,
+            "MarketStatus": market_session.get_market_phase(observed).value,
+            "_full_book_snapshot": True,
+            "_provider_source": "VNSTOCK_JS_SSI_REALTIME",
+        }
+        if self._callback is not None:
+            self._callback("bidask", book_event, symbol)
+        self._last_book_at_ms = max(self._last_book_at_ms or 0, stamp_ms)
+
+        price = quote["matched_price"]
+        if price is not None:
+            percent = quote["change_percent"]
+            trade_event = {
+                "Ticker": symbol,
+                "Close": price,
+                "Change": quote["change"],
+                "PercentPriceChange": percent / 100.0 if percent is not None else None,
+                "TotalMatchVolume": quote["total_volume"],
+                "TotalMatchValue": quote["total_value"],
+                "TradingDate": session,
+                "Timestamp": stamp,
+                "MarketStatus": market_session.get_market_phase(observed).value,
+                # The wire field is the latest matched lot repeated on book updates. It
+                # cannot be treated as a new time-and-sales print without an exchange
+                # trade id/timestamp; the confirmed KBS tape path owns prints.
+                "_synthetic_session_snapshot": True,
+                "_provider_source": "VNSTOCK_JS_SSI_REALTIME",
+            }
+            if self._callback is not None:
+                self._callback("trade", trade_event, symbol)
+            self._last_trade_at_ms = max(self._last_trade_at_ms or 0, stamp_ms)
+        self._notify_status()
+        return True
 
     # ------------------------------ call boundary ----------------------------
     async def _wait_for_rate_slot(self) -> None:
@@ -393,6 +599,7 @@ class VnstockProvider(MarketDataProvider):
             return 0
         self._last_board_check_monotonic = time.monotonic()
         emitted = 0
+        valid_rows = 0
         for row in rows:
             symbol = str(row.get("symbol") or row.get("SB") or "").strip().upper()
             if symbol not in symbols:
@@ -401,12 +608,17 @@ class VnstockProvider(MarketDataProvider):
             stamp = _iso_timestamp(row.get("time"), session_date=session)
             if stamp is None:
                 stamp = _iso_timestamp(row.get("IT"), session_date=session)
+            # An HTTP response that proves only the session can refresh REF/bands through
+            # get_session_reference_data, but it cannot be ordered against push data. Do
+            # not let an undated board response overwrite a newer SSI observation.
+            if stamp is None:
+                continue
             stamp_ms: int | None = None
-            if stamp:
-                stamp_ms = int(datetime.fromisoformat(stamp).timestamp() * 1000)
-                self._last_data_at_ms = max(self._last_data_at_ms or 0, stamp_ms)
-                self._last_book_at_ms = max(self._last_book_at_ms or 0, stamp_ms)
-                self._last_data_session = max(self._last_data_session or "", session or "") or None
+            stamp_ms = int(datetime.fromisoformat(stamp).timestamp() * 1000)
+            valid_rows += 1
+            self._last_data_at_ms = max(self._last_data_at_ms or 0, stamp_ms)
+            self._last_book_at_ms = max(self._last_book_at_ms or 0, stamp_ms)
+            self._last_data_session = max(self._last_data_session or "", session or "") or None
             trade_event = self._trade_event(row, symbol, session, stamp)
             book_event = self._book_event(row, symbol, session, stamp)
             if self._callback is not None and trade_event is not None:
@@ -417,6 +629,8 @@ class VnstockProvider(MarketDataProvider):
             if self._callback is not None and book_event is not None:
                 self._callback("bidask", book_event, symbol)
                 emitted += 1
+        if valid_rows:
+            self._last_board_data_monotonic = time.monotonic()
         self._notify_status()
         return emitted
 
@@ -467,6 +681,7 @@ class VnstockProvider(MarketDataProvider):
             "TradingDate": session,
             "Timestamp": stamp,
             "MarketStatus": row.get("market_status") or row.get("MS"),
+            "_full_book_snapshot": True,
             "_provider_source": "VNSTOCK_KBS_PRICE_BOARD",
         }
 
@@ -960,6 +1175,63 @@ class VnstockProvider(MarketDataProvider):
             })
         stock_leaders = leaders(groups["VNINDEX"])
         cw_leaders = leaders([s.upper() for s in cw_symbols])
+        stock_rows = [
+            row for symbol in groups["VNINDEX"] if (row := valid_row(symbol)) is not None
+        ]
+
+        def observed_total(field: str) -> tuple[float | None, int]:
+            values = [_finite(row.get(field)) for row in stock_rows]
+            present = [value for value in values if value is not None]
+            return (sum(present) if present else None, len(present))
+
+        total_volume, volume_observed = observed_total("volume_accumulated")
+        total_value, value_observed = observed_total("total_value")
+        foreign_buy, foreign_buy_observed = observed_total("foreign_buy_volume")
+        foreign_sell, foreign_sell_observed = observed_total("foreign_sell_volume")
+        expected_stocks = len(groups["VNINDEX"])
+        metric_stamps = [
+            stamp
+            for row in stock_rows
+            if (stamp := _iso_timestamp(row.get("time"), session_date=session)) is not None
+        ]
+        metric_as_of = max(metric_stamps, default=None)
+        market_metrics = {
+            "session_date": session,
+            "as_of": None if reference_only else metric_as_of,
+            "liquidity": {
+                "total_volume": None if reference_only else total_volume,
+                "total_value": None if reference_only else total_value,
+                "observed": 0 if reference_only else min(volume_observed, value_observed),
+                "expected": expected_stocks,
+                "coverage": 0.0 if reference_only or not expected_stocks else (
+                    min(volume_observed, value_observed) / expected_stocks
+                ),
+                "availability": "UNAVAILABLE" if reference_only or total_volume is None else (
+                    "AVAILABLE" if volume_observed == expected_stocks and value_observed == expected_stocks
+                    else "PARTIAL"
+                ),
+                "source": "DERIVED_VNSTOCK_KBS_PRICE_BOARD",
+            },
+            "foreign_flow": {
+                "buy_volume": None if reference_only else foreign_buy,
+                "sell_volume": None if reference_only else foreign_sell,
+                "net_volume": None if reference_only or foreign_buy is None or foreign_sell is None
+                else foreign_buy - foreign_sell,
+                "observed": 0 if reference_only else min(
+                    foreign_buy_observed, foreign_sell_observed
+                ),
+                "expected": expected_stocks,
+                "coverage": 0.0 if reference_only or not expected_stocks else (
+                    min(foreign_buy_observed, foreign_sell_observed) / expected_stocks
+                ),
+                "availability": "UNAVAILABLE" if reference_only or foreign_buy is None
+                or foreign_sell is None else (
+                    "AVAILABLE" if foreign_buy_observed == expected_stocks
+                    and foreign_sell_observed == expected_stocks else "PARTIAL"
+                ),
+                "source": "DERIVED_VNSTOCK_KBS_PRICE_BOARD",
+            },
+        }
         useful = bool(stock_leaders or cw_leaders or any(i["availability"] != "UNAVAILABLE" for i in indices))
         availability = (
             "AVAILABLE" if all(i["availability"] == "AVAILABLE" for i in indices) and stock_leaders and cw_leaders
@@ -973,6 +1245,7 @@ class VnstockProvider(MarketDataProvider):
         result = {
             "display_session": session, "indices": indices,
             "top_stock_volume": stock_leaders, "top_cw_volume": cw_leaders,
+            "market_metrics": market_metrics,
             "as_of": max((i.get("as_of") for i in indices if i.get("as_of")), default=None),
             "market_session_active": market_session.is_trading_active(),
             "market_phase": phase,
@@ -984,6 +1257,8 @@ class VnstockProvider(MarketDataProvider):
                 "top_cw_volume": "AVAILABLE" if cw_leaders else "UNAVAILABLE",
                 "breadth": "AVAILABLE" if all(i["provenance"]["breadth"]["availability"] == "AVAILABLE" for i in indices) else "PARTIAL",
                 "bands": "AVAILABLE" if bands_available else "PARTIAL" if valid_board_rows else "UNAVAILABLE",
+                "liquidity": market_metrics["liquidity"]["availability"],
+                "foreign_flow": market_metrics["foreign_flow"]["availability"],
             },
         }
         self._overview_cache = (time.monotonic(), result)
@@ -1001,13 +1276,31 @@ class VnstockProvider(MarketDataProvider):
             max(0.0, time.monotonic() - self._last_board_check_monotonic)
             if self._last_board_check_monotonic is not None else None
         )
+        board_data_age = (
+            max(0.0, time.monotonic() - self._last_board_data_monotonic)
+            if self._last_board_data_monotonic is not None else None
+        )
         pollers_running = bool(
             self._connected and self._active_symbols and self._quote_task and not self._quote_task.done()
         )
+        realtime_task_running = bool(
+            self._connected and self._active_symbols and self._realtime_task
+            and not self._realtime_task.done()
+        )
+        realtime_age = (
+            max(0.0, time.monotonic() - self._last_realtime_message_monotonic)
+            if self._last_realtime_message_monotonic is not None else None
+        )
         current_session_data = self._last_data_session == display_session
+        poll_fresh = bool(
+            pollers_running and board_data_age is not None and board_data_age <= self._freshness
+        )
+        realtime_fresh = bool(
+            self._realtime_connected and self._realtime_session == display_session
+            and realtime_age is not None and realtime_age <= self._freshness
+        )
         fresh = bool(
-            active and pollers_running and current_session_data
-            and check_age is not None and check_age <= self._freshness
+            active and current_session_data and (poll_fresh or realtime_fresh)
         )
         upstream = (
             "UNAVAILABLE" if not self._enabled else "DISCONNECTED" if not self._connected
@@ -1021,16 +1314,22 @@ class VnstockProvider(MarketDataProvider):
                 active=active,
                 last_data_at=last_data if current_session_data else None,
             ),
-            "provider": "vnstock", "source": "VNSTOCK_KBS_VCI",
-            "transport_mode": "POLLING", "access_tier": "UNVERIFIED",
+            "provider": "vnstock", "source": "VNSTOCK_KBS_VCI_SSI",
+            "transport_mode": "HYBRID" if self._realtime_enabled else "POLLING",
+            "access_tier": "UNVERIFIED",
             "api_key_configured": self._api_key_present, "license_verified": None,
             # Public Vnstock datasets do not establish a login session. Keep the legacy
             # field false instead of equating "a key file exists" with authentication.
             "authenticated": False, "upstream_status": upstream,
-            "trade_stream_connected": pollers_running, "bid_ask_stream_connected": pollers_running,
+            "trade_stream_connected": self._realtime_connected or pollers_running,
+            "bid_ask_stream_connected": self._realtime_connected or pollers_running,
             "subscription_count": len(self._active_symbols), "max_subscriptions": self.max_symbols,
             "subscriptions": self.get_active_subscriptions(), "feed_fresh": fresh,
-            "feed_freshness_seconds": self._freshness, "latest_tick_age_seconds": check_age,
+            "feed_freshness_seconds": self._freshness,
+            "latest_tick_age_seconds": min(
+                (age for age in (board_data_age, realtime_age) if age is not None), default=None
+            ),
+            "latest_board_check_age_seconds": check_age,
             "trade_tick_age_seconds": (
                 max(0.0, time.time() - self._last_trade_at_ms / 1000.0) if self._last_trade_at_ms else None
             ),
@@ -1043,7 +1342,24 @@ class VnstockProvider(MarketDataProvider):
             "request_failure_count": self._request_failures,
             "quote_poll_seconds": self._quote_interval, "tape_sweep_seconds": self._tape_sweep,
             "min_request_interval_seconds": self._request_floor,
-            "reconnect_count": 0, "silent_stream_reconnect_count": 0,
-            "stream_watchdog_active": False, "stream_silence_reconnect_seconds": 0.0,
+            "reconnect_count": self._realtime_reconnect_count,
+            "realtime_reconnect_count": self._realtime_reconnect_count,
+            "silent_stream_reconnect_count": 0,
+            "stream_watchdog_active": realtime_task_running,
+            "stream_silence_reconnect_seconds": self._realtime_deadman if self._realtime_enabled else 0.0,
             "signalr_decode_error_count": 0,
+            "realtime_source": "VNSTOCK_JS_SSI_REALTIME" if self._realtime_enabled else None,
+            "realtime_socket_connected": self._realtime_connected,
+            "realtime_message_age_seconds": realtime_age,
+            "realtime_message_count": self._realtime_message_count,
+            "realtime_quote_count": self._realtime_quote_count,
+            "realtime_parse_error_count": self._realtime_parse_errors,
+            "realtime_session": self._realtime_session,
+            "realtime_observed_symbols": sorted(self._realtime_observed_symbols),
+            "realtime_observed_stock_count": sum(
+                1 for symbol in self._realtime_observed_symbols if not _is_cw(symbol)
+            ),
+            "realtime_observed_cw_count": sum(
+                1 for symbol in self._realtime_observed_symbols if _is_cw(symbol)
+            ),
         }

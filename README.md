@@ -7,8 +7,9 @@ historical research, and AI-assisted analysis.**
 **▶ Live demo: https://cw-research-terminal.vercel.app** — no account needed; the dashboard,
 research, market data, quant analytics, and history are all fully public.
 
-It is a personal project. Market data is provided by **FiinQuant**. It is not affiliated
-with, sponsored by, or operated on behalf of any brokerage.
+It is a personal project. Runtime market data comes from public Vnstock Community
+KBS/VCI adapters plus the SSI iBoard WebSocket protocol documented by `vnstock-js`. It is
+not affiliated with, sponsored by, or operated on behalf of those projects or providers.
 
 ### What is a covered warrant?
 
@@ -40,14 +41,15 @@ price, implied volatility, Greeks, moneyness, spread, days-to-expiry).
 
 ```
 REALTIME
-  FiinQuant (SignalR)  ─►  FiinQuantProvider  ─►  MarketState (normalized bid/ask/trade)
+  SSI iBoard WebSocket + KBS recovery poll  ─►  VnstockProvider
+      ─►  MarketState (normalized bid/ask/trade)
       ─►  Redis warm cache (L2 recovery)  ─►  FastAPI WebSocket (/ws/market)  ─►  React
   LiveQuantEngine  ◄─ market ticks  ─►  BSM / IV / Greeks / theo price  ─►  analytics patches ─► WS
 
 HISTORICAL
   history_read_service (PostgreSQL-first)
       complete DB hit          → 0 provider calls
-      legitimate in-horizon gap → 1 controlled, single-flighted FiinQuant fill → persist
+      legitimate in-horizon gap → 1 controlled, single-flighted Vnstock fill → persist
   PostgresHistoricalBarSource → HistoricalVolatilityService (HV_22) → in-memory estimate → LiveQuantEngine
 
 QUANT
@@ -61,9 +63,9 @@ AUTH (optional)
 ```
 
 - **`MarketDataProvider`** is a vendor-neutral abstraction (`connect`, `set_subscriptions`,
-  `get_historical_bars`, `set_event_callback`). The only implementation is
-  `FiinQuantProvider`; another legitimate provider could be added behind the same boundary
-  without touching the subscription planner, market-state pipeline, or quant engine.
+  `get_historical_bars`, `set_event_callback`). The runtime implementation is
+  `VnstockProvider`; source changes stay behind this boundary and do not alter the
+  subscription planner, market-state pipeline, or quant engine.
 - **Quant math is an independent implementation** of public Black-Scholes-Merton pricing,
   implied-volatility inversion, analytical Greeks, and the HV_22 window. HOSE covered
   warrants are dividend-protected (the issuer adjusts strike/ratio on the ex-date), so the
@@ -74,8 +76,8 @@ AUTH (optional)
 
 | Decision | Why |
 |---|---|
-| `MarketDataProvider` abstraction | Vendor-neutral seam; the subscription planner, market-state pipeline and quant engine never import FiinQuant. |
-| One backend replica / one Uvicorn worker | The provider owns persistent SignalR connections and shared in-memory state; a second worker would duplicate upstream connections against a limited account and split the process-local WS / rate-limit counters. |
+| `MarketDataProvider` abstraction | Vendor-neutral seam; the subscription planner, market-state pipeline and quant engine never import a vendor SDK. |
+| One backend replica / one Uvicorn worker | The provider owns one SSI socket, the bounded recovery poller, and shared in-memory state; a second worker would duplicate upstream traffic and split process-local WS state. |
 | PostgreSQL-first history | A complete DB hit makes **zero** provider calls; only a legitimate in-horizon gap triggers **one** controlled, advisory-locked, single-flighted fill, which is then persisted. |
 | Redis warm state | L2 recovery of the latest canonical market snapshot across restarts/sessions, plus the distributed rate limiter (separate key prefixes). |
 | `q = 0` dividend convention | CWs are dividend-protected via strike/ratio adjustment; a BSM `q > 0` would double-count and underprice. |
@@ -83,9 +85,10 @@ AUTH (optional)
 
 ## Testing
 
-Backend **~900** pytest cases (quant verification, provider SignalR lifecycle, ingestion /
+Backend **1,500+** pytest cases (quant verification, provider lifecycle, ingestion /
 history, auth, rate-limit / security, repo-hygiene) + frontend **~190** vitest cases,
-`tsc --noEmit`, and `pyright` — all green. No test makes a real FiinQuant network call.
+`tsc --noEmit`, and `pyright`. Normal CI tests use captured provider fixtures and make no
+live market-data request.
 
 ```bash
 cd backend && .venv/bin/python -m pytest -q
@@ -105,13 +108,14 @@ The persistence tests spin up a disposable local PostgreSQL cluster and skip cle
 
 ## Known limitations
 
-- **Single backend replica by design.** The FiinQuant SignalR streams and in-memory market
+- **Single backend replica by design.** The SSI socket, HTTP poller, and in-memory market
   state are process-owned; horizontal scaling would require extracting the provider into its
   own single-instance service with a fan-out bus (see *Design decisions*).
-- **Realtime is live only during HOSE hours** (Mon–Fri, 09:00–15:00 ICT). Outside the
-  session FiinQuant closes the streams; the provider reconnects on a slow session-aware
+- **Realtime is live only during HOSE hours** (Mon–Fri, 09:00–15:00 ICT, excluding lunch).
+  Outside the session the provider closes/pauses the push channel on a session-aware
   cadence and quotes render as `—` rather than stale values.
-- **Historical horizon ≈ 365 days** (FiinQuant limit); longer lookbacks need range chunking.
+- **Public upstreams have no exchange-grade SLA.** The KBS recovery path remains active if
+  the SSI channel is unavailable, and health reports push and polling evidence separately.
 - **AI assistant runs on a free model** and is deliberately cost-capped (daily budget,
   concurrency gate, per-hour rate limit). It summarizes the on-screen market/quant/history
   context; it has no news/event feed.
@@ -124,9 +128,7 @@ The persistence tests spin up a disposable local PostgreSQL cluster and skip cle
   warrants using the quantitative context above (price, IV, Greeks, moneyness, spread,
   DTE, HV) → have the AI assistant summarize, compare, and explain.
   Any additional data this requires would be obtained through the existing
-  `MarketDataProvider` boundary from **FiinQuant or another legitimate/public source**.
-  The current FiinQuant integration does **not** provide a dedicated event dataset; the
-  workflow above is product direction, not shipped functionality.
+  `MarketDataProvider` boundary or the existing persisted public enrichment pipeline.
 - Saved research / backtests.
 
 ## Stack
@@ -134,7 +136,7 @@ The persistence tests spin up a disposable local PostgreSQL cluster and skip cle
 | Layer | Technology |
 |---|---|
 | Backend | Python 3.13, FastAPI, SQLAlchemy 2 (async), Alembic |
-| Realtime provider | FiinQuant SignalR |
+| Realtime provider | SSI iBoard WebSocket (documented by `vnstock-js`) + Vnstock KBS recovery polling |
 | Storage | PostgreSQL (historical bars), Redis (warm market-state cache + rate limiter) |
 | Auth (optional) | Supabase Auth — JWT verified locally; only `/api/me/*` is protected |
 | AI assistant (optional) | OpenRouter |
@@ -142,8 +144,8 @@ The persistence tests spin up a disposable local PostgreSQL cluster and skip cle
 
 ## Quick start (local)
 
-**Prerequisites:** Python 3.13, Node.js 18+, PostgreSQL 15+, Redis, and a FiinQuant account
-(username / password) for live and historical market data.
+**Prerequisites:** Python 3.13, Node.js 18+, PostgreSQL 15+, Redis, and a Vnstock Community
+API key for the Python data adapter.
 
 ```bash
 # backend
@@ -162,7 +164,7 @@ npm run dev                     # http://localhost:5173
 ## Configuration
 
 All configuration is environment-driven — see **`.env.example`** for the full annotated
-list. The only credentials the runtime needs are the FiinQuant account (market data), and
+list. The only market-data credential the runtime needs is the server-side Vnstock key, and
 optionally a PostgreSQL URL, a Redis URL, a Supabase project (auth), and an OpenRouter key
 (AI). Never commit a real `.env`.
 
@@ -171,5 +173,6 @@ optionally a PostgreSQL URL, a Redis URL, a Supabase project (auth), and an Open
 The domain modeling — covered-warrant contract mechanics, corporate-action term
 adjustments, the analytics column set — reflects experience building trading-desk research
 tooling during a software-engineering internship. Every line in this repository is an
-independent implementation over public market rules and the FiinQuant / public data
-sources; it contains no proprietary datasets, endpoints, or credentials.
+independent implementation over public market rules and public data sources. The SSI
+subscription envelope and frame layout are adapted from the Apache-2.0 `vnstock-js`
+project; see `THIRD_PARTY_NOTICES.md`. The repository contains no credentials.

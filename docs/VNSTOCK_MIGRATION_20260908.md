@@ -2,15 +2,19 @@
 
 Date: 2026-09-08
 
+> Superseded for realtime transport by
+> [Vnstock-js hybrid market-data plan](./VNSTOCK_JS_HYBRID_PLAN_20260909.md). KBS/VCI
+> polling remains the recovery/reference/history path; SSI iBoard push is now additive.
+
 ## Result
 
 The terminal runtime now selects `VnstockProvider` exclusively. The provider factory
 rejects `MARKET_DATA_PROVIDER=fiinquant`, the public provider package exports Vnstock,
 and the production dependency list no longer installs FiinQuant or SignalR packages.
 
-Vnstock Community is a polling HTTP source. It is suitable for this research terminal's
-five-second quote cadence, but it is not an exchange-grade push feed and has no realtime
-SLA in the public package.
+The Python Vnstock Community package is an HTTP source. The terminal now supplements it
+with the public SSI iBoard WebSocket contract documented by `vnstock-js`; neither source
+provides an exchange-grade SLA.
 
 The API key is stored outside the repository in `~/.vnstock/api_key.json` with owner-only
 permissions. It is never returned through the terminal API or written to logs. A deployed

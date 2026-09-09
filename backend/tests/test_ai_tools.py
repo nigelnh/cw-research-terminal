@@ -14,6 +14,7 @@ from app.instruments.instrument_schemas import (
 )
 from app.quant.quant_engine import live_quant_engine
 from app.ai.tools.market_tools import (
+    get_market_context,
     get_market_status,
     get_quote,
     get_order_book,
@@ -125,6 +126,32 @@ async def test_3_get_dashboard_snapshot_reads_memory_without_new_subscriptions()
     hpg = next(item for item in snapshot["instruments"] if item["symbol"] == "HPG")
     assert hpg["last_price"] == 22000.0
     assert hpg["bid1_price"] == 21950.0
+
+
+@pytest.mark.asyncio
+async def test_market_context_uses_the_same_session_scoped_overview_as_dashboard():
+    payload = {
+        "availability": "AVAILABLE",
+        "indices": [{"symbol": "VNINDEX", "value": 1847.17}],
+        "top_stock_volume": [{"symbol": "HPG", "volume": 5_000_000}],
+        "top_cw_volume": [],
+        "market_metrics": {
+            "session_date": "2026-09-09",
+            "liquidity": {"total_value": 1_000_000, "availability": "AVAILABLE"},
+            "foreign_flow": {"net_volume": 12_000, "availability": "AVAILABLE"},
+        },
+        "market_phase": "CONTINUOUS_AM",
+        "as_of": "2026-09-09T10:00:00+07:00",
+    }
+    with patch(
+        "app.market_data.market_overview_service.market_overview_service.get",
+        new=AsyncMock(return_value=payload),
+    ):
+        result = await get_market_context()
+
+    assert result["provenance"] == "APP_MARKET_OVERVIEW"
+    assert result["market_metrics"]["foreign_flow"]["net_volume"] == 12_000
+    assert result["indices"][0]["symbol"] == "VNINDEX"
 
 
 @pytest.mark.asyncio

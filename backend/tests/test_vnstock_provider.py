@@ -7,12 +7,20 @@ from datetime import date, datetime
 import pytest
 
 from app.market_data.market_schemas import CanonicalQuote
+from app.market_data.market_state import MarketState
+from app.market_data.providers.ssi_realtime import parse_realtime_frame, subscription_message
 from app.market_data.providers.vnstock_provider import VnstockProvider
 from app.market_data.traded_log import TradedLog
 from app.market_data.trading_calendar import VN_TZ, MarketPhase
 
 SESSION = "2026-09-08"
 STAMP_MS = int(datetime(2026, 9, 8, 10, 54, 59, tzinfo=VN_TZ).timestamp() * 1000)
+SSI_FRAME = (
+    "MAIN|S#MBB|26550|32400|26500|582000|26450|1505900|||||||||||||||"
+    "26600|102800|26650|254300|26700|450500|||||||||||||||26550|1000|26800|hose|"
+    "26500|26618|3828200|101926470000|1051200|27997390000|100|0.38|11773300|"
+    "313381740000||||28300|24600|26450||||0|s|N||||0|0|VSDMBBX||26800|||||||||||||||||||||27"
+)
 
 
 def board_row(symbol="CHPG2625", session="08/09/2026"):
@@ -33,6 +41,79 @@ def provider(**kwargs):
     return p
 
 
+def test_ssi_realtime_parser_keeps_terminal_raw_vnd_units():
+    quote = parse_realtime_frame(SSI_FRAME)
+    assert quote["symbol"] == "MBB"
+    assert quote["bids"][0] == {"price": 26550, "volume": 32400}
+    assert quote["asks"][0] == {"price": 26600, "volume": 102800}
+    assert quote["matched_price"] == 26550
+    assert quote["change"] == 100
+    assert quote["change_percent"] == .38
+    assert quote["total_volume"] == 11_773_300
+
+
+def test_ssi_subscription_contract_is_stable_and_deduplicated():
+    import json
+
+    payload = json.loads(subscription_message(["mbb", "HPG", "MBB"]))
+    assert payload == {
+        "type": "sub",
+        "topic": "stockRealtimeBySymbolsAndBoards",
+        "variables": {"symbols": ["HPG", "MBB"], "boardIds": ["MAIN"]},
+        "component": "priceTableEquities",
+    }
+
+
+def test_ssi_realtime_frame_emits_book_and_non_print_trade_observations():
+    p = provider()
+    p._active_symbols = ["MBB"]
+    events = []
+    p.set_event_callback(lambda kind, row, symbol: events.append((kind, row, symbol)))
+
+    observed = datetime(2026, 9, 9, 10, 0, tzinfo=VN_TZ)
+    assert p._handle_realtime_text(SSI_FRAME, received_at=observed) is True
+
+    assert [kind for kind, _, _ in events] == ["bidask", "trade"]
+    book = events[0][1]
+    trade = events[1][1]
+    assert book["Best1Bid"] == 26550
+    assert book["Best3Ask"] == 26700
+    assert book["_full_book_snapshot"] is True
+    assert trade["Close"] == 26550
+    assert trade["PercentPriceChange"] == pytest.approx(.0038)
+    assert trade["_synthetic_session_snapshot"] is True
+    assert trade["TradingDate"] == "2026-09-09"
+    assert p._realtime_observed_symbols == {"MBB"}
+
+
+def test_ssi_realtime_rejects_unsubscribed_and_late_generation_frames():
+    p = provider()
+    p._active_symbols = ["HPG"]
+    observed = datetime(2026, 9, 9, 10, 0, tzinfo=VN_TZ)
+    assert p._handle_realtime_text(SSI_FRAME, received_at=observed) is False
+    p._active_symbols = ["MBB"]
+    p._generation = 4
+    assert p._handle_realtime_text(SSI_FRAME, generation=3, received_at=observed) is False
+
+
+def test_full_book_snapshot_clears_levels_that_disappeared():
+    state = MarketState()
+    base = {
+        "Ticker": "MBB", "TradingDate": "2026-09-09",
+        "Timestamp": "2026-09-09T10:00:00+07:00", "_full_book_snapshot": True,
+        "Best1Bid": 26550, "Best1BidVolume": 100,
+        "Best1Ask": 26600, "Best1AskVolume": 200,
+    }
+    state.apply_bidask_event(base)
+    quote, diff = state.apply_bidask_event({
+        **base, "Timestamp": "2026-09-09T10:00:01+07:00",
+        "Best1Bid": None, "Best1BidVolume": 0,
+        "Best1Ask": None, "Best1AskVolume": 0,
+    })
+    assert quote.bid1_price is None and quote.ask1_price is None
+    assert diff["bid1_price"] is None and diff["ask1_price"] is None
+
+
 @pytest.mark.asyncio
 async def test_board_is_emitted_in_raw_vnd_with_confirmed_session():
     p = provider(board_fetcher=lambda symbols: [board_row()])
@@ -51,6 +132,21 @@ async def test_board_is_emitted_in_raw_vnd_with_confirmed_session():
     assert book["Best1Bid"] == 570
     assert book["Best1Ask"] == 580
     assert trade["Timestamp"].startswith(f"{SESSION}T10:54:59")
+
+
+@pytest.mark.asyncio
+async def test_undated_board_snapshot_cannot_overwrite_ordered_push_state():
+    row = board_row()
+    row.pop("time")
+    p = provider(board_fetcher=lambda symbols: [row])
+    events = []
+    p.set_event_callback(lambda kind, item, symbol: events.append((kind, item, symbol)))
+    p._active_symbols = ["CHPG2625"]
+
+    assert await p._poll_quotes_once() == 0
+    assert events == []
+    assert p._last_board_check_monotonic is not None
+    assert p._last_board_data_monotonic is None
 
 
 @pytest.mark.asyncio
@@ -279,6 +375,62 @@ async def test_overview_keeps_other_indices_when_one_dataset_fails(monkeypatch):
     assert by_symbol["VNDIAMOND"]["breadth_observed"] == 1
     assert result["availability"] == "PARTIAL"
     assert result["top_stock_volume"]
+
+
+@pytest.mark.asyncio
+async def test_overview_exposes_session_scoped_liquidity_and_foreign_flow(monkeypatch):
+    def history(symbol, source, start, end, interval):
+        if interval == "1D":
+            return [
+                {"time": "2026-09-07 15:00:00", "close": 1000, "volume": 1},
+                {"time": "2026-09-08 10:00:00", "close": 1010, "volume": 2},
+            ]
+        return [{"time": "2026-09-08 10:00:00", "close": 1010, "volume": 2}]
+
+    def board(symbols):
+        rows = []
+        for index, symbol in enumerate(symbols, start=1):
+            rows.append({
+                **board_row(symbol=symbol),
+                "volume_accumulated": index * 100,
+                "total_value": index * 1_000_000,
+                "foreign_buy_volume": index * 10,
+                "foreign_sell_volume": index * 4,
+            })
+        return rows
+
+    p = provider(
+        board_fetcher=board,
+        history_fetcher=history,
+        listing_fetcher=lambda: [
+            {"symbol": "HPG", "exchange": "HSX", "type": "STOCK"},
+            {"symbol": "MBB", "exchange": "HSX", "type": "STOCK"},
+        ],
+        group_fetcher=lambda _: ["HPG", "MBB"],
+    )
+    monkeypatch.setattr(
+        "app.market_data.providers.vnstock_provider.reference_session_date",
+        lambda *args, **kwargs: date(2026, 9, 8),
+    )
+    monkeypatch.setattr(
+        "app.market_data.providers.vnstock_provider.market_session.get_market_phase",
+        lambda *args, **kwargs: MarketPhase.CONTINUOUS_AM,
+    )
+    monkeypatch.setattr(
+        "app.market_data.providers.vnstock_provider.market_session.is_trading_active",
+        lambda *args, **kwargs: True,
+    )
+
+    result = await p.get_market_overview([])
+    metrics = result["market_metrics"]
+    assert metrics["session_date"] == SESSION
+    assert metrics["liquidity"]["availability"] == "AVAILABLE"
+    assert metrics["liquidity"]["total_volume"] == 300
+    assert metrics["liquidity"]["total_value"] == 3_000_000
+    assert metrics["foreign_flow"]["buy_volume"] == 30
+    assert metrics["foreign_flow"]["sell_volume"] == 12
+    assert metrics["foreign_flow"]["net_volume"] == 18
+    assert result["components"]["foreign_flow"] == "AVAILABLE"
 
 
 @pytest.mark.asyncio

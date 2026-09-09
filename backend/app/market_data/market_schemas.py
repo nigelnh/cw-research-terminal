@@ -360,8 +360,20 @@ class MarketHealthResponse(BaseModel):
     request_count: int = 0
     request_failure_count: int = 0
     quote_poll_seconds: Optional[float] = None
+    latest_board_check_age_seconds: Optional[float] = None
     tape_sweep_seconds: Optional[float] = None
     min_request_interval_seconds: Optional[float] = None
+    realtime_source: Optional[str] = None
+    realtime_socket_connected: bool = False
+    realtime_message_age_seconds: Optional[float] = None
+    realtime_message_count: int = 0
+    realtime_quote_count: int = 0
+    realtime_parse_error_count: int = 0
+    realtime_reconnect_count: int = 0
+    realtime_session: Optional[str] = None
+    realtime_observed_symbols: List[str] = Field(default_factory=list)
+    realtime_observed_stock_count: int = 0
+    realtime_observed_cw_count: int = 0
     realtime_universe: Dict[str, Any] = Field(default_factory=dict)
     market_session: str = "UNKNOWN"
     market_session_active: bool = False
