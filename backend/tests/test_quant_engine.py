@@ -18,7 +18,9 @@ Comprehensive Quantitative Engine Unit Tests for Covered Warrants:
 
 import pytest
 import math
+from decimal import Decimal
 from datetime import date, datetime, timezone, timedelta
+from typing import cast
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -36,6 +38,7 @@ import app.quant.quant_engine as _qe
 from app.quant.quant_engine import LiveQuantEngine, calculate_time_to_maturity
 from app.quant.historical_volatility import calculate_historical_volatility
 from app.quant.historical_volatility_service import HistoricalVolatilityService
+from app.quant.historical_volatility_service import VolEstimate
 from app.core.config import settings
 from tests.fixtures.fake_bar_source import FakeBarSource, make_daily_bars, synthetic_closes
 from app.instruments.instrument_schemas import (
@@ -648,6 +651,48 @@ async def test_theoretical_price_requires_independent_volatility_source():
     assert analytics.model_price_at_iv_mid is not None
     assert abs(analytics.model_price_at_iv_mid - 45.0) < 1.0
     assert analytics.theoretical_price != analytics.model_price_at_iv_mid
+
+
+@pytest.mark.asyncio
+async def test_postgres_decimal_hv_is_normalized_before_bsm_math():
+    """A Decimal restored from persistence must not crash all EOD analytics.
+
+    Dataclass annotations do not coerce at runtime, so a persistence-backed estimate can
+    legitimately carry ``Decimal`` even though the public contract says ``float``.
+    """
+    engine = LiveQuantEngine()
+    engine.set_historical_vol_getter(
+        lambda _symbol: VolEstimate(
+            value=cast(float, Decimal("0.2540")), window=22, as_of=date(2026, 8, 28)
+        )
+    )
+    spec = CoveredWarrantSpecification(
+        symbol="CHPG2602",
+        issuer="TCBS",
+        underlying_symbol="HPG",
+        strike_price=25885.0,
+        exercise_ratio=3.5704,
+        maturity_date="2026-09-21",
+        last_trading_date="2026-09-17",
+        status=InstrumentLifecycleStatus.ACTIVE,
+        data_quality=DataQualityStatus.COMPLETE,
+        evidence_level=LifecycleEvidenceLevel.CURRENT_EXCHANGE_LIST,
+        metadata_verification=MetadataVerificationStatus.VERIFIED_CURRENT,
+    )
+    und = CanonicalQuote(symbol="HPG", instrument_type="STOCK", last_price=22150.0)
+    cw = CanonicalQuote(
+        symbol="CHPG2602", instrument_type="CW",
+        bid1_price=40.0, ask1_price=50.0, last_price=45.0,
+    )
+
+    analytics = await engine.compute_warrant_analytics(
+        "CHPG2602", spec=spec, cw_state=cw, und_state=und
+    )
+
+    assert analytics.is_available is True
+    assert analytics.historical_volatility == pytest.approx(0.254)
+    assert analytics.theoretical_price is not None
+    assert analytics.greeks.volatility_used is not None
 
 
 @pytest.mark.asyncio
