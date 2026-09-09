@@ -721,9 +721,21 @@ class LiveQuantEngine:
             moneyness_cat = MoneynessCategory.ATM
 
         # 6. Resolve CW Market Prices
-        bid_price: Optional[float] = cw_state.bid1_price if cw_state else None
-        ask_price: Optional[float] = cw_state.ask1_price if cw_state else None
-        last_price: Optional[float] = cw_state.last_price if cw_state else None
+        # EOD book fields are assigned from SQLAlchemy snapshots after CanonicalQuote has
+        # been constructed.  Pydantic does not validate assignment on this model, so those
+        # values can still be Decimal even though the field annotation is float.
+        bid_price: Optional[float] = (
+            float(cw_state.bid1_price)
+            if cw_state is not None and cw_state.bid1_price is not None else None
+        )
+        ask_price: Optional[float] = (
+            float(cw_state.ask1_price)
+            if cw_state is not None and cw_state.ask1_price is not None else None
+        )
+        last_price: Optional[float] = (
+            float(cw_state.last_price)
+            if cw_state is not None and cw_state.last_price is not None else None
+        )
 
         def input_origin(state, stamp):
             return {"sessionDate": state.market_session_date if state else None,

@@ -684,6 +684,11 @@ async def test_postgres_decimal_hv_is_normalized_before_bsm_math():
         symbol="CHPG2602", instrument_type="CW",
         bid1_price=40.0, ask1_price=50.0, last_price=45.0,
     )
+    # SnapshotRepository assigns SQLAlchemy Decimal values after model construction,
+    # bypassing Pydantic's construction-time float coercion.
+    cw.bid1_price = cast(float, Decimal("40.0"))
+    cw.ask1_price = cast(float, Decimal("50.0"))
+    cw.last_price = cast(float, Decimal("45.0"))
 
     analytics = await engine.compute_warrant_analytics(
         "CHPG2602", spec=spec, cw_state=cw, und_state=und
