@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IntradayVolume, MarketOverviewStrip, Sparkline } from "@/features/watchlist/market_overview_strip";
 
-const state = vi.hoisted(() => ({ empty: false, refreshing: false }));
+const state = vi.hoisted(() => ({ empty: false, refreshing: false, preOpen: false }));
 vi.mock("@/data/query/use_market_overview", () => ({
   useMarketOverview: () => ({
     isLoading: false,
@@ -12,7 +12,7 @@ vi.mock("@/data/query/use_market_overview", () => ({
       availability: "UNAVAILABLE", refreshing: state.refreshing,
     } : {
       indices: ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"].map((symbol) => ({
-        symbol, value: 1831.56, change: 3.2, change_percent: 0.18,
+        symbol, value: 1831.56, reference: 1828.36, change: 3.2, change_percent: 0.18,
         volume: 1000000, trading_value: 2000000000, advancing: 12,
         ceiling: 1, unchanged: 5, declining: 9, floor: 2,
         as_of: "2026-09-02T14:00:00+07:00", sparkline: [1, 2, 1.5, 3],
@@ -20,6 +20,7 @@ vi.mock("@/data/query/use_market_overview", () => ({
       top_stock_volume: [{ symbol: "HPG", volume: 17126700, price: 22100, market_state: "DOWN", as_of: "2026-09-02" }],
       top_cw_volume: [{ symbol: "CHPG2617", volume: 306800, price: 490, market_state: "REFERENCE", as_of: "2026-09-02" }],
       as_of: "2026-09-02T14:00:00+07:00", market_session_active: true,
+      market_phase: state.preOpen ? "PRE_OPEN" : "CONTINUOUS_PM",
       stock_scope: "HOSE (VNINDEX constituents)", cw_scope: "verified active CW registry", source: "FIINQUANT",
     },
   }),
@@ -28,6 +29,7 @@ afterEach(() => {
   cleanup();
   state.empty = false;
   state.refreshing = false;
+  state.preOpen = false;
 });
 
 describe("market overview strip", () => {
@@ -115,6 +117,18 @@ describe("market overview strip", () => {
     state.empty = true;
     render(<MarketOverviewStrip />);
     expect(screen.getByText("MARKET OVERVIEW UNAVAILABLE")).toBeTruthy();
+  });
+
+  it("shows only today's references and blank leader slots during pre-open", () => {
+    state.preOpen = true;
+    render(<MarketOverviewStrip />);
+    expect(screen.getAllByText("REF")).toHaveLength(4);
+    expect(screen.getAllByText("1,828.36").length).toBeGreaterThanOrEqual(4);
+    expect(screen.getAllByLabelText("Session reference price")).toHaveLength(4);
+    expect(screen.getAllByLabelText("No ranked volume yet")).toHaveLength(10);
+    expect(screen.queryByText("HPG")).toBeNull();
+    expect(screen.queryByText("CHPG2617")).toBeNull();
+    expect(document.querySelectorAll(".overview-direction-icon")).toHaveLength(0);
   });
 
   it("keeps requested index order and separates the two ranking scopes", () => {

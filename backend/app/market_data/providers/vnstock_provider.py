@@ -829,6 +829,8 @@ class VnstockProvider(MarketDataProvider):
         if cached and time.monotonic() - cached_at < self._OVERVIEW_TTL:
             return cached
         session = reference_session_date().isoformat()
+        phase = market_session.get_market_phase().value
+        reference_only = phase == "PRE_OPEN"
         index_symbols = ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"]
         groups = {
             "VN30": await self._safe_group_symbols("VN30"),
@@ -855,9 +857,14 @@ class VnstockProvider(MarketDataProvider):
                 if row is None:
                     continue
                 volume = _finite(row.get("volume_accumulated"))
-                if volume is None:
+                # A zero-volume board row is only a pre-open placeholder. Ranking it
+                # fabricated a top-five table from whichever zero happened to arrive
+                # first and made an empty new session look active.
+                if volume is None or volume <= 0:
                     continue
                 price, ref = _finite(row.get("close_price")), _finite(row.get("reference_price"))
+                if price is not None and price <= 0:
+                    price = None
                 ceiling, floor = _finite(row.get("ceiling_price")), _finite(row.get("floor_price"))
                 values.append({
                     "symbol": symbol, "volume": volume, "price": price, "reference": ref,
@@ -886,41 +893,51 @@ class VnstockProvider(MarketDataProvider):
             daily.sort(key=lambda item: item[1])
             current = next((r for r, day in reversed(daily) if day == session), None)
             previous = next((r for r, day in reversed(daily) if day < session), None)
-            price = _finite((current or {}).get("close"))
+            price = None if reference_only else _finite((current or {}).get("close"))
+            if price is not None and price <= 0:
+                price = None
             reference = _finite((previous or {}).get("close"))
             change = price - reference if price is not None and reference is not None else None
-            members = [valid_row(member) for member in groups[symbol]]
+            members = [] if reference_only else [valid_row(member) for member in groups[symbol]]
             members = [row for row in members if row is not None]
             states = [self._market_state(_finite(r.get("close_price")), _finite(r.get("reference_price")), _finite(r.get("ceiling_price")), _finite(r.get("floor_price"))) for r in members]
             sparkline = []
-            for row in intraday_rows:
+            for row in ([] if reference_only else intraday_rows):
                 if _date_text(row.get("time")) != session:
                     continue
                 point_stamp = _iso_timestamp(row.get("time"))
                 point_value = _finite(row.get("close"))
                 if point_stamp and point_value is not None:
                     sparkline.append({"timestamp": point_stamp, "value": point_value, "reference": reference, "volume": _finite(row.get("volume"))})
-            as_of = sparkline[-1]["timestamp"] if sparkline else _iso_timestamp((current or {}).get("time"))
+            as_of = sparkline[-1]["timestamp"] if sparkline else (
+                None if reference_only else _iso_timestamp((current or {}).get("time"))
+            )
             expected_members = len(groups[symbol])
             breadth_coverage = len(members) / expected_members if expected_members else 0.0
             has_breadth = bool(members)
             complete_breadth = bool(expected_members and len(members) == expected_members)
             availability = (
                 "AVAILABLE" if price is not None and sparkline and complete_breadth
-                else "PARTIAL" if price is not None or has_breadth else "UNAVAILABLE"
+                else "PARTIAL" if price is not None or reference is not None or has_breadth else "UNAVAILABLE"
             )
+            advancing = None if reference_only else states.count("UP")
+            ceiling_count = None if reference_only else states.count("CEILING")
+            unchanged = None if reference_only else states.count("REFERENCE")
+            declining = None if reference_only else states.count("DOWN")
+            floor_count = None if reference_only else states.count("FLOOR")
             indices.append({
                 "symbol": symbol, "value": price, "change": change,
                 "change_percent": change / reference * 100 if change is not None and reference else None,
-                "reference": reference, "volume": _finite((current or {}).get("volume")),
-                "trading_value": _finite((current or {}).get("value") or (current or {}).get("va")),
-                "advancing": states.count("UP"), "ceiling": states.count("CEILING"),
-                "unchanged": states.count("REFERENCE"), "declining": states.count("DOWN"),
-                "floor": states.count("FLOOR"), "as_of": as_of, "session_date": session,
+                "reference": reference,
+                "volume": None if reference_only else _finite((current or {}).get("volume")),
+                "trading_value": None if reference_only else _finite((current or {}).get("value") or (current or {}).get("va")),
+                "advancing": advancing, "ceiling": ceiling_count,
+                "unchanged": unchanged, "declining": declining,
+                "floor": floor_count, "as_of": as_of, "session_date": session,
                 "breadth_observed": len(members), "breadth_expected": expected_members,
                 "breadth_coverage": breadth_coverage,
                 "update_mode": "POLLED", "sparkline": sparkline, "availability": availability,
-                "partial_reasons": [reason for reason, missing in (
+                "partial_reasons": (["PRE_OPEN_REFERENCE_ONLY"] if reference_only else []) + [reason for reason, missing in (
                     ("PRICE_UNAVAILABLE", price is None), ("REFERENCE_UNAVAILABLE", reference is None),
                     ("INTRADAY_UNAVAILABLE", not sparkline),
                     ("BREADTH_UNAVAILABLE", not has_breadth),
@@ -928,8 +945,11 @@ class VnstockProvider(MarketDataProvider):
                 ) if missing],
                 "provenance": {
                     "price": {"source": "VNSTOCK_VCI", "as_of": as_of, "session_date": session},
+                    "reference": {"source": "VNSTOCK_VCI_PRIOR_CLOSE", "as_of": None,
+                                  "session_date": session,
+                                  "observed_session_date": max((day for _, day in daily if day < session), default=None)},
                     "totals": {"source": "VNSTOCK_VCI", "as_of": as_of, "session_date": session,
-                               "availability": "AVAILABLE" if current else "UNAVAILABLE"},
+                               "availability": "UNAVAILABLE" if reference_only else "AVAILABLE" if current else "UNAVAILABLE"},
                     "breadth": {"source": "DERIVED_VNSTOCK_KBS_CONSTITUENTS", "as_of": as_of,
                                 "session_date": session,
                                 "availability": "AVAILABLE" if complete_breadth else "PARTIAL" if has_breadth else "UNAVAILABLE",
@@ -955,7 +975,7 @@ class VnstockProvider(MarketDataProvider):
             "top_stock_volume": stock_leaders, "top_cw_volume": cw_leaders,
             "as_of": max((i.get("as_of") for i in indices if i.get("as_of")), default=None),
             "market_session_active": market_session.is_trading_active(),
-            "market_phase": market_session.get_market_phase().value,
+            "market_phase": phase,
             "stock_scope": "HOSE (VNINDEX constituents)", "cw_scope": "active CW registry",
             "source": "VNSTOCK", "availability": availability,
             "components": {
