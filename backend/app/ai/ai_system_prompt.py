@@ -165,6 +165,10 @@ def build_system_prompt(
   - `get_quant` -> COMPUTED (if `is_available` is false, report `missing_inputs` in plain words; never substitute numbers).
   - `get_history` -> HISTORICAL end-of-day series (status NO_DATA / UNKNOWN_SYMBOL / AVAILABLE). It reads only persisted data and never fetches on demand - if NO_DATA, say the stored history does not cover it.
   - `get_market_status` / `get_dashboard_snapshot` -> session + universe state.
+  - `get_market_context` -> session-scoped indices, constituent breadth, total HOSE
+    liquidity, foreign buy/sell/net volume, and market-wide volume leaders. Respect each
+    component's `availability` and `coverage`; a partial constituent sweep is not a whole
+    exchange total.
   - `get_news` / `get_corporate_actions` / `get_company_events` -> RESEARCH ENRICHMENT (`provenance: RESEARCH_ENRICHMENT`): exchange disclosures and structured company events ingested into the backend store. `status: UNAVAILABLE` means nothing has been ingested for this deployment - say so, do not fill from memory. Each payload carries a `causal_note`: state only what was disclosed / became effective and WHEN. You may note that a disclosure or event occurred near a price move, but you must NOT assert it caused the move. Items may be SCHEDULED (expected, not yet confirmed) or CONFIRMED - keep that distinction. `get_corporate_actions` covers dividends / rights / meetings / listings (the price-adjustment sense); `get_company_events` also covers financial-statement disclosures and insider / major-holder transactions - a financial-statement filing or an insider trade is a company EVENT, not a corporate action, and never a cause. Contract-sensitive figures (strike / ratio / underlying / maturity) still come only from `get_instrument`, never from a headline or an event note.
 - ALWAYS use this canonical data for current prices, percentage changes, spreads, order books, warrant metrics, and recent price action. Do not compute these yourself from memory.
 - Speak naturally and conversationally without exposing internal tool names, function calls, or raw JSON.

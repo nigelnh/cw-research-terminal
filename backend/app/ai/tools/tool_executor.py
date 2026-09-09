@@ -57,6 +57,12 @@ MARKET_STATUS_KEYWORDS = {
     "nghỉ trưa", "lunch break", "trading hours", "is market open",
 }
 
+MARKET_CONTEXT_KEYWORDS = {
+    "market breadth", "độ rộng", "foreign flow", "foreign buy", "foreign sell",
+    "khối ngoại", "mua ròng", "bán ròng", "market liquidity", "thanh khoản toàn sàn",
+    "vnindex", "vn30", "vnfinlead", "vndiamond", "index viewer", "chỉ số",
+}
+
 HISTORY_KEYWORDS = {
     "history", "historical", "recent price", "price action", "past week", "past month",
     "last week", "last month", "last few days", "trend", "drawdown", "over the last",
@@ -119,6 +125,7 @@ _TOOL_DISPLAY_NAMES: Dict[str, str] = {
     "get_history": "Loading market history",
     "get_dashboard_snapshot": "Checking your dashboard",
     "get_market_status": "Checking market session",
+    "get_market_context": "Checking the market overview",
     "get_news": "Searching disclosures",
     "get_corporate_actions": "Checking corporate actions",
     "get_company_events": "Checking company events",
@@ -419,6 +426,10 @@ class ToolExecutor:
             await self.call_tool("get_dashboard_snapshot", {"symbols": watched} if watched else {})
 
         # Case 3: market status query
+        elif any(k in q_lower for k in MARKET_CONTEXT_KEYWORDS):
+            await self.call_tool("get_market_context", {})
+
+        # Case 4: exchange calendar / transport status without market-wide analytics
         elif any(k in q_lower for k in MARKET_STATUS_KEYWORDS):
             await self.call_tool("get_market_status", {})
 

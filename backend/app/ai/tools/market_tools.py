@@ -59,6 +59,43 @@ def get_market_status() -> Dict[str, Any]:
     }
 
 
+async def get_market_context() -> Dict[str, Any]:
+    """Session-scoped index, breadth, liquidity, foreign-flow and volume-leader context.
+
+    This is the same shared overview used by the dashboard. It never asks the model to
+    reconstruct market breadth or turnover from a partial watchlist.
+    """
+    from app.market_data.market_overview_service import market_overview_service
+
+    active_cws = [
+        symbol
+        for symbol in subscription_manager.get_active_symbols()
+        if len(symbol) == 8 and symbol.startswith("C")
+    ]
+    try:
+        overview = await market_overview_service.get(active_cws)
+    except Exception as exc:  # noqa: BLE001 - tool result remains structured and sanitized
+        logger.warning("AI market overview unavailable: %s", type(exc).__name__)
+        return {
+            "status": "UNAVAILABLE",
+            "message": "Session-scoped market overview is temporarily unavailable.",
+            "provenance": "APP_MARKET_OVERVIEW",
+            "sessionContext": session_context(),
+        }
+    return {
+        "status": overview.get("availability", "UNAVAILABLE"),
+        "indices": overview.get("indices", []),
+        "top_stock_volume": overview.get("top_stock_volume", []),
+        "top_cw_volume": overview.get("top_cw_volume", []),
+        "market_metrics": overview.get("market_metrics"),
+        "market_phase": overview.get("market_phase"),
+        "as_of": overview.get("as_of"),
+        "feedStatus": overview.get("feedStatus"),
+        "sessionContext": overview.get("sessionContext") or session_context(),
+        "provenance": "APP_MARKET_OVERVIEW",
+    }
+
+
 def _row_payload(row) -> Dict[str, Any]:
     values = row.values
     bid, ask = values.get("bid1_price"), values.get("ask1_price")

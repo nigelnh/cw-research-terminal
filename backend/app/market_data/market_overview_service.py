@@ -202,6 +202,13 @@ class MarketOverviewService:
             return price.get("session_date") or item.get("session_date") or (item.get("as_of") or "")[:10]
         for key in ("indices", "top_stock_volume", "top_cw_volume"):
             result[key] = [item for item in result.get(key, []) if day(item) == display_session]
+        metrics = result.get("market_metrics")
+        if not isinstance(metrics, dict) or metrics.get("session_date") != display_session:
+            result["market_metrics"] = {
+                "session_date": display_session, "as_of": None,
+                "liquidity": {"availability": "UNAVAILABLE"},
+                "foreign_flow": {"availability": "UNAVAILABLE"},
+            }
         for item in result["indices"]:
             for group, fields in {
                 "breadth": ("advancing", "ceiling", "unchanged", "declining", "floor"),
@@ -242,6 +249,11 @@ class MarketOverviewService:
     def _empty_payload(refreshing: bool) -> dict[str, Any]:
         return {
             "indices": [], "top_stock_volume": [], "top_cw_volume": [],
+            "market_metrics": {
+                "session_date": reference_session_date().isoformat(), "as_of": None,
+                "liquidity": {"availability": "UNAVAILABLE"},
+                "foreign_flow": {"availability": "UNAVAILABLE"},
+            },
             "as_of": None, "source": "VNSTOCK", "availability": "UNAVAILABLE",
             "market_session_active": market_session.is_trading_active(),
             "market_phase": market_session.get_market_phase().value,

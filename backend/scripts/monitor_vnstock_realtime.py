@@ -55,8 +55,15 @@ def _load_state(path: Path, session: str) -> dict[str, Any]:
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         state = {}
     if state.get("session") != session:
-        return {"session": session, "live_consecutive": 0, "last_live_tick": None,
-                "preopen_ready_seen": False, "accepted": False}
+        return {
+            "session": session,
+            "live_consecutive": 0,
+            "last_live_tick": None,
+            "realtime_advancing_consecutive": 0,
+            "last_realtime_quote_count": None,
+            "preopen_ready_seen": False,
+            "accepted": False,
+        }
     return state
 
 
@@ -143,6 +150,24 @@ def assess(sample: dict[str, Any], state: dict[str, Any], required_live_samples:
         and all(_positive(item.get("volume")) for item in stock_leaders + cw_leaders)
     )
     last_tick = market.get("last_tick_at")
+    hybrid = market.get("transport_mode") == "HYBRID"
+    push_connected = market.get("realtime_socket_connected") is True
+    push_stock = int(market.get("realtime_observed_stock_count") or 0) > 0
+    push_cw = int(market.get("realtime_observed_cw_count") or 0) > 0
+    realtime_quote_count = int(market.get("realtime_quote_count") or 0)
+    prior_realtime_count = state.get("last_realtime_quote_count")
+    push_advancing = bool(
+        push_connected
+        and prior_realtime_count is not None
+        and realtime_quote_count > int(prior_realtime_count)
+    )
+    if push_advancing:
+        state["realtime_advancing_consecutive"] = int(
+            state.get("realtime_advancing_consecutive") or 0
+        ) + 1
+    elif hybrid and active:
+        state["realtime_advancing_consecutive"] = 0
+    state["last_realtime_quote_count"] = realtime_quote_count
     live_candidate = bool(
         active and provider_ok and market.get("feed_fresh") is True
         and market.get("upstream_status") == "LIVE"
@@ -160,7 +185,14 @@ def assess(sample: dict[str, Any], state: dict[str, Any], required_live_samples:
     state["accepted"] = accepted
     state["last_checked_at"] = context.get("serverTime")
 
-    if accepted:
+    push_stable = int(state.get("realtime_advancing_consecutive") or 0) >= required_live_samples
+    if accepted and hybrid and push_stable and push_stock and push_cw:
+        status = "LIVE_ACCEPTED_HYBRID"
+    elif accepted and hybrid and push_stable and push_stock:
+        status = "LIVE_ACCEPTED_STOCK_PUSH_CW_POLLING"
+    elif accepted and hybrid:
+        status = "LIVE_ACCEPTED_POLLING_RECOVERY"
+    elif accepted:
         status = "LIVE_ACCEPTED"
     elif phase == "PRE_OPEN":
         status = "PREOPEN_READY" if preopen_ready else "PREOPEN_MISMATCH"
@@ -182,6 +214,24 @@ def assess(sample: dict[str, Any], state: dict[str, Any], required_live_samples:
         "preopenReadySeen": bool(state.get("preopen_ready_seen")),
         "liveConsecutive": int(state.get("live_consecutive") or 0),
         "requiredLiveSamples": required_live_samples,
+        "realtime": {
+            "transport": market.get("transport_mode"),
+            "source": market.get("realtime_source"),
+            "socketConnected": push_connected,
+            "quoteCount": realtime_quote_count,
+            "advancing": push_advancing,
+            "advancingConsecutive": int(state.get("realtime_advancing_consecutive") or 0),
+            "stockObserved": push_stock,
+            "cwObserved": push_cw,
+            "observedSymbols": market.get("realtime_observed_symbols") or [],
+            "recommendation": (
+                "SSI push confirmed for stocks and covered warrants."
+                if push_stable and push_stock and push_cw
+                else "Keep SSI for stocks and KBS polling for covered warrants."
+                if push_stable and push_stock
+                else "Terminal data is usable through KBS; SSI push still needs live-session evidence."
+            ),
+        },
         "checks": {
             "provider": provider_ok,
             "referenceOnlyIndices": reference_only,
@@ -191,6 +241,10 @@ def assess(sample: dict[str, Any], state: dict[str, Any], required_live_samples:
             "liveBookRows": len(live_books),
             "liveIndices": len(index_live),
             "positiveRankings": rankings_live,
+            "hybridConfigured": hybrid,
+            "pushSocketConnected": push_connected,
+            "pushStockCoverage": push_stock,
+            "pushCwCoverage": push_cw,
         },
         "requestFailures": market.get("request_failure_count"),
         "feedStatus": (market.get("feedStatus") or {}).get("code"),
@@ -249,7 +303,7 @@ def main() -> int:
         deadline_at += timedelta(days=1)
     while datetime.now(ICT) <= deadline_at:
         report = run_once(args)
-        if report.get("status") == "LIVE_ACCEPTED":
+        if str(report.get("status", "")).startswith("LIVE_ACCEPTED"):
             return 0
         time.sleep(max(5.0, args.interval))
     return 1

@@ -35,9 +35,8 @@ class Settings(BaseSettings):
     AI_HISTORY_MAX_LOOKBACK_DAYS: int = Field(default=120, description="Max calendar span the AI get_history tool may request")
     AI_HISTORY_MAX_POINTS: int = Field(default=60, description="Max OHLCV rows the AI get_history tool returns (older rows downsampled)")
 
-    # Market data provider. Vnstock Community is polled because the public package does
-    # not expose a streaming transport. One backend process owns the polling lifecycle;
-    # browsers only subscribe to the normalized server-side state.
+    # Market data provider. One backend process owns both the public SSI push channel and
+    # the bounded Vnstock HTTP recovery poller; browsers only consume canonical state.
     MARKET_DATA_PROVIDER: str = Field(default="vnstock", description="Active provider: 'vnstock'")
     MARKET_DATA_MAX_SYMBOLS: int = Field(default=60, description="Maximum server-owned market universe")
     MARKET_DATA_DEBOUNCE_MS: int = Field(default=300, description="Subscription debounce delay in milliseconds")
@@ -59,6 +58,22 @@ class Settings(BaseSettings):
     VNSTOCK_FEED_FRESHNESS_SECONDS: float = Field(
         default=15.0,
         description="Maximum age of a successful board observation while the exchange is active",
+    )
+    VNSTOCK_REALTIME_ENABLED: bool = Field(
+        default=True,
+        description="Enable the supplemental SSI iBoard WebSocket documented by vnstock-js",
+    )
+    VNSTOCK_REALTIME_URL: str = Field(
+        default="wss://iboard-pushstream.ssi.com.vn/realtime",
+        description="SSI iBoard realtime WebSocket URL",
+    )
+    VNSTOCK_REALTIME_DEADMAN_SECONDS: float = Field(
+        default=60.0,
+        description="Reconnect the SSI channel after this much in-session message silence",
+    )
+    VNSTOCK_REALTIME_RECONNECT_BASE_SECONDS: float = Field(
+        default=3.0,
+        description="Initial SSI reconnect backoff; repeated failures double to 60 seconds",
     )
     VNSTOCK_MAX_CONCURRENT_CALLS: int = Field(
         default=4,

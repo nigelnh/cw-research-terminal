@@ -44,6 +44,29 @@ export interface MarketOverviewData {
   indices: IndexOverview[];
   top_stock_volume: VolumeLeader[];
   top_cw_volume: VolumeLeader[];
+  market_metrics?: {
+    session_date: string;
+    as_of: string | null;
+    liquidity: {
+      total_volume?: number | null;
+      total_value?: number | null;
+      observed?: number;
+      expected?: number;
+      coverage?: number;
+      availability: string;
+      source?: string;
+    };
+    foreign_flow: {
+      buy_volume?: number | null;
+      sell_volume?: number | null;
+      net_volume?: number | null;
+      observed?: number;
+      expected?: number;
+      coverage?: number;
+      availability: string;
+      source?: string;
+    };
+  };
   as_of: string | null;
   market_session_active: boolean;
   stock_scope: string;

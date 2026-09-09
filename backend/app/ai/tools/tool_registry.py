@@ -9,6 +9,7 @@ import logging
 import inspect
 
 from app.ai.tools.market_tools import (
+    get_market_context,
     get_market_status,
     get_quote,
     get_order_book,
@@ -22,6 +23,17 @@ from app.ai.tools.research_tools import get_news, get_corporate_actions, get_com
 logger = logging.getLogger(__name__)
 
 TOOL_DEFINITIONS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_market_context",
+            "description": (
+                "Returns session-scoped VN indices, constituent breadth, HOSE liquidity, "
+                "foreign buy/sell/net volume and market-wide stock/CW volume leaders."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -222,6 +234,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
 
 # Strict Whitelist of callable tool handlers
 TOOL_HANDLERS = {
+    "get_market_context": get_market_context,
     "get_market_status": get_market_status,
     "get_quote": get_quote,
     "get_order_book": get_order_book,

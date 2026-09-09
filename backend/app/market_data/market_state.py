@@ -651,6 +651,7 @@ class MarketState:
         has_explicit_session = self._explicit_event_session_date(raw_event) is not None
         source_ts = _source_ms(ts_str, raw_event.get("TradingDate"))
         provider_market_status = raw_event.get("MarketStatus")
+        full_book_snapshot = bool(raw_event.get("_full_book_snapshot"))
 
         diff: Dict[str, Any] = {}
 
@@ -668,16 +669,20 @@ class MarketState:
             self._expire_reference_metadata(q, reference_session_date, diff)
 
             # Level 1
-            if b1_prc is not None and q.bid1_price != float(b1_prc):
-                q.bid1_price = float(b1_prc)
+            if (b1_prc is not None or full_book_snapshot) and q.bid1_price != (
+                float(b1_prc) if b1_prc is not None else None
+            ):
+                q.bid1_price = float(b1_prc) if b1_prc is not None else None
                 diff["bid1_price"] = q.bid1_price
 
             if b1_vol is not None and q.bid1_quantity != int(b1_vol):
                 q.bid1_quantity = int(b1_vol)
                 diff["bid1_quantity"] = q.bid1_quantity
 
-            if a1_prc is not None and q.ask1_price != float(a1_prc):
-                q.ask1_price = float(a1_prc)
+            if (a1_prc is not None or full_book_snapshot) and q.ask1_price != (
+                float(a1_prc) if a1_prc is not None else None
+            ):
+                q.ask1_price = float(a1_prc) if a1_prc is not None else None
                 diff["ask1_price"] = q.ask1_price
 
             if a1_vol is not None and q.ask1_quantity != int(a1_vol):
@@ -685,16 +690,20 @@ class MarketState:
                 diff["ask1_quantity"] = q.ask1_quantity
 
             # Level 2
-            if b2_prc is not None and q.bid2_price != float(b2_prc):
-                q.bid2_price = float(b2_prc)
+            if (b2_prc is not None or full_book_snapshot) and q.bid2_price != (
+                float(b2_prc) if b2_prc is not None else None
+            ):
+                q.bid2_price = float(b2_prc) if b2_prc is not None else None
                 diff["bid2_price"] = q.bid2_price
 
             if b2_vol is not None and q.bid2_quantity != int(b2_vol):
                 q.bid2_quantity = int(b2_vol)
                 diff["bid2_quantity"] = q.bid2_quantity
 
-            if a2_prc is not None and q.ask2_price != float(a2_prc):
-                q.ask2_price = float(a2_prc)
+            if (a2_prc is not None or full_book_snapshot) and q.ask2_price != (
+                float(a2_prc) if a2_prc is not None else None
+            ):
+                q.ask2_price = float(a2_prc) if a2_prc is not None else None
                 diff["ask2_price"] = q.ask2_price
 
             if a2_vol is not None and q.ask2_quantity != int(a2_vol):
@@ -702,16 +711,20 @@ class MarketState:
                 diff["ask2_quantity"] = q.ask2_quantity
 
             # Level 3
-            if b3_prc is not None and q.bid3_price != float(b3_prc):
-                q.bid3_price = float(b3_prc)
+            if (b3_prc is not None or full_book_snapshot) and q.bid3_price != (
+                float(b3_prc) if b3_prc is not None else None
+            ):
+                q.bid3_price = float(b3_prc) if b3_prc is not None else None
                 diff["bid3_price"] = q.bid3_price
 
             if b3_vol is not None and q.bid3_quantity != int(b3_vol):
                 q.bid3_quantity = int(b3_vol)
                 diff["bid3_quantity"] = q.bid3_quantity
 
-            if a3_prc is not None and q.ask3_price != float(a3_prc):
-                q.ask3_price = float(a3_prc)
+            if (a3_prc is not None or full_book_snapshot) and q.ask3_price != (
+                float(a3_prc) if a3_prc is not None else None
+            ):
+                q.ask3_price = float(a3_prc) if a3_prc is not None else None
                 diff["ask3_price"] = q.ask3_price
 
             if a3_vol is not None and q.ask3_quantity != int(a3_vol):
