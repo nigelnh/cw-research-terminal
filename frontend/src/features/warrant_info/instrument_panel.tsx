@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { RealtimePulse } from "@/domain/models";
+import type { MarketQuote, RealtimePulse } from "@/domain/models";
 import type { SelectedInstrumentView } from "@/data/selected_instrument";
 import type { DashboardRow } from "@/data/query/use_dashboard_data";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
@@ -73,6 +73,78 @@ function greek(v: number | null | undefined, dp = 2): string {
   return v.toFixed(dp);
 }
 
+function fmtPercent(v: number | null | undefined): string {
+  return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : DASH;
+}
+
+function BookDepthPanel({ quote, live }: { quote: MarketQuote | null | undefined; live: boolean }) {
+  if (!live) {
+    return (
+      <div style={{ height: "100%", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, textAlign: "center" }}>
+        <span style={{ fontSize: 11, color: "var(--t-42)" }}>Top-3 order book unavailable outside a live session</span>
+      </div>
+    );
+  }
+
+  const levels = [
+    [quote?.bidPrice, quote?.bidQuantity, quote?.askPrice, quote?.askQuantity],
+    [quote?.bid2Price, quote?.bid2Quantity, quote?.ask2Price, quote?.ask2Quantity],
+    [quote?.bid3Price, quote?.bid3Quantity, quote?.ask3Price, quote?.ask3Quantity],
+  ] as const;
+  const hasBook = levels.some(level => level.some(v => typeof v === "number" && Number.isFinite(v)));
+  if (!hasBook) {
+    return (
+      <div style={{ height: "100%", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, textAlign: "center" }}>
+        <span style={{ fontSize: 11, color: "var(--t-42)" }}>No top-3 book observed for this instrument yet.</span>
+      </div>
+    );
+  }
+
+  const volume = (v: number | null | undefined) => typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
+  const bidDepth = levels.reduce((sum, level) => sum + volume(level[1]), 0);
+  const askDepth = levels.reduce((sum, level) => sum + volume(level[3]), 0);
+  const visibleDepth = bidDepth + askDepth;
+  const bidShare = visibleDepth > 0 ? bidDepth / visibleDepth : null;
+  const spread = quote?.bidPrice != null && quote?.askPrice != null && quote.askPrice >= quote.bidPrice
+    ? quote.askPrice - quote.bidPrice
+    : null;
+
+  return (
+    <div className="mono" style={{ display: "flex", gap: 8, height: "100%" }}>
+      <div style={{ flex: 1.4, minWidth: 0, border: "1px solid var(--border)", padding: "10px 12px" }}>
+        <div style={{ fontSize: 10.5, color: "var(--t-55)", marginBottom: 10 }}>TOP-3 ORDER BOOK · LIVE</div>
+        <div style={{ display: "grid", gridTemplateColumns: "28px 1fr 1fr 1fr 1fr", gap: "7px 8px", alignItems: "center", fontSize: 10.5, fontVariantNumeric: "tabular-nums" }}>
+          <span />
+          <span style={{ textAlign: "right", color: "var(--t-42)" }}>BID VOL</span>
+          <span style={{ textAlign: "right", color: "var(--t-42)" }}>BID</span>
+          <span style={{ textAlign: "right", color: "var(--t-42)" }}>ASK</span>
+          <span style={{ textAlign: "right", color: "var(--t-42)" }}>ASK VOL</span>
+          {levels.flatMap((level, index) => [
+            <span key={`level-${index}`} style={{ color: "var(--t-42)" }}>L{index + 1}</span>,
+            <span key={`bv-${index}`} style={{ textAlign: "right", color: "var(--up)" }}>{volume(level[1]) ? fmtVol(level[1]) : DASH}</span>,
+            <span key={`bp-${index}`} style={{ textAlign: "right", color: "var(--up)" }}>{fmtPrice(level[0])}</span>,
+            <span key={`ap-${index}`} style={{ textAlign: "right", color: "var(--down)" }}>{fmtPrice(level[2])}</span>,
+            <span key={`av-${index}`} style={{ textAlign: "right", color: "var(--down)" }}>{volume(level[3]) ? fmtVol(level[3]) : DASH}</span>,
+          ])}
+        </div>
+      </div>
+      <div style={{ flex: 1, minWidth: 170, border: "1px solid var(--border)", padding: "10px 12px" }}>
+        <div style={{ fontSize: 10.5, color: "var(--t-55)", marginBottom: 8 }}>VISIBLE DEPTH</div>
+        <MetricRow label="BID DEPTH" compact value={bidDepth > 0 ? fmtVol(bidDepth) : DASH} color="var(--up)" />
+        <MetricRow label="ASK DEPTH" compact value={askDepth > 0 ? fmtVol(askDepth) : DASH} color="var(--down)" />
+        <MetricRow label="SPREAD" compact value={fmtPrice(spread)} color="var(--t-85)" />
+        <MetricRow label="BID SHARE" compact value={fmtPercent(bidShare)} color="var(--t-85)" title="Bid volume / total visible volume across the top three levels." />
+        <div title="Visible top-three-level imbalance; this is not full exchange depth." style={{ display: "flex", height: 8, marginTop: 12, background: "var(--down)" }}>
+          <div style={{ width: `${(bidShare ?? 0) * 100}%`, background: "var(--up)" }} />
+        </div>
+        <div style={{ marginTop: 6, fontSize: 9, color: "var(--t-42)", lineHeight: 1.45 }}>
+          Coverage: three published price levels. Empty levels remain empty.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* -------------------------------------------------- corporate-events display */
 
 const CORP_EVENT_LABELS: Record<string, string> = {
@@ -106,10 +178,8 @@ function corpEventDesc(ev: CorporateActionItem): string {
   return DASH;
 }
 
-/** Named, not silently blank: this tier's get_ratios returns only revenue, net profit and
- *  EBIT, and an explicit `fields` list makes the SDK raise, so these have no source. */
 const UNAVAILABLE_HINT =
-  "Not served by the current market-data entitlement — no source for this figure.";
+  "Not served by the current market-data source for this instrument.";
 const TS_COLS = "1.1fr 1fr 1fr 1.15fr 1fr 0.65fr";
 
 const TS_HEAD: React.CSSProperties = {
@@ -277,6 +347,15 @@ export function InstrumentPanel({
   const valuationHint = fundamentals.data?.valuation_as_of
     ? `Trailing, as of ${fundamentals.data.valuation_as_of}`
     : "Trailing valuation from the market-data provider";
+  const fundamentalHint = (field: string) => {
+    const unavailable = fundamentals.data?.unavailable?.[field];
+    if (unavailable) return unavailable;
+    const provenance = fundamentals.data?.provenance?.[field];
+    if (provenance?.source) {
+      return `${provenance.source}${provenance.as_of ? ` · ${provenance.as_of}` : ""}`;
+    }
+    return UNAVAILABLE_HINT;
+  };
 
   const cw = instrument?.cw;
   const q = dashRow?.quote ?? instrument?.quote ?? cw?.quote;
@@ -524,32 +603,7 @@ export function InstrumentPanel({
                 <MetricRow label="RHO /1%" color="var(--t-85)" compact value={greek(pick("rho"), 2)} pulse={cw?.realtimePulses?.rho} />
               </div>
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-                {marketSessionActive ? (
-                  <div style={{ display: "flex", gap: 8, height: "100%" }}>
-                    <div style={{ flex: 1, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <span style={{ fontSize: 10.5, color: "var(--t-42)" }}>PRICE DEPTH · live</span>
-                    </div>
-                    <div style={{ flex: 1, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <span style={{ fontSize: 10.5, color: "var(--t-42)" }}>MARKET DEPTH · live</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      height: "100%",
-                      border: "1px solid var(--border)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: 20,
-                      textAlign: "center",
-                    }}
-                  >
-                    <span style={{ fontSize: 11, color: "var(--t-42)" }}>
-                      Order book depth &amp; time-of-sale unavailable outside a live session
-                    </span>
-                  </div>
-                )}
+                <BookDepthPanel quote={q} live={marketSessionActive} />
               </div>
             </>
           ) : (
@@ -562,7 +616,13 @@ export function InstrumentPanel({
                   </div>
                 ) : (
                   <>
-                    <MetricRow label="EPS" color="var(--t-85)" compact value={DASH} title={UNAVAILABLE_HINT} />
+                    <MetricRow
+                      label="EPS"
+                      color="var(--t-85)"
+                      compact
+                      value={fundamentals.data?.eps == null ? DASH : `${Math.round(fundamentals.data.eps).toLocaleString("en-US")} VND`}
+                      title={fundamentalHint("eps")}
+                    />
                     <MetricRow
                       label="PE"
                       color="var(--t-85)"
@@ -577,10 +637,10 @@ export function InstrumentPanel({
                       value={fundamentals.data?.pb == null ? DASH : fundamentals.data.pb.toFixed(2)}
                       title={valuationHint}
                     />
-                    <MetricRow label="ROE" color="var(--t-85)" compact value={DASH} title={UNAVAILABLE_HINT} />
-                    <MetricRow label="ROA" color="var(--t-85)" compact value={DASH} title={UNAVAILABLE_HINT} />
-                    <MetricRow label="ROIC" color="var(--t-85)" compact value={DASH} title={UNAVAILABLE_HINT} />
-                    <MetricRow label="GROSS MARGIN" color="var(--t-85)" compact value={DASH} title={UNAVAILABLE_HINT} />
+                    <MetricRow label="ROE" color="var(--t-85)" compact value={fmtPercent(fundamentals.data?.roe)} title={fundamentalHint("roe")} />
+                    <MetricRow label="ROA" color="var(--t-85)" compact value={fmtPercent(fundamentals.data?.roa)} title={fundamentalHint("roa")} />
+                    <MetricRow label="ROIC" color="var(--t-85)" compact value={fmtPercent(fundamentals.data?.roic)} title={fundamentalHint("roic")} />
+                    <MetricRow label="GROSS MARGIN" color="var(--t-85)" compact value={fmtPercent(fundamentals.data?.gross_margin)} title={fundamentalHint("gross_margin")} />
                     <MetricRow
                       label="NET MARGIN"
                       color="var(--t-85)"
@@ -590,11 +650,7 @@ export function InstrumentPanel({
                           ? DASH
                           : `${(fundamentals.data.net_margin * 100).toFixed(1)}%`
                       }
-                      title={
-                        fundamentals.data?.latest_period
-                          ? `Net profit / revenue, ${fundamentals.data.latest_period} (consolidated)`
-                          : "Net profit / revenue for the latest reported quarter"
-                      }
+                      title={fundamentalHint("net_margin")}
                     />
                   </>
                 )}

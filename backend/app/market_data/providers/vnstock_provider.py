@@ -14,6 +14,7 @@ import io
 import logging
 import math
 import os
+import re
 import threading
 import time
 from collections import defaultdict, deque
@@ -166,6 +167,7 @@ class VnstockProvider(MarketDataProvider):
         listing_fetcher: Callable[[], Any] | None = None,
         group_fetcher: Callable[[str], Any] | None = None,
         fundamentals_fetcher: Callable[[str], Any] | None = None,
+        income_statement_fetcher: Callable[[str], Any] | None = None,
     ) -> None:
         self.max_symbols = int(max_symbols or settings.MARKET_DATA_MAX_SYMBOLS)
         self._enabled = bool(settings.VNSTOCK_ENABLED)
@@ -192,6 +194,9 @@ class VnstockProvider(MarketDataProvider):
         self._listing_fetcher = listing_fetcher or self._fetch_listing_sync
         self._group_fetcher = group_fetcher or self._fetch_group_sync
         self._fundamentals_fetcher = fundamentals_fetcher or self._fetch_fundamentals_sync
+        self._income_statement_fetcher = (
+            income_statement_fetcher or self._fetch_income_statement_sync
+        )
 
         self._callback: EventCallback | None = None
         self._status_callback: Callable[[], None] | None = None
@@ -233,6 +238,7 @@ class VnstockProvider(MarketDataProvider):
         self._listing_cache: tuple[float, list[dict[str, Any]]] = (0.0, [])
         self._group_cache: dict[str, tuple[float, list[str]]] = {}
         self._fundamental_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._income_statement_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._overview_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
         self._board_cache_at = 0.0
         self._board_cache_requested: set[str] = set()
@@ -576,6 +582,22 @@ class VnstockProvider(MarketDataProvider):
 
         return Company(symbol, show_log=False).ratio_summary()
 
+    @staticmethod
+    def _fetch_income_statement_sync(symbol: str) -> Any:
+        """Read the public Vietcap quarterly income statement exposed by Vnstock.
+
+        The returned dataframe is transposed: one row per statement item and one column
+        per quarter. Keeping the provider output intact here lets the normalization below
+        preserve exact reporting periods and distinguish a missing item from a zero.
+        """
+        from vnstock.explorer.vci.financial import Finance
+
+        return Finance(
+            symbol, period="quarter", get_all=True, show_log=False
+        ).income_statement(
+            period="quarter", lang="en", dropna=False, show_log=False
+        )
+
     # ------------------------------ live polling -----------------------------
     async def _run_quote_poll(self, generation: int) -> None:
         while self._connected and generation == self._generation:
@@ -705,6 +727,24 @@ class VnstockProvider(MarketDataProvider):
             await asyncio.sleep(max(1.0, self._tape_sweep / max(1, len(symbols))))
 
     def _emit_confirmed_prints(self, symbol: str, rows: list[dict[str, Any]]) -> None:
+        normalized = self._normalize_confirmed_prints(symbol, rows)
+        seen = self._seen_print_sets[symbol]
+        order = self._seen_prints[symbol]
+        for event in normalized:
+            identity = event["TradeId"]
+            if identity in seen:
+                continue
+            if len(order) == order.maxlen:
+                seen.discard(order[0])
+            order.append(identity)
+            seen.add(identity)
+            if self._callback is not None:
+                self._callback("trade_print", event, symbol)
+
+    @staticmethod
+    def _normalize_confirmed_prints(
+        symbol: str, rows: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         current = reference_session_date().isoformat()
         normalized: list[dict[str, Any]] = []
         for row in rows:
@@ -733,18 +773,15 @@ class VnstockProvider(MarketDataProvider):
                 "_provider_source": "VNSTOCK_KBS_TAPE",
             })
         normalized.sort(key=lambda item: item["Timestamp"])
-        seen = self._seen_print_sets[symbol]
-        order = self._seen_prints[symbol]
-        for event in normalized:
-            identity = event["TradeId"]
-            if identity in seen:
-                continue
-            if len(order) == order.maxlen:
-                seen.discard(order[0])
-            order.append(identity)
-            seen.add(identity)
-            if self._callback is not None:
-                self._callback("trade_print", event, symbol)
+        return normalized
+
+    async def get_confirmed_trade_prints(
+        self, symbol: str, limit: int = 300
+    ) -> list[dict[str, Any]]:
+        sym = symbol.strip().upper()
+        page_size = max(1, min(self._tape_page_size, int(limit)))
+        rows = _records(await self._call("tape", self._tape_fetcher, sym, page_size))
+        return self._normalize_confirmed_prints(sym, rows)
 
     # ----------------------------- snapshots/history -------------------------
     async def _board_rows(
@@ -950,11 +987,107 @@ class VnstockProvider(MarketDataProvider):
         self._fundamental_cache[sym] = (time.monotonic(), rows)
         return rows
 
+    async def _income_statement_rows(self, symbol: str) -> list[dict[str, Any]]:
+        sym = symbol.strip().upper()
+        cached = self._income_statement_cache.get(sym)
+        if cached and time.monotonic() - cached[0] < self._FUNDAMENTAL_TTL:
+            return cached[1]
+        rows = _records(await self._call(
+            "income_statement", self._income_statement_fetcher, sym
+        ))
+        self._income_statement_cache[sym] = (time.monotonic(), rows)
+        return rows
+
+    @staticmethod
+    def _quarterly_statement_values(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Normalize Vnstock/Vietcap's transposed income statement by quarter.
+
+        Vnstock returns one row per statement item and period columns such as
+        ``2026-Q2``. Tests and alternate adapters may already return one row per period,
+        so both shapes are accepted at this boundary.
+        """
+        if not rows:
+            return {}
+
+        def period_of(value: Any) -> str | None:
+            match = re.fullmatch(r"(\d{4})-?Q([1-4])", str(value or "").upper())
+            return f"{match.group(1)}Q{match.group(2)}" if match else None
+
+        def normalized_id(value: Any) -> str:
+            return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+
+        aliases = {
+            "revenue": (
+                "net_sales", "net_revenue", "revenue", "sales",
+                "total_operating_income", "operating_income",
+            ),
+            # Net profit attributable to the parent is the figure conventionally charted
+            # by Vietnamese equity terminals. Fall back to consolidated after-tax profit.
+            "net_profit": (
+                "attributable_to_parent_company", "net_profit_attributable_to_parent",
+                "net_income_attributable_to_parent", "net_profit_loss_after_tax",
+                "profit_after_tax", "net_income",
+            ),
+            "gross_profit": ("gross_profit",),
+            "eps": ("eps_basic_vnd", "basic_eps_vnd", "basic_eps", "eps"),
+        }
+
+        # Row-per-period shape, useful for injected adapters and future provider versions.
+        by_period: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            year = _integer(row.get("year") or row.get("year_report"))
+            quarter = _integer(row.get("quarter"))
+            period = period_of(row.get("period")) or (
+                f"{year}Q{quarter}" if year and quarter in (1, 2, 3, 4) else None
+            )
+            if not period:
+                continue
+            values = by_period.setdefault(period, {})
+            for field, names in aliases.items():
+                for name in names:
+                    value = _finite(row.get(name))
+                    if value is not None:
+                        values[field] = value
+                        break
+
+        # Transposed Vnstock shape: item_id + one column per quarter.
+        item_rows: dict[str, dict[str, Any]] = {}
+        period_columns: set[str] = set()
+        for row in rows:
+            item_id = normalized_id(row.get("item_id") or row.get("item_en") or row.get("item"))
+            if item_id:
+                item_rows[item_id] = row
+            period_columns.update(
+                str(key) for key in row if period_of(key) is not None
+            )
+
+        for source_period in period_columns:
+            period = period_of(source_period)
+            if period is None:
+                continue
+            values = by_period.setdefault(period, {})
+            for field, names in aliases.items():
+                for name in names:
+                    row = item_rows.get(name)
+                    value = _finite(row.get(source_period)) if row else None
+                    # VCI uses zero for absent EPS in interim periods. Treat it as missing;
+                    # an asserted zero EPS needs a source that distinguishes the two.
+                    if field == "eps" and value == 0:
+                        value = None
+                    if value is not None:
+                        values[field] = value
+                        break
+        return by_period
+
     async def get_stock_valuation(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
         result: dict[str, dict[str, Any]] = {}
         for symbol in sorted({s.strip().upper() for s in symbols if s.strip()}):
             rows = await self._fundamental_rows(symbol)
-            latest = rows[-1] if rows else {}
+            quarterly = [
+                row for row in rows
+                if _integer(row.get("quarter")) in (1, 2, 3, 4)
+            ]
+            latest = quarterly[-1] if quarterly else (rows[-1] if rows else {})
             year = _integer(latest.get("year") or latest.get("year_report"))
             quarter = _integer(latest.get("quarter"))
             result[symbol] = {
@@ -966,23 +1099,61 @@ class VnstockProvider(MarketDataProvider):
         return result
 
     async def get_financial_ratios(self, symbol: str, quarters: int = 8) -> list[dict[str, Any]]:
-        rows = (await self._fundamental_rows(symbol))[-max(1, quarters):]
-        result = []
+        rows = await self._fundamental_rows(symbol)
+        try:
+            statement_values = self._quarterly_statement_values(
+                await self._income_statement_rows(symbol)
+            )
+        except Exception as exc:  # noqa: BLE001 - ratios remain useful without statements
+            logger.debug("Vnstock income statement unavailable for %s: %s", symbol, type(exc).__name__)
+            statement_values = {}
+
+        result_by_period: dict[str, dict[str, Any]] = {}
         for row in rows:
             year = _integer(row.get("year") or row.get("year_report"))
             quarter = _integer(row.get("quarter"))
-            if not year or not quarter:
+            if not year or quarter not in (1, 2, 3, 4):
                 continue
-            result.append({
-                "period": f"{year}Q{quarter}", "year": year, "quarter": quarter,
-                "revenue": None, "net_profit": None,
+            period = f"{year}Q{quarter}"
+            result_by_period[period] = {
+                "period": period, "year": year, "quarter": quarter,
+                "revenue": None, "net_profit": None, "eps": None,
                 "ebit": _finite(row.get("ebit")),
                 "net_margin": _finite(row.get("after_tax_profit_margin")),
                 "roe": _finite(row.get("roe")), "roa": _finite(row.get("roa")),
                 "roic": _finite(row.get("roic")),
                 "gross_margin": _finite(row.get("gross_margin")),
+                "ratio_source": "VNSTOCK_VCI_RATIO_SUMMARY",
+            }
+
+        for period, statement in statement_values.items():
+            match = re.fullmatch(r"(\d{4})Q([1-4])", period)
+            if match is None:
+                continue
+            item = result_by_period.setdefault(period, {
+                "period": period,
+                "year": int(match.group(1)),
+                "quarter": int(match.group(2)),
+                "revenue": None, "net_profit": None, "eps": None,
+                "ebit": None, "net_margin": None, "roe": None, "roa": None,
+                "roic": None, "gross_margin": None, "ratio_source": None,
             })
-        return result
+            for field in ("revenue", "net_profit", "eps"):
+                if statement.get(field) is not None:
+                    item[field] = statement[field]
+            revenue = _finite(statement.get("revenue"))
+            net_profit = _finite(statement.get("net_profit"))
+            gross_profit = _finite(statement.get("gross_profit"))
+            if item.get("net_margin") is None and revenue not in (None, 0) and net_profit is not None:
+                item["net_margin"] = net_profit / revenue
+            if item.get("gross_margin") is None and revenue not in (None, 0) and gross_profit is not None:
+                item["gross_margin"] = gross_profit / revenue
+            item["statement_source"] = "VNSTOCK_VCI_INCOME_STATEMENT"
+
+        ordered = sorted(
+            result_by_period.values(), key=lambda item: (item["year"], item["quarter"])
+        )
+        return ordered[-max(1, quarters):]
 
     # ------------------------------- overview --------------------------------
     async def _group_symbols(self, group: str) -> list[str]:

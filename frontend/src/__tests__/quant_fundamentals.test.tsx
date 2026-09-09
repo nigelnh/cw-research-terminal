@@ -2,10 +2,8 @@
 /**
  * QUANT tab fundamentals.
  *
- * Deliberately partial, and honest about it. This market-data tier serves P/E and P/B, and
- * a statement call returning only revenue, net profit and EBIT — passing an explicit
- * `fields` list makes the SDK raise — so EPS / ROE / ROA / ROIC / gross margin have no
- * source. They stay visible with a stated reason rather than silently blank.
+ * Financial statement and ratio fields keep their reporting period and remain explicitly
+ * unavailable when the upstream dataset omits them.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
@@ -68,20 +66,43 @@ describe("FINANCIAL INDICATORS", () => {
   it("shows the figures this tier actually serves", () => {
     fundamentals.data = {
       pe: 7.89115654, pb: 1.30068952, valuation_as_of: "2026-09-04",
-      net_margin: 0.11467485, latest_period: "2026Q2",
+      eps: 1781, roe: .1738, roa: .0891, roic: .1072,
+      gross_margin: .1644, net_margin: 0.11467485, latest_period: "2026Q2",
+      unavailable: {},
+      provenance: {
+        eps: { source: "VNSTOCK_VCI_INCOME_STATEMENT", as_of: "2026Q2" },
+        roe: { source: "VNSTOCK_VCI_RATIO_SUMMARY", as_of: "2026Q2" },
+      },
     };
     const text = quantTab().container.textContent ?? "";
+    expect(text).toContain("1,781 VND");
     expect(text).toContain("7.89");   // PE, 2dp
     expect(text).toContain("1.30");   // PB
+    expect(text).toContain("17.4%");  // ROE
+    expect(text).toContain("8.9%");   // ROA
+    expect(text).toContain("10.7%");  // ROIC
+    expect(text).toContain("16.4%");  // gross margin
     expect(text).toContain("11.5%");  // net margin, derived from profit / revenue
   });
 
   it("keeps the unavailable rows visible with a stated reason", () => {
+    fundamentals.data = {
+      pe: null, pb: null, valuation_as_of: null, eps: null, roe: null, roa: null,
+      roic: null, gross_margin: null, net_margin: null, latest_period: null,
+      unavailable: {
+        eps: "not served by the current market-data source",
+        roe: "not served by the current market-data source",
+        roa: "not served by the current market-data source",
+        roic: "not served by the current market-data source",
+        gross_margin: "not served by the current market-data source",
+      },
+      provenance: {},
+    };
     const view = quantTab();
     for (const label of ["EPS", "ROE", "ROA", "ROIC", "GROSS MARGIN"]) {
       const el = view.getByText(label).closest("[title]") as HTMLElement | null;
       expect(el, `${label} should explain itself`).not.toBeNull();
-      expect(el!.title).toMatch(/not served by the current market-data entitlement/i);
+      expect(el!.title).toMatch(/not served by the current market-data source/i);
     }
   });
 

@@ -326,14 +326,24 @@ export class BackendClient {
     pe: number | null;
     pb: number | null;
     valuation_as_of: string | null;
+    eps: number | null;
+    roe: number | null;
+    roa: number | null;
+    roic: number | null;
+    gross_margin: number | null;
     net_margin: number | null;
     latest_period: string | null;
     quarters: Array<{
       period: string; year: number; quarter: number;
       revenue: number | null; net_profit: number | null;
-      ebit: number | null; net_margin: number | null;
+      eps: number | null; ebit: number | null; net_margin: number | null;
+      roe: number | null; roa: number | null; roic: number | null;
+      gross_margin: number | null;
+      ratio_source?: string | null;
+      statement_source?: string | null;
     }>;
     unavailable: Record<string, string>;
+    provenance: Record<string, { source: string | null; as_of: string | null }>;
     source: string;
     errors: string[];
   }> {

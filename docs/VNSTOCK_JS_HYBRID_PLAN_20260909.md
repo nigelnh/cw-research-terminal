@@ -30,6 +30,27 @@ provider avoids a second process, a second cache, and cross-runtime session race
 | Technical indicators and `aiContext()` | EMA/VWAP chart overlays; BSM/IV/Greeks/HV; canonical AI tools already shipped | Keep calculations over canonical bars; add market-wide context tool rather than accepting a second precomputed truth |
 | MCP, CLI and filesystem watchlist | The web app has its own API, CLI workflows and persisted watchlist | Do not install end-user CLI/MCP state inside the production server |
 
+## Instrument panel capability map
+
+| Surface / field | Canonical input | Delivery status | Availability rule |
+|---|---|---|---|
+| OVERVIEW / STATS | Resolved quote and reference groups | Implemented | Uses the dashboard resolver; a missing or rejected group stays blank |
+| OVERVIEW / TRADED LOGS | KBS intraday prints, server Redis tape, live WS delivery to browsers | Partial by design | Only confirmed prints are stored. SSI's repeated matched-lot field has no stable trade id, so it updates the quote but is not fabricated into time-and-sales. The panel says `Observed window` and reports truncation |
+| Stock QUANT / PE, PB | Latest quarterly VCI ratio summary | Implemented | Carries the provider reporting period; a failed valuation scope leaves only these fields blank |
+| Stock QUANT / ROE, ROA, ROIC, gross margin, net margin | Latest quarterly VCI ratio summary | Implemented | Decimal ratios are rendered as percentages with per-field source and period |
+| Stock QUANT / EPS | VCI quarterly income statement (`eps_basic_vnd`) | Implemented | Provider zero used as an absent interim value is not asserted as a real zero |
+| Stock QUANT / revenue and net profit chart | VCI quarterly income statement (`net_sales`; profit attributable to parent, with consolidated fallback) | Implemented | Chart renders only quarters with a statement value; ratio-only rows do not create an empty chart |
+| CW QUANT / IV bid, trade, ask | Canonical same-session CW price, raw underlying spot and effective terms | Implemented | Each price source is gated independently; resolver `null` is preserved |
+| CW QUANT / HV22, theoretical price, moneyness and Greeks | Adjusted underlying history plus the canonical pricing inputs | Implemented | Carries pricing session/provenance and the established BSM units |
+| CW QUANT / top-three order book | Canonical bid/ask levels 1-3 from SSI push or KBS full snapshot | Implemented | Shown only during a live matching phase; empty levels clear rather than retaining an older order |
+| CW QUANT / visible depth and imbalance | Sum of quantities at the canonical top three levels | Implemented | Explicitly labelled visible three-level coverage; it is not presented as full exchange depth |
+
+The full financial statement API can expose balance sheet and cash-flow lines too. They are
+mapped as a provider capability, but the current instrument layout consumes only the income
+statement fields needed by the quarterly revenue/profit chart. A future statement browser
+must preserve the provider period, units and company-type-specific line mapping rather than
+adding more unlabeled rows to the compact QUANT surface.
+
 ## Implemented architecture
 
 ```text

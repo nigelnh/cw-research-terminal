@@ -259,6 +259,25 @@ def test_tape_normalization_uses_full_footprint_for_dedup(monkeypatch):
     assert prints[0]["TradeId"] != prints[1]["TradeId"]
 
 
+@pytest.mark.asyncio
+async def test_confirmed_trade_prints_can_backfill_an_instrument_on_demand(monkeypatch):
+    p = provider(tape_fetcher=lambda symbol, limit: [{
+        "time": "2026-09-08 10:54:59", "price": .59, "volume": 1000,
+        "match_type": "buy", "trading_date": "08/09/2026",
+        "accumulated_volume": 484400,
+    }])
+    monkeypatch.setattr(
+        "app.market_data.providers.vnstock_provider.reference_session_date",
+        lambda *args, **kwargs: date(2026, 9, 8),
+    )
+
+    rows = await p.get_confirmed_trade_prints("CHPG2625", limit=50)
+
+    assert len(rows) == 1
+    assert rows[0]["Close"] == 590
+    assert rows[0]["_provider_source"] == "VNSTOCK_KBS_TAPE"
+
+
 def test_confirmed_provider_print_does_not_require_quote_rollback(monkeypatch):
     monkeypatch.setattr(
         "app.market_data.traded_log.reference_session_date", lambda *args, **kwargs: date(2026, 9, 8)
@@ -277,6 +296,7 @@ def test_confirmed_provider_print_does_not_require_quote_rollback(monkeypatch):
     assert item["price"] == 590
     assert item["side"] == "B"
     assert item["side_basis"] == "PROVIDER"
+    assert item["source"] == "PROVIDER_TAPE"
     assert quote.last_price == 600
     assert tape.get("CHPG2625")["side_basis"] == "PROVIDER"
 
@@ -299,13 +319,43 @@ async def test_fundamentals_use_latest_quarter_and_expose_available_ratios():
         {"year": "2026", "quarter": 2, "pe": 7.9, "pb": 1.3,
          "after_tax_profit_margin": .115, "roe": .21, "roa": .12,
          "roic": .18, "gross_margin": .24, "ebit": 12_000},
-    ])
+    ], income_statement_fetcher=lambda symbol: [])
     valuation = await p.get_stock_valuation(["HPG"])
     ratios = await p.get_financial_ratios("HPG")
     assert valuation["HPG"] == {"symbol": "HPG", "pe": 7.9, "pb": 1.3, "as_of": "2026Q2"}
     assert ratios[-1]["period"] == "2026Q2"
     assert ratios[-1]["net_margin"] == .115
     assert ratios[-1]["roe"] == .21
+
+
+@pytest.mark.asyncio
+async def test_fundamentals_merge_public_income_statement_without_calling_q5_a_quarter():
+    p = provider(
+        fundamentals_fetcher=lambda symbol: [
+            {"year": "2025", "quarter": 5, "pe": 9.4, "pb": 1.1},
+            {"year": "2026", "quarter": 1, "pe": 8.4, "pb": 1.2,
+             "roe": .18, "gross_margin": .22},
+            {"year": "2026", "quarter": 2, "pe": 7.9, "pb": 1.3,
+             "roe": .21, "gross_margin": .24},
+        ],
+        income_statement_fetcher=lambda symbol: [
+            {"item_id": "net_sales", "2026-Q1": 53_000, "2026-Q2": 55_000},
+            {"item_id": "attributable_to_parent_company",
+             "2026-Q1": 8_900, "2026-Q2": 6_300},
+            {"item_id": "eps_basic_vnd", "2026-Q1": 0, "2026-Q2": 1781},
+        ],
+    )
+
+    valuation = await p.get_stock_valuation(["HPG"])
+    rows = await p.get_financial_ratios("HPG")
+
+    assert valuation["HPG"]["as_of"] == "2026Q2"
+    assert [row["period"] for row in rows] == ["2026Q1", "2026Q2"]
+    assert rows[0]["eps"] is None
+    assert rows[-1]["revenue"] == 55_000
+    assert rows[-1]["net_profit"] == 6_300
+    assert rows[-1]["eps"] == 1781
+    assert rows[-1]["statement_source"] == "VNSTOCK_VCI_INCOME_STATEMENT"
 
 
 def test_health_does_not_report_previous_session_data_as_fresh(monkeypatch):

@@ -330,7 +330,22 @@ async def get_fundamentals(symbol: str):
 
     latest = quarters[-1] if quarters else {}
     available_metrics = {
-        field: latest.get(field) for field in ("roe", "roa", "roic", "gross_margin")
+        field: latest.get(field)
+        for field in ("eps", "roe", "roa", "roic", "gross_margin")
+    }
+    latest_period = latest.get("period")
+    provenance = {
+        "pe": {"source": "VNSTOCK_VCI_RATIO_SUMMARY", "as_of": valuation.get("as_of")},
+        "pb": {"source": "VNSTOCK_VCI_RATIO_SUMMARY", "as_of": valuation.get("as_of")},
+        "eps": {"source": latest.get("statement_source"), "as_of": latest_period},
+        "revenue": {"source": latest.get("statement_source"), "as_of": latest_period},
+        "net_profit": {"source": latest.get("statement_source"), "as_of": latest_period},
+        "roe": {"source": latest.get("ratio_source"), "as_of": latest_period},
+        "roa": {"source": latest.get("ratio_source"), "as_of": latest_period},
+        "roic": {"source": latest.get("ratio_source"), "as_of": latest_period},
+        "gross_margin": {"source": latest.get("ratio_source"), "as_of": latest_period},
+        "net_margin": {"source": latest.get("ratio_source") or latest.get("statement_source"),
+                       "as_of": latest_period},
     }
     return {
         "symbol": sym,
@@ -339,14 +354,15 @@ async def get_fundamentals(symbol: str):
         "valuation_as_of": valuation.get("as_of"),
         "net_margin": latest.get("net_margin"),
         **available_metrics,
-        "latest_period": latest.get("period"),
+        "latest_period": latest_period,
         "quarters": quarters,
         # Named, not silently blank: the UI shows the reason on each empty row.
         "unavailable": {
             field: "not served by the current market-data source"
             for field in ("eps", "roe", "roa", "roic", "gross_margin")
-            if field == "eps" or available_metrics.get(field) is None
+            if available_metrics.get(field) is None
         },
+        "provenance": provenance,
         "source": "VNSTOCK_VCI",
         "errors": errors,
     }
@@ -379,6 +395,28 @@ async def get_traded_log(symbol: str, limit: int = Query(default=200, ge=1, le=8
     if not (1 <= len(sym) <= 12) or not sym.isalnum():
         raise HTTPException(status_code=400, detail=f"invalid symbol: {symbol!r}")
     payload = await traded_log.get_session(sym, limit=limit)
+    # A symbol may be opened after its background sweep slot, or the backend may have
+    # restarted mid-session before Redis was attached. Repair an empty tape from the
+    # provider's confirmed intraday endpoint; never synthesize prints from a board/daily
+    # snapshot. The provider caps this read, and its own scope/backoff contains failures.
+    if not payload.get("items"):
+        try:
+            raw_prints = await subscription_manager.provider.get_confirmed_trade_prints(
+                sym, limit=min(limit, 1000)
+            )
+            added = []
+            quote = market_state.get_quote(sym)
+            for raw in raw_prints:
+                item = traded_log.record_provider_print(sym, raw, quote=quote)
+                if item is not None:
+                    added.append(item)
+            if added:
+                await traded_log.persist_many(sym, added)
+                payload = await traded_log.get_session(sym, limit=limit)
+        except NotImplementedError:
+            pass
+        except Exception as exc:  # noqa: BLE001 - an empty partial tape is still a 200
+            logger.debug("Traded-log on-demand backfill unavailable for %s: %s", sym, type(exc).__name__)
     payload["sessionContext"] = cal.session_context()
     payload["market_session"] = cal.session_status(cal._as_vn(None)).value
     return payload

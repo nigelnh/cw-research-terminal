@@ -80,6 +80,12 @@ class MarketDataProvider(ABC):
         """Read recent provider-confirmed financial ratios for one equity."""
         raise NotImplementedError("financial ratios are not supported by this provider")
 
+    async def get_confirmed_trade_prints(
+        self, symbol: str, limit: int = 300
+    ) -> List[Dict[str, Any]]:
+        """Read provider-confirmed prints for session tape repair or on-demand backfill."""
+        raise NotImplementedError("confirmed trade prints are not supported by this provider")
+
     async def get_session_reference_data(
         self, symbols: List[str], session_date: date
     ) -> Dict[str, Dict[str, Any]]:

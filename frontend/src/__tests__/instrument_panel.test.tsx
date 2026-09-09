@@ -127,4 +127,31 @@ describe("InstrumentPanel — bottom split panel", () => {
     expect(html).toContain("−450");
     expect(html).not.toContain("+50");
   });
+
+  it("7. QUANT renders the canonical live top-three book instead of placeholder cards", () => {
+    const quote = mapRawSnapshotToQuote({
+      Symbol: "CFPT2401", Traded: 590, Ref: 550,
+      Bid1_Prc: 570, Bid1_Qty: 10_000, Ask1_Prc: 580, Ask1_Qty: 20_000,
+      Bid2_Prc: 560, Bid2_Qty: 30_000, Ask2_Prc: 590, Ask2_Qty: 40_000,
+      Bid3_Prc: 550, Bid3_Qty: 50_000, Ask3_Prc: 600, Ask3_Qty: 60_000,
+    });
+    const html = renderMarkup(<InstrumentPanel
+      instrument={cw}
+      dashRow={{ symbol: cw.symbol, quote, analytics: null, trackedRealtime: true,
+        displayState: "LIVE", provenance: {
+          quote: { state: "LIVE", source: "VNSTOCK_JS_SSI_REALTIME" },
+          book: { state: "LIVE", source: "VNSTOCK_JS_SSI_REALTIME" },
+        } }}
+      marketSessionActive={true}
+      initialTab="quant"
+      onClose={vi.fn()}
+    />);
+    expect(html).toContain("TOP-3 ORDER BOOK · LIVE");
+    expect(html).toContain("BID DEPTH");
+    expect(html).toContain("ASK DEPTH");
+    expect(html).toContain("BID SHARE");
+    expect(html).toContain("90,000");
+    expect(html).toContain("120,000");
+    expect(html).not.toContain("PRICE DEPTH · live");
+  });
 });
