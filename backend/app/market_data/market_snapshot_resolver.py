@@ -189,7 +189,66 @@ class MarketSnapshotResolver:
             if row.reference_prov.session_date != row.quote_prov.session_date or row.values.get("reference_price") is None:
                 row.values["price_change"] = row.values["price_change_percent"] = None
         await self._derive_cw_bands(rows)
+        # Redis is restored into the quant engine during application startup, so a
+        # dashboard reload can receive the quote and its matching analytics in one
+        # response. This lookup does no I/O or recomputation. A changed price tuple fails
+        # validation and remains absent until the scheduler publishes the new result.
+        self.attach_cached_analytics(rows, now=now)
         return rows
+
+    def attach_cached_analytics(
+        self, rows: list[ResolvedRow], *, now: datetime
+    ) -> int:
+        """Attach already-computed analytics without doing I/O or recomputation."""
+        from app.quant.quant_engine import live_quant_engine
+
+        display = reference_session_date(now).isoformat()
+        session_active = cal.is_trading_active(now)
+        attached = 0
+        for row in rows:
+            if row.instrument_type != "CW" or row.analytics is not None:
+                continue
+            analytics = live_quant_engine.get_analytics(
+                row.symbol, now=now, validate_inputs=True
+            )
+            if (
+                analytics is None
+                or not analytics.is_available
+                or analytics.session_date != display
+            ):
+                continue
+            self._set_current_analytics(
+                row, analytics, now=now, session_active=session_active
+            )
+            attached += 1
+        return attached
+
+    @staticmethod
+    def _set_current_analytics(
+        row: ResolvedRow, analytics, *, now: datetime, session_active: bool
+    ) -> None:
+        row.analytics = _analytics_wire(analytics)
+        stamps: list[str] = []
+        for provenance in analytics.input_provenance.values():
+            stamp = provenance.get("asOf") if isinstance(provenance, dict) else None
+            if isinstance(stamp, str) and stamp:
+                stamps.append(stamp)
+        fresh = bool(
+            session_active
+            and stamps
+            and all(
+                0 <= (now - datetime.fromisoformat(stamp)).total_seconds() <= 180
+                for stamp in stamps
+            )
+        )
+        row.analytics_prov = FieldProvenance(
+            DataTemporalState.LIVE if fresh else DataTemporalState.SESSION_SNAPSHOT,
+            DataSource.QUANT_LIVE,
+            as_of=min(stamps) if stamps else analytics.calculated_at,
+            session_date=analytics.session_date,
+            stale=bool(session_active and not fresh),
+            note="Validated Redis/in-memory analytics cache",
+        )
 
     async def _derive_cw_bands(self, rows: list[ResolvedRow]) -> None:
         by_symbol = {r.symbol: r for r in rows}
@@ -322,7 +381,7 @@ class MarketSnapshotResolver:
             for f in _BOOK_FIELDS:
                 row.values[f] = getattr(live, f, None)
             row.underlying_symbol = live.underlying_symbol
-            sd = live_sd
+            sd = str(live_sd)
             def group_provenance(ts, received, has_value):
                 if not has_value:
                     return FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE,
@@ -464,8 +523,16 @@ class MarketSnapshotResolver:
         bars = [b for b in bars if (_parse_date(b.date) or now.date()) <= latest_session]
         if bars:
             target_session = row.quote_prov.session_date
-            eligible_bars = ([b for b in bars if _parse_date(b.date).isoformat() <= target_session]
-                             if target_session else bars)
+            eligible_bars = (
+                [
+                    b
+                    for b in bars
+                    if (bar_date := _parse_date(b.date)) is not None
+                    and bar_date.isoformat() <= target_session
+                ]
+                if target_session
+                else bars
+            )
             if not eligible_bars:
                 eligible_bars = bars
             last_bar = eligible_bars[-1]
@@ -559,15 +626,8 @@ class MarketSnapshotResolver:
         if display > latest_session:
             live = await live_quant_engine.resolve_display_analytics(sym, now=now, sessionmaker=self._sm)
             if live is not None and live.is_available and live.session_date == display.isoformat():
-                row.analytics = _analytics_wire(live)
-                stamps = [p.get("asOf") for p in live.input_provenance.values() if isinstance(p, dict) and p.get("asOf")]
-                fresh = bool(session_active and stamps and all(
-                    0 <= (now - datetime.fromisoformat(stamp)).total_seconds() <= 180 for stamp in stamps
-                ))
-                row.analytics_prov = FieldProvenance(
-                    DataTemporalState.LIVE if fresh else DataTemporalState.SESSION_SNAPSHOT,
-                    DataSource.QUANT_LIVE, as_of=min(stamps) if stamps else None,
-                    session_date=display.isoformat(), stale=session_active and not fresh,
+                self._set_current_analytics(
+                    row, live, now=now, session_active=session_active
                 )
             else:
                 row.analytics_prov = FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE,

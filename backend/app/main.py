@@ -166,6 +166,7 @@ async def lifespan(app: FastAPI):
         await subscription_manager.initialize()
     except Exception as e:
         logger.warning(f"Market provider initialization warning: {e}")
+    live_quant_engine.set_analytics_store(subscription_manager.store)
 
     # Traded log (time & sales). Shares the warm-cache Redis client so the tape survives a
     # restart - Railway redeploys several times a session - and is retired at 08:00 ICT.
@@ -183,6 +184,7 @@ async def lifespan(app: FastAPI):
     # The direct provider is always available for provider-direct mode / non-daily / unseeded.
     history_read_service.set_provider(subscription_manager.provider)
     _snapshot_checkpointer = None
+    market_snapshot_resolver = None
     if _persistence_ready:
         history_read_service.configure(
             engine=persistence_db.get_engine(),
@@ -192,9 +194,12 @@ async def lifespan(app: FastAPI):
         logger.info("Historical reads: PostgreSQL-first (mode=%s).", settings.HISTORY_SOURCE_MODE)
 
         # ---- After-hours fallback resolver + last-valid snapshot checkpointer (Step 13C) ----
-        from app.market_data.market_snapshot_resolver import market_snapshot_resolver
+        from app.market_data.market_snapshot_resolver import (
+            market_snapshot_resolver as configured_market_snapshot_resolver,
+        )
         from app.market_data.snapshot_checkpointer import SnapshotCheckpointer
 
+        market_snapshot_resolver = configured_market_snapshot_resolver
         market_snapshot_resolver.configure(
             persistence_db.get_sessionmaker(), store=subscription_manager.store
         )
@@ -211,7 +216,7 @@ async def lifespan(app: FastAPI):
     # upstream historical source is usable. The engine getter (get_estimate) is a pure
     # in-memory lookup; all fetching happens here / in the background refresh loop / ensure().
     # Startup warm-up must never make the application fail to boot. When PostgreSQL has the
-    # adjusted daily bars, HV warm-up makes ZERO historical FiinQuant calls.
+    # adjusted daily bars, HV warm-up makes ZERO historical provider calls.
     if _persistence_ready:
         from app.persistence.bar_source import PostgresHistoricalBarSource
 
@@ -242,6 +247,24 @@ async def lifespan(app: FastAPI):
             f"Historical volatility warm-up incomplete (non-fatal): {e.__class__.__name__}: {e}"
         )
 
+    # Restore the latest calculation only after both quote state and HV are warm. The
+    # engine validates the complete price tuple, session and model inputs before exposing
+    # any Redis value, so a deploy/reload can start stable without showing stale IV.
+    _startup_cw_symbols = [
+        str(item["symbol"])
+        for item in realtime_universe.items
+        if item.get("instrument_type") == "CW"
+    ]
+    try:
+        restored_analytics = await live_quant_engine.restore_analytics(_startup_cw_symbols)
+        if restored_analytics:
+            logger.info(
+                "Quant analytics restored for %d current-session warrants.",
+                restored_analytics,
+            )
+    except Exception as e:  # noqa: BLE001 - warm cache is optional
+        logger.warning("Quant analytics warm restore skipped: %s", type(e).__name__)
+
     # Quant analytics follows the same server-owned universe.  Browser unsubscribe or
     # disconnect events only change delivery interests and cannot disable shared work.
     for item in realtime_universe.items:
@@ -261,8 +284,8 @@ async def lifespan(app: FastAPI):
 
     # Warm only the fixed server-owned universe, before accepting browser reloads. Legacy
     # book-only snapshots can recover actual closes from the session-scoped Redis history
-    # cache (or one bounded FiinQuant read), without making any value look live.
-    if _persistence_ready:
+    # cache (or one bounded provider read), without making any value look live.
+    if _persistence_ready and market_snapshot_resolver is not None:
         try:
             await asyncio.wait_for(
                 market_snapshot_resolver.resolve_rows(
@@ -285,13 +308,13 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down CW Research Terminal Backend...")
     await market_overview_service.close()
     try:
-        await subscription_manager.shutdown()
-    except Exception as e:
-        logger.warning(f"Market provider shutdown warning: {e}")
-    try:
         await live_quant_engine.shutdown()
     except Exception as e:
         logger.warning(f"Quant engine shutdown warning: {e}")
+    try:
+        await subscription_manager.shutdown()
+    except Exception as e:
+        logger.warning(f"Market provider shutdown warning: {e}")
     try:
         await historical_volatility_service.stop_periodic_refresh()
     except Exception as e:

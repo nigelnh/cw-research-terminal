@@ -456,7 +456,87 @@ async def test_G_scheduled_path_matches_direct_compute_numerically():
     s.pop("calculated_at")
     assert s == d                                       # byte-identical analytics + Greeks + IVs
     assert scheduled.greeks.volatility_source == GreeksVolatilitySource.IV_TRADE
+
+    # Volume/timestamp-only quote updates do not change any pricing input, so they keep
+    # the exact cached object and do not make time-to-maturity drift on screen.
+    with patch.object(instrument_registry, "get_instrument", AsyncMock(return_value=spec)):
+        computed = eng.stats()["computed"]
+        cw.total_volume = 99_000
+        cw.received_timestamp = stamp + 1_000
+        eng.notify_market_tick("CHPG2602")
+        await _drain(eng)
+        assert eng.get_analytics("CHPG2602") is scheduled
+        assert eng.stats()["computed"] == computed
+        assert eng.stats()["input_cache_hits"] == 1
+
+        # A price change is a real valuation input change and schedules one new calculation.
+        cw.bid1_price = 1210.0
+        eng.notify_market_tick("CHPG2602")
+        await _drain(eng)
+        assert eng.stats()["computed"] == computed + 1
     await eng.shutdown()
+
+
+async def test_G2_current_price_analytics_restore_across_process_cache():
+    spec = _real_spec()
+    und = CanonicalQuote(symbol="HPG", instrument_type="STOCK", last_price=26500.0)
+    cw = CanonicalQuote(
+        symbol="CHPG2602", instrument_type="CW",
+        bid1_price=1200.0, ask1_price=1250.0, last_price=1230.0,
+    )
+    hv = HistoricalVolatilityService(
+        bar_source=FakeBarSource({"HPG": make_daily_bars(synthetic_closes(40))})
+    )
+    await hv.warm(["HPG"])
+
+    from app.quant.quant_engine import get_vietnam_now
+    from app.market_data.trading_calendar import reference_session_date, VN_TZ
+    from datetime import datetime, time
+    now = get_vietnam_now()
+    day = reference_session_date(now)
+    stamp = int(min(now, datetime.combine(day, time(15), tzinfo=VN_TZ)).timestamp() * 1000)
+    for quote in (cw, und):
+        quote.market_session_date = day.isoformat()
+        quote.trade_timestamp = quote.book_timestamp = stamp
+
+    source = LiveQuantEngine()
+    source.set_historical_vol_getter(hv.get_estimate)
+    source.set_market_state_getter(lambda s: {"CHPG2602": cw, "HPG": und}.get(s))
+    analytics = await source.compute_warrant_analytics(
+        "CHPG2602", spec=spec, cw_state=cw, und_state=und
+    )
+
+    class AnalyticsStore:
+        def is_available(self):
+            return True
+
+        async def load_quant_analytics(self, symbols, session_date):
+            return {
+                "CHPG2602": analytics.model_dump(mode="json")
+            } if session_date == day.isoformat() and "CHPG2602" in symbols else {}
+
+    restored_engine = LiveQuantEngine()
+    restored_engine.set_historical_vol_getter(hv.get_estimate)
+    restored_engine.set_market_state_getter(
+        lambda s: {"CHPG2602": cw, "HPG": und}.get(s)
+    )
+    restored_engine.set_analytics_store(AnalyticsStore())
+    with patch.object(instrument_registry, "get_instrument", AsyncMock(return_value=spec)):
+        assert await restored_engine.restore_analytics(["CHPG2602"], now=now) == 1
+    assert restored_engine.get_analytics(
+        "CHPG2602", now=now, validate_inputs=True
+    ) is not None
+
+    # A persisted result cannot cross a changed market-price boundary.
+    cw.bid1_price = 1210.0
+    mismatched_engine = LiveQuantEngine()
+    mismatched_engine.set_historical_vol_getter(hv.get_estimate)
+    mismatched_engine.set_market_state_getter(
+        lambda s: {"CHPG2602": cw, "HPG": und}.get(s)
+    )
+    mismatched_engine.set_analytics_store(AnalyticsStore())
+    with patch.object(instrument_registry, "get_instrument", AsyncMock(return_value=spec)):
+        assert await mismatched_engine.restore_analytics(["CHPG2602"], now=now) == 0
 
 
 # --------------------------------------------------------------------------- #

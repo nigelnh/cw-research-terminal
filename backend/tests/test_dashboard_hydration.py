@@ -11,7 +11,7 @@ import pytest
 from app.market_data.market_snapshot_resolver import MarketSnapshotResolver
 from app.market_data.market_schemas import HistoricalBar
 from app.quant.quant_engine import LiveQuantEngine
-from app.quant.quant_schemas import WarrantAnalytics
+from app.quant.quant_schemas import QuantModelInputs, WarrantAnalytics
 
 pytestmark = pytest.mark.asyncio
 
@@ -38,6 +38,52 @@ async def test_quote_resolution_does_not_invoke_analytics(monkeypatch):
     assert len(rows) == 1
     assert rows[0].symbol == "CHPG2602"
     assert rows[0].analytics is None
+
+
+async def test_quote_response_attaches_validated_warm_analytics_without_compute(monkeypatch):
+    resolver = MarketSnapshotResolver()
+    cached = WarrantAnalytics(
+        symbol="CHPG2602",
+        underlying_symbol="HPG",
+        calculated_at="2026-08-28T14:45:00+07:00",
+        session_date="2026-08-28",
+        is_available=True,
+        is_tradable=True,
+        iv_bid=0.35,
+        iv_trade=0.36,
+        iv_ask=0.37,
+        input_provenance={
+            "trade": {"asOf": "2026-08-28T14:45:00+07:00"},
+            "underlying": {"asOf": "2026-08-28T14:45:00+07:00"},
+        },
+        model_inputs=QuantModelInputs(
+            underlying_price=21_850,
+            market_last=570,
+            market_bid=560,
+            market_ask=580,
+        ),
+    )
+
+    async def no_bars(*args, **kwargs):
+        return []
+
+    def cached_only(symbol, **kwargs):
+        assert symbol == "CHPG2602"
+        assert kwargs["validate_inputs"] is True
+        return cached
+
+    from app.quant.quant_engine import live_quant_engine
+
+    monkeypatch.setattr(resolver, "_recent_daily_bars", no_bars)
+    monkeypatch.setattr(live_quant_engine, "get_analytics", cached_only)
+
+    row = (await resolver.resolve_rows(["CHPG2602"], now=_CLOSED_NOW))[0]
+    wire = row.to_wire()
+
+    assert wire["analytics"]["ivTrade"] == 0.36
+    assert wire["analytics"]["modelInputs"]["market_last"] == 570
+    assert wire["provenance"]["analytics"]["source"] == "QUANT_LIVE"
+    assert wire["provenance"]["analytics"]["state"] == "SESSION_SNAPSHOT"
 
 
 async def test_many_quote_fallbacks_start_concurrently(monkeypatch):

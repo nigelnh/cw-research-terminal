@@ -462,6 +462,29 @@ async def test_overview_keeps_other_indices_when_one_dataset_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_current_finlead_and_diamond_constituents_fallback_when_vci_group_is_empty():
+    def empty_group(_name):
+        raise ValueError("JSON data is empty or not provided")
+
+    p = provider(group_fetcher=empty_group)
+    # Exercise the production boundary: only the built-in VCI fetcher is allowed to use
+    # audited bundled membership; an injected/custom dataset continues to fail closed.
+    p._uses_default_group_fetcher = True
+
+    finlead = await p._safe_group_symbols("VNFINLEAD", "2026-09-10")
+    diamond = await p._safe_group_symbols("VNDIAMOND", "2026-09-10")
+
+    assert len(finlead) == 24
+    assert {"TCX", "VCK", "VPB"}.issubset(finlead)
+    assert len(diamond) == 18
+    assert {"FPT", "MWG", "PNJ"}.issubset(diamond)
+    assert p._group_provenance["VNFINLEAD"]["fallback"] is True
+    assert p._group_provenance["VNDIAMOND"]["valid_through"] == "2026-10-31"
+    # Never let an undated static list silently survive a future index review.
+    assert await p._safe_group_symbols("VNDIAMOND", "2026-11-02") == []
+
+
+@pytest.mark.asyncio
 async def test_overview_exposes_session_scoped_liquidity_and_foreign_flow(monkeypatch):
     def history(symbol, source, start, end, interval):
         if interval == "1D":

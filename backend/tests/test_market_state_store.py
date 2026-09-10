@@ -129,6 +129,38 @@ async def test_dashboard_history_cache_preserves_basis_session_and_missing_value
 
 
 @pytest.mark.asyncio
+async def test_quant_analytics_cache_is_session_namespaced_and_round_trips_inputs():
+    redis = MockRedisClient()
+    store = RedisMarketStateStore(enabled=True, redis_client=redis)
+    await store.initialize()
+    try:
+        payload = {
+            "symbol": "CHPG2625",
+            "underlying_symbol": "HPG",
+            "session_date": "2026-09-10",
+            "calculated_at": "2026-09-10T10:00:00+07:00",
+            "is_available": True,
+            "iv_bid": 0.35,
+            "model_inputs": {
+                "underlying_price": 21850,
+                "market_bid": 560,
+                "market_ask": 570,
+                "market_last": 570,
+            },
+        }
+        await store.save_quant_analytics("chpg2625", "2026-09-10", payload)
+
+        restored = await store.load_quant_analytics(["CHPG2625"], "2026-09-10")
+        assert restored == {"CHPG2625": payload}
+        assert await store.load_quant_analytics(["CHPG2625"], "2026-09-11") == {}
+        assert redis.ttls[
+            "cw_research:quant_analytics:v1:2026-09-10:CHPG2625"
+        ] == 7 * 86400
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
 async def test_redis_initialize_never_logs_connection_url(caplog):
     secret_url = "redis://default:private-password@redis.internal:6379/0"
     store = RedisMarketStateStore(
@@ -405,6 +437,9 @@ async def test_redis_health_counts_successful_quote_writes_and_unique_restores()
         "write_errors": 0,
         "restore_errors": 0,
         "connection_restores": 0,
+        "analytics_writes_succeeded": 0,
+        "analytics_restored": 0,
+        "analytics_errors": 0,
     }
     await store.close()
 
@@ -438,6 +473,9 @@ async def test_redis_health_counts_errors_and_connectivity_restores_without_payl
         "write_errors": 1,
         "restore_errors": 2,
         "connection_restores": 2,
+        "analytics_writes_succeeded": 0,
+        "analytics_restored": 0,
+        "analytics_errors": 0,
     }
     assert all(isinstance(value, int) for value in health["counters"].values())
     await store.close()
