@@ -7,9 +7,11 @@ close, not just while the market is open.
 
 Two honesty constraints shape this module:
 
-* Only REAL matches are recorded. The 20s session-trade poll also routes through the trade
-  path, but it reads a daily bar and carries no individual match; those events are marked
-  synthetic by the caller and skipped, or the tape would fill with phantom prints.
+* Provider-confirmed prints retain their exchange time. SSI price-table push exposes the
+  latest matched lot without a trustworthy execution timestamp; a change in its
+  price/size/cumulative-volume footprint is recorded once with `SERVER_OBSERVED` time. The
+  response therefore says `OBSERVED_WINDOW`, rather than claiming a complete exchange tape.
+  The 20s board poll carries only a daily snapshot and is still skipped.
 
 * The exchange does not tell us who was the aggressor. `Trading_Data_Stream` has no
   per-match buy/sell flag (`Bu`/`Sd` are market-wide totals), so the side is DERIVED with
@@ -101,7 +103,13 @@ class TradedLog:
         return f"{KEY_PREFIX}:{symbol.strip().upper()}:{session_date or reference_session_date().isoformat()}"
 
     # ------------------------------------------------------------------ write
-    def record(self, quote: CanonicalQuote, diff: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def record(
+        self,
+        quote: CanonicalQuote,
+        diff: Dict[str, Any],
+        *,
+        event: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Append one match. Returns the entry, or None when this event was not a match.
 
         A trade frame that only restates session totals (no new match timestamp) must not
@@ -141,20 +149,40 @@ class TradedLog:
         if change_pct is None and ref is not None and ref > 0:
             change_pct = (price - ref) / ref
 
+        event = event or {}
+        volume = diff.get("traded_quantity", quote.traded_quantity)
+        if event.get("_observed_latest_match"):
+            raw_observed_volume = event.get("MatchVolume")
+            observed_volume: int | None = None
+            if raw_observed_volume is not None:
+                try:
+                    parsed_volume = int(float(raw_observed_volume))
+                    observed_volume = parsed_volume if parsed_volume > 0 else None
+                except (TypeError, ValueError):
+                    pass
+            # Prefer the latest-lot quantity carried by SSI. If it is absent, only use a
+            # quantity newly derived from cumulative-volume advance, never a stale value
+            # left on the canonical quote by an earlier board observation.
+            volume = observed_volume or diff.get("traded_quantity")
         entry = {
             "ts": stamp_ms,
             "time": datetime.fromtimestamp(stamp_ms / 1000.0, tz=VN_TZ).strftime("%H:%M:%S"),
             "price": price,
             "change": change,
             "change_percent": change_pct,
-            "volume": diff.get("traded_quantity", quote.traded_quantity),
+            "volume": volume,
             "side": classify_side(price, quote.bid1_price, quote.ask1_price)
                 if quote.book_timestamp and 0 <= stamp_ms - quote.book_timestamp <= 180000 else None,
             "cumulative_volume": quote.total_volume,
             "session_date": session,
+            "source": str(event.get("_provider_source") or "TRADE_STREAM"),
+            "timestamp_basis": str(event.get("_timestamp_basis") or "PROVIDER_EVENT"),
         }
 
-        entry["id"] = "|".join(str(entry.get(k, "")) for k in ("session_date", "ts", "price", "volume", "cumulative_volume"))
+        entry["id"] = str(event.get("_trade_identity") or "|".join(
+            str(entry.get(k, ""))
+            for k in ("session_date", "ts", "price", "volume", "cumulative_volume")
+        ))
         tape = self._log.setdefault(symbol, deque(maxlen=self._memory))
         # The same match can be re-delivered after a reconnect; never print it twice.
         if any(p.get("id") == entry["id"] for p in tape):
@@ -188,9 +216,13 @@ class TradedLog:
         session = str(raw.get("TradingDate") or dt.astimezone(VN_TZ).date().isoformat())[:10]
         if session != reference_session_date().isoformat():
             return None
+        raw_price = raw.get("Close")
+        raw_volume = raw.get("MatchVolume")
+        if raw_price is None or raw_volume is None:
+            return None
         try:
-            price = float(raw.get("Close"))
-            volume = int(float(raw.get("MatchVolume")))
+            price = float(raw_price)
+            volume = int(float(raw_volume))
         except (TypeError, ValueError):
             return None
         if not math.isfinite(price) or price <= 0 or volume <= 0:
@@ -224,6 +256,7 @@ class TradedLog:
             "cumulative_volume": cumulative,
             "session_date": session,
             "source": str(raw.get("_provider_source") or "PROVIDER_TAPE"),
+            "timestamp_basis": "PROVIDER_EVENT",
         }
         entry["id"] = str(raw.get("TradeId") or "|".join(
             str(entry.get(k, "")) for k in (
@@ -339,7 +372,10 @@ class TradedLog:
             if not items:
                 continue
             items.sort(key=lambda i: i.get("ts") or 0)
-            self._session[sym] = items[-1].get("session_date")
+            restored_session = items[-1].get("session_date")
+            if not isinstance(restored_session, str):
+                continue
+            self._session[sym] = restored_session
             self._log[sym] = deque(items, maxlen=self._memory)
             restored += 1
         return restored

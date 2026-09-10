@@ -20,6 +20,8 @@ export interface TradePrint {
   volume: number | null;
   side: "B" | "S" | null;
   session_date: string;
+  source?: string;
+  timestamp_basis?: string;
 }
 
 export const tradePrintKey = (p: TradePrint) => p.id ?? `${p.session_date}|${p.ts}|${p.price}|${p.volume ?? ""}|${p.cumulative_volume ?? ""}`;

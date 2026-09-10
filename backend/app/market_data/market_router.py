@@ -385,11 +385,11 @@ async def get_market_overview():
 async def get_traded_log(symbol: str, limit: int = Query(default=200, ge=1, le=8000)):
     """Time & sales for one instrument.
 
-    Served from the shared Redis tape, so a browser opening mid-session on any machine gets
-    the whole session's prints and not just what has arrived since it connected. Kept until
-    08:00 ICT the morning after its session, so the panel still has the day's tape after the
-    close. `side` is DERIVED from the last known book (see traded_log), not published by the
-    exchange - `side_basis` says so on every response.
+    Served from the shared Redis tape, so every browser sees the same retained observation
+    window. Provider-confirmed history can backfill the full session when available; SSI
+    latest-match transitions otherwise begin when this backend observes them. Kept until
+    08:00 ICT the morning after the session. `side_basis` declares whether side came from
+    the provider or was derived from the last known book.
     """
     sym = symbol.strip().upper()
     if not (1 <= len(sym) <= 12) or not sym.isalnum():

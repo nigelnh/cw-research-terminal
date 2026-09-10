@@ -232,6 +232,10 @@ class VnstockProvider(MarketDataProvider):
         self._realtime_reconnect_count = 0
         self._realtime_session: str | None = None
         self._realtime_observed_symbols: set[str] = set()
+        # SSI repeats the latest matched lot on ordinary book updates.  Remember the
+        # match-state footprint across socket reconnects so one observed match becomes one
+        # tape row instead of one row per price-table frame.
+        self._realtime_match_identities: dict[str, str] = {}
         self._seen_prints: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=4000))
         self._seen_print_sets: dict[str, set[str]] = defaultdict(set)
 
@@ -446,6 +450,7 @@ class VnstockProvider(MarketDataProvider):
         if self._realtime_session != session:
             self._realtime_session = session
             self._realtime_observed_symbols.clear()
+            self._realtime_match_identities.clear()
         stamp = observed.isoformat()
         stamp_ms = int(observed.timestamp() * 1000)
         self._realtime_observed_symbols.add(symbol)
@@ -472,22 +477,39 @@ class VnstockProvider(MarketDataProvider):
         self._last_book_at_ms = max(self._last_book_at_ms or 0, stamp_ms)
 
         price = quote["matched_price"]
-        if price is not None:
+        matched_volume = quote["matched_volume"]
+        cumulative_volume = quote["total_volume"]
+        # The SSI price-table frame exposes the latest match, but repeats it while only the
+        # book changes.  Its cumulative volume is the stable boundary between matches.
+        # Record the first current-session observation and every later footprint change;
+        # the timestamp remains explicitly server-observed because this frame carries no
+        # trustworthy exchange execution timestamp.
+        match_identity = "|".join(
+            map(str, (session, symbol, price, matched_volume, cumulative_volume))
+        )
+        previous_identity = self._realtime_match_identities.get(symbol)
+        has_current_session_match = (
+            price is not None
+            and cumulative_volume is not None
+            and cumulative_volume > 0
+        )
+        if has_current_session_match and match_identity != previous_identity:
+            self._realtime_match_identities[symbol] = match_identity
             percent = quote["change_percent"]
             trade_event = {
                 "Ticker": symbol,
                 "Close": price,
+                "MatchVolume": matched_volume,
                 "Change": quote["change"],
                 "PercentPriceChange": percent / 100.0 if percent is not None else None,
-                "TotalMatchVolume": quote["total_volume"],
+                "TotalMatchVolume": cumulative_volume,
                 "TotalMatchValue": quote["total_value"],
                 "TradingDate": session,
                 "Timestamp": stamp,
                 "MarketStatus": market_session.get_market_phase(observed).value,
-                # The wire field is the latest matched lot repeated on book updates. It
-                # cannot be treated as a new time-and-sales print without an exchange
-                # trade id/timestamp; the confirmed KBS tape path owns prints.
-                "_synthetic_session_snapshot": True,
+                "_trade_identity": f"SSI_OBSERVED|{match_identity}",
+                "_timestamp_basis": "SERVER_OBSERVED",
+                "_observed_latest_match": True,
                 "_provider_source": "VNSTOCK_JS_SSI_REALTIME",
             }
             if self._callback is not None:

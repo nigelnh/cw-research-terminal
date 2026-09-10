@@ -47,6 +47,7 @@ def test_ssi_realtime_parser_keeps_terminal_raw_vnd_units():
     assert quote["bids"][0] == {"price": 26550, "volume": 32400}
     assert quote["asks"][0] == {"price": 26600, "volume": 102800}
     assert quote["matched_price"] == 26550
+    assert quote["matched_volume"] == 1000
     assert quote["change"] == 100
     assert quote["change_percent"] == .38
     assert quote["total_volume"] == 11_773_300
@@ -64,7 +65,7 @@ def test_ssi_subscription_contract_is_stable_and_deduplicated():
     }
 
 
-def test_ssi_realtime_frame_emits_book_and_non_print_trade_observations():
+def test_ssi_realtime_frame_emits_book_and_observed_latest_match():
     p = provider()
     p._active_symbols = ["MBB"]
     events = []
@@ -80,10 +81,43 @@ def test_ssi_realtime_frame_emits_book_and_non_print_trade_observations():
     assert book["Best3Ask"] == 26700
     assert book["_full_book_snapshot"] is True
     assert trade["Close"] == 26550
+    assert trade["MatchVolume"] == 1000
     assert trade["PercentPriceChange"] == pytest.approx(.0038)
-    assert trade["_synthetic_session_snapshot"] is True
+    assert trade["_observed_latest_match"] is True
+    assert trade["_timestamp_basis"] == "SERVER_OBSERVED"
+    assert trade["_trade_identity"].startswith("SSI_OBSERVED|2026-09-09|MBB|")
     assert trade["TradingDate"] == "2026-09-09"
     assert p._realtime_observed_symbols == {"MBB"}
+
+
+def test_ssi_realtime_repeated_book_frame_does_not_duplicate_latest_match():
+    p = provider()
+    p._active_symbols = ["MBB"]
+    events = []
+    p.set_event_callback(lambda kind, row, symbol: events.append((kind, row, symbol)))
+
+    observed = datetime(2026, 9, 9, 10, 0, tzinfo=VN_TZ)
+    assert p._handle_realtime_text(SSI_FRAME, received_at=observed) is True
+    first_trade = next(row for kind, row, _ in events if kind == "trade")
+
+    events.clear()
+    assert p._handle_realtime_text(
+        SSI_FRAME, received_at=observed.replace(second=1)
+    ) is True
+    assert [kind for kind, _, _ in events] == ["bidask"]
+
+    parts = SSI_FRAME.split("|")
+    parts[43] = "500"
+    parts[54] = "11773800"
+    events.clear()
+    assert p._handle_realtime_text(
+        "|".join(parts), received_at=observed.replace(second=2)
+    ) is True
+    assert [kind for kind, _, _ in events] == ["bidask", "trade"]
+    next_trade = events[1][1]
+    assert next_trade["MatchVolume"] == 500
+    assert next_trade["TotalMatchVolume"] == 11_773_800
+    assert next_trade["_trade_identity"] != first_trade["_trade_identity"]
 
 
 def test_ssi_realtime_rejects_unsubscribed_and_late_generation_frames():

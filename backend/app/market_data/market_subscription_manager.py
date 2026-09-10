@@ -133,11 +133,11 @@ class SubscriptionManager:
                 return
             if event_type == "trade":
                 quote, diff = self.state.apply_trade_event(raw_data)
-                # Time & sales. Only real matches print; the 20s session-snapshot poll
-                # routes through here too but carries a daily bar, not an individual trade.
+                # Time & sales. Provider-confirmed prints and deduplicated SSI latest-match
+                # transitions print; the 20s board poll carries only a daily snapshot.
                 if not raw_data.get("_synthetic_session_snapshot"):
                     try:
-                        printed = traded_log.record(quote, diff)
+                        printed = traded_log.record(quote, diff, event=raw_data)
                         if printed is not None:
                             asyncio.ensure_future(traded_log.persist(quote.symbol, printed))
                             # Push the print on the same rail as quote and bar patches.

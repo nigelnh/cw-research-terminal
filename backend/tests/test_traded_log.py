@@ -114,6 +114,30 @@ async def test_the_same_match_redelivered_after_a_reconnect_prints_once():
     assert log.get("HPG")["count"] == 1
 
 
+async def test_ssi_latest_match_uses_stable_identity_and_declares_observation_time():
+    state = _state_with_book()
+    log = TradedLog(max_entries=10)
+    identity = "SSI_OBSERVED|2026-09-07|HPG|21900|300|1000000"
+    event = {
+        "_trade_identity": identity,
+        "_provider_source": "VNSTOCK_JS_SSI_REALTIME",
+        "_timestamp_basis": "SERVER_OBSERVED",
+    }
+    quote, diff = _trade(state, 21_900, when=at("09:20:00"))
+    entry = log.record(quote, diff, event=event)
+    assert entry is not None
+    assert entry["id"] == identity
+    assert entry["volume"] == 300
+    assert entry["source"] == "VNSTOCK_JS_SSI_REALTIME"
+    assert entry["timestamp_basis"] == "SERVER_OBSERVED"
+
+    # SSI can repeat the exact latest match on a later book observation. Its observation
+    # timestamp changes, but its stable match-state identity does not.
+    repeated, repeated_diff = _trade(state, 21_900, when=at("09:20:01"))
+    assert log.record(repeated, repeated_diff, event=event) is None
+    assert log.get("HPG")["count"] == 1
+
+
 async def test_the_tape_is_newest_first_and_bounded():
     state = _state_with_book()
     log = TradedLog(max_entries=3)
