@@ -14,18 +14,18 @@ const REPAIR_LIMIT = 300;
  *
  * Three sources, deliberately:
  *
- * * The **session archive** - one fetch of the whole server-side tape when the panel opens
- *   on a symbol. This is what makes the log the same on every machine: the tape lives in
- *   Redis, so a laptop opening at 14:00 gets the morning's prints it was never connected
- *   for, instead of starting blank. It is a large response, so it is fetched once and not
- *   polled - the socket keeps it current from there.
+ * * The **shared observed window** - one fetch of the server-side tape when the panel opens.
+ *   Redis makes it the same on every machine and survives backend restarts. When a provider
+ *   offers confirmed intraday history it can backfill earlier prints; SSI-only coverage
+ *   begins when the backend observes latest-match transitions.
  * * **Live prints** over the WebSocket, on the same tick path as the quote patches that
  *   drive STATS and the watchlist row - polling REST alone left the tape running seconds
  *   behind them.
  * * A small **repair poll**, to pick up anything missed while the socket was down. It asks
  *   for a short recent window rather than the session, so the periodic cost stays trivial.
  *
- * The three are merged and de-duplicated on the exchange timestamp, so overlap is free.
+ * The three are merged and de-duplicated by provider identity when available, with a full
+ * observation footprint as the fallback.
  *
  * The server keeps the tape until 08:00 ICT the morning after its session, so this still
  * has the day's prints after the close.

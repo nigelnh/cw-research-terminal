@@ -62,13 +62,20 @@ async def test_cursor_never_loses_equal_timestamp_rows(sessionmaker_):
 async def test_inclusive_ict_dates_and_source_kind(sessionmaker_):
     await seed(sessionmaker_)
     async with sessionmaker_() as s:
-        rows, _ = await repo.list_feed(s, date_from=date(2026,9,10), date_to=date(2026,9,10))
+        # Scope this date-boundary assertion to its dated fixture. The separate undated TCB
+        # event legitimately uses its observation day; letting wall-clock 2026-09-10 decide
+        # whether it appears made this test fail only when the suite ran on that date.
+        rows, _ = await repo.list_feed(
+            s, symbol="FPT", date_from=date(2026,9,10), date_to=date(2026,9,10)
+        )
         assert len(rows) == 1
         assert rows[0].symbol == "FPT"
         assert rows[0].date_kind == "ex_date"
         assert rows[0].published_at == "2026-09-10"  # backwards-compatible legacy field
         assert datetime.fromisoformat(rows[0].display_date).date() == date(2026,9,9)  # 17:00 UTC = ICT midnight
-        empty, _ = await repo.list_feed(s, date_from=date(2026,9,11), date_to=date(2026,9,12))
+        empty, _ = await repo.list_feed(
+            s, symbol="FPT", date_from=date(2026,9,11), date_to=date(2026,9,12)
+        )
         assert not empty
 
 

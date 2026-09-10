@@ -7,6 +7,7 @@ import type { CorporateActionItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useHistoricalBars, useCorporateActions } from "@/data/query";
 import { useTradedLog } from "@/data/query/use_traded_log";
+import { tradePrintKey } from "@/data/backend/trade_print_store";
 import { useFundamentals } from "@/data/query/use_fundamentals";
 import { QuarterlyResultsChart } from "./quarterly_results_chart";
 import { TradingChart } from "@/components/common/trading_chart";
@@ -197,11 +198,9 @@ const TAPE_PAGE = 300;
  * TRADED LOGS panel (OVERVIEW tab) - server-side time & sales.
  *
  * The tape is shared, not per-browser: it lives on the server and is kept until 08:00 ICT
- * the morning after its session, so it stays populated after the close instead of going
- * blank at 15:00, and a second machine opening mid-session scrolls back through the whole
- * day rather than starting empty. The B/S column is DERIVED from the last known book
- * (at/through the ask = buyer crossed, at/through the bid = seller); a print inside the
- * spread is left blank rather than guessed, and the header says so.
+ * the morning after its session. SSI rows represent deduplicated latest-match transitions
+ * with server-observed time; confirmed provider history may extend the window backward.
+ * The B/S column is derived from the latest book when the provider does not publish it.
  */
 function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
   const { items, isLoading, isError, coverage, truncated, sessionDate } = useTradedLog(symbol, live);
@@ -265,9 +264,11 @@ function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
                   ? "var(--up)"
                   : "var(--down)";
             return (
-              <div key={`${row.ts}:${row.price}:${row.volume ?? ""}`} className="instrument-tape-row">
+              <div key={tradePrintKey(row)} className="instrument-tape-row">
                 <span style={{ borderRight: "1px solid var(--border-row)", paddingRight: 4, color: "var(--t-70)" }}>
-                  {row.time}
+                  <span title={row.timestamp_basis === "SERVER_OBSERVED" ? "Server observation time for the latest SSI match" : "Provider trade time"}>
+                    {row.time}
+                  </span>
                 </span>
                 <span style={{ ...cellStyle, color: tone }}>{fmtPrice(row.price)}</span>
                 <span style={{ ...cellStyle, color: tone }}>

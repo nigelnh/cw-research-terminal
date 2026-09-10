@@ -278,9 +278,8 @@ export class BackendClient {
   }
 
   /**
-   * Time & sales for one instrument, from the shared server-side tape - so this is the
-   * whole session's history regardless of which machine or browser is asking. `side` is
-   * derived from the book, never published by the exchange.
+   * Time & sales for one instrument from the shared server-side observed window. Confirmed
+   * provider history may backfill earlier prints; SSI-only rows carry server-observed time.
    */
   async getTradedLog(
     symbol: string,
@@ -304,6 +303,8 @@ export class BackendClient {
       volume: number | null;
       side: "B" | "S" | null;
       session_date: string;
+      source?: string;
+      timestamp_basis?: string;
     }>;
   }> {
     return this.get<any>(
