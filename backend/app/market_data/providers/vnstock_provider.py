@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import json
 import logging
 import math
 import os
@@ -55,6 +56,21 @@ from app.market_data.trading_calendar import (
 
 EventCallback = Callable[[str, dict[str, Any], str], None]
 logger = logging.getLogger(__name__)
+_INDEX_CONSTITUENTS_PATH = (
+    Path(__file__).resolve().parent.parent / "data" / "index_constituents.json"
+)
+
+
+def _load_bundled_index_constituents() -> dict[str, list[dict[str, Any]]]:
+    """Load audited, time-bounded fallbacks for groups VCI cannot currently resolve."""
+    try:
+        payload = json.loads(_INDEX_CONSTITUENTS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+_BUNDLED_INDEX_CONSTITUENTS = _load_bundled_index_constituents()
 
 
 def _finite(value: Any) -> float | None:
@@ -192,6 +208,7 @@ class VnstockProvider(MarketDataProvider):
         self._history_fetcher = history_fetcher or self._fetch_history_sync
         self._tape_fetcher = tape_fetcher or self._fetch_tape_sync
         self._listing_fetcher = listing_fetcher or self._fetch_listing_sync
+        self._uses_default_group_fetcher = group_fetcher is None
         self._group_fetcher = group_fetcher or self._fetch_group_sync
         self._fundamentals_fetcher = fundamentals_fetcher or self._fetch_fundamentals_sync
         self._income_statement_fetcher = (
@@ -241,6 +258,7 @@ class VnstockProvider(MarketDataProvider):
 
         self._listing_cache: tuple[float, list[dict[str, Any]]] = (0.0, [])
         self._group_cache: dict[str, tuple[float, list[str]]] = {}
+        self._group_provenance: dict[str, dict[str, Any]] = {}
         self._fundamental_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._income_statement_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._overview_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
@@ -1188,16 +1206,63 @@ class VnstockProvider(MarketDataProvider):
         if hasattr(value, "tolist"):
             value = value.tolist()
         symbols = sorted({str(item).strip().upper() for item in (value or []) if str(item).strip()})
+        if not symbols:
+            raise ValueError(f"empty constituent group: {group}")
         self._group_cache[group] = (time.monotonic(), symbols)
+        self._group_provenance[group] = {
+            "source": "VNSTOCK_VCI_SYMBOLS_BY_GROUP",
+            "effective_from": None,
+            "valid_through": None,
+        }
         return symbols
 
-    async def _safe_group_symbols(self, group: str) -> list[str]:
+    def _bundled_group_symbols(self, group: str, session: str) -> list[str]:
+        try:
+            session_day = date.fromisoformat(session)
+        except ValueError:
+            return []
+        for record in _BUNDLED_INDEX_CONSTITUENTS.get(group, []):
+            try:
+                effective = date.fromisoformat(str(record["effective_from"]))
+                valid_through = date.fromisoformat(str(record["valid_through"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not effective <= session_day <= valid_through:
+                continue
+            symbols = sorted({
+                str(symbol).strip().upper()
+                for symbol in record.get("symbols", [])
+                if str(symbol).strip()
+            })
+            if symbols:
+                self._group_provenance[group] = {
+                    "source": record.get("source"),
+                    "source_url": record.get("source_url"),
+                    "effective_from": effective.isoformat(),
+                    "valid_through": valid_through.isoformat(),
+                    "fallback": True,
+                }
+                return symbols
+        return []
+
+    async def _safe_group_symbols(self, group: str, session: str) -> list[str]:
         try:
             return await self._group_symbols(group)
         except Exception as exc:  # noqa: BLE001 - component failure stays scoped
             logger.debug("Vnstock overview group %s unavailable: %s", group, type(exc).__name__)
             cached = self._group_cache.get(group)
-            return list(cached[1]) if cached else []
+            if cached and cached[1]:
+                self._group_provenance.setdefault(group, {
+                    "source": "RUNTIME_GROUP_CACHE",
+                    "effective_from": None,
+                    "valid_through": None,
+                })
+                return list(cached[1])
+            # The fallback is limited to the real provider adapter. Tests and alternate
+            # callers that inject a group source retain strict failure scoping.
+            if self._uses_default_group_fetcher:
+                return self._bundled_group_symbols(group, session)
+            return []
 
     async def _safe_listing_rows(self) -> list[dict[str, Any]]:
         try:
@@ -1241,11 +1306,11 @@ class VnstockProvider(MarketDataProvider):
         reference_only = phase == "PRE_OPEN"
         index_symbols = ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"]
         groups = {
-            "VN30": await self._safe_group_symbols("VN30"),
+            "VN30": await self._safe_group_symbols("VN30", session),
             "VNINDEX": [str(row.get("symbol")).upper() for row in await self._safe_listing_rows()
                         if str(row.get("exchange") or "").upper() == "HSX" and str(row.get("type") or "").upper() == "STOCK"],
-            "VNFINLEAD": await self._safe_group_symbols("VNFINLEAD"),
-            "VNDIAMOND": await self._safe_group_symbols("VNDIAMOND"),
+            "VNFINLEAD": await self._safe_group_symbols("VNFINLEAD", session),
+            "VNDIAMOND": await self._safe_group_symbols("VNDIAMOND", session),
         }
         board_symbols = sorted(set(groups["VNINDEX"]) | {s.upper() for s in cw_symbols})
         try:
@@ -1361,7 +1426,8 @@ class VnstockProvider(MarketDataProvider):
                     "breadth": {"source": "DERIVED_VNSTOCK_KBS_CONSTITUENTS", "as_of": as_of,
                                 "session_date": session,
                                 "availability": "AVAILABLE" if complete_breadth else "PARTIAL" if has_breadth else "UNAVAILABLE",
-                                "observed": len(members), "expected": expected_members},
+                                "observed": len(members), "expected": expected_members,
+                                "constituents": self._group_provenance.get(symbol)},
                     "sparkline": {"source": "VNSTOCK_VCI", "as_of": as_of, "session_date": session,
                                   "timeframe": "5m", "availability": "AVAILABLE" if sparkline else "UNAVAILABLE"},
                 },

@@ -37,6 +37,7 @@ from app.quant.black_scholes import (
 from app.quant.dividend_convention import CW_DIVIDEND_YIELD_CONVENTION
 
 if TYPE_CHECKING:
+    from app.market_data.market_state_store import MarketStateStore
     from app.quant.historical_volatility_service import VolEstimate
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,7 @@ class LiveQuantEngine:
         # (no network / disk / blocking I/O): it is invoked on the per-tick calculation path.
         self._historical_vol_getter: Optional[Callable[[str], "Optional[VolEstimate]"]] = None
         self._broadcaster = None
+        self._analytics_store: Optional["MarketStateStore"] = None
 
         # ---- latest-wins scheduling state (all mutated only on the event-loop thread) ----
         self._generation: int = 0                          # monotonic; ++ on every schedule
@@ -171,6 +173,9 @@ class LiveQuantEngine:
             "stale_discarded": 0,    # computed results dropped because a newer generation won
             "failures": 0,           # compute exceptions (cache preserved, worker survives)
             "broadcast_errors": 0,
+            "input_cache_hits": 0,  # ticks whose price/terms/HV inputs did not change
+            "redis_restored": 0,
+            "redis_persist_errors": 0,
         }
 
     def set_market_state_getter(self, getter_func):
@@ -199,6 +204,48 @@ class LiveQuantEngine:
         supported contract is a plain function.
         """
         self._broadcaster = broadcaster_func
+
+    def set_analytics_store(self, store: "MarketStateStore") -> None:
+        """Attach the existing warm-cache owner; no extra Redis client is created."""
+        self._analytics_store = store
+
+    async def restore_analytics(
+        self, symbols: list[str], *, now: Optional[datetime] = None
+    ) -> int:
+        """Hydrate current-session analytics before browsers receive their first snapshot.
+
+        A restored calculation is accepted only when its model prices still match the
+        independently restored canonical quote state. The Redis record therefore removes
+        reload flicker without allowing an old IV to describe a newer price.
+        """
+        store = self._analytics_store
+        if store is None or not store.is_available():
+            return 0
+        session = reference_session_date(now or get_vietnam_now()).isoformat()
+        try:
+            raw = await store.load_quant_analytics(symbols, session)
+        except Exception as exc:  # noqa: BLE001 - warm cache is optional
+            logger.warning("Quant analytics warm restore unavailable: %s", type(exc).__name__)
+            return 0
+        restored = 0
+        for symbol, payload in raw.items():
+            try:
+                analytics = WarrantAnalytics.model_validate(payload)
+            except Exception:
+                continue
+            clean = symbol.strip().upper()
+            spec = await instrument_registry.get_instrument(clean)
+            if (
+                not analytics.is_available
+                or spec is None
+                or not self._analytics_inputs_unchanged(analytics, spec, now=now)
+            ):
+                continue
+            self._analytics_cache[clean] = analytics
+            self._cache_generation[clean] = 0
+            restored += 1
+        self._counters["redis_restored"] += restored
+        return restored
 
     def register_watched_cw(self, cw_symbol: str, underlying_symbol: str) -> None:
         """Registers a watched CW into the active quant evaluation pool and fan-out mapping.
@@ -230,10 +277,27 @@ class LiveQuantEngine:
         if task is not None and not task.done():
             task.cancel()
 
-    def get_analytics(self, symbol: str, *, now: Optional[datetime] = None) -> Optional[WarrantAnalytics]:
-        """Returns the latest cached quantitative analytics for a symbol."""
+    def get_analytics(
+        self,
+        symbol: str,
+        *,
+        now: Optional[datetime] = None,
+        validate_inputs: bool = False,
+    ) -> Optional[WarrantAnalytics]:
+        """Returns the latest cached quantitative analytics for a symbol.
+
+        ``validate_inputs`` is used at delivery boundaries. Keeping the plain cache read
+        available preserves the scheduler's small inspection API while REST/WebSocket
+        callers can require an exact current-session price tuple.
+        """
         value = self._analytics_cache.get(symbol.strip().upper())
-        return value if value is not None and (now is None or value.session_date == reference_session_date(now).isoformat()) else None
+        if value is None:
+            return None
+        if now is not None and value.session_date != reference_session_date(now).isoformat():
+            return None
+        if validate_inputs and not self._result_matches_current_prices(value, now=now):
+            return None
+        return value
 
     async def resolve_display_analytics(self, symbol: str, *, now=None, sessionmaker=None) -> WarrantAnalytics:
         from app.market_data.trading_calendar import latest_completed_trading_session
@@ -242,7 +306,16 @@ class LiveQuantEngine:
         if display <= latest_completed_trading_session(current):
             result = await self.compute_eod_analytics(symbol, display, sessionmaker=sessionmaker)
         else:
+            cached = self.get_analytics(symbol, now=current, validate_inputs=True)
+            if cached is not None:
+                return cached
             result = await self.compute_warrant_analytics(symbol)
+            if result.is_available and self._result_matches_current_prices(result, now=current):
+                # A cold REST read becomes the shared value for WebSocket clients and
+                # subsequent tabs. Give it a normal generation so an older in-flight
+                # scheduler result cannot overwrite it.
+                self._generation += 1
+                self._publish(symbol.strip().upper(), self._generation, result)
         if result.session_date and result.session_date != display.isoformat():
             return WarrantAnalytics(symbol=symbol, underlying_symbol=result.underlying_symbol,
                 calculated_at=current.isoformat(), session_date=display.isoformat(),
@@ -944,6 +1017,82 @@ class LiveQuantEngine:
         for cw_sym in targets:
             self._schedule_recompute(cw_sym)
 
+    @staticmethod
+    def _same_number(left, right) -> bool:
+        if left is None or right is None:
+            return left is None and right is None
+        try:
+            return float(left) == float(right)
+        except (TypeError, ValueError):
+            return False
+
+    def _result_matches_current_prices(
+        self, analytics: WarrantAnalytics, *, now: Optional[datetime] = None
+    ) -> bool:
+        """Whether cached analytics describe the current canonical price tuple.
+
+        Quantity, cumulative volume and observation timestamps intentionally do not enter
+        this comparison. They cannot change IV, and recomputing on those fields was making
+        T drift by seconds and the displayed IV oscillate after every reload.
+        """
+        inputs = analytics.model_inputs
+        getter = self._market_state_getter
+        if not analytics.is_available or inputs is None or getter is None:
+            return False
+        current = now or get_vietnam_now()
+        session = reference_session_date(current).isoformat()
+        if analytics.session_date != session:
+            return False
+        cw_state = getter(analytics.symbol)
+        und_state = getter(analytics.underlying_symbol)
+        if cw_state is None or und_state is None:
+            return False
+        if cw_state.market_session_date != session or und_state.market_session_date != session:
+            return False
+        bid = cw_state.bid1_price
+        ask = cw_state.ask1_price
+        if bid is not None and ask is not None and float(ask) < float(bid):
+            bid = ask = None
+        return all((
+            self._same_number(inputs.underlying_price, und_state.last_price),
+            self._same_number(inputs.market_last, cw_state.last_price),
+            self._same_number(inputs.market_bid, bid),
+            self._same_number(inputs.market_ask, ask),
+        ))
+
+    def _analytics_inputs_unchanged(
+        self,
+        analytics: WarrantAnalytics,
+        spec: CoveredWarrantSpecification,
+        *,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        if not self._result_matches_current_prices(analytics, now=now):
+            return False
+        inputs = analytics.model_inputs
+        if inputs is None:
+            return False
+        version = hashlib.sha256(spec.model_dump_json().encode()).hexdigest()[:16]
+        if analytics.terms_version != version:
+            return False
+        _t, dte = calculate_time_to_maturity(
+            spec.maturity_date or "", current_time=now
+        )
+        if inputs.days_to_expiry != dte:
+            return False
+        if not self._same_number(inputs.strike_price, spec.effective_strike):
+            return False
+        if not self._same_number(inputs.exercise_ratio, spec.effective_ratio):
+            return False
+        if not self._same_number(inputs.risk_free_rate, settings.QUANT_RISK_FREE_RATE):
+            return False
+        estimate = (
+            self._historical_vol_getter(spec.underlying_symbol.upper())
+            if self._historical_vol_getter is not None else None
+        )
+        current_hv = estimate.value if estimate is not None else None
+        return self._same_number(analytics.historical_volatility, current_hv)
+
     def _schedule_recompute(self, cw_sym: str) -> None:
         """Record the newest generation for ``cw_sym`` and ensure a worker is running."""
         if self._shutting_down:
@@ -1002,7 +1151,8 @@ class LiveQuantEngine:
                         want = newer
                     try:
                         analytics = await self._compute_for_symbol(cw_sym, want)
-                        self._counters["computed"] += 1
+                        if analytics is not None:
+                            self._counters["computed"] += 1
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:  # noqa: BLE001 - one bad tick must not kill the worker
@@ -1016,7 +1166,8 @@ class LiveQuantEngine:
                         await asyncio.sleep(0)
                         continue
 
-                self._publish(cw_sym, want, analytics)
+                if analytics is not None:
+                    self._publish(cw_sym, want, analytics)
                 await asyncio.sleep(0)  # fairness: let other symbols' workers run
         except asyncio.CancelledError:
             raise
@@ -1026,7 +1177,9 @@ class LiveQuantEngine:
             if not self._shutting_down and self._pending.get(cw_sym) is not None:
                 self._schedule_recompute(cw_sym)
 
-    async def _compute_for_symbol(self, cw_sym: str, generation: int) -> WarrantAnalytics:
+    async def _compute_for_symbol(
+        self, cw_sym: str, generation: int
+    ) -> Optional[WarrantAnalytics]:
         """Resolve a COHERENT input snapshot, then compute. This is the scheduler's only
         awaiting seam and the natural override point for concurrency tests.
 
@@ -1046,6 +1199,15 @@ class LiveQuantEngine:
         cw_state = getter(cw_sym) if getter else None
         und_state = getter(und_sym) if (getter and und_sym) else None
 
+        cached = self._analytics_cache.get(cw_sym)
+        if (
+            cached is not None
+            and spec is not None
+            and self._analytics_inputs_unchanged(cached, spec)
+        ):
+            self._counters["input_cache_hits"] += 1
+            return None
+
         return await self.compute_warrant_analytics(
             cw_sym, spec=spec, cw_state=cw_state, und_state=und_state
         )
@@ -1060,6 +1222,21 @@ class LiveQuantEngine:
         self._cache_generation[cw_sym] = generation
         self._counters["published"] += 1
 
+        if (
+            self._analytics_store is not None
+            and analytics.is_available
+            and analytics.session_date
+            and not self._shutting_down
+        ):
+            try:
+                task = asyncio.get_running_loop().create_task(
+                    self._persist_analytics(cw_sym, analytics)
+                )
+                self._tasks.add(task)
+                task.add_done_callback(self._on_task_done)
+            except RuntimeError:
+                pass
+
         if self._broadcaster is not None and analytics.is_available and not self._shutting_down:
             try:
                 res = self._broadcaster(cw_sym, analytics)
@@ -1073,6 +1250,26 @@ class LiveQuantEngine:
             except Exception as exc:  # noqa: BLE001
                 self._counters["broadcast_errors"] += 1
                 logger.warning("Analytics broadcast failed for %s: %s", cw_sym, exc)
+
+    async def _persist_analytics(
+        self, cw_sym: str, analytics: WarrantAnalytics
+    ) -> None:
+        store = self._analytics_store
+        if store is None or not analytics.session_date:
+            return
+        try:
+            await store.save_quant_analytics(
+                cw_sym,
+                analytics.session_date,
+                analytics.model_dump(mode="json"),
+            )
+        except Exception as exc:  # noqa: BLE001 - Redis is an optional warm cache
+            self._counters["redis_persist_errors"] += 1
+            logger.warning(
+                "Quant analytics warm-cache persist failed for %s: %s",
+                cw_sym,
+                type(exc).__name__,
+            )
 
     async def shutdown(self) -> None:
         """Block new scheduling and cancel/await every engine task. Idempotent."""

@@ -73,6 +73,21 @@ class MarketStateStore(ABC):
     async def save_market_overview(self, payload: Dict[str, Any]) -> None:
         pass
 
+    async def load_quant_analytics(
+        self, symbols: List[str], session_date: str
+    ) -> Dict[str, Dict[str, Any]]:
+        """Optional session-scoped cache for derived CW analytics.
+
+        Analytics stay separate from :class:`CanonicalQuote`: quote fields are observed
+        market data, while IV/Greeks are calculations with their own input provenance.
+        """
+        return {}
+
+    async def save_quant_analytics(
+        self, symbol: str, session_date: str, payload: Dict[str, Any]
+    ) -> None:
+        pass
+
     @abstractmethod
     async def delete(self, symbol: str) -> None:
         """Removes a symbol from the cache."""

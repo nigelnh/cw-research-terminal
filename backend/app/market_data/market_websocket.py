@@ -380,6 +380,17 @@ async def websocket_market_endpoint(websocket: WebSocket):
                 # Deliver immediate snapshot for cached symbols
                 cached_rows = market_state.get_snapshots(accepted)
                 if cached_rows:
+                    # Keep quote + analytics atomic on initial hydration. The engine only
+                    # returns a value when its session and exact price tuple still match
+                    # canonical market state; a real price change therefore omits this
+                    # field until the corresponding recalculation is published.
+                    for row in cached_rows:
+                        symbol = str(row.get("Symbol") or "").upper()
+                        analytics = live_quant_engine.get_analytics(
+                            symbol, validate_inputs=True
+                        )
+                        if analytics is not None and analytics.is_available:
+                            row["analytics"] = analytics.model_dump(mode="json")
                     import time
                     now_ms = int(time.time() * 1000)
                     snap_msg = {
@@ -391,7 +402,9 @@ async def websocket_market_endpoint(websocket: WebSocket):
 
                 # Deliver cached analytics for watched CWs
                 for sym in accepted:
-                    cached_analytics = live_quant_engine.get_analytics(sym)
+                    cached_analytics = live_quant_engine.get_analytics(
+                        sym, validate_inputs=True
+                    )
                     if cached_analytics and cached_analytics.is_available:
                         an_dict = cached_analytics.model_dump(by_alias=True)
                         an_msg = {

@@ -252,4 +252,104 @@ describe("BackendWebSocketClient - Correctness, Routing & Lifecycle Tests", () =
     expect(mockWs.send).toHaveBeenCalledTimes(calls);
     vi.useRealTimers();
   });
+
+  it("12. Same-price route hydration preserves the accepted analytics snapshot", () => {
+    const row = {
+      Symbol: "CHPG2625",
+      Under_Symbol: "HPG",
+      Under_Prc: 21.85,
+      Traded: 0.57,
+      Bid1_Prc: 0.56,
+      Ask1_Prc: 0.57,
+      _market_session_date: "2026-09-10",
+      _ts_source: 10_000,
+    };
+    client.handleIncomingMessage({ type: "snapshot", row });
+    client.handleIncomingMessage({
+      type: "analytics_patch",
+      symbol: "CHPG2625",
+      analytics: {
+        symbol: "CHPG2625",
+        underlying_symbol: "HPG",
+        session_date: "2026-09-10",
+        calculated_at: "2026-09-10T10:00:00+07:00",
+        is_available: true,
+        iv_bid: 0.35,
+        iv_trade: 0.36,
+        iv_ask: 0.36,
+        input_provenance: {
+          underlying: { sessionDate: "2026-09-10" },
+          trade: { sessionDate: "2026-09-10" },
+          book: { sessionDate: "2026-09-10" },
+        },
+        model_inputs: {
+          underlying_price: 21_850,
+          market_last: 570,
+          market_bid: 560,
+          market_ask: 570,
+        },
+      },
+    });
+    const accepted = client.getCoveredWarrant("CHPG2625");
+
+    client.handleIncomingMessage({
+      type: "snapshot",
+      row: { ...row, _ts_source: 11_000, Total_Vol: 999_000 },
+    });
+    const hydrated = client.getCoveredWarrant("CHPG2625");
+    expect(hydrated?.analyticsSnapshot).toEqual(accepted?.analyticsSnapshot);
+    expect(hydrated?.analyticsCalculatedAt).toBe(accepted?.analyticsCalculatedAt);
+    expect(hydrated?.ivBid).toBe(0.35);
+    expect(hydrated?.ivTrade).toBe(0.36);
+    expect(hydrated?.ivAsk).toBe(0.36);
+
+    client.handleIncomingMessage({
+      type: "snapshot",
+      row: { ...row, Bid1_Prc: 0.55, _ts_source: 12_000 },
+    });
+    expect(client.getCoveredWarrant("CHPG2625")?.analyticsSnapshot).toBeUndefined();
+    expect(client.getCoveredWarrant("CHPG2625")?.ivBid).toBeNull();
+  });
+
+  it("13. Redis-restored analytics hydrate atomically with the initial quote", () => {
+    const observed: Array<{ last: number | null; iv: number | null }> = [];
+    client.onCoveredWarrantUpdate((cw) => {
+      if (cw.symbol === "CHPG2625") {
+        observed.push({ last: cw.quote.lastPrice, iv: cw.ivTrade });
+      }
+    });
+
+    client.handleIncomingMessage({
+      type: "snapshot",
+      row: {
+        Symbol: "CHPG2625",
+        Under_Symbol: "HPG",
+        Under_Prc: 21.85,
+        Traded: 0.57,
+        Bid1_Prc: 0.56,
+        Ask1_Prc: 0.57,
+        _market_session_date: "2026-09-10",
+        analytics: {
+          symbol: "CHPG2625",
+          underlying_symbol: "HPG",
+          session_date: "2026-09-10",
+          calculated_at: "2026-09-10T10:00:00+07:00",
+          is_available: true,
+          iv_bid: 0.35,
+          iv_trade: 0.36,
+          iv_ask: 0.36,
+          model_inputs: {
+            underlying_price: 21_850,
+            market_last: 570,
+            market_bid: 560,
+            market_ask: 570,
+          },
+        },
+      },
+    });
+
+    expect(observed).toEqual([{ last: 570, iv: 0.36 }]);
+    expect(client.getCoveredWarrant("CHPG2625")?.ivBid).toBe(0.35);
+    expect(client.getCoveredWarrant("CHPG2625")?.ivAsk).toBe(0.36);
+  });
 });

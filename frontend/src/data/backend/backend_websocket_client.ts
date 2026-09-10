@@ -32,6 +32,118 @@ type UpstreamFeedStateHandler = (state: UpstreamFeedState) => void;
 const WS_CONNECTING = 0;
 const WS_OPEN = 1;
 
+function applyAnalyticsToWarrant(
+  existing: CoveredWarrant,
+  analytics: any,
+  emitPulses: boolean,
+): CoveredWarrant {
+  const g = analytics.greeks || {};
+  const numeric = (
+    obj: any,
+    snake: string,
+    camel: string,
+    fallback: number | null | undefined,
+  ) => {
+    const value = snake in obj ? obj[snake] : camel in obj ? obj[camel] : fallback;
+    return analytics.is_available === false ||
+      analytics.isAvailable === false ||
+      typeof value !== "number" ||
+      !Number.isFinite(value)
+      ? null
+      : value;
+  };
+  const modelInputs = analytics.model_inputs ?? analytics.modelInputs;
+  const updated: CoveredWarrant = {
+    ...existing,
+    analyticsSnapshot: normalizeAnalytics(analytics),
+    analyticsCalculatedAt:
+      analytics.calculated_at ??
+      analytics.calculatedAt ??
+      existing.analyticsCalculatedAt ??
+      null,
+    modelDte:
+      modelInputs?.days_to_expiry ?? modelInputs?.daysToExpiry ?? null,
+    modelRiskFreeRate:
+      modelInputs?.risk_free_rate ?? modelInputs?.riskFreeRate ?? null,
+    greeksVolatilitySource:
+      g.volatility_source ?? g.volatilitySource ?? null,
+    quantAvailable:
+      analytics.is_available !== false && analytics.isAvailable !== false,
+    ivBid: numeric(analytics, "iv_bid", "ivBid", existing.ivBid),
+    ivTrade: numeric(analytics, "iv_trade", "ivTrade", existing.ivTrade),
+    ivAsk: numeric(analytics, "iv_ask", "ivAsk", existing.ivAsk),
+    theoreticalPrice: numeric(
+      g,
+      "theoretical_price",
+      "theoreticalPrice",
+      numeric(
+        analytics,
+        "theoretical_price",
+        "theoreticalPrice",
+        existing.theoreticalPrice,
+      ),
+    ),
+    delta: numeric(g, "delta", "delta", existing.delta),
+    gamma: numeric(g, "gamma", "gamma", existing.gamma),
+    theta: numeric(g, "theta", "theta", existing.theta),
+    vega: numeric(g, "vega", "vega", existing.vega),
+    rho: numeric(g, "rho", "rho", existing.rho),
+    moneynessRatio: numeric(
+      analytics,
+      "moneyness",
+      "moneynessRatio",
+      existing.moneynessRatio,
+    ),
+    moneynessCategory:
+      analytics.moneyness_category ??
+      analytics.moneynessCategory ??
+      existing.moneynessCategory ??
+      null,
+    contractState:
+      analytics.contract_state ??
+      analytics.contractState ??
+      existing.contractState ??
+      null,
+    isTradable:
+      typeof analytics.is_tradable === "boolean"
+        ? analytics.is_tradable
+        : typeof analytics.isTradable === "boolean"
+          ? analytics.isTradable
+          : (existing.isTradable ?? null),
+    quantUnavailableReason:
+      analytics.is_available === false || analytics.isAvailable === false
+        ? (analytics.unavailable_reason ?? analytics.unavailableReason ?? null)
+        : null,
+    historicalVolatility: numeric(
+      analytics,
+      "historical_volatility",
+      "historicalVolatility",
+      existing.historicalVolatility,
+    ),
+  };
+  const analyticsFields = [
+    "ivBid",
+    "ivTrade",
+    "ivAsk",
+    "theoreticalPrice",
+    "delta",
+    "gamma",
+    "theta",
+    "vega",
+    "rho",
+    "moneynessRatio",
+    "historicalVolatility",
+  ];
+  updated.realtimePulses = mergeRealtimePulses(
+    existing.realtimePulses,
+    existing as unknown as Record<string, number | null | undefined>,
+    updated as unknown as Record<string, number | null | undefined>,
+    analyticsFields,
+    emitPulses,
+  );
+  return updated;
+}
+
 export class BackendWebSocketClient {
   private wsUrl: string;
   private ws: WebSocket | null = null;
@@ -644,98 +756,13 @@ export class BackendWebSocketClient {
 
         const an = msg.analytics;
         const display = marketSessionStore.getSnapshot().sessionContext?.displaySessionDate;
-        if (display && an.session_date !== display) break;
+        const analyticsSession = an.session_date ?? an.sessionDate;
+        if (display && analyticsSession !== display) break;
         const existing = this.warrantsMap.get(sym);
         if (existing) {
-          const g = an.greeks || {};
-          const numeric = (
-            obj: any,
-            snake: string,
-            camel: string,
-            fallback: number | null | undefined,
-          ) => {
-            const value =
-              snake in obj ? obj[snake] : camel in obj ? obj[camel] : fallback;
-            return an.is_available === false ||
-              typeof value !== "number" ||
-              !Number.isFinite(value)
-              ? null
-              : value;
-          };
-          const updatedCw: CoveredWarrant = {
-            ...existing,
-            analyticsSnapshot: normalizeAnalytics(an),
-            analyticsCalculatedAt:
-              an.calculated_at ?? existing.analyticsCalculatedAt ?? null,
-            modelDte: an.model_inputs?.days_to_expiry ?? null,
-            modelRiskFreeRate: an.model_inputs?.risk_free_rate ?? null,
-            greeksVolatilitySource: g.volatility_source ?? null,
-            quantAvailable: an.is_available !== false,
-            ivBid: numeric(an, "iv_bid", "ivBid", existing.ivBid),
-            ivTrade: numeric(an, "iv_trade", "ivTrade", existing.ivTrade),
-            ivAsk: numeric(an, "iv_ask", "ivAsk", existing.ivAsk),
-            theoreticalPrice: numeric(
-              g,
-              "theoretical_price",
-              "theoreticalPrice",
-              existing.theoreticalPrice,
-            ),
-            delta: numeric(g, "delta", "delta", existing.delta),
-            gamma: numeric(g, "gamma", "gamma", existing.gamma),
-            theta: numeric(g, "theta", "theta", existing.theta),
-            vega: numeric(g, "vega", "vega", existing.vega),
-            rho: numeric(g, "rho", "rho", existing.rho),
-            moneynessRatio: numeric(
-              an,
-              "moneyness",
-              "moneynessRatio",
-              existing.moneynessRatio,
-            ),
-            moneynessCategory:
-              an.moneyness_category ??
-              an.moneynessCategory ??
-              existing.moneynessCategory ??
-              null,
-            contractState:
-              an.contract_state ??
-              an.contractState ??
-              existing.contractState ??
-              null,
-            isTradable:
-              typeof an.is_tradable === "boolean"
-                ? an.is_tradable
-                : typeof an.isTradable === "boolean"
-                  ? an.isTradable
-                  : (existing.isTradable ?? null),
-            quantUnavailableReason:
-              an.is_available === false
-                ? (an.unavailable_reason ?? null)
-                : null,
-            historicalVolatility:
-              typeof an.historical_volatility === "number"
-                ? an.historical_volatility
-                : typeof an.historicalVolatility === "number"
-                  ? an.historicalVolatility
-                  : existing.historicalVolatility,
-          };
-          const analyticsFields = [
-            "ivBid",
-            "ivTrade",
-            "ivAsk",
-            "theoreticalPrice",
-            "delta",
-            "gamma",
-            "theta",
-            "vega",
-            "rho",
-            "moneynessRatio",
-            "historicalVolatility",
-          ];
-          updatedCw.realtimePulses = mergeRealtimePulses(
-            existing.realtimePulses,
-            existing as unknown as Record<string, number | null | undefined>,
-            updatedCw as unknown as Record<string, number | null | undefined>,
-            analyticsFields,
+          const updatedCw = applyAnalyticsToWarrant(
+            existing,
+            an,
             this.pulseReadySymbols.has(sym),
           );
           this.warrantsMap.set(sym, updatedCw);
@@ -800,6 +827,59 @@ export class BackendWebSocketClient {
 
     if (isCwSymbol || isCwType) {
       let cw = mapRawSnapshotToCoveredWarrant(row);
+      const existingCw = this.warrantsMap.get(sym);
+      const inlineAnalytics = row.analytics;
+      const display = marketSessionStore.getSnapshot().sessionContext?.displaySessionDate;
+      const inlineSession =
+        inlineAnalytics?.session_date ?? inlineAnalytics?.sessionDate;
+      const hasMatchingInlineAnalytics = Boolean(
+        inlineAnalytics && (!display || inlineSession === display),
+      );
+      if (hasMatchingInlineAnalytics) {
+        // Redis-restored analytics travel with the initial quote snapshot, so a hard
+        // reload never renders quote/terms first and IV in a later frame.
+        cw = applyAnalyticsToWarrant(cw, inlineAnalytics, false);
+      }
+
+      // A route change re-subscribes and receives the canonical quote snapshot before
+      // the analytics frame. Preserve the already-validated calculation only when that
+      // snapshot describes the exact same session and price tuple. This prevents a full
+      // snapshot from momentarily replacing IV/Greeks with raw/null values, while a real
+      // bid/ask/trade change still clears the old calculation until the backend publishes
+      // its new result.
+      if (
+        !hasMatchingInlineAnalytics &&
+        existingCw &&
+        this.snapshotMatchesAnalytics(cw, existingCw)
+      ) {
+        cw = {
+          ...cw,
+          analyticsCalculatedAt: existingCw.analyticsCalculatedAt,
+          analyticsSnapshot: existingCw.analyticsSnapshot,
+          modelDte: existingCw.modelDte,
+          modelRiskFreeRate: existingCw.modelRiskFreeRate,
+          greeksVolatilitySource: existingCw.greeksVolatilitySource,
+          quantAvailable: existingCw.quantAvailable,
+          ivAsk: existingCw.ivAsk,
+          ivTrade: existingCw.ivTrade,
+          ivBid: existingCw.ivBid,
+          theoreticalPrice: existingCw.theoreticalPrice,
+          modelPriceAtIvMid: existingCw.modelPriceAtIvMid,
+          theoreticalVolatility: existingCw.theoreticalVolatility,
+          theoreticalVolatilitySource: existingCw.theoreticalVolatilitySource,
+          delta: existingCw.delta,
+          gamma: existingCw.gamma,
+          theta: existingCw.theta,
+          vega: existingCw.vega,
+          rho: existingCw.rho,
+          moneynessRatio: existingCw.moneynessRatio,
+          moneynessCategory: existingCw.moneynessCategory,
+          historicalVolatility: existingCw.historicalVolatility,
+          contractState: existingCw.contractState,
+          isTradable: existingCw.isTradable,
+          quantUnavailableReason: existingCw.quantUnavailableReason,
+        };
+      }
 
       // Apply any buffered patches that arrived before this snapshot
       if (this.pendingPatches.has(sym)) {
@@ -820,6 +900,40 @@ export class BackendWebSocketClient {
       this.quoteListeners.forEach((fn) => fn(quote));
     }
     this.pulseReadySymbols.add(sym);
+  }
+
+  private snapshotMatchesAnalytics(
+    incoming: CoveredWarrant,
+    existing: CoveredWarrant,
+  ): boolean {
+    const analytics = existing.analyticsSnapshot as Record<string, any> | null | undefined;
+    const inputs = analytics?.modelInputs ?? analytics?.model_inputs;
+    const analyticsSession = analytics?.sessionDate ?? analytics?.session_date;
+    const incomingSession = incoming.quote.marketSessionDate;
+    if (
+      analytics?.isAvailable === false ||
+      analytics?.is_available === false ||
+      !inputs ||
+      !analyticsSession ||
+      !incomingSession ||
+      analyticsSession !== incomingSession
+    ) {
+      return false;
+    }
+
+    let bid = incoming.quote.bidPrice;
+    let ask = incoming.quote.askPrice;
+    if (bid != null && ask != null && ask < bid) {
+      bid = null;
+      ask = null;
+    }
+    return (
+      inputs.market_last === incoming.quote.lastPrice &&
+      inputs.market_bid === bid &&
+      inputs.market_ask === ask &&
+      (incoming.underlyingPrice == null ||
+        inputs.underlying_price === incoming.underlyingPrice)
+    );
   }
 }
 

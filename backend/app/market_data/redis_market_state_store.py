@@ -28,6 +28,7 @@ class RedisMarketStateStore(MarketStateStore):
     KEY_PREFIX = "cw_research:market_state:v1"
     HISTORY_PREFIX = "cw_research:dashboard_history:v1"
     OVERVIEW_KEY = "cw_research:market_overview:v2"
+    ANALYTICS_PREFIX = "cw_research:quant_analytics:v1"
 
     def __init__(
         self,
@@ -60,6 +61,9 @@ class RedisMarketStateStore(MarketStateStore):
             "write_errors": 0,
             "restore_errors": 0,
             "connection_restores": 0,
+            "analytics_writes_succeeded": 0,
+            "analytics_restored": 0,
+            "analytics_errors": 0,
         }
 
     def _mark_connected(self) -> None:
@@ -316,6 +320,66 @@ class RedisMarketStateStore(MarketStateStore):
             await self._client.set(self.OVERVIEW_KEY, json.dumps(payload), ex=7 * 86400)
         except Exception as exc:
             logger.warning("Market overview cache write failed: %s", type(exc).__name__)
+
+    def _analytics_key(self, symbol: str, session_date: str) -> str:
+        return f"{self.ANALYTICS_PREFIX}:{session_date}:{symbol.strip().upper()}"
+
+    async def load_quant_analytics(
+        self, symbols: List[str], session_date: str
+    ) -> Dict[str, Dict[str, Any]]:
+        """Restore only the requested valuation session.
+
+        The session is part of the key and is checked again inside the payload. This
+        prevents yesterday's perfectly valid IV from appearing beside today's prices.
+        """
+        if not self.is_available() or not symbols or self._client is None:
+            return {}
+        clean = list(dict.fromkeys(s.strip().upper() for s in symbols if s.strip()))
+        try:
+            values = await self._client.mget(
+                [self._analytics_key(symbol, session_date) for symbol in clean]
+            )
+            restored: Dict[str, Dict[str, Any]] = {}
+            for symbol, raw in zip(clean, values):
+                if not raw:
+                    continue
+                item = json.loads(raw)
+                if (
+                    isinstance(item, dict)
+                    and item.get("symbol", "").upper() == symbol
+                    and item.get("session_date") == session_date
+                ):
+                    restored[symbol] = item
+            self._counters["analytics_restored"] += len(restored)
+            return restored
+        except Exception as exc:
+            self._counters["analytics_errors"] += 1
+            logger.warning("Quant analytics cache read failed: %s", type(exc).__name__)
+            return {}
+
+    async def save_quant_analytics(
+        self, symbol: str, session_date: str, payload: Dict[str, Any]
+    ) -> None:
+        if not self.is_available() or self._client is None:
+            return
+        if payload.get("session_date") != session_date:
+            return
+        try:
+            await self._client.set(
+                self._analytics_key(symbol, session_date),
+                json.dumps(payload),
+                # Session keys make cross-day reads impossible. Seven days lets a same-day
+                # Railway restart hydrate immediately while bounding abandoned namespaces.
+                ex=7 * 86400,
+            )
+            self._counters["analytics_writes_succeeded"] += 1
+        except Exception as exc:
+            self._counters["analytics_errors"] += 1
+            logger.warning(
+                "Quant analytics cache write failed for %s: %s",
+                symbol,
+                type(exc).__name__,
+            )
 
     def enqueue_save(self, symbol: str, quote: CanonicalQuote) -> None:
         """Buffers quote for asynchronous batch writing without blocking."""

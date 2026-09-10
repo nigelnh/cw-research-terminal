@@ -1,0 +1,27 @@
+{
+  "VNFINLEAD": [
+    {
+      "effective_from": "2026-08-03",
+      "valid_through": "2026-10-31",
+      "source": "SSIAM_VNFINLEAD_PORTFOLIO",
+      "source_url": "https://ssiam.com.vn/en/fund-information-vnfinlead?nav_page=335",
+      "symbols": [
+        "ACB", "BID", "CTG", "EIB", "HCM", "HDB", "MBB", "MSB",
+        "NAB", "OCB", "SHB", "SSB", "SSI", "STB", "TCB", "TCX",
+        "TPB", "VCB", "VCI", "VCK", "VIB", "VIX", "VND", "VPB"
+      ]
+    }
+  ],
+  "VNDIAMOND": [
+    {
+      "effective_from": "2026-08-03",
+      "valid_through": "2026-10-31",
+      "source": "HOSE_VNDIAMOND_CONSTITUENTS_2026_Q3",
+      "source_url": "https://static2.vietstock.vn/vietstock/2026/4/20/20042026___cbtt_danh_muc_thanh_phan_vndiamond_thang_4_2026.pdf",
+      "symbols": [
+        "ACB", "BMP", "CTD", "CTG", "FPT", "GMD", "HDB", "KDH", "MBB",
+        "MSB", "MWG", "NLG", "OCB", "PNJ", "REE", "TCB", "TPB", "VPB"
+      ]
+    }
+  ]
+}
