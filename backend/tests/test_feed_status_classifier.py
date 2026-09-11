@@ -273,6 +273,23 @@ def test_optional_overview_groups_never_promote_to_a_feed_wide_banner():
     }
 
 
+def test_fresh_realtime_stream_wins_over_old_optional_dataset_failures():
+    """Production may keep a failed history/tape scope until that dataset is retried.
+    Current live ticks are direct evidence that the market feed itself is available."""
+    access = FeedAccess()
+    access.record("history", "upstream_unavailable")
+    access.record("tape", "upstream_unavailable")
+
+    wire = access.wire(
+        fresh=True,
+        active=True,
+        last_data_at="2026-09-11T02:59:00+00:00",
+    )
+
+    assert wire["code"] == "AVAILABLE"
+    assert {item["scope"] for item in wire["datasets"]} == {"history", "tape"}
+
+
 def test_several_dead_datasets_still_leave_the_stream_alone():
     access = FeedAccess()
     access.record("profiles", "401 Unauthorized")
