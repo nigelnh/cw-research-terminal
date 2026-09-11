@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IntradayVolume, MarketOverviewStrip, Sparkline } from "@/features/watchlist/market_overview_strip";
 
-const state = vi.hoisted(() => ({ empty: false, refreshing: false, preOpen: false }));
+const state = vi.hoisted(() => ({ empty: false, refreshing: false, preOpen: false, stale: false }));
 vi.mock("@/data/query/use_market_overview", () => ({
   useMarketOverview: () => ({
     isLoading: false,
@@ -15,7 +15,7 @@ vi.mock("@/data/query/use_market_overview", () => ({
         symbol, value: 1831.56, reference: 1828.36, change: 3.2, change_percent: 0.18,
         volume: 1000000, trading_value: 2000000000, advancing: 12,
         ceiling: 1, unchanged: 5, declining: 9, floor: 2,
-        as_of: "2026-09-02T14:00:00+07:00", sparkline: [1, 2, 1.5, 3],
+        as_of: "2026-09-02T14:00:00+07:00", sparkline: [1, 2, 1.5, 3], stale: state.stale,
       })),
       top_stock_volume: [{ symbol: "HPG", volume: 17126700, price: 22100, market_state: "DOWN", as_of: "2026-09-02" }],
       top_cw_volume: [{ symbol: "CHPG2617", volume: 306800, price: 490, market_state: "REFERENCE", as_of: "2026-09-02" }],
@@ -30,6 +30,7 @@ afterEach(() => {
   state.empty = false;
   state.refreshing = false;
   state.preOpen = false;
+  state.stale = false;
 });
 
 describe("market overview strip", () => {
@@ -148,6 +149,13 @@ describe("market overview strip", () => {
     expect(screen.getAllByText("(1)")[0].style.color).toBe("var(--price-ceiling)");
     // the POLLED / PARTIAL status row was removed from the card
     expect(screen.queryByText(/POLLED|PARTIAL/)).toBeNull();
+  });
+
+  it("shows the observation time instead of a STALE label", () => {
+    state.stale = true;
+    render(<MarketOverviewStrip />);
+    expect(screen.queryByText("STALE")).toBeNull();
+    expect(screen.getAllByText("14:00")).toHaveLength(4);
   });
 
   it("can render the compact index-only variant", () => {

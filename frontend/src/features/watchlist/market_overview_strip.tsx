@@ -212,7 +212,10 @@ function IndexCard({ item, referenceOnly = false }: { item: IndexOverview; refer
   const asOf = item.as_of
     ? new Date(item.as_of).toLocaleTimeString("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" })
     : null;
-  const tag = referenceOnly ? null : item.stale ? "STALE" : asOf;
+  // Keep freshness in provenance/tooltips, while the compact viewer always shows the
+  // observation time. A literal STALE badge was visually louder than the live index move
+  // and duplicated the feed-level health notice.
+  const tag = referenceOnly ? null : asOf;
   const tagTitle = [
     "Index path — 5-minute bars, 09:00–15:00 ICT.",
     asOf ? `As of ${asOf} ICT.` : "",
@@ -223,7 +226,7 @@ function IndexCard({ item, referenceOnly = false }: { item: IndexOverview; refer
     <div className="overview-spark-wrap">
       <IntradayVolume values={referenceOnly ? [] : item.sparkline || []} />
       <Sparkline values={referenceOnly ? [] : item.sparkline || []} reference={item.reference} />
-      {tag && <span className={`overview-spark-tag${item.stale ? " is-stale" : ""}`} title={tagTitle}>{tag}</span>}
+      {tag && <span className="overview-spark-tag" title={tagTitle}>{tag}</span>}
     </div>
     <div className="index-card-main">
       <strong className="heading">{item.symbol}</strong>

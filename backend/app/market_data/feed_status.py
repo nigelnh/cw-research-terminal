@@ -165,11 +165,14 @@ class FeedAccess:
             error for error in errors
             if not error["scope"].startswith(_BANNER_PROMOTION_EXCLUDED_PREFIXES)
         ]
-        if global_error is None and len(promotion_errors) > 1:
+        if global_error is None and not fresh and len(promotion_errors) > 1:
             # An account-wide condition is DISCOVERED, never assumed: when several
             # independent scopes are rejected the same way, that is the feed talking, not
             # one endpoint. A single failure only ever speaks for itself - `get_ceilingfloor`
             # is 401 for this account by design and must not headline as an auth outage.
+            # A fresh realtime stream is stronger current evidence than old failures from
+            # optional REST datasets. Those failures remain in ``datasets`` for their
+            # owning panels, but they cannot turn a healthy live board into a global outage.
             # This affects the banner only; blocking stays strictly per scope.
             counts: dict[str, int] = {}
             for err in promotion_errors:
