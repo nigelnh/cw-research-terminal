@@ -108,6 +108,7 @@ class SubscriptionManager:
         Updates in-memory MarketState and broadcasts incremental patch.
         """
         try:
+            pending_print_msg: Optional[Dict[str, Any]] = None
             if self._server_owned and self._event_session_date(raw_data) > reference_session_date().isoformat():
                 # Do not let an early next-session reset erase the overnight close.
                 return
@@ -140,22 +141,16 @@ class SubscriptionManager:
                         printed = traded_log.record(quote, diff, event=raw_data)
                         if printed is not None:
                             asyncio.ensure_future(traded_log.persist(quote.symbol, printed))
-                            # Push the print on the same rail as quote and bar patches.
-                            # Polling REST every 5s left the tape visibly behind STATS and
-                            # the watchlist row, which update on every tick; a print is a
-                            # tick, so it belongs on the tick path - for every subscribed
-                            # symbol, not just whichever panel happens to be open.
-                            print_msg = {
+                            # Publish this after the canonical quote patch below. The
+                            # browser uses the accepted, deduplicated print as one shared
+                            # flash trigger for TRD_PRC, TRD_AMT, +/-, and %CHG, including
+                            # when those displayed values repeat the previous match.
+                            pending_print_msg = {
                                 "type": "trade_print",
                                 "symbol": quote.symbol,
                                 "print": printed,
                                 "ts": quote.received_timestamp,
                             }
-                            for listener in self._patch_listeners:
-                                try:
-                                    listener(print_msg)
-                                except Exception as err:  # noqa: BLE001
-                                    logger.warning("Error broadcasting trade print: %s", err)
                     except Exception as err:  # noqa: BLE001 - the tape must never break the feed
                         logger.debug("Traded-log record failed for %s: %s", quote.symbol, err)
             else:
@@ -174,6 +169,13 @@ class SubscriptionManager:
                         listener(wire_msg)
                     except Exception as err:
                         logger.warning(f"Error broadcasting patch to listener: {err}")
+
+            if pending_print_msg is not None and self._patch_listeners:
+                for listener in self._patch_listeners:
+                    try:
+                        listener(pending_print_msg)
+                    except Exception as err:  # noqa: BLE001
+                        logger.warning("Error broadcasting trade print: %s", err)
 
             if event_type == "trade" and self._patch_listeners:
                 for bar_msg in live_bar_builder.on_trade(quote.symbol, raw_data):

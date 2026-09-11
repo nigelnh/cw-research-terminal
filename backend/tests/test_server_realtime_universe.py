@@ -21,12 +21,57 @@ from app.main import app
 from app.market_data.market_state import MarketState, market_state
 from app.market_data.market_state_store import NullMarketStateStore
 from app.market_data.market_subscription_manager import SubscriptionManager, subscription_manager
+from app.market_data.traded_log import traded_log
 from app.market_data.market_websocket import manager
 from app.market_data.session_reference import reference_session_date
 from tests.fixtures.mock_market_provider import MockMarketDataProvider
 
 
 client = TestClient(app)
+
+
+@pytest.mark.asyncio
+async def test_a_live_match_publishes_quote_before_the_shared_trade_flash(monkeypatch):
+    """The UI must paint the newest quote, then flash all traded cells as one match."""
+    session_day = reference_session_date()
+    managed = SubscriptionManager(
+        provider=MockMarketDataProvider(max_symbols=33),
+        state=MarketState(),
+        store=NullMarketStateStore(),
+        max_symbols=33,
+    )
+    managed._reference_refresh_session = session_day.isoformat()
+    messages: list[dict] = []
+    managed.register_patch_listener(messages.append)
+    printed = {
+        "id": "match-1",
+        "ts": 1_789_000_000_000,
+        "time": "10:06:53",
+        "price": 22_100,
+        "change": 100,
+        "change_percent": 100 / 22_000,
+        "volume": 100,
+        "side": "B",
+        "session_date": session_day.isoformat(),
+    }
+    monkeypatch.setattr(traded_log, "record", lambda *_args, **_kwargs: printed)
+    persist = AsyncMock()
+    monkeypatch.setattr(traded_log, "persist", persist)
+
+    managed._on_provider_event("trade", {
+        "Ticker": "HPG",
+        "Close": 22_100,
+        "Reference": 22_000,
+        "MatchVolume": 100,
+        "TotalMatchVolume": 10_000,
+        "TradingDate": f"{session_day.isoformat()}T10:06:53+07:00",
+    }, "HPG")
+    await asyncio.sleep(0)
+
+    kinds = [message["type"] for message in messages]
+    assert kinds.index("patch") < kinds.index("trade_print")
+    assert messages[kinds.index("trade_print")]["print"]["id"] == "match-1"
+    persist.assert_awaited_once_with("HPG", printed)
 
 
 async def _resolved_default():

@@ -37,8 +37,8 @@ describe("tradePrintStore", () => {
 
   it("ignores a match re-delivered after a reconnect", () => {
     const p = print(1000, 21_850);
-    acceptTradePrintMessage({ type: "trade_print", symbol: "HPG", print: p });
-    acceptTradePrintMessage({ type: "trade_print", symbol: "HPG", print: { ...p } });
+    expect(acceptTradePrintMessage({ type: "trade_print", symbol: "HPG", print: p })).toBe(true);
+    expect(acceptTradePrintMessage({ type: "trade_print", symbol: "HPG", print: { ...p } })).toBe(false);
     expect(tradePrintStore.get("HPG")).toHaveLength(1);
   });
 

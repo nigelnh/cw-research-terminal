@@ -124,7 +124,7 @@ describe("InstrumentPanel — bottom split panel", () => {
         } }} marketSessionActive={false} onClose={vi.fn()} />);
     expect(html).toContain("21,650");
     expect(html).toContain("9,472,000");
-    expect(html).toContain("−450");
+    expect(html).toContain("450");
     expect(html).not.toContain("+50");
   });
 

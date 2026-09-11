@@ -17,6 +17,8 @@ import { mergeRealtimePulses } from "./mappers/realtime_pulse";
 import { acceptLiveBarMessage } from "./live_bar_store";
 import { acceptTradePrintMessage } from "./trade_print_store";
 
+const LIVE_TRADE_PULSE_MAX_AGE_MS = 5_000;
+
 type GatewayStateHandler = (state: GatewayConnectionState) => void;
 type UpstreamFeedStateHandler = (state: UpstreamFeedState) => void;
 
@@ -744,7 +746,57 @@ export class BackendWebSocketClient {
       }
 
       case "trade_print": {
-        acceptTradePrintMessage(msg);
+        const accepted = acceptTradePrintMessage(msg);
+        const sym = String(msg.symbol ?? "").toUpperCase();
+        const eventTs = Number(msg.ts);
+        const now = Date.now();
+        const existingQuote = this.quotesMap.get(sym);
+        // REST/backfill frames also populate the tape, but only a newly accepted print
+        // observed on the live rail may flash the quote. This prevents route hydration or
+        // reconnect replay from pretending that an old match just happened.
+        if (
+          accepted &&
+          sym &&
+          existingQuote &&
+          this.pulseReadySymbols.has(sym) &&
+          Number.isFinite(eventTs) &&
+          Math.abs(now - eventTs) <= LIVE_TRADE_PULSE_MAX_AGE_MS
+        ) {
+          const change = msg.print?.change;
+          const signedChange = typeof change === "number" && Number.isFinite(change)
+            ? change
+            : typeof msg.print?.price === "number" && existingQuote.referencePrice != null
+              ? msg.print.price - existingQuote.referencePrice
+              : 0;
+          const tradePulse = {
+            sequence: (existingQuote.realtimePulses?.trade?.sequence ?? 0) + 1,
+            direction: signedChange < 0 ? "down" as const : "up" as const,
+            startedAt: now,
+          };
+          const updatedQuote: MarketQuote = {
+            ...existingQuote,
+            realtimePulses: {
+              ...(existingQuote.realtimePulses ?? {}),
+              trade: tradePulse,
+            },
+          };
+          this.quotesMap.set(sym, updatedQuote);
+          this.quoteListeners.forEach((fn) => fn(updatedQuote));
+
+          const existingCw = this.warrantsMap.get(sym);
+          if (existingCw) {
+            const updatedCw: CoveredWarrant = {
+              ...existingCw,
+              quote: updatedQuote,
+              realtimePulses: {
+                ...(existingCw.realtimePulses ?? {}),
+                trade: tradePulse,
+              },
+            };
+            this.warrantsMap.set(sym, updatedCw);
+            this.cwListeners.forEach((fn) => fn(updatedCw));
+          }
+        }
         break;
       }
 

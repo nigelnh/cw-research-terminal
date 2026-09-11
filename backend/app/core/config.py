@@ -208,7 +208,7 @@ class Settings(BaseSettings):
     # This is the single authoritative window; no other HV lookback value is defined elsewhere.
     QUANT_HV_WINDOW_SESSIONS: int = Field(default=22, description="Canonical historical volatility window in trading sessions (HV_22)")
     QUANT_HV_MIN_SESSIONS: int = Field(default=10, description="Minimum trading sessions of log-returns required to compute HV")
-    QUANT_HV_MAX_STALE_DAYS: int = Field(default=6, description="Max age (VN calendar days) of a cached HV estimate before it is treated as unavailable")
+    QUANT_HV_MAX_STALE_DAYS: int = Field(default=6, description="Max completed HOSE sessions missing after an HV estimate before it is treated as unavailable")
     QUANT_HV_WARMUP_TIMEOUT_SECONDS: float = Field(default=20.0, description="Max seconds to block on HV warm-up during application startup")
     QUANT_HV_REFRESH_INTERVAL_SECONDS: int = Field(default=21600, description="Interval for the background HV refresh loop (default 6h)")
     QUANT_HV_MAX_CONCURRENT_REFRESHES: int = Field(default=4, description="Max concurrent upstream historical fetches during HV refresh")

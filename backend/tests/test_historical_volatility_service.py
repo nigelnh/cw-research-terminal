@@ -246,6 +246,42 @@ def test_stale_estimate_treated_as_unavailable():
     assert svc.get_value("HPG") is None
 
 
+def test_hv_freshness_counts_completed_sessions_not_weekend_calendar_days(monkeypatch):
+    """Sep 4 -> Sep 10 is seven calendar days but only four completed HOSE sessions."""
+    import app.quant.historical_volatility_service as hv_module
+
+    svc = HistoricalVolatilityService(bar_source=_hpg_source(), max_stale_days=4)
+    svc._cache["HPG"] = VolEstimate(value=0.254, window=22, as_of=date(2026, 9, 4))
+    monkeypatch.setattr(
+        hv_module,
+        "latest_completed_trading_session",
+        lambda: date(2026, 9, 10),
+    )
+
+    assert svc.get_value("HPG") == pytest.approx(0.254)
+
+
+@pytest.mark.asyncio
+async def test_hv_refresh_excludes_current_incomplete_session(monkeypatch):
+    import app.quant.historical_volatility_service as hv_module
+
+    closes = synthetic_closes(40, base=20_000.0)
+    start = date(2026, 9, 11) - timedelta(days=len(closes) - 1)
+    bars = make_daily_bars(closes, start=start.isoformat())
+    src = FakeBarSource({"HPG": bars})
+    svc = HistoricalVolatilityService(bar_source=src)
+    monkeypatch.setattr(
+        hv_module,
+        "latest_completed_trading_session",
+        lambda: date(2026, 9, 10),
+    )
+
+    estimate = await svc.refresh("HPG")
+
+    assert estimate is not None
+    assert estimate.as_of == date(2026, 9, 10)
+
+
 @pytest.mark.asyncio
 async def test_upstream_source_is_swappable_without_engine_changes():
     """Demonstrates the PostgreSQL swap-point: only set_bar_source() changes."""
@@ -572,4 +608,3 @@ async def test_hv_refresh_handles_auth_error_without_raising():
     est = await svc.refresh("HPG")
     assert est is None
     assert svc.get_estimate("HPG") is None
-
