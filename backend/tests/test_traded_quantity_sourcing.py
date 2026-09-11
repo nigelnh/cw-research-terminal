@@ -63,6 +63,48 @@ async def test_traded_quantity_is_emitted_in_the_diff_for_the_websocket():
     assert diff.get("traded_quantity") == 500
 
 
+async def test_confirmed_matches_advance_trade_revision_but_replays_and_snapshots_do_not():
+    s = _store()
+    first = {
+        "Ticker": "CVPB2615",
+        "Close": 820,
+        "MatchVolume": 100,
+        "TotalMatchVolume": 1_000,
+        "TradingDate": "2026-09-11",
+        "Timestamp": "2026-09-11T10:00:00+07:00",
+        "_trade_identity": "SSI_OBSERVED|match-1",
+    }
+    quote, diff = s.apply_trade_event(first)
+    assert quote.trade_revision == 1
+    assert diff["trade_revision"] == 1
+    assert quote.to_wire_patch(diff)["_trade_revision"] == 1
+
+    replay, replay_diff = s.apply_trade_event(first)
+    assert replay.trade_revision == 1
+    assert "trade_revision" not in replay_diff
+
+    second = {
+        **first,
+        "Timestamp": "2026-09-11T10:00:01+07:00",
+        "TotalMatchVolume": 1_100,
+        "_trade_identity": "SSI_OBSERVED|match-2",
+    }
+    quote, diff = s.apply_trade_event(second)
+    assert quote.last_price == 820
+    assert quote.trade_revision == 2
+    assert diff["trade_revision"] == 2
+
+    observed_snapshot = {
+        **second,
+        "Timestamp": "2026-09-11T10:00:02+07:00",
+        "TotalMatchVolume": 1_200,
+        "_synthetic_session_snapshot": True,
+    }
+    quote, diff = s.apply_trade_event(observed_snapshot)
+    assert quote.trade_revision == 2
+    assert "trade_revision" not in diff
+
+
 # --------------------------------------------------------------------------- #
 # Book prices: 0 means "this side is empty", not a free order.
 # --------------------------------------------------------------------------- #

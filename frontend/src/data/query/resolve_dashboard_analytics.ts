@@ -38,12 +38,19 @@ export function resolveDashboardAnalytics(
   if (!inputs || !a.inputProvenance?.underlying || a.inputProvenance.underlying.sessionDate !== a.sessionDate) return null;
   if (underlying && (underlying.marketSessionDate !== a.sessionDate || underlying.lastPrice !== inputs.underlying_price)) return null;
   const result = { ...a };
+  const analyticsTradeRevision =
+    inputs.marketLastRevision ?? inputs.market_last_revision;
+  const tradeRevisionMatches =
+    analyticsTradeRevision == null ||
+    quote.tradeRevision == null ||
+    analyticsTradeRevision === quote.tradeRevision;
   for (const [field, price, input, group] of [
     ["ivBid", quote.bidPrice, inputs.market_bid, "book"],
     ["ivAsk", quote.askPrice, inputs.market_ask, "book"],
     ["ivTrade", quote.lastPrice, inputs.market_last, "trade"],
   ] as const) {
-    if (price == null || price !== input || a.inputProvenance?.[group]?.sessionDate !== a.sessionDate) result[field] = null;
+    if (price == null || price !== input || a.inputProvenance?.[group]?.sessionDate !== a.sessionDate ||
+        (field === "ivTrade" && !tradeRevisionMatches)) result[field] = null;
   }
   if (result.ivBid == null || result.ivAsk == null || (quote.askPrice ?? 0) < (quote.bidPrice ?? 0)) result.ivMid = null;
   const volatilitySource = a.greeksVolatilitySource ?? a.greeks?.volatility_source;

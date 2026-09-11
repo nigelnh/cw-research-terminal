@@ -39,6 +39,8 @@ _INTRADAY_FIELDS = (
     "iv_trade",
     "iv_ask",
     "trade_timestamp",
+    "trade_revision",
+    "trade_identity",
     "book_timestamp",
     "trade_received_timestamp",
     "book_received_timestamp",
@@ -505,6 +507,39 @@ class MarketState:
             if match_price is not None and q.last_price != match_price:
                 q.last_price = match_price
                 diff["last_price"] = q.last_price
+
+            # The same displayed price may be matched repeatedly. Keep an execution
+            # revision separate from the price so IV_TRADE can be tied to the newest
+            # confirmed match. Polling snapshots describe a board observation and never
+            # advance the revision. Provider identities suppress reconnect replays.
+            provider_trade_identity = raw_event.get("_trade_identity")
+            if provider_trade_identity is None and source_ts is not None:
+                provider_trade_identity = "|".join(
+                    map(
+                        str,
+                        (
+                            reference_session_date,
+                            sym,
+                            source_ts,
+                            match_price,
+                            traded_qty,
+                            tot_vol,
+                        ),
+                    )
+                )
+            new_confirmed_match = (
+                match_price is not None
+                and not raw_event.get("_synthetic_session_snapshot")
+                and (
+                    provider_trade_identity is None
+                    or str(provider_trade_identity) != q.trade_identity
+                )
+            )
+            if new_confirmed_match:
+                q.trade_revision = (q.trade_revision or 0) + 1
+                diff["trade_revision"] = q.trade_revision
+                if provider_trade_identity is not None:
+                    q.trade_identity = str(provider_trade_identity)
 
             if ref_price is not None and q.reference_price != ref_price:
                 q.reference_price = ref_price

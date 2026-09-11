@@ -110,6 +110,7 @@ export function mapRawSnapshotToQuote(raw: any): MarketQuote {
         : null,
     sourceTimestamp: raw._ts_source ? Number(raw._ts_source) : null,
     tradeTimestamp: raw._ts_trade ? Number(raw._ts_trade) : (raw._ts_source ? Number(raw._ts_source) : null),
+    tradeRevision: raw._trade_revision != null ? Number(raw._trade_revision) : null,
     bookTimestamp: raw._ts_book ? Number(raw._ts_book) : null,
     referenceTimestamp: raw._ts_reference ? Number(raw._ts_reference) : null,
     tradeReceivedTimestamp: raw._received_trade ? Number(raw._received_trade) : null,

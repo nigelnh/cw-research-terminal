@@ -53,6 +53,13 @@ class CanonicalQuote(BaseModel):
     provider_timestamp: Optional[str] = None
     source_timestamp: Optional[int] = None  # compatibility alias: latest trade timestamp
     trade_timestamp: Optional[int] = None  # epoch ms, only advanced by a real trade event
+    # Monotonic within one trading session and advanced only by a confirmed new match.
+    # Quant analytics bind IV_TRADE to this revision instead of mistaking a repeated
+    # board snapshot for another execution.
+    trade_revision: Optional[int] = None
+    # Internal provider identity used to reject reconnect replays. It is persisted in the
+    # warm quote but deliberately omitted from the browser wire contract.
+    trade_identity: Optional[str] = None
     book_timestamp: Optional[int] = None  # epoch ms, only advanced by order-book events
     trade_received_timestamp: Optional[int] = None
     book_received_timestamp: Optional[int] = None
@@ -157,6 +164,7 @@ class CanonicalQuote(BaseModel):
             "MaturityDate": self.maturity_date,
             "_ts_source": self.source_timestamp,
             "_ts_trade": self.trade_timestamp,
+            "_trade_revision": self.trade_revision,
             "_ts_book": self.book_timestamp,
             "_received_trade": self.trade_received_timestamp,
             "_received_book": self.book_received_timestamp,
@@ -219,6 +227,7 @@ class CanonicalQuote(BaseModel):
             "iv_bid": ("Vol3", to_wire_iv),
             "source_timestamp": ("_ts_source", lambda v: v),
             "trade_timestamp": ("_ts_trade", lambda v: v),
+            "trade_revision": ("_trade_revision", lambda v: v),
             "book_timestamp": ("_ts_book", lambda v: v),
             "trade_received_timestamp": ("_received_trade", lambda v: v),
             "book_received_timestamp": ("_received_book", lambda v: v),
