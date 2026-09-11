@@ -90,6 +90,37 @@ describe("resolveDashboardAnalytics", () => {
     for (const g of ["delta", "gamma", "theta", "vega", "rho"]) expect(out?.[g]).toBeNull();
   });
 
+  it("does not attach IV_TRADE to a newer confirmed match revision", () => {
+    const a = analytics({
+      modelInputs: {
+        underlying_price: 25000,
+        market_bid: 1120,
+        market_ask: 1140,
+        market_last: 1130,
+        market_last_revision: 7,
+      },
+    });
+    const out = resolveDashboardAnalytics([a], quote({ tradeRevision: 8 }), S);
+    expect(out?.ivBid).toBeCloseTo(0.42);
+    expect(out?.ivAsk).toBeCloseTo(0.45);
+    expect(out?.ivTrade).toBeNull();
+    expect(out?.delta).toBeNull();
+  });
+
+  it("accepts IV_TRADE calculated for the current confirmed match revision", () => {
+    const a = analytics({
+      modelInputs: {
+        underlying_price: 25000,
+        market_bid: 1120,
+        market_ask: 1140,
+        market_last: 1130,
+        market_last_revision: 8,
+      },
+    });
+    expect(resolveDashboardAnalytics([a], quote({ tradeRevision: 8 }), S)?.ivTrade)
+      .toBeCloseTo(0.44);
+  });
+
   it("keeps the Greeks when a different IV moved than the one they used", () => {
     const out = resolveDashboardAnalytics([analytics()], quote({ bidPrice: 1125 }), S);
     expect(out?.delta).toBeCloseTo(0.1);

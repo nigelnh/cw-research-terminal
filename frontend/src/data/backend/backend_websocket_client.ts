@@ -981,6 +981,9 @@ export class BackendWebSocketClient {
     }
     return (
       inputs.market_last === incoming.quote.lastPrice &&
+      ((inputs.market_last_revision ?? inputs.marketLastRevision) == null ||
+        incoming.quote.tradeRevision == null ||
+        (inputs.market_last_revision ?? inputs.marketLastRevision) === incoming.quote.tradeRevision) &&
       inputs.market_bid === bid &&
       inputs.market_ask === ask &&
       (incoming.underlyingPrice == null ||

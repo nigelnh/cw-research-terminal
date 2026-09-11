@@ -66,6 +66,8 @@ export interface MarketQuote {
   exchangeTimestamp: number | null;
   sourceTimestamp: number | null;
   tradeTimestamp?: number | null;
+  /** Current-session provider-confirmed match revision used by IV_TRADE analytics. */
+  tradeRevision?: number | null;
   bookTimestamp?: number | null;
   referenceTimestamp?: number | null;
   tradeReceivedTimestamp?: number | null;

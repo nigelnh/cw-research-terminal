@@ -955,6 +955,11 @@ class LiveQuantEngine:
             market_bid=bid_price,
             market_ask=ask_price,
             market_last=last_price,
+            market_last_revision=(
+                cw_state.trade_revision
+                if last_price is not None and cw_state is not None
+                else None
+            ),
         )
 
         analytics = WarrantAnalytics(
@@ -1056,6 +1061,7 @@ class LiveQuantEngine:
         return all((
             self._same_number(inputs.underlying_price, und_state.last_price),
             self._same_number(inputs.market_last, cw_state.last_price),
+            self._same_number(inputs.market_last_revision, cw_state.trade_revision),
             self._same_number(inputs.market_bid, bid),
             self._same_number(inputs.market_ask, ask),
         ))

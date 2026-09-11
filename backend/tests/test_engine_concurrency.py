@@ -469,11 +469,24 @@ async def test_G_scheduled_path_matches_direct_compute_numerically():
         assert eng.stats()["computed"] == computed
         assert eng.stats()["input_cache_hits"] == 1
 
-        # A price change is a real valuation input change and schedules one new calculation.
+        # A genuine new execution at the same displayed price must still bind IV_TRADE to
+        # the new match revision and publish a fresh analytics snapshot.
+        cw.trade_revision = 1
+        cw.trade_timestamp = stamp + 2_000
+        eng.notify_market_tick("CHPG2602")
+        await _drain(eng)
+        matched = eng.get_analytics("CHPG2602")
+        assert matched is not None
+        assert matched is not scheduled
+        assert matched.model_inputs is not None
+        assert matched.model_inputs.market_last_revision == 1
+        assert eng.stats()["computed"] == computed + 1
+
+        # A price change remains a valuation input change and schedules another calculation.
         cw.bid1_price = 1210.0
         eng.notify_market_tick("CHPG2602")
         await _drain(eng)
-        assert eng.stats()["computed"] == computed + 1
+        assert eng.stats()["computed"] == computed + 2
     await eng.shutdown()
 
 

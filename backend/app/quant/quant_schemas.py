@@ -77,6 +77,10 @@ class QuantModelInputs(BaseModel):
     market_bid: Optional[float] = Field(default=None, description="Market Bid1 price in raw VND")
     market_ask: Optional[float] = Field(default=None, description="Market Ask1 price in raw VND")
     market_last: Optional[float] = Field(default=None, description="Market Last trade price in raw VND")
+    market_last_revision: Optional[int] = Field(
+        default=None,
+        description="Current-session confirmed-match revision used for IV_TRADE",
+    )
 
 
 class HistoricalVolatilityPoint(BaseModel):

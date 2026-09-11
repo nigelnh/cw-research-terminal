@@ -102,6 +102,11 @@ export function applyRawPatchToQuote(
     if (patch._ts_trade === undefined) q.tradeTimestamp = Number(patch._ts_source);
   }
   if (patch._ts_trade !== undefined) q.tradeTimestamp = Number(patch._ts_trade);
+  if (patch._trade_revision !== undefined) {
+    q.tradeRevision = patch._trade_revision == null
+      ? null
+      : Number(patch._trade_revision);
+  }
   if (patch._ts_book !== undefined) q.bookTimestamp = Number(patch._ts_book);
   if (patch._ts_reference !== undefined) q.referenceTimestamp = Number(patch._ts_reference);
   if (patch._received_trade !== undefined) q.tradeReceivedTimestamp = Number(patch._received_trade);
