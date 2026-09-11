@@ -478,7 +478,7 @@ export function TradingChart({
             </span>
           </div>
 
-          {activeReadout && <span style={{ fontSize: 9, color: "var(--t-62)" }} title={activeReadout.asOf ?? "Observation time unavailable"}>{activeReadout.sessionDate ?? activeReadout.timestamp} · {activeReadout.priceBasis ?? "Basis unavailable"} · {activeReadout.source ?? "Source unavailable"}{activeReadout.complete === false ? " · PARTIAL" : ""}</span>}
+          {activeReadout && <span style={{ fontSize: 9, color: "var(--t-75)" }} title={activeReadout.asOf ?? "Observation time unavailable"}>{activeReadout.sessionDate ?? activeReadout.timestamp} · {activeReadout.priceBasis ?? "Basis unavailable"} · {activeReadout.source ?? "Source unavailable"}{activeReadout.complete === false ? " · PARTIAL" : ""}</span>}
           {activeReadout && activeReadout.open !== null && (
             <div
               style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--muted-foreground)", fontSize: "10.5px" }}
@@ -501,12 +501,10 @@ export function TradingChart({
                   }}
                 >
                   <RealtimeValue pulse={livePulses?.priceChange}>
-                    {activeReadout.change > 0 ? "+" : ""}
-                    {formatVnd(activeReadout.change)}
+                    {formatVnd(Math.abs(activeReadout.change))}
                   </RealtimeValue>{" "}(
                   <RealtimeValue pulse={livePulses?.priceChangePercent}>
-                    {activeReadout.changePercent > 0 ? "+" : ""}
-                    {(activeReadout.changePercent * 100).toFixed(2)}%
+                    {Math.abs(activeReadout.changePercent * 100).toFixed(2)}%
                   </RealtimeValue>)
                 </span>
               )}

@@ -201,7 +201,6 @@ export function IntradayVolume({ values }: { values: IndexOverview["sparkline"] 
 }
 
 function IndexCard({ item, referenceOnly = false }: { item: IndexOverview; referenceOnly?: boolean }) {
-  const prefix = item.change != null && item.change > 0 ? "+" : "";
   const sessionKey = item.as_of?.slice(0, 10) ?? null;
   const reasons = item.partial_reasons?.map(reason => ({
     BREADTH_UNAVAILABLE: "Market breadth unavailable (advancing/declining counts)",
@@ -235,8 +234,8 @@ function IndexCard({ item, referenceOnly = false }: { item: IndexOverview; refer
       </span> : <span style={{ color: tone(item.change) }}>
         <PolledRealtimeValue value={item.value} resetKey={sessionKey} tone={flashTone(item.change)}>{number(item.value)}</PolledRealtimeValue>{" "}
         <small>
-          <PolledRealtimeValue value={item.change} resetKey={sessionKey} tone={flashTone(item.change)}>{prefix}{number(item.change)}</PolledRealtimeValue>{" "}(
-          <PolledRealtimeValue value={item.change_percent} resetKey={sessionKey} tone={flashTone(item.change_percent)}>{prefix}{item.change_percent == null ? DASH : `${item.change_percent.toFixed(2)}%`}</PolledRealtimeValue>)
+          <PolledRealtimeValue value={item.change} resetKey={sessionKey} tone={flashTone(item.change)}>{number(item.change == null ? null : Math.abs(item.change))}</PolledRealtimeValue>{" "}(
+          <PolledRealtimeValue value={item.change_percent} resetKey={sessionKey} tone={flashTone(item.change_percent)}>{item.change_percent == null ? DASH : `${Math.abs(item.change_percent).toFixed(2)}%`}</PolledRealtimeValue>)
         </small>
       </span>}
     </div>

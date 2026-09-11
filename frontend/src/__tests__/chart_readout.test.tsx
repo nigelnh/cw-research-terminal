@@ -73,7 +73,7 @@ describe("Chart OHLCV readout", () => {
     expect(page.getAllByText("115")).toHaveLength(1);
     const change = page.getByTitle("Bar change: close − open");
     expect(change.previousElementSibling?.textContent).toBe("C 115");
-    expect(change.textContent).toBe("+15 (+15.00%)");
+    expect(change.textContent).toBe("15 (15.00%)");
     expect(page.getByText("5.0k")).toBeTruthy();
     expect(page.queryByText(/LAST 2026/)).toBeNull();
     const candle = chart.series.find((s) => s.kind === "candle")!;

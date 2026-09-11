@@ -2,11 +2,12 @@
 import { act, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RealtimeValue, REALTIME_FLASH_DURATION_MS } from "@/components/common/realtime_value";
-import { quoteCell } from "@/components/common/quote_columns";
+import { QUOTE_COLUMN_PULSE_FIELD, quoteCell } from "@/components/common/quote_columns";
 import { MARKET_COLOR, priceColor } from "@/components/common/grid_table";
 import { BackendWebSocketClient } from "@/data/backend/backend_websocket_client";
 import { applyRawPatchToQuote } from "@/data/backend/mappers/map_patch";
 import { mapRawSnapshotToQuote } from "@/data/backend/mappers/map_snapshot";
+import { tradePrintStore } from "@/data/backend/trade_print_store";
 
 const snapshot = (overrides: Record<string, unknown> = {}) => ({
   Symbol: "HPG",
@@ -99,7 +100,53 @@ describe("incremental realtime feedback", () => {
     );
 
     expect(after.lastPrice).toBe(22_100);
-    expect(rendered.text).toBe("+200");
+    expect(rendered.text).toBe("200");
+  });
+
+  it("uses one accepted match to retrigger every traded column even when values repeat", () => {
+    tradePrintStore.clear("HPG");
+    const client = new BackendWebSocketClient("ws://example.test/ws/market");
+    client.handleIncomingMessage({
+      type: "status",
+      market_session: "MORNING_SESSION",
+      market_session_date: "2026-09-11",
+      market_session_active: true,
+      upstream_status: "LIVE",
+      feed_fresh: true,
+    });
+    client.handleIncomingMessage({ type: "snapshots", rows: [snapshot()] });
+
+    const message = (id: string) => ({
+      type: "trade_print",
+      symbol: "HPG",
+      ts: Date.now(),
+      print: {
+        id,
+        ts: Date.now(),
+        time: "10:06:53",
+        price: 22_100,
+        volume: 100,
+        change: -100,
+        change_percent: -0.0045,
+        side: "S",
+        session_date: "2026-09-11",
+      },
+    });
+
+    client.handleIncomingMessage(message("match-1"));
+    expect(client.getQuote("HPG")?.realtimePulses?.trade).toMatchObject({
+      sequence: 1,
+      direction: "down",
+    });
+    for (const column of ["last", "tradedQuantity", "change", "chgPct"] as const) {
+      expect(QUOTE_COLUMN_PULSE_FIELD[column]).toBe("trade");
+    }
+
+    // A distinct match with the same displayed price/size/change is still a new event.
+    client.handleIncomingMessage(message("match-2"));
+    expect(client.getQuote("HPG")?.realtimePulses?.trade?.sequence).toBe(2);
+    client.handleIncomingMessage(message("match-2"));
+    expect(client.getQuote("HPG")?.realtimePulses?.trade?.sequence).toBe(2);
   });
 
   it("does not pulse a full snapshot and retriggers consecutive same-direction patches", () => {

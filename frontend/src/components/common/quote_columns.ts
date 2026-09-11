@@ -37,10 +37,12 @@ export type QuoteColumnKey = (typeof QUOTE_COLUMNS)[number]["key"];
 export const QUOTE_COLUMN_PULSE_FIELD: Partial<Record<QuoteColumnKey, string>> = {
   bid: "bidPrice",
   ask: "askPrice",
-  last: "lastPrice",
-  tradedQuantity: "tradedQuantity",
-  change: "priceChange",
-  chgPct: "priceChangePercent",
+  // A matched order is one visual event. Use its shared pulse so all four trade fields
+  // flash together even when the latest price, size, or change repeats the prior print.
+  last: "trade",
+  tradedQuantity: "trade",
+  change: "trade",
+  chgPct: "trade",
   vol: "totalVolume",
   ivBid: "ivBid",
   ivTrade: "ivTrade",
@@ -114,10 +116,7 @@ export function quoteCell(
           ? row.last - row.ref
           : null;
       return {
-        text:
-          amount === null
-            ? DASH
-            : `${amount > 0 ? "+" : amount < 0 ? "−" : ""}${fmtPrice(Math.abs(amount))}`,
+        text: amount === null ? DASH : fmtPrice(Math.abs(amount)),
         color:
           amount === null
             ? muted

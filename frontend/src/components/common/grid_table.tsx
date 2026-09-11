@@ -5,7 +5,7 @@ import { marketSessionStore, marketNow } from "@/data/market_session_store";
  * Ports the "Direction C" prototype's exact sort / pin / colour logic:
  *   - 3-state header sort (asc -> desc -> none), nulls always sort last
  *   - row pinning: pinned rows float to the top of the ordered list
- *   - fmtChg(): signed percent -> { text, color } using the semantic market colours
+ *   - fmtChg(): percent magnitude -> { text, color } using semantic market colours
  *   - priceColor(): HOSE ceiling / floor / reference bands for BID / ASK / TRD cells
  */
 import React, { useCallback, useMemo, useState } from "react";
@@ -85,13 +85,13 @@ export function priceBandColor(
   return MARKET_COLOR[band === "reference" ? "flat" : band];
 }
 
-/** Signed percent (already a percent number, e.g. -0.45) -> display text + colour. */
+/** Percent magnitude (already a percent number, e.g. -0.45) + directional colour. */
 export function fmtChg(pct: number | null | undefined): { text: string; color: string } {
   if (pct === null || pct === undefined || Number.isNaN(pct)) {
     return { text: "—", color: "var(--t-46)" };
   }
   const color = pct > 0 ? MARKET_COLOR.up : pct < 0 ? MARKET_COLOR.down : MARKET_COLOR.flat;
-  return { text: `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`, color };
+  return { text: `${Math.abs(pct).toFixed(2)}%`, color };
 }
 
 export interface PriceColorRef {

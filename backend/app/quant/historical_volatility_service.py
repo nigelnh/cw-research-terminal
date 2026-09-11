@@ -39,6 +39,10 @@ from app.market_data.market_schemas import (
     HistoricalEntitlementError,
     HistoricalRateLimitError,
 )
+from app.market_data.trading_calendar import (
+    latest_completed_trading_session,
+    trading_sessions_between,
+)
 from app.quant.historical_volatility import calculate_historical_volatility
 
 logger = logging.getLogger(__name__)
@@ -148,7 +152,17 @@ class HistoricalVolatilityService:
         est = self._cache.get(symbol.strip().upper())
         if est is None:
             return None
-        if est.as_of > _vn_today() or (_vn_today() - est.as_of).days > self._max_stale_days:
+        # HV is an EOD series, so freshness is measured in completed HOSE sessions. A
+        # calendar-day check made a Friday estimate expire on the following Friday after
+        # only four completed sessions, which blanked Rich/Cheap after a weekend/redeploy.
+        # It also allowed a provider's incomplete current-day bar into an EOD calculation.
+        latest_completed = latest_completed_trading_session()
+        if est.as_of > latest_completed:
+            return None
+        missing_sessions = len(
+            trading_sessions_between(est.as_of + timedelta(days=1), latest_completed)
+        )
+        if missing_sessions > self._max_stale_days:
             return None
         return est
 
@@ -226,6 +240,7 @@ class HistoricalVolatilityService:
                 return self._cache.get(sym)
 
             observations: Dict[date, float] = {}
+            latest_completed = latest_completed_trading_session()
             for bar in bars or []:
                 close = getattr(bar, "close", None)
                 if close is None:
@@ -240,7 +255,7 @@ class HistoricalVolatilityService:
                         bar_date = raw_date if isinstance(raw_date, date) else date.fromisoformat(str(raw_date)[:10])
                     except (TypeError, ValueError):
                         continue
-                    if bar_date <= _vn_today():
+                    if bar_date <= latest_completed:
                         observations[bar_date] = c
 
             ordered = sorted(observations.items())

@@ -67,8 +67,10 @@ describe("TRADED LOGS", () => {
     const text = body.textContent ?? "";
     expect(text).toContain("09:20:31");
     expect(text).toContain("1,190");
-    expect(text).toContain("+80");
-    expect(text).toContain("+7.21%");
+    expect(text).toContain("80");
+    expect(text).toContain("7.21%");
+    expect(text).not.toContain("+80");
+    expect(text).not.toContain("+7.21%");
     expect(text).toContain("12,000");
     expect(text).toContain("B");
     // The session date chip was removed from the heading: the tape's own rows carry the

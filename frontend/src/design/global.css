@@ -43,19 +43,21 @@
   --border-19: oklch(0.19 0 0);
   --border-26: oklch(0.26 0 0);
 
-  --t-92: oklch(0.92 0 0);
-  --t-90: oklch(0.90 0 0);
-  --t-85: oklch(0.85 0 0);
-  --t-80: oklch(0.80 0 0);
-  --t-75: oklch(0.75 0 0);
-  --t-70: oklch(0.70 0 0);
-  --t-66: oklch(0.66 0 0);
-  --t-60: oklch(0.60 0 0);
-  --t-55: oklch(0.55 0 0);
-  --t-50: oklch(0.50 0 0);
-  --t-46: oklch(0.46 0 0);
-  --t-42: oklch(0.42 0 0);
-  --t-40: oklch(0.40 0 0);
+  /* Text remains hierarchical, but every tier clears the contrast floor on the black
+     terminal ground. Direction and selection continue to use semantic/signature colours. */
+  --t-92: oklch(0.96 0 0);
+  --t-90: oklch(0.94 0 0);
+  --t-85: oklch(0.91 0 0);
+  --t-80: oklch(0.88 0 0);
+  --t-75: oklch(0.85 0 0);
+  --t-70: oklch(0.82 0 0);
+  --t-66: oklch(0.80 0 0);
+  --t-60: oklch(0.78 0 0);
+  --t-55: oklch(0.76 0 0);
+  --t-50: oklch(0.74 0 0);
+  --t-46: oklch(0.72 0 0);
+  --t-42: oklch(0.70 0 0);
+  --t-40: oklch(0.68 0 0);
 
   --accent: #a0c4e1; /* soft steel-blue — brand, symbols, active tab, tracked, quant values */
   --accent-violet: oklch(0.75 0.13 300); /* REPL ">" glyph only */
@@ -73,7 +75,7 @@
   --flat: oklch(0.80 0.15 95);
   --price-ceiling: oklch(0.78 0.17 340);
   --price-floor: oklch(0.75 0.14 200);
-  --price-null: oklch(0.50 0 0);
+  --price-null: var(--t-70);
 
   --font-display: "Rousseau Deco", Georgia, "Times New Roman", serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;

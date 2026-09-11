@@ -38,14 +38,14 @@ let revision = 0;
 
 const key = (symbol: string) => symbol.trim().toUpperCase();
 
-export function acceptTradePrintMessage(message: unknown): void {
+export function acceptTradePrintMessage(message: unknown): boolean {
   const m = message as { symbol?: unknown; print?: TradePrint } | null;
   const sym = typeof m?.symbol === "string" ? key(m.symbol) : "";
   const entry = m?.print;
-  if (!sym || !entry || typeof entry.ts !== "number" || typeof entry.price !== "number") return;
+  if (!sym || !entry || typeof entry.ts !== "number" || typeof entry.price !== "number") return false;
 
   const day = marketSessionStore.getSnapshot().sessionContext?.displaySessionDate;
-  if (day && entry.session_date !== day) return;
+  if (day && entry.session_date !== day) return false;
   const previous = prints.get(sym);
   const tape = previous?.[0]?.session_date === entry.session_date ? previous : [];
   const seen = tape === previous ? identities.get(sym)! : new Set<string>();
@@ -53,7 +53,7 @@ export function acceptTradePrintMessage(message: unknown): void {
   // The same match can be re-delivered after a reconnect, and the REST backfill overlaps
   // with whatever arrived while it was in flight.
   if (seen.has(identity)) {
-    return;
+    return false;
   }
   seen.add(identity);
   if (!tape.length || entry.ts >= tape[0].ts) tape.unshift(entry);
@@ -63,6 +63,7 @@ export function acceptTradePrintMessage(message: unknown): void {
   identities.set(sym, seen);
   revision++;
   listeners.forEach((fn) => fn());
+  return true;
 }
 
 export const tradePrintStore = {
