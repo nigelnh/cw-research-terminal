@@ -63,6 +63,7 @@ class ResolvedRow:
     instrument_type: str
     values: dict[str, Optional[float]] = field(default_factory=dict)  # RAW VND / points
     underlying_symbol: Optional[str] = None
+    trade_revision: Optional[int] = None
     analytics: Optional[dict[str, Any]] = None
     quote_prov: FieldProvenance = field(
         default_factory=lambda: FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE)
@@ -110,6 +111,7 @@ class ResolvedRow:
             "Avg_Prc": p("average_price"),
             "Total_Vol": v.get("total_volume"),
             "Traded_Qty": v.get("traded_quantity"),
+            "_trade_revision": self.trade_revision,
             "Trading_Val": p("trading_value"),
             "Bid1_Prc": p("bid1_price"), "Bid1_Qty": v.get("bid1_quantity"),
             "Ask1_Prc": p("ask1_price"), "Ask1_Qty": v.get("ask1_quantity"),
@@ -381,6 +383,7 @@ class MarketSnapshotResolver:
             for f in _BOOK_FIELDS:
                 row.values[f] = getattr(live, f, None)
             row.underlying_symbol = live.underlying_symbol
+            row.trade_revision = live.trade_revision
             sd = str(live_sd)
             def group_provenance(ts, received, has_value):
                 if not has_value:

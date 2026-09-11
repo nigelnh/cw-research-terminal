@@ -79,13 +79,14 @@ def _clear_market_state():
 async def test_live_wins_during_active_session(resolver):
     market_state.restore_quote(CanonicalQuote(
         symbol="HPG", instrument_type="STOCK", last_price=30000.0, bid1_price=29900.0,
-        ask1_price=30100.0, total_volume=5_000_000,
+        ask1_price=30100.0, total_volume=5_000_000, trade_revision=3,
         received_timestamp=int(_ACTIVE_NOW.timestamp() * 1000),
     ))
     r = (await resolver.resolve_rows(["HPG"], now=_ACTIVE_NOW))[0]
     assert r.quote_prov.state.value == "LIVE"
     assert r.values["last_price"] == 30000.0
     assert r.is_realtime_eligible is True
+    assert r.to_wire()["_trade_revision"] == 3
 
 
 async def test_live_row_keeps_session_bands_and_exposes_reference_provenance(resolver):
