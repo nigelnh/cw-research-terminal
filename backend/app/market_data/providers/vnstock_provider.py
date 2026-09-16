@@ -1374,6 +1374,21 @@ class VnstockProvider(MarketDataProvider):
             members = [] if reference_only else [valid_row(member) for member in groups[symbol]]
             members = [row for row in members if row is not None]
             states = [self._market_state(_finite(r.get("close_price")), _finite(r.get("reference_price")), _finite(r.get("ceiling_price")), _finite(r.get("floor_price"))) for r in members]
+            # VCI's index OHLCV currently omits traded value even though its daily row
+            # carries the cumulative volume.  KBS board rows expose raw-VND
+            # ``total_value`` for every constituent, so a complete, session-matched
+            # constituent set is an authoritative fallback for index turnover.  Do not
+            # publish a partial sum as the full index value.
+            direct_trading_value = None
+            for key in ("value", "va", "trading_value", "total_value"):
+                direct_trading_value = _finite((current or {}).get(key))
+                if direct_trading_value is not None:
+                    break
+            constituent_trading_values = [
+                value
+                for row in members
+                if (value := _finite(row.get("total_value"))) is not None
+            ]
             sparkline = []
             for row in ([] if reference_only else intraday_rows):
                 if _date_text(row.get("time")) != session:
@@ -1389,6 +1404,40 @@ class VnstockProvider(MarketDataProvider):
             breadth_coverage = len(members) / expected_members if expected_members else 0.0
             has_breadth = bool(members)
             complete_breadth = bool(expected_members and len(members) == expected_members)
+            complete_constituent_value = bool(
+                complete_breadth
+                and len(constituent_trading_values) == expected_members
+            )
+            if reference_only:
+                trading_value = None
+            elif direct_trading_value is not None:
+                trading_value = direct_trading_value
+            elif complete_constituent_value:
+                trading_value = sum(constituent_trading_values)
+            else:
+                trading_value = None
+            trading_value_source = (
+                "VNSTOCK_VCI" if direct_trading_value is not None
+                else "DERIVED_VNSTOCK_KBS_CONSTITUENTS"
+            )
+            constituent_value_stamps = [
+                stamp for row in members
+                if _finite(row.get("total_value")) is not None
+                and (stamp := _iso_timestamp(row.get("time"), session_date=session)) is not None
+            ]
+            trading_value_as_of = (
+                as_of if direct_trading_value is not None
+                else max(constituent_value_stamps, default=None)
+            )
+            index_volume = None if reference_only else _finite((current or {}).get("volume"))
+            if reference_only:
+                totals_availability = "UNAVAILABLE"
+            elif index_volume is not None and trading_value is not None:
+                totals_availability = "AVAILABLE"
+            elif index_volume is not None or trading_value is not None:
+                totals_availability = "PARTIAL"
+            else:
+                totals_availability = "UNAVAILABLE"
             availability = (
                 "AVAILABLE" if price is not None and sparkline and complete_breadth
                 else "PARTIAL" if price is not None or reference is not None or has_breadth else "UNAVAILABLE"
@@ -1402,8 +1451,8 @@ class VnstockProvider(MarketDataProvider):
                 "symbol": symbol, "value": price, "change": change,
                 "change_percent": change / reference * 100 if change is not None and reference else None,
                 "reference": reference,
-                "volume": None if reference_only else _finite((current or {}).get("volume")),
-                "trading_value": None if reference_only else _finite((current or {}).get("value") or (current or {}).get("va")),
+                "volume": index_volume,
+                "trading_value": trading_value,
                 "advancing": advancing, "ceiling": ceiling_count,
                 "unchanged": unchanged, "declining": declining,
                 "floor": floor_count, "as_of": as_of, "session_date": session,
@@ -1415,14 +1464,30 @@ class VnstockProvider(MarketDataProvider):
                     ("INTRADAY_UNAVAILABLE", not sparkline),
                     ("BREADTH_UNAVAILABLE", not has_breadth),
                     ("BREADTH_PARTIAL", has_breadth and not complete_breadth),
+                    ("TRADING_VALUE_UNAVAILABLE", not reference_only and trading_value is None),
                 ) if missing],
                 "provenance": {
                     "price": {"source": "VNSTOCK_VCI", "as_of": as_of, "session_date": session},
                     "reference": {"source": "VNSTOCK_VCI_PRIOR_CLOSE", "as_of": None,
                                   "session_date": session,
                                   "observed_session_date": max((day for _, day in daily if day < session), default=None)},
-                    "totals": {"source": "VNSTOCK_VCI", "as_of": as_of, "session_date": session,
-                               "availability": "UNAVAILABLE" if reference_only else "AVAILABLE" if current else "UNAVAILABLE"},
+                    "totals": {
+                        "source": "VNSTOCK_VCI" if direct_trading_value is not None
+                        else "MIXED_VNSTOCK_VCI_KBS_CONSTITUENTS",
+                        "as_of": as_of, "session_date": session,
+                        "availability": totals_availability,
+                        "volume": {
+                            "source": "VNSTOCK_VCI", "as_of": as_of,
+                            "availability": "AVAILABLE" if index_volume is not None else "UNAVAILABLE",
+                        },
+                        "trading_value": {
+                            "source": trading_value_source, "as_of": trading_value_as_of,
+                            "availability": "AVAILABLE" if trading_value is not None else "UNAVAILABLE",
+                            "observed": len(constituent_trading_values)
+                            if direct_trading_value is None else None,
+                            "expected": expected_members if direct_trading_value is None else None,
+                        },
+                    },
                     "breadth": {"source": "DERIVED_VNSTOCK_KBS_CONSTITUENTS", "as_of": as_of,
                                 "session_date": session,
                                 "availability": "AVAILABLE" if complete_breadth else "PARTIAL" if has_breadth else "UNAVAILABLE",
