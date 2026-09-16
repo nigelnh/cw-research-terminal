@@ -86,6 +86,10 @@ export function RealtimeValue({
   const flash = activePulse
     ? ` realtime-flash realtime-flash-${flashTone}`
     : "";
+  // Every surface routes its pulse through this component.  Override the steady-state
+  // market colour while the wash is active so the digits flash white with the cell,
+  // then restore the caller's original colour as soon as the pulse expires.
+  const displayedStyle = activePulse ? { ...style, color: "#fff" } : style;
   const Tag = as;
   return (
     <Tag
@@ -94,7 +98,7 @@ export function RealtimeValue({
       data-flash-direction={activePulse?.direction}
       data-flash-tone={activePulse ? flashTone : undefined}
       data-flash-sequence={activePulse?.sequence}
-      style={style}
+      style={displayedStyle}
       title={title}
     >
       {children}

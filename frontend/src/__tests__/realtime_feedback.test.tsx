@@ -28,15 +28,18 @@ describe("incremental realtime feedback", () => {
     vi.useFakeTimers();
     try {
       const { container, unmount } = render(<table><tbody><tr>
-        <RealtimeValue as="td" title="Traded price" style={{ padding: "8px" }}
+        <RealtimeValue as="td" title="Traded price" style={{ padding: "8px", color: "var(--down)" }}
           pulse={{ sequence: 1, direction: "up", startedAt: Date.now() }}>21,700</RealtimeValue>
       </tr></tbody></table>);
-      expect(container.querySelector("td.realtime-flash-up")?.textContent).toBe("21,700");
+      const flashingCell = container.querySelector("td.realtime-flash-up") as HTMLElement;
+      expect(flashingCell?.textContent).toBe("21,700");
+      expect(flashingCell.style.color).toBe("#fff");
       expect(container.querySelector("td span")).toBeNull();
       act(() => vi.advanceTimersByTime(1000));
       expect(container.querySelector("td.realtime-flash-up")).not.toBeNull();
       act(() => vi.advanceTimersByTime(201));
       expect(container.querySelector(".realtime-flash")).toBeNull();
+      expect((container.querySelector("td") as HTMLElement).style.color).toBe("var(--down)");
       expect(REALTIME_FLASH_DURATION_MS).toBe(1200);
       unmount();
     } finally { vi.useRealTimers(); }

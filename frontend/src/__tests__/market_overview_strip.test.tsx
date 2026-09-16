@@ -143,6 +143,7 @@ describe("market overview strip", () => {
     expect(screen.queryByText("HOSE covered warrants")).toBeNull();
     expect(screen.queryByText(/LAST SESSION/)).toBeNull();
     expect(screen.getByText("17,126,700")).toBeTruthy();
+    expect(screen.getAllByText("2.00B")).toHaveLength(4);
     expect(screen.getByText("HPG").style.color).toBe("var(--down)");
     expect(screen.getByText("22,100").style.color).toBe("var(--down)");
     expect(document.querySelectorAll(".overview-direction-icon")).toHaveLength(8);

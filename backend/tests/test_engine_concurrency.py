@@ -432,9 +432,16 @@ async def test_G_scheduled_path_matches_direct_compute_numerically():
 
     from app.quant.quant_engine import get_vietnam_now
     from app.market_data.trading_calendar import reference_session_date, VN_TZ
-    from datetime import datetime, time
+    from datetime import datetime, time, timedelta
     day = reference_session_date(get_vietnam_now())
-    stamp = int(min(get_vietnam_now(), datetime.combine(day, time(15), tzinfo=VN_TZ)).timestamp() * 1000)
+    # Keep the two synthetic revisions in the observed past.  Using the exact live clock
+    # made the second revision two seconds in the future during an active session, so the
+    # production future-tick gate correctly rejected it and this test became time-of-day
+    # dependent.
+    stamp = int(min(
+        get_vietnam_now() - timedelta(seconds=5),
+        datetime.combine(day, time(15), tzinfo=VN_TZ),
+    ).timestamp() * 1000)
     for quote in (cw, und):
         quote.market_session_date = day.isoformat()
         quote.trade_timestamp = quote.book_timestamp = stamp

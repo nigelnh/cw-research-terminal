@@ -538,6 +538,18 @@ async def test_overview_exposes_session_scoped_liquidity_and_foreign_flow(monkey
     assert metrics["foreign_flow"]["sell_volume"] == 12
     assert metrics["foreign_flow"]["net_volume"] == 18
     assert result["components"]["foreign_flow"] == "AVAILABLE"
+    # VCI index OHLCV has no traded-value field.  A complete, same-session KBS
+    # constituent board is the authoritative raw-VND fallback for each index.
+    for item in result["indices"]:
+        assert item["trading_value"] == 3_000_000
+        assert item["provenance"]["totals"]["trading_value"] == {
+            "source": "DERIVED_VNSTOCK_KBS_CONSTITUENTS",
+            "as_of": "2026-09-08T10:54:59+07:00",
+            "availability": "AVAILABLE",
+            "observed": 2,
+            "expected": 2,
+        }
+        assert "TRADING_VALUE_UNAVAILABLE" not in item["partial_reasons"]
 
 
 @pytest.mark.asyncio
