@@ -9,6 +9,7 @@ import type { AiQuota } from "@/data/backend/backend_client";
 import { AssistantMarkdown } from "./assistant_markdown";
 import { ATTACHMENT_ACCEPT, useFileAttachments } from "@/data/ai/use_file_attachments";
 import { PixelBlobIcon } from "./pixel_blob_icon";
+import { useScheduledBlobState } from "./blob_schedule";
 
 const POS_KEY = "cw_research:ai_anchor_pos:v1";
 const ANCHOR = 34; // px, square
@@ -323,6 +324,7 @@ function Composer({
 // ------------------------------------------------------------------------ anchor
 export function AiAnchor({ context }: AiAnchorProps) {
   const chat = useAiChatContext();
+  const blobState = useScheduledBlobState();
   const {
     messages,
     conversations,
@@ -475,7 +477,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
               flexShrink: 0,
             }}
           >
-            <PixelBlobIcon size={18} />
+            <PixelBlobIcon size={18} state={blobState} />
             <span className="heading" style={{ fontSize: 11, letterSpacing: "0.04em", color: "var(--t-80)" }}>
               RESEARCH ASSISTANT
             </span>
@@ -636,7 +638,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
           transition: dragging ? "none" : "filter 120ms ease",
         }}
       >
-        <PixelBlobIcon size={32} />
+        <PixelBlobIcon size={32} state={blobState} />
         <span
           aria-hidden
           style={{
