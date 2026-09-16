@@ -18,7 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field
 InstrumentType = Literal["CW", "STOCK", "INDEX"]
 
 # Hard ceiling independent of settings, purely as a payload-size guard at the edge.
-_MAX_ITEMS_HARD = 200
+# Giới hạn parser phải cao hơn giới hạn sản phẩm để router trả lỗi 400 có cấu trúc.
+# Universe hiện tại có khoảng 350 mã; cấu hình production vẫn chặn ở 500.
+_MAX_ITEMS_HARD = 1000
 
 
 class WatchlistItemInputModel(BaseModel):

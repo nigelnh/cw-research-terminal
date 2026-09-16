@@ -47,8 +47,8 @@ export const WATCHLIST_STORAGE_KEY_V5 = "cw-research-watchlist:v5";
 export const CURRENT_WATCHLIST_SCHEMA_VERSION = 5;
 
 /**
- * PRIMARY UI UNIVERSE - mirrors the backend GET /api/instruments/default-universe.
- * Reviewed 2026-09-02: 3 stocks and 27 active CWs with cross-checked terms.
+ * Offline bootstrap only. The live default comes from
+ * GET /api/instruments/default-universe and is refreshed from current VN30/CW groups.
  */
 export const PRIMARY_UI_UNIVERSE = [
   "HPG",
@@ -128,7 +128,8 @@ export const DEFAULT_PRIMARY_WATCHLIST_ITEMS: WatchlistItem[] = [
 ];
 
 /**
- * Creates the canonical default research watchlist populated with the 30 primary UI universe symbols.
+ * Creates the offline bootstrap watchlist; the watchlist hook upgrades an untouched copy
+ * to the current server-owned universe.
  */
 export function createDefaultWatchlist(): ResearchWatchlist {
   return {

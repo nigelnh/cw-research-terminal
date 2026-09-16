@@ -12,7 +12,7 @@ export class BackendMarketDataProvider implements MarketDataProvider {
 
   getCapabilities(): MarketDataProviderCapabilities {
     return {
-      maxRealtimeSymbols: config.maxRealtimeSymbols ?? 33,
+      maxRealtimeSymbols: config.maxRealtimeSymbols ?? 500,
       supportsDynamicSubscription: true,
       supportsHistoricalData: true,
       supportsInstrumentSearch: true,

@@ -58,6 +58,8 @@ class MarketOverviewService:
         self._load_lock = asyncio.Lock()
         self._refresh_task: asyncio.Task | None = None
         self._retry_at = 0.0
+        self._symbols: tuple[str, ...] = ()
+        self._symbols_generation = 0
         # Injectable for deterministic tests, mirrors the provider's own off-session TTL.
         self._seconds_to_next_session: Callable[[], float] = (
             market_session.seconds_until_next_trading_session
@@ -104,13 +106,35 @@ class MarketOverviewService:
         self._cached_at = 0.0
         self._loaded = False
         self._retry_at = 0.0
+        self._symbols = ()
+        self._symbols_generation = 0
+
+    def _set_symbols(self, symbols: list[str]) -> None:
+        normalized = tuple(sorted({
+            str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()
+        }))
+        if normalized == self._symbols:
+            return
+        self._symbols = normalized
+        self._symbols_generation += 1
+        # Universe membership changed: make the next read rebuild immediately and stop
+        # showing a delisted CW in the meantime. The in-flight worker below notices the
+        # generation change and repeats with the newest complete list.
+        self._cached_at = 0.0
+        if self._cache is not None:
+            allowed = set(normalized)
+            self._cache["top_cw_volume"] = [
+                item for item in self._cache.get("top_cw_volume", [])
+                if str(item.get("symbol") or "").strip().upper() in allowed
+            ]
 
     def start_refresh(self, symbols: list[str]) -> None:
+        self._set_symbols(symbols)
         if self._refresh_task is not None and not self._refresh_task.done():
             return
         if time.monotonic() < self._retry_at:
             return
-        self._refresh_task = asyncio.create_task(self._refresh(symbols))
+        self._refresh_task = asyncio.create_task(self._refresh())
         self._refresh_task.add_done_callback(self._refresh_done)
 
     def _refresh_done(self, task: asyncio.Task) -> None:
@@ -143,9 +167,18 @@ class MarketOverviewService:
                     logger.warning("Market overview restore unavailable: %s", type(exc).__name__)
             self._loaded = True
 
-    async def _refresh(self, symbols: list[str]) -> None:
+    async def _refresh(self, symbols: list[str] | None = None) -> None:
+        if symbols is not None:
+            self._set_symbols(symbols)
         await self._load()
-        result = await self._provider.get_market_overview(symbols)
+        provider = self._provider
+        if provider is None:
+            raise RuntimeError("market overview provider is not configured")
+        while True:
+            generation = self._symbols_generation
+            result = await provider.get_market_overview(list(self._symbols))
+            if generation == self._symbols_generation:
+                break
         # At the 08:00 display rollover Vnstock can confirm today's official index
         # references before the first index bar exists.  A reference-only overview is a
         # valid pre-open payload and must replace yesterday's completed-session cache.
@@ -176,7 +209,10 @@ class MarketOverviewService:
     def _payload(self) -> dict[str, Any]:
         result = self._session_payload()
         result["sessionContext"] = session_context()
-        health = self._provider.get_health() if callable(getattr(self._provider, "get_health", None)) else {}
+        provider = self._provider
+        health_getter = getattr(provider, "get_health", None)
+        health_value = health_getter() if callable(health_getter) else {}
+        health = health_value if isinstance(health_value, dict) else {}
         result["feedStatus"] = health.get("feedStatus")
         return result
 

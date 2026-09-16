@@ -221,11 +221,23 @@ export class BackendClient {
     }
   }
 
-  /** Curated default research/demo universe (verified CWs + underlyings + index). */
+  /** Current server-owned VN30, CW and underlying universe. */
   async getDefaultUniverse(
     signal?: AbortSignal,
-  ): Promise<{ known_through?: string; items: any[] }> {
-    return this.get<{ known_through?: string; items: any[] }>(
+  ): Promise<{
+    known_through?: string;
+    source?: string;
+    refreshed_at?: string | null;
+    health?: Record<string, unknown>;
+    items: any[];
+  }> {
+    return this.get<{
+      known_through?: string;
+      source?: string;
+      refreshed_at?: string | null;
+      health?: Record<string, unknown>;
+      items: any[];
+    }>(
       "/api/instruments/default-universe",
       undefined,
       signal,

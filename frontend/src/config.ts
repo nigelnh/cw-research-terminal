@@ -74,14 +74,14 @@ export function resolveAppConfig(
     ? env.VITE_DEFAULT_LIVE_SYMBOLS.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
     : [];
 
-  let maxRealtimeSymbols: number | null = 33;
+  let maxRealtimeSymbols: number | null = 500;
   const envMax = env.VITE_MAX_REALTIME_SYMBOLS;
   if (envMax !== undefined && envMax !== "") {
     if (envMax === "null" || envMax === "unlimited") {
       maxRealtimeSymbols = null;
     } else {
       const parsed = parseInt(envMax, 10);
-      maxRealtimeSymbols = isNaN(parsed) ? 33 : parsed;
+      maxRealtimeSymbols = isNaN(parsed) ? 500 : parsed;
     }
   }
 

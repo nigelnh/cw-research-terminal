@@ -1,9 +1,8 @@
-"""Canonical loader and runtime validation for the default realtime universe.
+"""Resolve the server-owned VN30, CW and underlying realtime universe.
 
-The JSON file is the product-owned list.  Runtime registry data is the source of
-truth for whether each covered warrant is still safe to stream and model.  Invalid
-entries are withheld rather than replaced, and the resulting completeness report is
-kept for health/status responses.
+Vnstock current groups are the live membership source. The bundled curated file remains
+an explicit degraded startup fallback; verified contract terms stay in the registry and
+are never inferred from listing membership.
 """
 
 from __future__ import annotations
@@ -47,6 +46,11 @@ class ResolvedResearchUniverse:
     expected_size: int = EXPECTED_UNIVERSE_SIZE
     expected_stocks: int = EXPECTED_STOCKS
     expected_covered_warrants: int = EXPECTED_COVERED_WARRANTS
+    source: str = "STATIC_CURATED_FALLBACK"
+    refreshed_at: str | None = None
+    vn30_count: int = 0
+    cw_underlying_count: int = 0
+    extra_underlying_count: int = 0
 
     @property
     def symbols(self) -> tuple[str, ...]:
@@ -68,6 +72,7 @@ class ResolvedResearchUniverse:
             and len(self.items) == self.expected_size
             and self.stock_count == self.expected_stocks
             and self.covered_warrant_count == self.expected_covered_warrants
+            and (self.source == "STATIC_CURATED_FALLBACK" or self.vn30_count == 30)
         )
 
     def health(self) -> dict[str, Any]:
@@ -81,6 +86,11 @@ class ResolvedResearchUniverse:
             "stock_count": self.stock_count,
             "expected_covered_warrants": self.expected_covered_warrants,
             "covered_warrant_count": self.covered_warrant_count,
+            "source": self.source,
+            "refreshed_at": self.refreshed_at,
+            "vn30_count": self.vn30_count,
+            "cw_underlying_count": self.cw_underlying_count,
+            "extra_underlying_count": self.extra_underlying_count,
             "complete": self.complete,
             "issues": [issue.to_wire() for issue in self.issues],
         }
@@ -124,7 +134,7 @@ def _duplicate_symbols(items: Iterable[dict[str, Any]]) -> set[str]:
     return duplicated
 
 
-async def resolve_default_research_universe(
+async def _resolve_static_research_universe(
     registry: InstrumentRegistry = instrument_registry,
     *,
     path: Path = DEFAULT_UNIVERSE_FILE,
@@ -232,6 +242,10 @@ async def resolve_default_research_universe(
             issues.append(UniverseIssue(symbol, ",".join(failures)))
             continue
 
+        # Các nhánh thiếu metadata đã bị loại ở trên; assertion giữ type-checker và
+        # runtime contract đồng nhất trước khi dựng item đã xác thực.
+        assert spec is not None
+
         resolved.append(
             {
                 "symbol": symbol,
@@ -262,3 +276,167 @@ async def resolve_default_research_universe(
         tuple(issues),
         configured_size=len(configured_items),
     )
+
+
+def _clean_symbols(values: Any) -> list[str]:
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    return sorted({_clean_symbol(value) for value in values if _clean_symbol(value)})
+
+
+async def _resolve_provider_research_universe(
+    registry: InstrumentRegistry,
+    provider: Any,
+    *,
+    force_refresh: bool,
+) -> ResolvedResearchUniverse:
+    snapshot = await provider.get_realtime_universe_snapshot(force_refresh=force_refresh)
+    vn30 = _clean_symbols(snapshot.get("vn30_symbols"))
+    cw_candidates = _clean_symbols(snapshot.get("covered_warrant_symbols"))
+    issues: list[UniverseIssue] = []
+
+    if len(vn30) != 30:
+        issues.append(UniverseIssue("__VN30__", f"expected_30_members_found_{len(vn30)}"))
+
+    valid_cws: list[str] = []
+    underlying_by_cw: dict[str, str] = {}
+    for symbol in cw_candidates:
+        match = re.fullmatch(r"C([A-Z]{3})\d{4}", symbol)
+        if match is None:
+            issues.append(UniverseIssue(symbol, "invalid_covered_warrant_symbol"))
+            continue
+        valid_cws.append(symbol)
+        underlying_by_cw[symbol] = match.group(1)
+
+    if not valid_cws:
+        issues.append(UniverseIssue("__CW__", "empty_current_provider_list"))
+
+    observed_at = str(snapshot.get("as_of") or "") or None
+    if not registry._is_initialized:
+        await registry.initialize()
+
+    cw_underlyings = sorted(set(underlying_by_cw.values()))
+    extra_underlyings = sorted(set(cw_underlyings) - set(vn30))
+    stock_symbols = sorted(set(vn30) | set(cw_underlyings))
+    by_underlying: dict[str, list[str]] = {symbol: [] for symbol in stock_symbols}
+    for symbol in valid_cws:
+        by_underlying.setdefault(underlying_by_cw[symbol], []).append(symbol)
+
+    items: list[dict[str, Any]] = []
+    for stock in stock_symbols:
+        items.append({
+            "symbol": stock,
+            "instrument_type": "STOCK",
+            "underlying_symbol": None,
+            "vn30_member": stock in set(vn30),
+        })
+        for symbol in sorted(by_underlying.get(stock, [])):
+            spec = await registry.get_instrument(symbol)
+            item: dict[str, Any] = {
+                "symbol": symbol,
+                "instrument_type": "CW",
+                "underlying_symbol": stock,
+            }
+            if spec is not None:
+                item.update({
+                    "issuer": spec.issuer or None,
+                    "strike_price": spec.effective_strike,
+                    "exercise_ratio": spec.effective_ratio,
+                    "maturity_date": spec.maturity_date,
+                    "last_trading_date": spec.last_trading_date,
+                    "metadata_verification": spec.metadata_verification.value,
+                    "data_quality": spec.data_quality.value,
+                })
+            items.append(item)
+
+    expected_stocks = len(stock_symbols)
+    expected_cws = len(valid_cws)
+    expected_size = expected_stocks + expected_cws
+    known_through = str(snapshot.get("session_date") or "") or (
+        observed_at[:10] if observed_at else None
+    )
+    return ResolvedResearchUniverse(
+        known_through=known_through,
+        items=tuple(items),
+        issues=tuple(issues),
+        configured_size=expected_size,
+        expected_size=expected_size,
+        expected_stocks=expected_stocks,
+        expected_covered_warrants=expected_cws,
+        source=str(snapshot.get("source") or "VNSTOCK_CURRENT_GROUPS"),
+        refreshed_at=observed_at,
+        vn30_count=len(vn30),
+        cw_underlying_count=len(cw_underlyings),
+        extra_underlying_count=len(extra_underlyings),
+    )
+
+
+_latest_resolved_universe: ResolvedResearchUniverse | None = None
+
+
+def latest_resolved_research_universe() -> ResolvedResearchUniverse | None:
+    return _latest_resolved_universe
+
+
+def publish_resolved_research_universe(universe: ResolvedResearchUniverse) -> None:
+    """Công bố universe chỉ sau khi live owner đã chấp nhận candidate."""
+    global _latest_resolved_universe
+    _latest_resolved_universe = universe
+
+
+async def reconcile_registry_with_research_universe(
+    registry: InstrumentRegistry,
+    universe: ResolvedResearchUniverse,
+) -> int:
+    """Commit lifecycle membership only after the live owner accepts the universe."""
+    if not universe.complete or universe.source == "STATIC_CURATED_FALLBACK":
+        return 0
+    symbols = [
+        str(item["symbol"])
+        for item in universe.items
+        if item.get("instrument_type") == "CW"
+    ]
+    return await registry.reconcile_current_market_warrants(
+        symbols,
+        source=universe.source,
+        observed_at=universe.refreshed_at,
+    )
+
+
+async def resolve_default_research_universe(
+    registry: InstrumentRegistry = instrument_registry,
+    *,
+    provider: Any | None = None,
+    force_refresh: bool = False,
+    path: Path = DEFAULT_UNIVERSE_FILE,
+    today: str | None = None,
+) -> ResolvedResearchUniverse:
+    """Resolve universe VN30 + CW live, dùng file curated làm fallback."""
+    if provider is not None:
+        try:
+            resolved = await _resolve_provider_research_universe(
+                registry, provider, force_refresh=force_refresh
+            )
+            return resolved
+        except Exception as exc:  # noqa: BLE001 - a listing outage cannot block startup
+            fallback = await _resolve_static_research_universe(
+                registry, path=path, today=today
+            )
+            issues = (
+                UniverseIssue("__DYNAMIC_UNIVERSE__", f"refresh_failed:{exc.__class__.__name__}"),
+                *fallback.issues,
+            )
+            fallback = ResolvedResearchUniverse(
+                known_through=fallback.known_through,
+                items=fallback.items,
+                issues=issues,
+                configured_size=fallback.configured_size,
+                expected_size=fallback.expected_size,
+                expected_stocks=fallback.expected_stocks,
+                expected_covered_warrants=fallback.expected_covered_warrants,
+                source="STATIC_CURATED_FALLBACK",
+            )
+            return fallback
+
+    resolved = await _resolve_static_research_universe(registry, path=path, today=today)
+    return resolved

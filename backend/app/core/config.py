@@ -38,7 +38,14 @@ class Settings(BaseSettings):
     # Market data provider. One backend process owns both the public SSI push channel and
     # the bounded Vnstock HTTP recovery poller; browsers only consume canonical state.
     MARKET_DATA_PROVIDER: str = Field(default="vnstock", description="Active provider: 'vnstock'")
-    MARKET_DATA_MAX_SYMBOLS: int = Field(default=60, description="Maximum server-owned market universe")
+    MARKET_DATA_MAX_SYMBOLS: int = Field(
+        default=500,
+        description="Maximum server-owned market universe (current VN30 + CW set is about 350)",
+    )
+    REALTIME_UNIVERSE_REFRESH_SECONDS: float = Field(
+        default=3600.0,
+        description="Background refresh interval for current VN30 and covered-warrant listings",
+    )
     MARKET_DATA_DEBOUNCE_MS: int = Field(default=300, description="Subscription debounce delay in milliseconds")
     VNSTOCK_ENABLED: bool = Field(default=True, description="Enable the Vnstock market-data adapter")
     VNSTOCK_API_KEY: str = Field(default="", description="Vnstock API key (server-side only; never returned or logged)")
@@ -405,7 +412,7 @@ class Settings(BaseSettings):
 
     # Per-user primary watchlist (the one user-owned feature in Step 9).
     ME_WATCHLIST_MAX_ITEMS: int = Field(
-        default=50, description="Hard cap on symbols in a user's persisted primary watchlist"
+        default=500, description="Hard cap on symbols in a user's persisted primary watchlist"
     )
 
     # TEST-ONLY escape hatch: when set to a non-empty value AND ENVIRONMENT != 'production',
@@ -571,7 +578,7 @@ class Settings(BaseSettings):
     WS_MAX_CONNECTIONS_TOTAL: int = Field(default=200, description="Global ceiling on concurrent /ws/market clients")
     WS_MAX_CONNECTIONS_PER_IP: int = Field(default=8, description="Max concurrent /ws/market connections from one client key")
     WS_MAX_SYMBOLS_PER_CLIENT: int = Field(
-        default=40,
+        default=500,
         description="Cap on eligible realtime delivery interests retained by one websocket client. "
         "Out-of-universe watchlist symbols do not consume this budget.",
     )

@@ -402,6 +402,21 @@ async def test_F3_unregister_cancels_symbol_worker_and_clears_state():
     await eng.shutdown()
 
 
+async def test_F4_replace_watched_cws_removes_old_and_relinks_changed_underlying():
+    eng = _HarnessEngine()
+    eng.register_watched_cw("COLD", "OLD")
+    eng.register_watched_cw("CMOVE", "OLD")
+
+    eng.replace_watched_cws({"CMOVE": "NEW", "CADD": "ADD"})
+
+    assert eng._watched_cw_symbols == {"CMOVE", "CADD"}
+    assert "COLD" not in eng._underlying_to_cw_map["OLD"]
+    assert "CMOVE" not in eng._underlying_to_cw_map["OLD"]
+    assert eng._underlying_to_cw_map["NEW"] == {"CMOVE"}
+    assert eng._underlying_to_cw_map["ADD"] == {"CADD"}
+    await eng.shutdown()
+
+
 # --------------------------------------------------------------------------- #
 # Test G - the scheduled path produces IDENTICAL analytics to a direct compute
 # --------------------------------------------------------------------------- #

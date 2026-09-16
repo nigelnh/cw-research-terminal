@@ -24,7 +24,11 @@ from app.market_data.market_subscription_manager import subscription_manager
 from app.market_data.market_overview_service import market_overview_service
 from app.instruments.instrument_router import instruments_router
 from app.instruments.instrument_registry import instrument_registry
-from app.instruments.research_universe import resolve_default_research_universe
+from app.instruments.research_universe import (
+    publish_resolved_research_universe,
+    reconcile_registry_with_research_universe,
+    resolve_default_research_universe,
+)
 from app.quant.quant_router import quant_router
 from app.enrichment.router import research_router
 from app.me import me_router
@@ -35,6 +39,7 @@ from app.persistence import database as persistence_db
 from app.market_data.history_read_service import history_read_service
 from app.market_data.market_state import market_state
 from app.market_data.market_websocket import manager
+from app.market_data.session_reference import reference_session_date
 
 import re
 
@@ -103,14 +108,27 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Instrument registry initialization warning: {e}")
 
-    # Resolve the product-owned 3-stock/27-CW realtime universe once at startup.
-    # Invalid lifecycle/metadata entries are withheld without replacement; the app
-    # continues with an explicit DEGRADED completeness report.
-    realtime_universe = await resolve_default_research_universe(instrument_registry)
+    # Resolve VN30 + toàn bộ CW active trước khi mở stream. File curated chỉ là fallback
+    # degraded lúc startup và không được thay universe live đang khỏe khi refresh nền.
+    realtime_universe = await resolve_default_research_universe(
+        instrument_registry,
+        provider=subscription_manager.provider,
+        force_refresh=True,
+    )
     configured, universe_message = subscription_manager.configure_server_universe(realtime_universe)
+    if configured:
+        await reconcile_registry_with_research_universe(instrument_registry, realtime_universe)
+        publish_resolved_research_universe(realtime_universe)
     universe_health = subscription_manager.get_universe_health()
     if configured and universe_health.get("complete"):
-        logger.info("Realtime universe ready: %d/%d symbols.", len(realtime_universe.items), realtime_universe.expected_size)
+        logger.info(
+            "Realtime universe ready: %d symbols (%d VN30, %d CW, %d CW underlyings; source=%s).",
+            len(realtime_universe.items),
+            realtime_universe.vn30_count,
+            realtime_universe.covered_warrant_count,
+            realtime_universe.cw_underlying_count,
+            realtime_universe.source,
+        )
     else:
         logger.warning(
             "Realtime universe DEGRADED: %s (%d/%d eligible; issues=%s)",
@@ -265,15 +283,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001 - warm cache is optional
         logger.warning("Quant analytics warm restore skipped: %s", type(e).__name__)
 
-    # Quant analytics follows the same server-owned universe.  Browser unsubscribe or
+    # Quant analytics follows the same server-owned universe. Browser unsubscribe or
     # disconnect events only change delivery interests and cannot disable shared work.
-    for item in realtime_universe.items:
-        if item.get("instrument_type") != "CW":
-            continue
-        symbol = str(item["symbol"])
-        underlying = str(item.get("underlying_symbol") or "")
-        if underlying:
-            live_quant_engine.register_watched_cw(symbol, underlying)
+    def _reconcile_universe_analytics(universe) -> set[str]:
+        desired: dict[str, str] = {}
+        for item in universe.items:
+            if item.get("instrument_type") != "CW":
+                continue
+            symbol = str(item["symbol"])
+            underlying = str(item.get("underlying_symbol") or "")
+            if underlying:
+                desired[symbol] = underlying
+        live_quant_engine.replace_watched_cws(desired)
+        return set(desired.values())
+
+    _startup_underlyings = sorted(
+        set(_startup_underlyings) | _reconcile_universe_analytics(realtime_universe)
+    )
 
     def _hv_refresh_symbols() -> list[str]:
         # Re-warm the startup universe plus anything ensure() has since pulled in.
@@ -302,10 +328,56 @@ async def lifespan(app: FastAPI):
     overview_cws = await instrument_registry.search(active_only=True)
     market_overview_service.start_refresh([item.symbol for item in overview_cws])
 
+    async def _refresh_realtime_universe() -> None:
+        interval = max(300.0, float(settings.REALTIME_UNIVERSE_REFRESH_SECONDS))
+        last_session = reference_session_date().isoformat()
+        next_refresh = asyncio.get_running_loop().time() + interval
+        while True:
+            await asyncio.sleep(30.0)
+            current_session = reference_session_date().isoformat()
+            now = asyncio.get_running_loop().time()
+            if current_session == last_session and now < next_refresh:
+                continue
+            last_session = current_session
+            next_refresh = now + interval
+            candidate = await resolve_default_research_universe(
+                instrument_registry,
+                provider=subscription_manager.provider,
+                force_refresh=True,
+            )
+            if not candidate.complete or candidate.source == "STATIC_CURATED_FALLBACK":
+                logger.warning(
+                    "Realtime universe refresh retained the live set: source=%s issues=%s",
+                    candidate.source,
+                    [issue.to_wire() for issue in candidate.issues],
+                )
+                continue
+            applied, message = await subscription_manager.replace_server_universe(candidate)
+            if not applied:
+                logger.warning("Realtime universe refresh rejected: %s", message)
+                continue
+            await reconcile_registry_with_research_universe(instrument_registry, candidate)
+            publish_resolved_research_universe(candidate)
+            new_underlyings = _reconcile_universe_analytics(candidate)
+            _startup_underlyings[:] = sorted(set(_startup_underlyings) | new_underlyings)
+            market_overview_service.start_refresh([
+                str(item["symbol"])
+                for item in candidate.items
+                if item.get("instrument_type") == "CW"
+            ])
+            logger.info(
+                "Realtime universe refreshed: %d symbols (%d VN30, %d CW).",
+                len(candidate.items), candidate.vn30_count, candidate.covered_warrant_count,
+            )
+
+    _universe_refresh_task = asyncio.create_task(_refresh_realtime_universe())
+
     yield
     # Shutdown: stop ingestion first (no new ticks), then drain the analytics scheduler,
     # then background refreshers.
     logger.info("Shutting down CW Research Terminal Backend...")
+    _universe_refresh_task.cancel()
+    await asyncio.gather(_universe_refresh_task, return_exceptions=True)
     await market_overview_service.close()
     try:
         await live_quant_engine.shutdown()

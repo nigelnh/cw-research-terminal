@@ -110,6 +110,29 @@ async def test_metadata_quality_remains_independent_of_lifecycle():
             assert item.data_quality == DataQualityStatus.PARTIAL
 
 
+@pytest.mark.asyncio
+async def test_current_market_membership_does_not_replace_verified_terms_provenance():
+    registry = InstrumentRegistry()
+    await registry.initialize(current_date="2026-09-15")
+    before = await registry.get_instrument("CHPG2602")
+    assert before is not None
+
+    await registry.reconcile_current_market_warrants(
+        ["CHPG2602"],
+        source="VNSTOCK_VCI_CURRENT_GROUPS",
+        observed_at="2026-09-15T10:00:00+07:00",
+    )
+
+    after = await registry.get_instrument("CHPG2602")
+    assert after is not None
+    assert after.status == InstrumentLifecycleStatus.ACTIVE
+    assert after.evidence_level == LifecycleEvidenceLevel.CURRENT_BROKER_MARKET_LIST
+    assert after.metadata_source == before.metadata_source
+    assert after.metadata_retrieved_at == before.metadata_retrieved_at
+    assert after.strike_price == before.strike_price
+    assert after.exercise_ratio == before.exercise_ratio
+
+
 def test_merge_does_not_upgrade_unknown_to_active_without_evidence():
     existing_records = [
         {
@@ -216,10 +239,11 @@ def test_rest_api_coverage_and_reconciliation_endpoints():
     assert "unknown_lifecycle_symbols" in metrics
     assert "metadata_complete_symbols" in metrics
     assert "metadata_partial_symbols" in metrics
-    # Only warrants with an auditable origin are ACTIVE (Step 13C): CHPG2602, CVPB2615,
-    # CTCB2601. Metadata-verification counts are unchanged (expired verified CWs keep their
-    # grade).
-    assert metrics["verified_active_symbols"] == 29
+    # Startup có thể overlay toàn bộ nhóm CW hiện hành; lifecycle và xác minh terms vẫn
+    # là hai chiều dữ liệu độc lập.
+    active = client.get("/api/instruments").json()["active_count"]
+    assert metrics["verified_active_symbols"] == active
+    assert metrics["verified_active_symbols"] >= 29
     assert metrics["verified_expired_symbols"] == 3
     assert metrics["unknown_lifecycle_symbols"] > 0
     assert metrics["verified_current_metadata_symbols"] == 31
