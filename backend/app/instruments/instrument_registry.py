@@ -7,6 +7,8 @@ and data completeness metrics for Covered Warrants.
 
 import asyncio
 import logging
+import re
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Set, Any
 from app.instruments.instrument_schemas import (
     CoveredWarrantSpecification,
@@ -150,6 +152,77 @@ class InstrumentRegistry:
 
         # Deterministic sorting by symbol
         return sorted(results, key=lambda x: x.symbol)
+
+    async def reconcile_current_market_warrants(
+        self,
+        symbols: List[str],
+        *,
+        source: str = "VNSTOCK_CURRENT_CW_GROUP",
+        observed_at: Optional[str] = None,
+    ) -> int:
+        """Overlay danh sách CW hiện hành đầy đủ lên metadata registry.
+
+        Tư cách niêm yết là bằng chứng lifecycle, nhưng không xác nhận strike, ratio,
+        issuer hay maturity. Terms đã xác minh được giữ nguyên; mã mới vào trạng thái
+        ACTIVE/PARTIAL/UNVERIFIED cho đến khi terms được đối soát riêng. Mã bị loại khỏi
+        danh sách provider được hạ về UNKNOWN, không tự kết luận hết hạn.
+        """
+        if not self._is_initialized:
+            await self.initialize()
+
+        from app.instruments.instrument_schemas import MetadataVerificationStatus
+
+        clean = sorted({str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()})
+        live = {symbol for symbol in clean if re.fullmatch(r"C[A-Z]{3}\d{4}", symbol)}
+        stamp = observed_at or datetime.now(timezone(timedelta(hours=7))).isoformat()
+
+        async with self._lock:
+            updated = dict(self._instruments)
+            for symbol, spec in list(updated.items()):
+                if symbol in live:
+                    updated[symbol] = spec.model_copy(update={
+                        "status": InstrumentLifecycleStatus.ACTIVE,
+                        "evidence_level": LifecycleEvidenceLevel.CURRENT_BROKER_MARKET_LIST,
+                    })
+                elif (
+                    spec.status == InstrumentLifecycleStatus.ACTIVE
+                    and spec.evidence_level
+                    in {
+                        LifecycleEvidenceLevel.CURRENT_PROVIDER_LIST,
+                        LifecycleEvidenceLevel.CURRENT_BROKER_MARKET_LIST,
+                    }
+                ):
+                    updated[symbol] = spec.model_copy(update={
+                        "status": InstrumentLifecycleStatus.UNKNOWN,
+                        "evidence_level": LifecycleEvidenceLevel.SEARCH_ONLY,
+                    })
+
+            for symbol in live - set(updated):
+                updated[symbol] = CoveredWarrantSpecification(
+                    symbol=symbol,
+                    issuer="",
+                    underlying_symbol=symbol[1:4],
+                    instrument_type="CW",
+                    status=InstrumentLifecycleStatus.ACTIVE,
+                    data_quality=DataQualityStatus.PARTIAL,
+                    evidence_level=LifecycleEvidenceLevel.CURRENT_BROKER_MARKET_LIST,
+                    metadata_verification=MetadataVerificationStatus.UNVERIFIED,
+                    metadata_source=source,
+                    metadata_retrieved_at=stamp,
+                )
+
+            self._instruments = updated
+            self._underlying_index.clear()
+            self._issuer_index.clear()
+            for symbol, spec in updated.items():
+                underlying = spec.underlying_symbol.strip().upper()
+                if underlying:
+                    self._underlying_index.setdefault(underlying, set()).add(symbol)
+                issuer = spec.issuer.strip().upper()
+                if issuer:
+                    self._issuer_index.setdefault(issuer, set()).add(symbol)
+
+        return len(live)
 
     def get_coverage_metrics(self) -> CoverageMetrics:
         from app.instruments.instrument_schemas import MetadataVerificationStatus

@@ -15,6 +15,8 @@ from app.instruments.instrument_schemas import InstrumentLifecycleStatus
 from app.instruments.providers.canonical_provider import CanonicalInstrumentProvider
 from app.instruments.research_universe import (
     EXPECTED_UNIVERSE_SIZE,
+    ResolvedResearchUniverse,
+    reconcile_registry_with_research_universe,
     resolve_default_research_universe,
 )
 from app.main import app
@@ -82,6 +84,48 @@ async def _resolved_default():
 
 
 @pytest.mark.asyncio
+async def test_live_universe_tracks_vn30_all_current_cws_and_extra_underlyings():
+    vn30 = [
+        "ACB", "BID", "BSR", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG", "LPB",
+        "MBB", "MCH", "MSN", "MWG", "SAB", "SHB", "SSB", "SSI", "STB", "TCB",
+        "TCX", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VPL", "VRE",
+    ]
+
+    class CurrentGroups:
+        async def get_realtime_universe_snapshot(self, *, force_refresh=False):
+            return {
+                "vn30_symbols": vn30,
+                "covered_warrant_symbols": ["CHPG2625", "CTPB2601"],
+                "as_of": "2026-09-15T10:00:00+07:00",
+                "session_date": "2026-09-15",
+                "source": "VNSTOCK_VCI_CURRENT_GROUPS",
+            }
+
+    registry = InstrumentRegistry(CanonicalInstrumentProvider())
+    await registry.initialize(current_date="2026-09-15")
+    universe = await resolve_default_research_universe(
+        registry, provider=CurrentGroups(), today="2026-09-15"
+    )
+
+    assert universe.complete is True
+    assert universe.vn30_count == 30
+    assert universe.covered_warrant_count == 2
+    assert universe.cw_underlying_count == 2
+    assert universe.extra_underlying_count == 1
+    assert universe.stock_count == 31
+    assert len(universe.symbols) == 33
+    assert "TPB" in universe.symbols
+    assert universe.health()["source"] == "VNSTOCK_VCI_CURRENT_GROUPS"
+
+    await reconcile_registry_with_research_universe(registry, universe)
+    discovered = await registry.get_instrument("CTPB2601")
+    assert discovered is not None
+    assert discovered.status.value == "ACTIVE"
+    assert discovered.data_quality.value == "PARTIAL"
+    assert discovered.metadata_verification.value == "UNVERIFIED"
+
+
+@pytest.mark.asyncio
 async def test_default_realtime_universe_is_exact_and_has_no_index():
     _, universe = await _resolved_default()
 
@@ -141,6 +185,43 @@ async def test_manager_activates_server_universe_once_at_startup_and_rejects_mut
     managed.unsubscribe(["FPT"])
     assert managed.get_desired_symbols() == before
     assert "VNINDEX" not in managed.get_active_symbols()
+    await managed.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_manager_atomically_replaces_changed_dynamic_universe():
+    def live_universe(symbols):
+        items = tuple({"symbol": symbol, "instrument_type": "STOCK"} for symbol in symbols)
+        return ResolvedResearchUniverse(
+            known_through="2026-09-15",
+            items=items,
+            issues=(),
+            configured_size=len(items),
+            expected_size=len(items),
+            expected_stocks=len(items),
+            expected_covered_warrants=0,
+            source="VNSTOCK_VCI_CURRENT_GROUPS",
+            vn30_count=30,
+        )
+
+    provider = MockMarketDataProvider(max_symbols=500)
+    managed = SubscriptionManager(
+        provider=provider,
+        state=MarketState(),
+        store=NullMarketStateStore(),
+        max_symbols=500,
+    )
+    original = live_universe([f"S{i:02d}" for i in range(30)])
+    changed = live_universe([f"S{i:02d}" for i in range(29)] + ["NEW"])
+    assert managed.configure_server_universe(original)[0] is True
+    assert await managed.initialize() is True
+
+    applied, _ = await managed.replace_server_universe(changed)
+
+    assert applied is True
+    assert set(managed.get_server_universe_symbols()) == set(changed.symbols)
+    assert set(provider.get_active_subscriptions()) == set(changed.symbols)
+    assert managed.get_universe_health()["active_complete"] is True
     await managed.shutdown()
 
 

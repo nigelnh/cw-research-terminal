@@ -57,12 +57,12 @@ class SubscriptionManager:
         self._server_universe_health: Dict[str, Any] = {
             "status": "DEGRADED",
             "ownership": "server",
-            "expected_size": 30,
+            "expected_size": 0,
             "configured_size": 0,
             "eligible_size": 0,
-            "expected_stocks": 3,
+            "expected_stocks": 0,
             "stock_count": 0,
-            "expected_covered_warrants": 27,
+            "expected_covered_warrants": 0,
             "covered_warrant_count": 0,
             "complete": False,
             "issues": [{"symbol": "__UNIVERSE__", "reason": "not_configured"}],
@@ -439,6 +439,53 @@ class SubscriptionManager:
         self._desired_symbols = set(symbols)
         self._server_universe_health = health
         return True, "Server realtime universe configured"
+
+    async def replace_server_universe(
+        self, universe: "ResolvedResearchUniverse"
+    ) -> TupleBoolStr:
+        """Áp dụng atomically candidate universe đã kiểm tra vào live owner.
+
+        Candidate lỗi hoặc vượt capacity không làm đổi universe đang khỏe. Khi tập mã
+        không đổi, chỉ health/provenance được cập nhật.
+        """
+        symbols = list(dict.fromkeys(s.strip().upper() for s in universe.symbols if s.strip()))
+        health = universe.health()
+        if not universe.complete:
+            return False, "Candidate realtime universe is incomplete"
+        if len(symbols) > self.max_symbols:
+            return False, f"Candidate universe {len(symbols)} exceeds capacity {self.max_symbols}"
+
+        target = set(symbols)
+        if target == self._server_universe_symbols:
+            self._server_universe_health = health
+            self._notify_status_change()
+            return True, "Realtime universe metadata refreshed"
+
+        previous = set(self._server_universe_symbols)
+        previous_desired = set(self._desired_symbols)
+        previous_health = dict(self._server_universe_health)
+        additions = sorted(target - previous)
+        if additions:
+            await self.hydrate_missing_market_state(additions)
+
+        success = await self.provider.set_subscriptions(symbols)
+        if not success:
+            self._server_universe_symbols = previous
+            self._desired_symbols = previous_desired
+            self._server_universe_health = previous_health
+            return False, "Provider rejected refreshed realtime universe"
+
+        self._server_owned = True
+        self._server_universe_symbols = target
+        self._desired_symbols = target
+        self._active_symbols = target
+        self._server_universe_health = health
+        self._reference_refresh_session = None
+        self._reference_attempt_session = None
+        self._reference_retry_at = 0.0
+        self._schedule_reference_refresh(reference_session_date().isoformat())
+        self._notify_status_change()
+        return True, f"Realtime universe replaced ({len(previous)} -> {len(target)})"
 
     def subscribe(self, symbols: List[str]) -> TupleBoolStr:
         """

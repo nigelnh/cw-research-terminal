@@ -277,6 +277,27 @@ class LiveQuantEngine:
         if task is not None and not task.done():
             task.cancel()
 
+    def replace_watched_cws(self, desired: Dict[str, str]) -> None:
+        """Đồng bộ chính xác quant pool với universe CW do server sở hữu."""
+        normalized = {
+            str(symbol).strip().upper(): str(underlying).strip().upper()
+            for symbol, underlying in desired.items()
+            if str(symbol).strip() and str(underlying).strip()
+        }
+        existing: Dict[str, str] = {}
+        for underlying, symbols in self._underlying_to_cw_map.items():
+            for symbol in symbols:
+                if symbol in self._watched_cw_symbols:
+                    existing[symbol] = underlying
+
+        for symbol, prior_underlying in existing.items():
+            if normalized.get(symbol) != prior_underlying:
+                self.unregister_watched_cw(symbol)
+
+        for symbol, underlying in normalized.items():
+            if existing.get(symbol) != underlying:
+                self.register_watched_cw(symbol, underlying)
+
     def get_analytics(
         self,
         symbol: str,

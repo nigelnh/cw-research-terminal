@@ -80,18 +80,25 @@ async def list_instruments(
 
 @instruments_router.get("/default-universe")
 async def get_default_universe():
-    """The curated default research/demo universe (Step 13C).
+    """Current server-owned VN30 + CW universe used by new dashboards."""
+    from app.instruments.research_universe import (
+        latest_resolved_research_universe,
+        resolve_default_research_universe,
+    )
+    from app.market_data.market_subscription_manager import subscription_manager
 
-    Anonymous users and new sessions seed their dashboard from this list instead of a
-    hardcoded frontend constant. Every CW here is active and VERIFIED_CURRENT; the list also carries
-    its three stock underlyings so the demo can show real underlying relationships and
-    quant analytics. Each item is re-resolved against the live registry so a symbol whose
-    verification later regresses is dropped rather than shown stale.
-    """
-    from app.instruments.research_universe import resolve_default_research_universe
-
-    universe = await resolve_default_research_universe(instrument_registry)
-    return {"known_through": universe.known_through, "items": list(universe.items)}
+    universe = latest_resolved_research_universe()
+    if universe is None:
+        universe = await resolve_default_research_universe(
+            instrument_registry, provider=subscription_manager.provider
+        )
+    return {
+        "known_through": universe.known_through,
+        "source": universe.source,
+        "refreshed_at": universe.refreshed_at,
+        "health": universe.health(),
+        "items": list(universe.items),
+    }
 
 
 @instruments_router.get("/metrics/coverage", response_model=CoverageMetrics)

@@ -41,6 +41,24 @@ def provider(**kwargs):
     return p
 
 
+@pytest.mark.asyncio
+async def test_realtime_universe_discovery_reads_current_vn30_and_cw_groups(monkeypatch):
+    vn30 = [f"S{i:02d}" for i in range(30)]
+    calls = []
+
+    def groups(group):
+        calls.append(group)
+        return vn30 if group == "VN30" else ["CHPG2625", "CTPB2601"]
+
+    p = provider(group_fetcher=groups)
+    snapshot = await p.get_realtime_universe_snapshot(force_refresh=True)
+
+    assert snapshot["vn30_symbols"] == sorted(vn30)
+    assert snapshot["covered_warrant_symbols"] == ["CHPG2625", "CTPB2601"]
+    assert snapshot["source"] == "VNSTOCK_VCI_CURRENT_GROUPS"
+    assert calls == ["VN30", "CW"]
+
+
 def test_ssi_realtime_parser_keeps_terminal_raw_vnd_units():
     quote = parse_realtime_frame(SSI_FRAME)
     assert quote["symbol"] == "MBB"

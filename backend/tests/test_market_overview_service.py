@@ -70,6 +70,40 @@ async def test_two_cold_tabs_share_refresh_and_do_not_cancel_it_on_timeout():
         await service.close()
 
 
+async def test_inflight_refresh_restarts_with_the_newest_cw_universe():
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    calls: list[tuple[str, ...]] = []
+
+    async def changing(symbols):
+        calls.append(tuple(symbols))
+        if len(calls) == 1:
+            first_started.set()
+            await release_first.wait()
+        payload = overview()
+        payload["top_cw_volume"] = [
+            {"symbol": symbol, "session_date": "2026-09-03"} for symbol in symbols
+        ]
+        return payload
+
+    provider = SimpleNamespace(get_market_overview=AsyncMock(side_effect=changing))
+    service = MarketOverviewService()
+    service.configure(provider, store())
+    try:
+        service.start_refresh(["COLD2601"])
+        await first_started.wait()
+        service.start_refresh(["CNEW2601", "CNEW2602"])
+        release_first.set()
+        await service._refresh_task
+
+        assert calls == [("COLD2601",), ("CNEW2601", "CNEW2602")]
+        assert [item["symbol"] for item in service._cache["top_cw_volume"]] == [
+            "CNEW2601", "CNEW2602",
+        ]
+    finally:
+        await service.close()
+
+
 async def test_restart_restores_stale_snapshot_without_waiting_for_provider():
     original = overview()
     saved = {"payload": original, "cached_at": time.time() - 3600}

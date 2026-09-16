@@ -64,13 +64,20 @@ def test_default_universe_endpoint_is_curated_and_verified():
     assert r.status_code == 200
     items = r.json()["items"]
     syms = [i["symbol"] for i in items]
-    assert "CTCB2601" not in syms  # the CONFLICTING warrant is not in the default demo
     cw_items = [i for i in items if i["instrument_type"] == "CW"]
-    assert cw_items and all(i["metadata_verification"] == "VERIFIED_CURRENT" for i in cw_items)
-    assert {"HPG", "FPT", "VPB"}.issubset(set(syms))
-    assert len(items) == 30 and len(cw_items) == 27
+    source = r.json().get("source")
+    assert cw_items
+    if source == "VNSTOCK_VCI_CURRENT_GROUPS":
+        assert r.json()["health"]["vn30_count"] == 30
+        assert len(items) == r.json()["health"]["expected_size"]
+        assert len(cw_items) == r.json()["health"]["expected_covered_warrants"]
+    else:
+        assert "CTCB2601" not in syms
+        assert all(i["metadata_verification"] == "VERIFIED_CURRENT" for i in cw_items)
+        assert {"HPG", "FPT", "VPB"}.issubset(set(syms))
+        assert len(items) == 30 and len(cw_items) == 27
+        assert all(i["last_trading_date"] > "2026-09-02" for i in cw_items)
     assert "VNINDEX" not in syms
-    assert all(i["last_trading_date"] > "2026-09-02" for i in cw_items)
 
 
 def test_unknown_symbol_rejected():
@@ -78,9 +85,11 @@ def test_unknown_symbol_rejected():
     assert r.status_code == 404
 
 
-def test_default_universe_excludes_warrants_past_last_trading_day(monkeypatch):
-    from app.instruments.providers import canonical_provider
-    monkeypatch.setattr(canonical_provider, "get_vietnam_today", lambda: "2027-07-01")
-    r = client.get("/api/instruments/default-universe")
-    assert r.status_code == 200
-    assert {i["symbol"] for i in r.json()["items"]} == {"HPG", "FPT", "VPB"}
+@pytest.mark.asyncio
+async def test_static_fallback_excludes_warrants_past_last_trading_day():
+    from app.instruments.research_universe import resolve_default_research_universe
+
+    universe = await resolve_default_research_universe(
+        instrument_registry, today="2027-07-01"
+    )
+    assert set(universe.symbols) == {"HPG", "FPT", "VPB"}

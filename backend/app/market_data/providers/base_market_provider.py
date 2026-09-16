@@ -66,6 +66,16 @@ class MarketDataProvider(ABC):
         """Return a cached, read-only market overview when the vendor supports it."""
         raise NotImplementedError("market overview is not supported by this provider")
 
+    async def get_realtime_universe_snapshot(
+        self, *, force_refresh: bool = False
+    ) -> Dict[str, Any]:
+        """Trả về danh sách VN30 và CW hiện hành từ provider.
+
+        Discovery tách khỏi ``set_subscriptions`` để kiểm tra đủ candidate trước khi
+        thay thế một live stream đang hoạt động tốt.
+        """
+        raise NotImplementedError("realtime universe discovery is not supported by this provider")
+
     async def get_stock_profiles(self, symbols: List[str]) -> List[Dict[str, Any]]:
         """Read company names and exchanges without streaming subscriptions."""
         raise NotImplementedError("stock profiles are not supported by this provider")

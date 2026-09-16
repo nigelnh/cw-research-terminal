@@ -764,7 +764,9 @@ class VnstockProvider(MarketDataProvider):
                 raise
             except Exception as exc:  # noqa: BLE001 - the paced poller must survive vendor faults
                 logger.debug("Vnstock tape poll unavailable: %s", type(exc).__name__)
-            await asyncio.sleep(max(1.0, self._tape_sweep / max(1, len(symbols))))
+            # SSI cung cấp lần khớp gần nhất theo realtime. KBS sweep chỉ là đường repair;
+            # nhịp tối thiểu bốn giây/mã tránh universe 350 mã chiếm hết HTTP quota.
+            await asyncio.sleep(max(4.0, self._tape_sweep / max(1, len(symbols))))
 
     def _emit_confirmed_prints(self, symbol: str, rows: list[dict[str, Any]]) -> None:
         normalized = self._normalize_confirmed_prints(symbol, rows)
@@ -1215,6 +1217,36 @@ class VnstockProvider(MarketDataProvider):
             "valid_through": None,
         }
         return symbols
+
+    async def get_realtime_universe_snapshot(
+        self, *, force_refresh: bool = False
+    ) -> dict[str, Any]:
+        """Khám phá đầy đủ danh sách mã VN30 và CW hiện hành."""
+        if force_refresh:
+            self._group_cache.pop("VN30", None)
+            self._group_cache.pop("CW", None)
+            self._group_provenance.pop("VN30", None)
+            self._group_provenance.pop("CW", None)
+
+        vn30 = await self._group_symbols("VN30")
+        covered_warrants = await self._group_symbols("CW")
+        if len(vn30) != 30:
+            raise ValueError(f"VN30 discovery returned {len(vn30)} symbols")
+        if not covered_warrants:
+            raise ValueError("covered-warrant discovery returned no symbols")
+
+        now = market_session.get_vn_now()
+        return {
+            "vn30_symbols": vn30,
+            "covered_warrant_symbols": covered_warrants,
+            "as_of": now.isoformat(),
+            "session_date": reference_session_date(now).isoformat(),
+            "source": "VNSTOCK_VCI_CURRENT_GROUPS",
+            "provenance": {
+                "VN30": dict(self._group_provenance.get("VN30", {})),
+                "CW": dict(self._group_provenance.get("CW", {})),
+            },
+        }
 
     def _bundled_group_symbols(self, group: str, session: str) -> list[str]:
         try:
