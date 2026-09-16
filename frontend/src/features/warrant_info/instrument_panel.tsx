@@ -439,7 +439,7 @@ export function InstrumentPanel({
   };
 
   // No instrument selected -> render nothing. The AI assistant now lives entirely in the
-  // draggable Orbit panel; Dashboard / Research reclaim the vertical space.
+  // draggable Blob panel; Dashboard / Research reclaim the vertical space.
   if (!instrument) return null;
 
   return (

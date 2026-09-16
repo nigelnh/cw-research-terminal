@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Orbit, Plus, History, Minus, CornerDownLeft, AtSign, X } from "lucide-react";
+import { Plus, History, Minus, CornerDownLeft, AtSign, X } from "lucide-react";
 import { useAiChatContext } from "@/data/ai/ai_chat_provider";
 import type { ResearchContextEnvelope, TraceStep } from "@/data/ai/use_ai_chat";
 import { AI_DRAFT_KEY, formatRelativeTime } from "@/data/ai/copilot_history_store";
@@ -8,6 +8,7 @@ import { useAiQuota } from "@/data/ai/use_ai_quota";
 import type { AiQuota } from "@/data/backend/backend_client";
 import { AssistantMarkdown } from "./assistant_markdown";
 import { ATTACHMENT_ACCEPT, useFileAttachments } from "@/data/ai/use_file_attachments";
+import { PixelBlobIcon } from "./pixel_blob_icon";
 
 const POS_KEY = "cw_research:ai_anchor_pos:v1";
 const ANCHOR = 34; // px, square
@@ -474,7 +475,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
               flexShrink: 0,
             }}
           >
-            <Orbit size={13} strokeWidth={1.6} color="var(--accent)" />
+            <PixelBlobIcon size={18} />
             <span className="heading" style={{ fontSize: 11, letterSpacing: "0.04em", color: "var(--t-80)" }}>
               RESEARCH ASSISTANT
             </span>
@@ -619,10 +620,9 @@ export function AiAnchor({ context }: AiAnchorProps) {
           top: pos.y,
           width: ANCHOR,
           height: ANCHOR,
-          borderRadius: 3,
-          border: "1px solid var(--border-strong)",
-          background: "var(--panel-2)",
-          color: "var(--t-80)",
+          border: 0,
+          padding: 0,
+          background: "transparent",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -630,11 +630,13 @@ export function AiAnchor({ context }: AiAnchorProps) {
           zIndex: 91,
           touchAction: "none",
           outline: "none",
-          boxShadow: open ? "0 0 0 1px var(--accent)" : "0 2px 10px rgba(0,0,0,0.35)",
-          transition: dragging ? "none" : "box-shadow 120ms ease",
+          filter: open
+            ? "drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 80%, transparent))"
+            : "drop-shadow(0 3px 3px rgba(0,0,0,0.55))",
+          transition: dragging ? "none" : "filter 120ms ease",
         }}
       >
-        <Orbit size={16} strokeWidth={1.5} />
+        <PixelBlobIcon size={32} />
         <span
           aria-hidden
           style={{

@@ -59,6 +59,20 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
     expect(btn.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("renders the static pixel Blob and does not move it during ordinary re-renders", () => {
+    const { getByRole, rerender } = renderAnchor();
+    const btn = getByRole("button", { name: /open research assistant/i });
+    const blob = btn.querySelector('[data-ai-blob="true"]') as SVGElement;
+    expect(blob).not.toBeNull();
+    expect(blob.style.animation).toBe("none");
+    expect(blob.style.transform).toBe("none");
+
+    const initialPosition = { left: btn.style.left, top: btn.style.top };
+    rerender(<AiAnchor context={{ activePage: "research" }} />);
+    expect(btn.style.left).toBe(initialPosition.left);
+    expect(btn.style.top).toBe(initialPosition.top);
+  });
+
   it("a click (no drag) toggles the fixed-size conversation panel with a composer", () => {
     const { getByRole, queryByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });

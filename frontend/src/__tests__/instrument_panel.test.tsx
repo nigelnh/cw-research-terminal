@@ -38,7 +38,7 @@ describe("InstrumentPanel — bottom split panel", () => {
     lastTradingDate: "2026-12-28",
   };
 
-  it("1. no instrument -> renders nothing (the AI assistant now lives in the Orbit panel)", () => {
+  it("1. no instrument -> renders nothing (the AI assistant now lives in the Blob panel)", () => {
     const html = renderMarkup(
       <InstrumentPanel instrument={null} marketSessionActive={false} onClose={vi.fn()} />,
     );
