@@ -59,13 +59,15 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
     expect(btn.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("renders the static pixel Blob and does not move it during ordinary re-renders", () => {
+  it("animates the pixel Blob in place without moving its launcher during ordinary re-renders", () => {
     const { getByRole, rerender } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
     const blob = btn.querySelector('[data-ai-blob="true"]') as SVGElement;
     expect(blob).not.toBeNull();
     expect(blob.style.animation).toBe("none");
     expect(blob.style.transform).toBe("none");
+    expect(blob.parentElement?.classList.contains("ai-pixel-blob-motion")).toBe(true);
+    expect(blob.parentElement?.getAttribute("data-ai-blob-motion")).toBe("idle-squish");
 
     const initialPosition = { left: btn.style.left, top: btn.style.top };
     rerender(<AiAnchor context={{ activePage: "research" }} />);

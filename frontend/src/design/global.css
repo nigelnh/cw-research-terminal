@@ -153,6 +153,22 @@ textarea::placeholder {
   color: var(--t-40);
 }
 
+/* The kit's gentle idle squish animates only the Blob artwork wrapper. The launcher
+   itself keeps fixed left/top coordinates and still moves exclusively via drag. */
+.ai-pixel-blob-motion {
+  animation: blobSquish 2.2s ease-in-out infinite;
+  transform-origin: bottom center;
+  will-change: transform;
+}
+@keyframes blobSquish {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.06, 0.94) translateY(2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-pixel-blob-motion { animation: none; transform: none; }
+}
+
 /* Colors */
 .text-primary { color: var(--accent); }
 .text-accent { color: var(--accent); }
