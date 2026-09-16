@@ -67,7 +67,8 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
     expect(blob.style.animation).toBe("none");
     expect(blob.style.transform).toBe("none");
     expect(blob.parentElement?.classList.contains("ai-pixel-blob-motion")).toBe(true);
-    expect(blob.parentElement?.getAttribute("data-ai-blob-motion")).toBe("idle-squish");
+    expect(["idle", "code", "boba", "sleep"]).toContain(blob.getAttribute("data-ai-blob-state"));
+    expect(blob.parentElement?.getAttribute("data-ai-blob-motion")).toBe(blob.getAttribute("data-ai-blob-state"));
 
     const initialPosition = { left: btn.style.left, top: btn.style.top };
     rerender(<AiAnchor context={{ activePage: "research" }} />);

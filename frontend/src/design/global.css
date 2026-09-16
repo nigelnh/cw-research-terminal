@@ -153,20 +153,76 @@ textarea::placeholder {
   color: var(--t-40);
 }
 
-/* The kit's gentle idle squish animates only the Blob artwork wrapper. The launcher
-   itself keeps fixed left/top coordinates and still moves exclusively via drag. */
+/* Blob activity animates only the artwork wrapper. The launcher itself keeps fixed
+   left/top coordinates and still moves exclusively via drag. */
 .ai-pixel-blob-motion {
-  animation: blobSquish 2.2s ease-in-out infinite;
   transform-origin: bottom center;
   will-change: transform;
+}
+.ai-pixel-blob-motion[data-ai-blob-state="idle"],
+.ai-pixel-blob-motion[data-ai-blob-state="code"] {
+  animation: blobSquish 2.2s ease-in-out infinite;
+}
+.ai-pixel-blob-motion[data-ai-blob-state="boba"] {
+  animation: bobaDrink 1.4s ease-in-out infinite;
+}
+.ai-pixel-blob-motion[data-ai-blob-state="sleep"] {
+  animation: sleepBreathe 3s ease-in-out infinite;
 }
 @keyframes blobSquish {
   0%, 100% { transform: scale(1, 1); }
   50% { transform: scale(1.06, 0.94) translateY(2px); }
 }
+@keyframes bobaDrink {
+  0%, 100% { transform: scale(1, 1); }
+  25% { transform: scale(0.96, 1.05) translateY(-2px); }
+  60% { transform: scale(1.08, 0.92) translateY(3px); }
+}
+@keyframes pearlSlurp {
+  0% { transform: translateY(5px); opacity: 0.2; }
+  25%, 70% { opacity: 1; }
+  70% { transform: translateY(-4px); }
+  100% { transform: translateY(-8px); opacity: 0; }
+}
+@keyframes sleepBreathe {
+  0%, 100% { transform: scale(1.05, 0.88) translateY(3px); }
+  50% { transform: scale(0.98, 0.96) translateY(1px); }
+}
+@keyframes floatZzz {
+  0% { transform: translate(0, 0) scale(0.6); opacity: 0; }
+  30% { opacity: 1; }
+  100% { transform: translate(12px, -24px) scale(1.2); opacity: 0; }
+}
+@keyframes snotBubble {
+  0%, 100% { transform: scale(0.2); opacity: 0.2; }
+  50% { transform: scale(1.1); opacity: 0.9; }
+}
+@keyframes typeTapL {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@keyframes typeTapR {
+  0%, 100% { transform: translateY(-2px); }
+  50% { transform: translateY(0); }
+}
+.ai-pixel-blob-pearl {
+  animation: pearlSlurp 1.4s infinite cubic-bezier(0.45, 0.05, 0.55, 0.95);
+}
+.ai-pixel-blob-snot {
+  animation: snotBubble 3s infinite ease-in-out;
+  transform-origin: 16px 18px;
+}
+.ai-pixel-blob-zzz-1 { animation: floatZzz 2.4s ease-out infinite; }
+.ai-pixel-blob-zzz-2 { animation: floatZzz 2.4s ease-out 0.8s infinite; }
+.ai-pixel-blob-paw-left { animation: typeTapL 0.26s ease-in-out infinite; }
+.ai-pixel-blob-paw-right { animation: typeTapR 0.26s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
-  .ai-pixel-blob-motion { animation: none; transform: none; }
+  .ai-pixel-blob-motion,
+  .ai-pixel-blob-motion * {
+    animation: none !important;
+    transform: none !important;
+  }
 }
 
 /* Colors */
