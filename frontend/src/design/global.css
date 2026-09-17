@@ -153,8 +153,7 @@ textarea::placeholder {
   color: var(--t-40);
 }
 
-/* Blob activity animates only the artwork wrapper. The launcher itself keeps fixed
-   left/top coordinates and still moves exclusively via drag. */
+/* Blob activity animates only the artwork wrapper. The launcher stays pinned in place. */
 .ai-pixel-blob-motion {
   transform-origin: bottom center;
   will-change: transform;

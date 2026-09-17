@@ -253,6 +253,10 @@ class VnstockProvider(MarketDataProvider):
         # match-state footprint across socket reconnects so one observed match becomes one
         # tape row instead of one row per price-table frame.
         self._realtime_match_identities: dict[str, str] = {}
+        # Some HOSE CW frames omit the latest-match quantity. Keep the cumulative total
+        # observed on every frame so a real increase can supply that quantity without
+        # guessing. A symbol first seen mid-session has no baseline and stays unavailable.
+        self._realtime_cumulative_volumes: dict[str, int] = {}
         self._seen_prints: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=4000))
         self._seen_print_sets: dict[str, set[str]] = defaultdict(set)
 
@@ -313,6 +317,8 @@ class VnstockProvider(MarketDataProvider):
             self._active_symbols = []
             self._connected = False
             self._realtime_connected = False
+            self._realtime_match_identities.clear()
+            self._realtime_cumulative_volumes.clear()
         self._notify_status()
 
     async def set_subscriptions(self, symbols: list[str]) -> bool:
@@ -324,6 +330,10 @@ class VnstockProvider(MarketDataProvider):
         async with self._lifecycle_lock:
             self._generation += 1
             generation = self._generation
+            removed_symbols = set(self._active_symbols).difference(clean)
+            for symbol in removed_symbols:
+                self._realtime_match_identities.pop(symbol, None)
+                self._realtime_cumulative_volumes.pop(symbol, None)
             old = [
                 task for task in (self._quote_task, self._tape_task, self._realtime_task)
                 if task is not None
@@ -469,6 +479,7 @@ class VnstockProvider(MarketDataProvider):
             self._realtime_session = session
             self._realtime_observed_symbols.clear()
             self._realtime_match_identities.clear()
+            self._realtime_cumulative_volumes.clear()
         stamp = observed.isoformat()
         stamp_ms = int(observed.timestamp() * 1000)
         self._realtime_observed_symbols.add(symbol)
@@ -497,6 +508,16 @@ class VnstockProvider(MarketDataProvider):
         price = quote["matched_price"]
         matched_volume = quote["matched_volume"]
         cumulative_volume = quote["total_volume"]
+        previous_cumulative = self._realtime_cumulative_volumes.get(symbol)
+        if (
+            (matched_volume is None or matched_volume <= 0)
+            and previous_cumulative is not None
+            and cumulative_volume is not None
+            and cumulative_volume > previous_cumulative
+        ):
+            matched_volume = cumulative_volume - previous_cumulative
+        if cumulative_volume is not None:
+            self._realtime_cumulative_volumes[symbol] = cumulative_volume
         # The SSI price-table frame exposes the latest match, but repeats it while only the
         # book changes.  Its cumulative volume is the stable boundary between matches.
         # Record the first current-session observation and every later footprint change;
