@@ -25,6 +25,9 @@ class RoutePolicy:
     methods: frozenset[str]  # {"*"} matches all
     key_scope: str  # "ip" | "subject_or_ip"
     fail_closed: bool = False
+    # Route có body có thể chờ endpoint validate xong mới trừ quota. Request sai cấu
+    # trúc vì thế không làm mất một lượt AI có tính chi phí.
+    defer_to_endpoint: bool = False
     # Callable[[authenticated: bool], tuple[RateLimitItem, ...]] - every tier's factory
     # accepts the flag (most ignore it); only a tier whose allowance actually depends on
     # sign-in state (currently just "ai") branches on it.
@@ -54,7 +57,20 @@ def policy_table() -> tuple[RoutePolicy, ...]:
         # item set - if the token is missing/invalid. ----
         RoutePolicy(
             tier="ai",
-            pattern=_p(r"^/api/ai/(?:chat|files/extract)/?$"),
+            pattern=_p(r"^/api/ai/chat/?$"),
+            methods=frozenset({"POST"}),
+            key_scope="subject_or_ip",
+            fail_closed=True,
+            defer_to_endpoint=True,
+            _items_factory=lambda authenticated: (
+                (per_minute(settings.RL_AI_AUTH_PER_MIN), per_day(settings.RL_AI_AUTH_PER_DAY))
+                if authenticated else
+                (per_minute(settings.RL_AI_GUEST_PER_MIN), per_day(settings.RL_AI_GUEST_PER_DAY))
+            ),
+        ),
+        RoutePolicy(
+            tier="ai",
+            pattern=_p(r"^/api/ai/files/extract/?$"),
             methods=frozenset({"POST"}),
             key_scope="subject_or_ip",
             fail_closed=True,

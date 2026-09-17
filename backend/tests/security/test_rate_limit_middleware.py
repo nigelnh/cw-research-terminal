@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 from app.auth.jwt_verifier import get_verifier
 from app.core.config import settings
 from app.main import app
+from app.ai.ai_router import get_client
+from app.ai.openrouter_client import OpenRouterClient
 from app.security.policies import policy_table
 
 client = TestClient(app)
@@ -106,7 +108,19 @@ def ai_tier_limits(rate_limit_enabled, monkeypatch):
     monkeypatch.setattr(settings, "ENVIRONMENT", "development")
     policy_table.cache_clear()
     get_verifier.cache_clear()
+    test_client = OpenRouterClient(
+        api_key="test-dummy-api-key",
+        model="test/model",
+        base_url="https://example.invalid",
+    )
+
+    async def fake_generate_chat(messages, system_prompt):
+        return {"content": "ok", "model": "test/model"}
+
+    monkeypatch.setattr(test_client, "generate_chat", fake_generate_chat)
+    app.dependency_overrides[get_client] = lambda: test_client
     yield
+    app.dependency_overrides.pop(get_client, None)
     policy_table.cache_clear()
     get_verifier.cache_clear()
 
@@ -145,12 +159,27 @@ def test_ai_quota_reports_the_guest_allowance_and_tracks_usage(ai_tier_limits):
     assert q0["per_day"]["limit"] == 100 and q0["per_day"]["used"] == 0
     assert q0["per_minute"]["limit"] == 1
 
-    # a chat request is consumed by the rate-limit middleware even when the route then
-    # fails (AI disabled in tests) - the quota read must reflect it.
-    client.post("/api/ai/chat", json=_AI_BODY)
+    # Request chat hợp lệ chỉ trừ đúng một lượt sau khi validate thành công.
+    assert client.post("/api/ai/chat", json=_AI_BODY).status_code == 200
     q1 = client.get("/api/ai/quota").json()
     assert q1["per_day"]["used"] == 1 and q1["per_day"]["remaining"] == 99
     assert q1["per_minute"]["used"] == 1
+
+
+def test_ai_invalid_context_does_not_consume_quota(ai_tier_limits):
+    oversized = {
+        "messages": [{"role": "user", "content": "hi"}],
+        "context": {"watchlist": [f"CW{i:04d}" for i in range(201)]},
+        "stream": False,
+    }
+
+    response = client.post("/api/ai/chat", json=oversized)
+    assert response.status_code == 400
+    assert response.headers.get("X-AI-Error-Code") == "INVALID_REQUEST"
+
+    quota = client.get("/api/ai/quota").json()
+    assert quota["per_day"]["used"] == 0
+    assert quota["per_minute"]["used"] == 0
 
 
 def test_ai_quota_reports_the_signed_in_allowance(ai_tier_limits):

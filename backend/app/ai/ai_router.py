@@ -2,7 +2,7 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.requests import HTTPConnection
 
 from app.ai.ai_errors import AiErrorCode, classify, http_status, user_message
@@ -86,7 +86,9 @@ async def ai_quota(
 @ai_router.post("/chat")
 async def chat_endpoint(
     req: ChatRequest,
+    request: Request,
     client: OpenRouterClient = Depends(get_client),
+    user: CurrentUser | None = Depends(get_optional_current_user),
 ):
     if not settings.AI_ENABLED or not settings.AI_PUBLIC_ENABLED:
         _raise_ai_http(AiErrorCode.AI_DISABLED, "AI_ENABLED/AI_PUBLIC_ENABLED is off")
@@ -94,12 +96,36 @@ async def chat_endpoint(
     if not client.api_key:
         _raise_ai_http(AiErrorCode.AI_DISABLED, "no OpenRouter API key configured on this server")
 
-    # Input hardening + optional process-local daily budget (rate limit + concurrency
-    # gate are enforced separately - middleware tier 'ai' and ai_call_gate).
+    # Giới hạn input và ngân sách ngày theo process. Rate limit của chat được áp dụng
+    # ngay sau validation; concurrency gate được áp dụng khi gọi provider.
     try:
         validate_chat_input(req)
     except HTTPException as e:
         _raise_ai_http(classify(e), f"input validation failed: {e.detail}")
+
+    # Chỉ trừ quota chat sau khi body đã parse và validate. ASGI limiter chung vẫn bảo vệ
+    # các route khác, gồm cả chức năng trích xuất file cho AI.
+    if settings.PUBLIC_RATE_LIMIT_ENABLED:
+        policy = resolve_policy("POST", "/api/ai/chat")
+        if policy is not None:
+            subject = user.subject if user else None
+            key = resolve_client_key(HTTPConnection(request.scope), subject=subject)
+            decision = await rate_limiter.check(
+                tier=policy.tier,
+                key=key,
+                items=policy.items(authenticated=subject is not None),
+                fail_closed=policy.fail_closed,
+            )
+            if not decision.allowed:
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": "rate_limited",
+                        "detail": "Too many requests. Please slow down.",
+                        "tier": policy.tier,
+                    },
+                    headers={"Retry-After": str(decision.retry_after)},
+                )
     try:
         ai_daily_budget.check_and_increment()
     except HTTPException as e:

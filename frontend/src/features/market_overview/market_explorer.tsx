@@ -17,6 +17,7 @@ import { useFeedFacets } from "@/data/query/use_research_feed";
 import type { GlobalSearchOption } from "@/components/common/app_header";
 import { computeSpread } from "@/domain/quant_display";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
+import { buildAiContextSymbols } from "@/data/ai/research_context";
 
 type Tab = "dashboard" | "research" | "news";
 
@@ -156,7 +157,11 @@ export function MarketExplorer() {
     return {
       activePage: activeTab,
       selectedInstrument: selectedContext,
-      watchlist: items.map((i) => i.symbol),
+      watchlist: buildAiContextSymbols(
+        items,
+        selected?.symbol ?? selectedSymbol,
+        selected?.underlyingSymbol,
+      ),
       realtimeStatus: realtimeStatusLabel,
       dataMode,
       marketSession,
