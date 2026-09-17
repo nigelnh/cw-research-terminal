@@ -11,12 +11,10 @@ import { ATTACHMENT_ACCEPT, useFileAttachments } from "@/data/ai/use_file_attach
 import { PixelBlobIcon } from "./pixel_blob_icon";
 import { useScheduledBlobState } from "./blob_schedule";
 
-const POS_KEY = "cw_research:ai_anchor_pos:v1";
 const ANCHOR = 34; // px, square
 const EDGE = 16; // safe viewport inset
 const PANEL_W = 380;
 const PANEL_H = 468;
-const DRAG_THRESHOLD = 4;
 const NEAR_BOTTOM_PX = 64;
 
 /** Short, friendly empty-state prompts. One is picked per panel mount (see below). */
@@ -50,27 +48,6 @@ function defaultPos(): Pos {
     x: window.innerWidth - ANCHOR - EDGE,
     y: window.innerHeight - ANCHOR - EDGE,
   });
-}
-
-function loadPos(): Pos {
-  try {
-    const raw = window.localStorage?.getItem(POS_KEY);
-    if (raw) {
-      const p = JSON.parse(raw);
-      if (typeof p?.x === "number" && typeof p?.y === "number") return clampToViewport(p);
-    }
-  } catch {
-    /* ignore */
-  }
-  return defaultPos();
-}
-
-function savePos(p: Pos) {
-  try {
-    window.localStorage?.setItem(POS_KEY, JSON.stringify(p));
-  } catch {
-    /* ignore */
-  }
 }
 
 /** Where the panel opens relative to the anchor, based on which quadrant it sits in. */
@@ -341,13 +318,11 @@ export function AiAnchor({ context }: AiAnchorProps) {
   const attachments = useFileAttachments(activeConversationId);
   const { quota, refresh: refreshQuota } = useAiQuota();
 
-  const [pos, setPos] = useState<Pos>(() => (typeof window === "undefined" ? { x: 0, y: 0 } : loadPos()));
+  const [pos, setPos] = useState<Pos>(() => (typeof window === "undefined" ? { x: 0, y: 0 } : defaultPos()));
   const [open, setOpen] = useState(false);
   // Pick one empty-state phrase on mount; stays put across re-renders and messages.
   const [emptyPhrase] = useState(() => EMPTY_PHRASES[Math.floor(Math.random() * EMPTY_PHRASES.length)]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const dragState = useRef<{ dx: number; dy: number; ox: number; oy: number; moved: boolean } | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
 
@@ -360,9 +335,10 @@ export function AiAnchor({ context }: AiAnchorProps) {
   const streaming = isLoading && (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.content);
   const assistantRunning = isLoading && lastMsg?.role === "assistant";
 
-  // keep anchor on-screen through viewport resize
+  // The launcher is intentionally pinned to the lower-right safe area. Recompute that
+  // fixed position on resize and ignore positions saved by older draggable releases.
   useEffect(() => {
-    const onResize = () => setPos((p) => clampToViewport(p));
+    const onResize = () => setPos(defaultPos());
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -380,47 +356,8 @@ export function AiAnchor({ context }: AiAnchorProps) {
     nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
   };
 
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      if (e.button !== 0) return;
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-      dragState.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y, ox: e.clientX, oy: e.clientY, moved: false };
-    },
-    [pos],
-  );
-
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    const st = dragState.current;
-    if (!st) return;
-    if (!st.moved) {
-      if (Math.hypot(e.clientX - st.ox, e.clientY - st.oy) <= DRAG_THRESHOLD) return;
-      st.moved = true;
-      setDragging(true);
-    }
-    setPos(clampToViewport({ x: e.clientX - st.dx, y: e.clientY - st.dy }));
-  }, []);
-
-  const onPointerUp = useCallback((e: React.PointerEvent) => {
-    const st = dragState.current;
-    dragState.current = null;
-    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
-    if (st?.moved) {
-      setDragging(false);
-      setPos((p) => {
-        const c = clampToViewport(p);
-        savePos(c);
-        return c;
-      });
-    } else {
-      setOpen((o) => !o);
-    }
-  }, []);
-
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      setOpen((o) => !o);
-    } else if (e.key === "Escape" && open) {
+    if (e.key === "Escape" && open) {
       setOpen(false);
     }
   };
@@ -612,9 +549,7 @@ export function AiAnchor({ context }: AiAnchorProps) {
         type="button"
         aria-label={open ? "Close research assistant" : "Open research assistant"}
         aria-expanded={open}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
+        onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
         style={{
           position: "fixed",
@@ -628,14 +563,14 @@ export function AiAnchor({ context }: AiAnchorProps) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          cursor: dragging ? "grabbing" : "grab",
+          cursor: "pointer",
           zIndex: 91,
-          touchAction: "none",
+          touchAction: "manipulation",
           outline: "none",
           filter: open
             ? "drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 80%, transparent))"
             : "drop-shadow(0 3px 3px rgba(0,0,0,0.55))",
-          transition: dragging ? "none" : "filter 120ms ease",
+          transition: "filter 120ms ease",
         }}
       >
         <PixelBlobIcon size={32} state={blobState} />

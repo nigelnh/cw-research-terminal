@@ -18,8 +18,6 @@ import { AiAnchor } from "@/features/ai_assistant/ai_anchor";
 import type { ResearchContextEnvelope } from "@/data/ai/use_ai_chat";
 import { setAccessTokenProvider } from "@/data/backend/backend_client";
 
-const POS_KEY = "cw_research:ai_anchor_pos:v1";
-
 function Wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
@@ -45,11 +43,10 @@ afterEach(cleanup);
 
 function openAnchorPanel() {
   const btn = screen.getByRole("button", { name: /open research assistant/i });
-  fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 850, pointerId: 1 });
-  fireEvent.pointerUp(btn, { clientX: 1390, clientY: 850, pointerId: 1 });
+  fireEvent.click(btn);
 }
 
-describe("AiAnchor — draggable assistant anchor + fixed conversation panel", () => {
+describe("AiAnchor — pinned assistant anchor + fixed conversation panel", () => {
   it("defaults to the bottom-right corner of the viewport with a safe inset", () => {
     const { getByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
@@ -76,13 +73,12 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
     expect(btn.style.top).toBe(initialPosition.top);
   });
 
-  it("a click (no drag) toggles the fixed-size conversation panel with a composer", () => {
+  it("a click toggles the fixed-size conversation panel with a composer", () => {
     const { getByRole, queryByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
     expect(queryByRole("dialog")).toBeNull();
 
-    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 850, pointerId: 1 });
-    fireEvent.pointerUp(btn, { clientX: 1390, clientY: 850, pointerId: 1 });
+    fireEvent.click(btn);
 
     const panel = getByRole("dialog", { name: /research assistant conversation/i });
     // fixed, bounded dimensions — never grows with content
@@ -95,7 +91,7 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
     expect(getByRole("button", { name: /close research assistant/i })).toBeTruthy();
   });
 
-  it("a drag past the threshold moves the anchor, persists it, and does NOT open the panel", () => {
+  it("ignores pointer movement and keeps the launcher pinned", () => {
     const { getByRole, queryByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
 
@@ -103,42 +99,26 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
     fireEvent.pointerMove(btn, { clientX: 900, clientY: 400, pointerId: 1 });
     fireEvent.pointerUp(btn, { clientX: 900, clientY: 400, pointerId: 1 });
 
-    expect(queryByRole("dialog")).toBeNull(); // drag != click
-    expect(btn.style.left).toBe("900px");
-    expect(btn.style.top).toBe("400px");
-    const saved = JSON.parse(window.localStorage.getItem(POS_KEY) || "{}");
-    expect(saved).toEqual({ x: 900, y: 400 });
-  });
-
-  it("clamps a drag that would leave the viewport", () => {
-    const { getByRole } = renderAnchor();
-    const btn = getByRole("button", { name: /open research assistant/i });
-    fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 850, pointerId: 1 });
-    fireEvent.pointerMove(btn, { clientX: 5000, clientY: 5000, pointerId: 1 });
-    fireEvent.pointerUp(btn, { clientX: 5000, clientY: 5000, pointerId: 1 });
-    // clamped to maxX = 1440-34-16 = 1390, maxY = 900-34-16 = 850
+    expect(queryByRole("dialog")).toBeNull();
     expect(btn.style.left).toBe("1390px");
     expect(btn.style.top).toBe("850px");
+    expect(btn.style.cursor).toBe("pointer");
   });
 
-  it("restores a persisted position and re-clamps it on viewport resize", () => {
-    window.localStorage.setItem(POS_KEY, JSON.stringify({ x: 1200, y: 800 }));
+  it("repositions the pinned launcher to the lower-right safe area on viewport resize", () => {
     const { getByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
-    expect(btn.style.left).toBe("1200px");
-
     window.innerWidth = 640;
     window.innerHeight = 480;
     fireEvent(window, new Event("resize"));
-    // re-clamped so the anchor can never be lost off-screen
-    expect(parseInt(btn.style.left)).toBeLessThanOrEqual(640 - 34 - 16);
-    expect(parseInt(btn.style.top)).toBeLessThanOrEqual(480 - 34 - 16);
+    expect(btn.style.left).toBe(`${640 - 34 - 16}px`);
+    expect(btn.style.top).toBe(`${480 - 34 - 16}px`);
   });
 
-  it("keyboard: Enter toggles the panel; the anchor exposes an accessible label + state", () => {
+  it("uses native button activation and exposes an accessible label + state", () => {
     const { getByRole, queryByRole } = renderAnchor();
     const btn = getByRole("button", { name: /open research assistant/i });
-    fireEvent.keyDown(btn, { key: "Enter" });
+    fireEvent.click(btn);
     expect(queryByRole("dialog")).not.toBeNull();
     expect(btn.getAttribute("aria-expanded")).toBe("true");
   });
@@ -153,8 +133,7 @@ describe("AiAnchor — draggable assistant anchor + fixed conversation panel", (
 
 function openPanel(getByRole: any) {
   const btn = getByRole("button", { name: /open research assistant/i });
-  fireEvent.pointerDown(btn, { button: 0, clientX: 1390, clientY: 850, pointerId: 1 });
-  fireEvent.pointerUp(btn, { clientX: 1390, clientY: 850, pointerId: 1 });
+  fireEvent.click(btn);
   return getByRole("dialog", { name: /research assistant conversation/i }) as HTMLElement;
 }
 

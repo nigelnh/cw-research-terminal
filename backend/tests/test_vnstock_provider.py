@@ -138,6 +138,54 @@ def test_ssi_realtime_repeated_book_frame_does_not_duplicate_latest_match():
     assert next_trade["_trade_identity"] != first_trade["_trade_identity"]
 
 
+def test_ssi_realtime_derives_missing_cw_match_volume_from_observed_session_delta():
+    p = provider()
+    p._active_symbols = ["CHPG2625"]
+    events = []
+    p.set_event_callback(lambda kind, row, symbol: events.append((kind, row, symbol)))
+
+    baseline = SSI_FRAME.split("|")
+    baseline[1] = "S#CHPG2625"
+    baseline[42] = ""
+    baseline[43] = ""
+    baseline[54] = "0"
+    observed = datetime(2026, 9, 9, 9, 5, tzinfo=VN_TZ)
+    assert p._handle_realtime_text("|".join(baseline), received_at=observed) is True
+    assert [kind for kind, _, _ in events] == ["bidask"]
+
+    matched = list(baseline)
+    matched[42] = "570"
+    matched[54] = "300"
+    events.clear()
+    assert p._handle_realtime_text(
+        "|".join(matched), received_at=observed.replace(minute=15)
+    ) is True
+
+    assert [kind for kind, _, _ in events] == ["bidask", "trade"]
+    trade = events[1][1]
+    assert trade["MatchVolume"] == 300
+    assert trade["TotalMatchVolume"] == 300
+
+
+def test_ssi_realtime_does_not_treat_mid_session_cumulative_as_latest_match_volume():
+    p = provider()
+    p._active_symbols = ["CHPG2625"]
+    events = []
+    p.set_event_callback(lambda kind, row, symbol: events.append((kind, row, symbol)))
+
+    first_seen = SSI_FRAME.split("|")
+    first_seen[1] = "S#CHPG2625"
+    first_seen[42] = "570"
+    first_seen[43] = ""
+    first_seen[54] = "5000"
+    observed = datetime(2026, 9, 9, 10, 0, tzinfo=VN_TZ)
+    assert p._handle_realtime_text("|".join(first_seen), received_at=observed) is True
+
+    trade = next(row for kind, row, _ in events if kind == "trade")
+    assert trade["MatchVolume"] is None
+    assert trade["TotalMatchVolume"] == 5000
+
+
 def test_ssi_realtime_rejects_unsubscribed_and_late_generation_frames():
     p = provider()
     p._active_symbols = ["HPG"]

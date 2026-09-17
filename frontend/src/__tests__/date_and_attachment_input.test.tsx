@@ -78,7 +78,7 @@ describe("File attachment preview", () => {
     const page = render(
       <QueryClientProvider client={qc}><AiChatProvider><AiAnchor /></AiChatProvider></QueryClientProvider>
     );
-    fireEvent.keyDown(page.getByRole("button", { name: "Open research assistant" }), { key: "Enter" });
+    fireEvent.click(page.getByRole("button", { name: "Open research assistant" }));
     const input = page.getByLabelText("Upload research files");
     fireEvent.change(input, { target: { files: [new File(["HPG,12345"], "a.csv", { type: "text/csv" })] } });
     await waitFor(() => expect(page.getByText(/Preview a.csv/)).toBeTruthy());
@@ -86,7 +86,7 @@ describe("File attachment preview", () => {
     expect(fetch.mock.calls[0][1].body).toBeInstanceOf(FormData);
     expect(page.getByText(/row 1/).textContent).toContain("12345");
     fireEvent.click(page.getByRole("button", { name: "Minimize conversation" }));
-    fireEvent.keyDown(page.getByRole("button", { name: "Open research assistant" }), { key: "Enter" });
+    fireEvent.click(page.getByRole("button", { name: "Open research assistant" }));
     expect(page.getByRole("button", { name: "Remove a.csv" })).toBeTruthy();
     const field = page.getByRole("textbox", { name: "Ask the research assistant" }) as HTMLTextAreaElement;
     fireEvent.change(field, { target: { value: "Analyse this file" } });
