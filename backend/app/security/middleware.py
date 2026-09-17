@@ -70,6 +70,8 @@ class RateLimitMiddleware:
         policy = resolve_policy(method, path)
         if policy is None:
             return await self.app(scope, receive, send)
+        if policy.defer_to_endpoint:
+            return await self.app(scope, receive, send)
 
         subject = _peek_verified_subject(conn) if policy.key_scope == "subject_or_ip" else None
         key = resolve_client_key(conn, subject=subject)
