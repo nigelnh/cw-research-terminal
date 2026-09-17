@@ -19,7 +19,10 @@ from app.market_data.market_schemas import (
     HistoricalTransportError,
 )
 from app.persistence.database import session_scope
-from app.persistence.ingestion.trading_calendar import last_completed_session_date
+from app.persistence.ingestion.trading_calendar import (
+    expected_trading_days,
+    last_completed_session_date,
+)
 from app.persistence.market_time import VN_TZ
 from app.persistence.models import MarketBar
 from app.persistence.repositories.instrument_repository import InstrumentRepository, InstrumentUpsert
@@ -148,7 +151,15 @@ async def test_A_missing_tail_triggers_one_fill_then_complete(history_service, f
     assert [b.date for b in bars][-1] == _CUTOFF.isoformat()            # tail now present
     async with session_scope() as s:
         n = (await s.execute(select(func.count()).select_from(MarketBar).where(MarketBar.instrument_id == iid))).scalar_one()
-    assert n == len(_weekdays(lo, _CUTOFF))
+    # The controlled tail fill intentionally excludes confirmed HOSE holidays.
+    # Keep the assertion on the same canonical calendar used by the service;
+    # counting every weekday breaks as soon as the moving test window spans a
+    # National Day or Tet closure.
+    initially_seeded = set(_weekdays(lo, mid))
+    expected_after_fill = initially_seeded | set(
+        expected_trading_days(mid + timedelta(days=1), _CUTOFF)
+    )
+    assert n == len(expected_after_fill)
 
     # second identical request: zero provider calls
     fake_provider.calls.clear()
@@ -423,4 +434,3 @@ async def test_no_generic_500_and_no_infinite_retry_on_typed_failure(history_ser
     assert len(bars) == len(_weekdays(lo, mid))
     # retry policy is bounded: the fake recorded a small, finite number of attempts
     assert 1 <= len(fake_provider.calls) <= settings.INGEST_MAX_RETRIES + 2
-

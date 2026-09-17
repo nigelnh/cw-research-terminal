@@ -184,6 +184,7 @@ export class BackendWebSocketClient {
   // the in-place maps/scalars via the getters; there is exactly ONE quote/warrant store.
   private storeListeners = new Set<() => void>();
   private revision = 0;
+  private marketRevisionTimer: ReturnType<typeof setTimeout> | null = null;
 
   private marketSession: string = "UNKNOWN";
   private marketSessionActive: boolean = false;
@@ -341,6 +342,21 @@ export class BackendWebSocketClient {
   private bumpRevision(): void {
     this.revision++;
     this.storeListeners.forEach((fn) => fn());
+  }
+
+  /**
+   * A busy SSI frame stream can carry hundreds of symbol patches per second. The maps are
+   * still updated synchronously for every accepted frame, but React observers are released
+   * in a short batch. This keeps the 300+ row terminal responsive and preserves every
+   * symbol's latest pulse sequence instead of asking React to render the full table once
+   * per network frame.
+   */
+  private scheduleMarketRevision(): void {
+    if (this.marketRevisionTimer !== null) return;
+    this.marketRevisionTimer = setTimeout(() => {
+      this.marketRevisionTimer = null;
+      this.bumpRevision();
+    }, 80);
   }
 
   private stopHeartbeat(): void {
@@ -524,6 +540,10 @@ export class BackendWebSocketClient {
       this.ws.close();
       this.ws = null;
     }
+    if (this.marketRevisionTimer !== null) {
+      clearTimeout(this.marketRevisionTimer);
+      this.marketRevisionTimer = null;
+    }
     this.setGatewayState("DISCONNECTED");
     this.setUpstreamFeedState("UNKNOWN");
   }
@@ -563,9 +583,9 @@ export class BackendWebSocketClient {
       return; // Unknown or invalid message format
     }
     this.routeIncomingMessage(msg);
-    // Single revision bump after routing so useSyncExternalStore consumers re-render once
-    // per inbound frame regardless of how many maps/scalars it touched.
-    this.bumpRevision();
+    // State mutation is immediate; React delivery is coalesced so a market-wide burst does
+    // not synchronously render the entire watchlist once per symbol frame.
+    this.scheduleMarketRevision();
   }
 
   private routeIncomingMessage(msg: any): void {

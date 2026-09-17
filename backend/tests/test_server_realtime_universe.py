@@ -126,6 +126,67 @@ async def test_live_universe_tracks_vn30_all_current_cws_and_extra_underlyings()
 
 
 @pytest.mark.asyncio
+async def test_live_universe_enriches_membership_with_current_contract_terms():
+    vn30 = [f"S{i:02d}" for i in range(30)]
+    vn30[0] = "HPG"
+
+    class CurrentGroupsWithTerms:
+        async def get_realtime_universe_snapshot(self, *, force_refresh=False):
+            return {
+                "vn30_symbols": vn30,
+                "covered_warrant_symbols": ["CHPG2603"],
+                "as_of": "2026-09-17T09:30:00+07:00",
+                "session_date": "2026-09-17",
+                "source": "VNSTOCK_VCI_CURRENT_GROUPS",
+            }
+
+        async def get_current_warrant_terms(self, *, session_date=None, force_refresh=False):
+            return {
+                "CHPG2603": {
+                    "symbol": "CHPG2603",
+                    "issuer": "TCBS",
+                    "underlying_symbol": "HPG",
+                    "strike_price": 25885,
+                    "exercise_ratio": 3.5704,
+                    "effective_strike_price": 25885,
+                    "effective_exercise_ratio": 3.5704,
+                    "maturity_date": "2026-12-21",
+                    "last_trading_date": "2026-12-17",
+                    "status": "ACTIVE",
+                    "data_quality": "COMPLETE",
+                    "evidence_level": "CURRENT_BROKER_MARKET_LIST",
+                    "metadata_verification": "VERIFIED_CURRENT",
+                    "metadata_source": "VNDIRECT_FINFO_CURRENT_DERIVATIVES",
+                    "metadata_retrieved_at": "2026-09-17T09:30:00+07:00",
+                    "provenance": {
+                        "effective_terms_source": {
+                            "source_type": "CURRENT_BROKER_TERMS",
+                            "source_url": "https://finfo.test/derivatives?q=code:CHPG2603",
+                            "retrieved_at": "2026-09-17T09:30:00+07:00",
+                        },
+                        "reconciliation_mode": "AUTOMATIC_SCRAPED",
+                    },
+                }
+            }
+
+    registry = InstrumentRegistry(CanonicalInstrumentProvider())
+    await registry.initialize(current_date="2026-09-17")
+    universe = await resolve_default_research_universe(
+        registry, provider=CurrentGroupsWithTerms(), today="2026-09-17"
+    )
+    cw = next(item for item in universe.items if item["symbol"] == "CHPG2603")
+    assert cw["issuer"] == "TCBS"
+    assert cw["strike_price"] == 25885
+    assert cw["exercise_ratio"] == 3.5704
+
+    await reconcile_registry_with_research_universe(registry, universe)
+    spec = await registry.get_instrument("CHPG2603")
+    assert spec is not None
+    assert spec.data_quality.value == "COMPLETE"
+    assert spec.metadata_verification.value == "VERIFIED_CURRENT"
+
+
+@pytest.mark.asyncio
 async def test_default_realtime_universe_is_exact_and_has_no_index():
     _, universe = await _resolved_default()
 

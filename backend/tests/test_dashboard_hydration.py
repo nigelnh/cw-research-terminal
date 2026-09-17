@@ -10,6 +10,11 @@ import pytest
 
 from app.market_data.market_snapshot_resolver import MarketSnapshotResolver
 from app.market_data.market_schemas import HistoricalBar
+from app.market_data.market_router import (
+    get_dashboard_analytics,
+    get_dashboard_rows,
+    market_snapshot_resolver,
+)
 from app.quant.quant_engine import LiveQuantEngine
 from app.quant.quant_schemas import QuantModelInputs, WarrantAnalytics
 
@@ -17,6 +22,43 @@ pytestmark = pytest.mark.asyncio
 
 _VN = timezone(timedelta(hours=7))
 _CLOSED_NOW = datetime(2026, 8, 29, 10, 0, tzinfo=_VN)
+
+
+async def test_dashboard_routes_hydrate_the_complete_current_universe(monkeypatch):
+    """The old 60-row route cap blanked quotes/IV after the first symbol block."""
+    symbols = [f"S{index:03d}" for index in range(357)]
+    quote_seen: list[str] = []
+    analytics_seen: list[str] = []
+
+    class Row:
+        def __init__(self, symbol: str):
+            self.symbol = symbol
+
+        def to_wire(self):
+            return {"Symbol": self.symbol}
+
+    async def resolve_rows(requested, **kwargs):
+        quote_seen.extend(requested)
+        return [Row(symbol) for symbol in requested]
+
+    async def resolve_analytics(requested, **kwargs):
+        analytics_seen.extend(requested)
+        return [{"Symbol": symbol, "analytics": None} for symbol in requested]
+
+    monkeypatch.setattr(market_snapshot_resolver, "resolve_rows", resolve_rows)
+    monkeypatch.setattr(
+        market_snapshot_resolver, "resolve_analytics_rows", resolve_analytics
+    )
+
+    quote_response = await get_dashboard_rows(
+        symbols=",".join(symbols), debug=False
+    )
+    analytics_response = await get_dashboard_analytics(symbols=",".join(symbols))
+
+    assert quote_seen == symbols
+    assert analytics_seen == symbols
+    assert len(quote_response["rows"]) == 357
+    assert len(analytics_response["rows"]) == 357
 
 
 async def test_quote_resolution_does_not_invoke_analytics(monkeypatch):

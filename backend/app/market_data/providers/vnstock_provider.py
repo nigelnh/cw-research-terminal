@@ -263,6 +263,11 @@ class VnstockProvider(MarketDataProvider):
         self._listing_cache: tuple[float, list[dict[str, Any]]] = (0.0, [])
         self._group_cache: dict[str, tuple[float, list[str]]] = {}
         self._group_provenance: dict[str, dict[str, Any]] = {}
+        self._warrant_terms_cache: tuple[float, str, dict[str, dict[str, Any]]] = (
+            0.0,
+            "",
+            {},
+        )
         self._fundamental_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._income_statement_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._overview_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
@@ -1238,6 +1243,46 @@ class VnstockProvider(MarketDataProvider):
             "valid_through": None,
         }
         return symbols
+
+    async def get_current_warrant_terms(
+        self, *, session_date: str | None = None, force_refresh: bool = False
+    ) -> dict[str, dict[str, Any]]:
+        """Return current effective terms for all trading CWs.
+
+        Vnstock owns listing membership and realtime delivery. VNDirect finfo is queried
+        once per refresh window only to enrich that membership with auditable contract
+        terms; it never creates an independent stream or SDK session.
+        """
+        from app.instruments.providers.vndirect_terms_provider import (
+            fetch_current_warrant_terms,
+            load_bundled_current_warrant_terms,
+        )
+
+        session = session_date or reference_session_date().isoformat()
+        cached_at, cached_session, cached = self._warrant_terms_cache
+        if (
+            not force_refresh
+            and cached
+            and cached_session == session
+            and time.monotonic() - cached_at < self._PROFILE_TTL
+        ):
+            return cached
+        try:
+            terms = await fetch_current_warrant_terms(
+                session,
+                base_url=settings.VNDIRECT_FINFO_BASE_URL,
+            )
+        except Exception as exc:  # noqa: BLE001 - bundled terms keep startup truthful
+            terms = load_bundled_current_warrant_terms(session)
+            if not terms:
+                raise
+            logger.warning(
+                "Current CW terms endpoint unavailable (%s); using %d bundled terms.",
+                type(exc).__name__,
+                len(terms),
+            )
+        self._warrant_terms_cache = (time.monotonic(), session, terms)
+        return terms
 
     async def get_realtime_universe_snapshot(
         self, *, force_refresh: bool = False

@@ -8,6 +8,24 @@ describe("BackendWebSocketClient - Correctness, Routing & Lifecycle Tests", () =
     client = new BackendWebSocketClient("ws://localhost:8501/ws/market");
   });
 
+  it("coalesces a market-wide frame burst into one React store notification", async () => {
+    vi.useFakeTimers();
+    const listener = vi.fn();
+    const unsubscribe = client.subscribe(listener);
+    for (let index = 0; index < 100; index += 1) {
+      client.handleIncomingMessage({
+        type: "patch",
+        symbol: `S${index}`,
+        patch: { Traded: 20 + index / 100, _ts_source: 1_000 + index },
+      });
+    }
+    expect(listener).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(80);
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    vi.useRealTimers();
+  });
+
   it("1. Patch before initial snapshots: queues patch and merges cleanly when snapshot arrives", () => {
     client.handleIncomingMessage({
       type: "patch",

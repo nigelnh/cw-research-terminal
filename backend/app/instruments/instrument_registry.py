@@ -159,6 +159,7 @@ class InstrumentRegistry:
         *,
         source: str = "VNSTOCK_CURRENT_CW_GROUP",
         observed_at: Optional[str] = None,
+        terms_by_symbol: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> int:
         """Overlay danh sách CW hiện hành đầy đủ lên metadata registry.
 
@@ -175,15 +176,42 @@ class InstrumentRegistry:
         clean = sorted({str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()})
         live = {symbol for symbol in clean if re.fullmatch(r"C[A-Z]{3}\d{4}", symbol)}
         stamp = observed_at or datetime.now(timezone(timedelta(hours=7))).isoformat()
+        current_terms = {
+            str(symbol).strip().upper(): value
+            for symbol, value in (terms_by_symbol or {}).items()
+            if str(symbol).strip().upper() in live and isinstance(value, dict)
+        }
 
         async with self._lock:
             updated = dict(self._instruments)
             for symbol, spec in list(updated.items()):
                 if symbol in live:
-                    updated[symbol] = spec.model_copy(update={
+                    payload = spec.model_dump()
+                    payload.update({
                         "status": InstrumentLifecycleStatus.ACTIVE,
                         "evidence_level": LifecycleEvidenceLevel.CURRENT_BROKER_MARKET_LIST,
                     })
+                    if symbol in current_terms:
+                        payload.update(current_terms[symbol])
+                        # Keep higher-quality manually reconciled disclosure references
+                        # and corporate-action history. The current broker row refreshes
+                        # the effective numbers and verification timestamp without
+                        # erasing the original/effective source distinction.
+                        if (
+                            spec.metadata_verification
+                            == MetadataVerificationStatus.VERIFIED_CURRENT
+                            and spec.provenance is not None
+                        ):
+                            payload.update({
+                                "initial_strike_price": spec.initial_strike_price,
+                                "initial_exercise_ratio": spec.initial_exercise_ratio,
+                                "is_adjusted": spec.is_adjusted,
+                                "terms_effective_date": spec.terms_effective_date,
+                                "adjustment_reference": spec.adjustment_reference,
+                                "provenance": spec.provenance.model_dump(),
+                                "metadata_source": spec.metadata_source,
+                            })
+                    updated[symbol] = CoveredWarrantSpecification.model_validate(payload)
                 elif (
                     spec.status == InstrumentLifecycleStatus.ACTIVE
                     and spec.evidence_level
@@ -198,7 +226,7 @@ class InstrumentRegistry:
                     })
 
             for symbol in live - set(updated):
-                updated[symbol] = CoveredWarrantSpecification(
+                payload: Dict[str, Any] = dict(
                     symbol=symbol,
                     issuer="",
                     underlying_symbol=symbol[1:4],
@@ -210,6 +238,9 @@ class InstrumentRegistry:
                     metadata_source=source,
                     metadata_retrieved_at=stamp,
                 )
+                if symbol in current_terms:
+                    payload.update(current_terms[symbol])
+                updated[symbol] = CoveredWarrantSpecification.model_validate(payload)
 
             self._instruments = updated
             self._underlying_index.clear()
