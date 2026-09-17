@@ -25,13 +25,19 @@ from app.market_data.market_snapshot_resolver import market_snapshot_resolver
 from app.market_data.market_overview_service import market_overview_service
 from app.instruments.instrument_registry import instrument_registry
 from app.market_data import trading_calendar as cal
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 from app.market_data.market_session import market_session
 
 market_router = APIRouter(prefix="/api/market", tags=["Market Data"])
 
-_MAX_DASHBOARD_SYMBOLS = 60
+# The dashboard now owns the complete server universe (VN30 + every current CW and
+# dependency underlying).  The previous 60-row cap silently dropped everything after
+# the first alphabetical block from REST hydration, so closed/pre-open reloads showed
+# metadata with blank quotes and IV for most of the table.  Keep the endpoint bounded by
+# the same configured universe ceiling used by the realtime owner.
+_MAX_DASHBOARD_SYMBOLS = settings.MARKET_DATA_MAX_SYMBOLS
 
 
 @market_router.get("/health", response_model=MarketHealthResponse)
@@ -284,7 +290,9 @@ async def get_stock_profiles(symbols: str = Query(..., max_length=1000)):
         )
         provider_source = str(upstream.get("source") or "VNSTOCK").upper()
         sources = ([provider_source] if used_provider else []) + (
-            [str(fallback.source or "COMPANY_PROFILES").upper()] if used_fallback else []
+            [str(fallback.source or "COMPANY_PROFILES").upper()]
+            if used_fallback and fallback is not None
+            else []
         )
         populated = sum(value is not None for value in (name, short_name, exchange))
         availability = (

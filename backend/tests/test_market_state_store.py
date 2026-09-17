@@ -27,6 +27,7 @@ class MockRedisClient:
         self.store: dict[str, str] = {}
         self.ttls: dict[str, int] = {}
         self.should_fail = False
+        self.pipeline_execute_count = 0
 
     async def ping(self):
         if self.should_fail:
@@ -77,6 +78,7 @@ class MockRedisPipeline:
     async def execute(self):
         if self.parent.should_fail:
             raise ConnectionError("Redis Pipeline execution failed")
+        self.parent.pipeline_execute_count += 1
         for cmd in self.commands:
             if cmd[0] == "set":
                 self.parent.store[cmd[1]] = cmd[2]
@@ -149,6 +151,7 @@ async def test_quant_analytics_cache_is_session_namespaced_and_round_trips_input
             },
         }
         await store.save_quant_analytics("chpg2625", "2026-09-10", payload)
+        await store._drain_analytics_and_save()
 
         restored = await store.load_quant_analytics(["CHPG2625"], "2026-09-10")
         assert restored == {"CHPG2625": payload}
@@ -156,6 +159,80 @@ async def test_quant_analytics_cache_is_session_namespaced_and_round_trips_input
         assert redis.ttls[
             "cw_research:quant_analytics:v1:2026-09-10:CHPG2625"
         ] == 7 * 86400
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_quant_analytics_burst_is_coalesced_into_one_redis_pipeline():
+    redis = MockRedisClient()
+    store = RedisMarketStateStore(enabled=True, redis_client=redis)
+    await store.initialize()
+    try:
+        session_date = "2026-09-17"
+        symbols = [f"CHPG{index:04d}" for index in range(326)]
+        for index, symbol in enumerate(symbols):
+            await store.save_quant_analytics(
+                symbol,
+                session_date,
+                {
+                    "symbol": symbol,
+                    "session_date": session_date,
+                    "iv_bid": index / 1000,
+                },
+            )
+
+        # A second publication before the flush replaces the older value for
+        # the same symbol rather than consuming another Redis connection.
+        await store.save_quant_analytics(
+            symbols[0],
+            session_date,
+            {
+                "symbol": symbols[0],
+                "session_date": session_date,
+                "iv_bid": 0.999,
+            },
+        )
+
+        assert len(store._analytics_write_buffer) == 326
+        await store._drain_analytics_and_save()
+
+        assert redis.pipeline_execute_count == 1
+        assert len(store._analytics_write_buffer) == 0
+        health = await store.health()
+        assert health["pending_analytics_write_buffer_size"] == 0
+        assert health["counters"]["analytics_writes_succeeded"] == 326
+        restored = await store.load_quant_analytics([symbols[0]], session_date)
+        assert restored[symbols[0]]["iv_bid"] == 0.999
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_quant_analytics_batch_is_requeued_once():
+    redis = MockRedisClient()
+    store = RedisMarketStateStore(enabled=True, redis_client=redis)
+    await store.initialize()
+    try:
+        payload = {
+            "symbol": "CHPG2625",
+            "session_date": "2026-09-17",
+            "iv_bid": 0.35,
+        }
+        await store.save_quant_analytics("CHPG2625", "2026-09-17", payload)
+        redis.should_fail = True
+        await store._drain_analytics_and_save()
+
+        assert len(store._analytics_write_buffer) == 1
+        assert store.is_available() is False
+        assert store._counters["analytics_errors"] == 1
+
+        redis.should_fail = False
+        assert (await store.health())["redis_connected"] is True
+        await store._drain_analytics_and_save()
+        assert len(store._analytics_write_buffer) == 0
+        assert redis.pipeline_execute_count == 1
+        assert store._counters["analytics_writes_succeeded"] == 1
     finally:
         await store.close()
 

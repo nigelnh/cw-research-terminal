@@ -8,10 +8,11 @@ are never inferred from listing membership.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Awaitable, Iterable, cast
 
 from app.instruments.instrument_registry import InstrumentRegistry, instrument_registry
 from app.instruments.instrument_schemas import (
@@ -26,6 +27,7 @@ EXPECTED_STOCKS = 3
 EXPECTED_COVERED_WARRANTS = 27
 EXPECTED_UNIVERSE_SIZE = EXPECTED_STOCKS + EXPECTED_COVERED_WARRANTS
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9]{1,11}$")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -289,6 +291,7 @@ async def _resolve_provider_research_universe(
     provider: Any,
     *,
     force_refresh: bool,
+    today: str | None = None,
 ) -> ResolvedResearchUniverse:
     snapshot = await provider.get_realtime_universe_snapshot(force_refresh=force_refresh)
     vn30 = _clean_symbols(snapshot.get("vn30_symbols"))
@@ -310,6 +313,28 @@ async def _resolve_provider_research_universe(
 
     if not valid_cws:
         issues.append(UniverseIssue("__CW__", "empty_current_provider_list"))
+
+    terms_by_cw: dict[str, dict[str, Any]] = {}
+    valid_cw_set = set(valid_cws)
+    terms_fetcher = getattr(provider, "get_current_warrant_terms", None)
+    if callable(terms_fetcher):
+        try:
+            fetched = await cast(
+                Awaitable[Any],
+                terms_fetcher(session_date=today, force_refresh=force_refresh),
+            )
+            if isinstance(fetched, dict):
+                terms_by_cw = {
+                    _clean_symbol(symbol): dict(term)
+                    for symbol, term in fetched.items()
+                    if _clean_symbol(symbol) in valid_cw_set and isinstance(term, dict)
+                }
+        except Exception as exc:  # noqa: BLE001 - listing remains independently usable
+            # Terms enrichment is independently recoverable from the canonical registry;
+            # listing/stream ownership must remain available when this public endpoint is
+            # temporarily down.
+            terms_by_cw = {}
+            logger.warning("Current CW terms enrichment skipped: %s", type(exc).__name__)
 
     observed_at = str(snapshot.get("as_of") or "") or None
     if not registry._is_initialized:
@@ -347,6 +372,8 @@ async def _resolve_provider_research_universe(
                     "metadata_verification": spec.metadata_verification.value,
                     "data_quality": spec.data_quality.value,
                 })
+            if symbol in terms_by_cw:
+                item.update(terms_by_cw[symbol])
             items.append(item)
 
     expected_stocks = len(stock_symbols)
@@ -400,6 +427,13 @@ async def reconcile_registry_with_research_universe(
         symbols,
         source=universe.source,
         observed_at=universe.refreshed_at,
+        terms_by_symbol={
+            str(item["symbol"]): item
+            for item in universe.items
+            if item.get("instrument_type") == "CW"
+            and item.get("strike_price") is not None
+            and item.get("exercise_ratio") is not None
+        },
     )
 
 
@@ -415,7 +449,7 @@ async def resolve_default_research_universe(
     if provider is not None:
         try:
             resolved = await _resolve_provider_research_universe(
-                registry, provider, force_refresh=force_refresh
+                registry, provider, force_refresh=force_refresh, today=today
             )
             return resolved
         except Exception as exc:  # noqa: BLE001 - a listing outage cannot block startup

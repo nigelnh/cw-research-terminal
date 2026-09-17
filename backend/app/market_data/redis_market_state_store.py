@@ -48,6 +48,12 @@ class RedisMarketStateStore(MarketStateStore):
         self._client: Optional[aioredis.Redis] = redis_client
         self._connected = False
         self._write_buffer: Dict[str, CanonicalQuote] = {}
+        # Quant can publish hundreds of symbols at once when the registry or an
+        # underlying quote changes.  Keep only the newest value per
+        # symbol/session and flush the whole burst through one Redis pipeline.
+        # Opening one SET task per symbol can exhaust a small managed Redis pool
+        # and leave the UI without a warm IV value after a reload.
+        self._analytics_write_buffer: Dict[tuple[str, str], Dict[str, Any]] = {}
         self._write_lock: Optional[asyncio.Lock] = None
         self._flush_event: Optional[asyncio.Event] = None
         self._flush_task: Optional[asyncio.Task] = None
@@ -139,6 +145,11 @@ class RedisMarketStateStore(MarketStateStore):
                 await self._drain_and_save()
             except Exception as e:
                 logger.warning(f"Error during final Redis flush: {e}")
+        if self.is_available() and self._analytics_write_buffer:
+            try:
+                await self._drain_analytics_and_save()
+            except Exception as e:
+                logger.warning("Error during final Redis analytics flush: %s", type(e).__name__)
 
         if self._client:
             try:
@@ -360,26 +371,61 @@ class RedisMarketStateStore(MarketStateStore):
     async def save_quant_analytics(
         self, symbol: str, session_date: str, payload: Dict[str, Any]
     ) -> None:
-        if not self.is_available() or self._client is None:
+        if not self._enabled:
             return
         if payload.get("session_date") != session_date:
             return
+
+        clean_symbol = symbol.strip().upper()
+        if not clean_symbol or payload.get("symbol", "").strip().upper() != clean_symbol:
+            return
+        # A shallow copy is enough: analytics payloads are replaced, never
+        # mutated by the engine after publication.
+        self._analytics_write_buffer[(clean_symbol, session_date)] = dict(payload)
+        if self._flush_event:
+            self._flush_event.set()
+
+    async def _drain_analytics_and_save(self) -> None:
+        if not self._analytics_write_buffer or not self.is_available() or self._client is None:
+            return
+
+        to_save: Dict[tuple[str, str], Dict[str, Any]] = {}
+        if self._write_lock:
+            async with self._write_lock:
+                to_save = dict(self._analytics_write_buffer)
+                self._analytics_write_buffer.clear()
+        else:
+            to_save = dict(self._analytics_write_buffer)
+            self._analytics_write_buffer.clear()
+
+        if not to_save:
+            return
+
         try:
-            await self._client.set(
-                self._analytics_key(symbol, session_date),
-                json.dumps(payload),
-                # Session keys make cross-day reads impossible. Seven days lets a same-day
-                # Railway restart hydrate immediately while bounding abandoned namespaces.
-                ex=7 * 86400,
-            )
-            self._counters["analytics_writes_succeeded"] += 1
+            serialized = [
+                (self._analytics_key(symbol, session_date), json.dumps(payload))
+                for (symbol, session_date), payload in to_save.items()
+            ]
+            pipe = self._client.pipeline()
+            for key, raw_json in serialized:
+                # Session keys make cross-day reads impossible. Seven days lets a
+                # same-day Railway restart hydrate immediately while bounding
+                # abandoned namespaces.
+                pipe.set(key, raw_json, ex=7 * 86400)
+            await pipe.execute()
+            self._counters["analytics_writes_succeeded"] += len(to_save)
         except Exception as exc:
             self._counters["analytics_errors"] += 1
+            # Preserve a newer value if one arrived while the failed batch was in
+            # flight; otherwise requeue the failed item for the reconnect worker.
+            for key, payload in to_save.items():
+                self._analytics_write_buffer.setdefault(key, payload)
             logger.warning(
-                "Quant analytics cache write failed for %s: %s",
-                symbol,
+                "Quant analytics cache batch write failed for %d symbols: %s",
+                len(to_save),
                 type(exc).__name__,
             )
+            self._mark_disconnected()
 
     def enqueue_save(self, symbol: str, quote: CanonicalQuote) -> None:
         """Buffers quote for asynchronous batch writing without blocking."""
@@ -418,8 +464,11 @@ class RedisMarketStateStore(MarketStateStore):
                     except asyncio.TimeoutError:
                         pass
 
-                if self._write_buffer and self.is_available():
-                    await self._drain_and_save()
+                if self.is_available():
+                    if self._write_buffer:
+                        await self._drain_and_save()
+                    if self._analytics_write_buffer:
+                        await self._drain_analytics_and_save()
                 elif not self._connected and self._enabled and self._client:
                     # Periodically attempt reconnect health check
                     try:
@@ -463,5 +512,6 @@ class RedisMarketStateStore(MarketStateStore):
             "ttl_seconds": self._ttl_seconds,
             "max_staleness_seconds": self._max_staleness_seconds,
             "pending_write_buffer_size": len(self._write_buffer),
+            "pending_analytics_write_buffer_size": len(self._analytics_write_buffer),
             "counters": dict(self._counters),
         }

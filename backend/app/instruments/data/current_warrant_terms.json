@@ -1,0 +1,3267 @@
+{
+  "known_through": "2026-09-17",
+  "retrieved_at": "2026-09-17T09:37:49.553213+07:00",
+  "source": "VNDIRECT_FINFO_CURRENT_DERIVATIVES",
+  "items": [
+    {
+      "code": "CACB2511",
+      "issuer": "SSI",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 19832.0,
+      "exerciseRatio": 1.7245,
+      "expiryDate": "2026-09-23",
+      "lastTradingDate": "2026-09-21",
+      "listedQtty": 13000000
+    },
+    {
+      "code": "CACB2515",
+      "issuer": "VND",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 27420.0,
+      "exerciseRatio": 1.7245,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CACB2516",
+      "issuer": "KAFI",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 24575.0,
+      "exerciseRatio": 3.4491,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CACB2517",
+      "issuer": "KAFI",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 25006.0,
+      "exerciseRatio": 3.4491,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CACB2602",
+      "issuer": "TCBS",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 22419.0,
+      "exerciseRatio": 1.7245,
+      "expiryDate": "2026-09-21",
+      "lastTradingDate": "2026-09-17",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CACB2603",
+      "issuer": "TCBS",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 22419.0,
+      "exerciseRatio": 1.7245,
+      "expiryDate": "2026-12-21",
+      "lastTradingDate": "2026-12-17",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CACB2604",
+      "issuer": "LPBS",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 22419.0,
+      "exerciseRatio": 1.7245,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 2800000
+    },
+    {
+      "code": "CACB2606",
+      "issuer": "HCM",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 21557.0,
+      "exerciseRatio": 3.4491,
+      "expiryDate": "2027-01-08",
+      "lastTradingDate": "2027-01-06",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CACB2607",
+      "issuer": "SSV",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 21384.0,
+      "exerciseRatio": 1.7245,
+      "expiryDate": "2027-02-11",
+      "lastTradingDate": "2027-02-02",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CACB2608",
+      "issuer": "SSV",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 21125.0,
+      "exerciseRatio": 1.7245,
+      "expiryDate": "2026-11-09",
+      "lastTradingDate": "2026-11-05",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CACB2609",
+      "issuer": "KISVN",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 24909.0,
+      "exerciseRatio": 4.3113,
+      "expiryDate": "2026-10-28",
+      "lastTradingDate": "2026-10-26",
+      "listedQtty": 1000000
+    },
+    {
+      "code": "CACB2610",
+      "issuer": "KISVN",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 25964.0,
+      "exerciseRatio": 4.3113,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 1000000
+    },
+    {
+      "code": "CACB2614",
+      "issuer": "HCM",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 23000.0,
+      "exerciseRatio": 1.0,
+      "expiryDate": "2026-12-16",
+      "lastTradingDate": "2026-12-14",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CACB2615",
+      "issuer": "VND",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 21900.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-04-29",
+      "lastTradingDate": "2027-04-27",
+      "listedQtty": 6000000
+    },
+    {
+      "code": "CACB2616",
+      "issuer": "MBS",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 23500.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CACB2617",
+      "issuer": "SSV",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 23000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CACB2618",
+      "issuer": "SSV",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 23500.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-04-02",
+      "lastTradingDate": "2027-03-31",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CACB2619",
+      "issuer": "LPS",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 21000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CACB2620",
+      "issuer": "LPS",
+      "underlyingAsset": "ACB",
+      "exercisePrice": 25000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CFPT2518",
+      "issuer": "SSI",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 104449.0,
+      "exerciseRatio": 8.4918,
+      "expiryDate": "2026-09-23",
+      "lastTradingDate": "2026-09-21",
+      "listedQtty": 15000000
+    },
+    {
+      "code": "CFPT2529",
+      "issuer": "VND",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 104362.0,
+      "exerciseRatio": 7.81,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CFPT2532",
+      "issuer": "KAFI",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 99578.0,
+      "exerciseRatio": 11.715,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CFPT2533",
+      "issuer": "KAFI",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 103483.0,
+      "exerciseRatio": 11.715,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CFPT2602",
+      "issuer": "TCBS",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 98641.0,
+      "exerciseRatio": 9.8641,
+      "expiryDate": "2026-09-21",
+      "lastTradingDate": "2026-09-17",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CFPT2603",
+      "issuer": "TCBS",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 100614.0,
+      "exerciseRatio": 9.8641,
+      "expiryDate": "2026-12-21",
+      "lastTradingDate": "2026-12-17",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CFPT2604",
+      "issuer": "LPBS",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 94696.0,
+      "exerciseRatio": 9.8641,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 3200000
+    },
+    {
+      "code": "CFPT2606",
+      "issuer": "VPBS",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 100614.0,
+      "exerciseRatio": 9.8641,
+      "expiryDate": "2026-09-30",
+      "lastTradingDate": "2026-09-28",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CFPT2608",
+      "issuer": "SSI",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 94696.0,
+      "exerciseRatio": 4.9321,
+      "expiryDate": "2026-09-29",
+      "lastTradingDate": "2026-09-25",
+      "listedQtty": 7000000
+    },
+    {
+      "code": "CFPT2609",
+      "issuer": "HCM",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 97162.0,
+      "exerciseRatio": 15.7826,
+      "expiryDate": "2027-01-08",
+      "lastTradingDate": "2027-01-06",
+      "listedQtty": 7000000
+    },
+    {
+      "code": "CFPT2610",
+      "issuer": "ACBS",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 83845.0,
+      "exerciseRatio": 11.837,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 19000000
+    },
+    {
+      "code": "CFPT2611",
+      "issuer": "PHS",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 79899.0,
+      "exerciseRatio": 19.7283,
+      "expiryDate": "2027-04-08",
+      "lastTradingDate": "2027-04-06",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CFPT2612",
+      "issuer": "PHS",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 75954.0,
+      "exerciseRatio": 22.6875,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CFPT2613",
+      "issuer": "SSV",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 77927.0,
+      "exerciseRatio": 9.8641,
+      "expiryDate": "2026-11-09",
+      "lastTradingDate": "2026-11-05",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CFPT2614",
+      "issuer": "SSV",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 78913.0,
+      "exerciseRatio": 9.8641,
+      "expiryDate": "2027-02-11",
+      "lastTradingDate": "2027-02-02",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CFPT2615",
+      "issuer": "MSVN",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 73981.0,
+      "exerciseRatio": 9.8641,
+      "expiryDate": "2027-03-29",
+      "lastTradingDate": "2027-03-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CFPT2616",
+      "issuer": "KISVN",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 82456.0,
+      "exerciseRatio": 16.0,
+      "expiryDate": "2026-10-28",
+      "lastTradingDate": "2026-10-26",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CFPT2617",
+      "issuer": "KISVN",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 85678.0,
+      "exerciseRatio": 16.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CFPT2621",
+      "issuer": "HCM",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 70500.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2026-12-16",
+      "lastTradingDate": "2026-12-14",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CFPT2622",
+      "issuer": "HCM",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 72000.0,
+      "exerciseRatio": 8.0,
+      "expiryDate": "2027-03-16",
+      "lastTradingDate": "2027-03-12",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CFPT2623",
+      "issuer": "VND",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 70100.0,
+      "exerciseRatio": 12.0,
+      "expiryDate": "2026-12-30",
+      "lastTradingDate": "2026-12-28",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CFPT2624",
+      "issuer": "VND",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 77000.0,
+      "exerciseRatio": 12.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CFPT2625",
+      "issuer": "SSV",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 74000.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 2200000
+    },
+    {
+      "code": "CFPT2626",
+      "issuer": "SSV",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 74500.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-04-02",
+      "lastTradingDate": "2027-03-31",
+      "listedQtty": 2200000
+    },
+    {
+      "code": "CFPT2627",
+      "issuer": "KAFI",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 68700.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CFPT2628",
+      "issuer": "KAFI",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 75800.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CFPT2629",
+      "issuer": "LPS",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 82000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 21000000
+    },
+    {
+      "code": "CFPT2630",
+      "issuer": "LPS",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 76000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 19000000
+    },
+    {
+      "code": "CFPT2631",
+      "issuer": "ACBS",
+      "underlyingAsset": "FPT",
+      "exercisePrice": 72000.0,
+      "exerciseRatio": 12.0,
+      "expiryDate": "2027-04-26",
+      "lastTradingDate": "2027-04-22",
+      "listedQtty": 15000000
+    },
+    {
+      "code": "CHDB2509",
+      "issuer": "VND",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 28682.0,
+      "exerciseRatio": 2.3131,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CHDB2602",
+      "issuer": "VPBS",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 28000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2026-09-30",
+      "lastTradingDate": "2026-09-28",
+      "listedQtty": 6000000
+    },
+    {
+      "code": "CHDB2603",
+      "issuer": "PHS",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 29000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-05-10",
+      "lastTradingDate": "2027-05-06",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHDB2604",
+      "issuer": "SSV",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 27300.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2026-11-09",
+      "lastTradingDate": "2026-11-05",
+      "listedQtty": 2500000
+    },
+    {
+      "code": "CHDB2605",
+      "issuer": "SSV",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 27800.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-02-11",
+      "lastTradingDate": "2027-02-02",
+      "listedQtty": 2500000
+    },
+    {
+      "code": "CHDB2606",
+      "issuer": "KISVN",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 29999.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2026-10-28",
+      "lastTradingDate": "2026-10-26",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CHDB2607",
+      "issuer": "KISVN",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 31999.0,
+      "exerciseRatio": 8.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CHDB2608",
+      "issuer": "VND",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 23800.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-12-30",
+      "lastTradingDate": "2026-12-28",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CHDB2609",
+      "issuer": "VND",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 26300.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CHDB2610",
+      "issuer": "MBS",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 28000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CHDB2611",
+      "issuer": "SSV",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 27000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 2500000
+    },
+    {
+      "code": "CHDB2612",
+      "issuer": "KAFI",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 24100.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHDB2613",
+      "issuer": "KAFI",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 27200.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CHDB2614",
+      "issuer": "LPS",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 29000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CHDB2615",
+      "issuer": "LPS",
+      "underlyingAsset": "HDB",
+      "exercisePrice": 26000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CHPG2525",
+      "issuer": "SSI",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 21555.0,
+      "exerciseRatio": 1.4865,
+      "expiryDate": "2026-09-23",
+      "lastTradingDate": "2026-09-21",
+      "listedQtty": 7000000
+    },
+    {
+      "code": "CHPG2539",
+      "issuer": "VND",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 30616.0,
+      "exerciseRatio": 1.7852,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CHPG2540",
+      "issuer": "KAFI",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 27670.0,
+      "exerciseRatio": 3.5704,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CHPG2541",
+      "issuer": "KAFI",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 29456.0,
+      "exerciseRatio": 3.5704,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CHPG2602",
+      "issuer": "TCBS",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25885.0,
+      "exerciseRatio": 3.5704,
+      "expiryDate": "2026-09-21",
+      "lastTradingDate": "2026-09-17",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CHPG2603",
+      "issuer": "TCBS",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25885.0,
+      "exerciseRatio": 3.5704,
+      "expiryDate": "2026-12-21",
+      "lastTradingDate": "2026-12-17",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CHPG2604",
+      "issuer": "ACBS",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25885.0,
+      "exerciseRatio": 2.6778,
+      "expiryDate": "2026-10-26",
+      "lastTradingDate": "2026-10-22",
+      "listedQtty": 19000000
+    },
+    {
+      "code": "CHPG2605",
+      "issuer": "LPBS",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 24100.0,
+      "exerciseRatio": 1.7852,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 3200000
+    },
+    {
+      "code": "CHPG2606",
+      "issuer": "VPBS",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 23207.0,
+      "exerciseRatio": 2.6778,
+      "expiryDate": "2026-12-30",
+      "lastTradingDate": "2026-12-28",
+      "listedQtty": 9000000
+    },
+    {
+      "code": "CHPG2607",
+      "issuer": "SSI",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 24993.0,
+      "exerciseRatio": 1.7852,
+      "expiryDate": "2026-09-29",
+      "lastTradingDate": "2026-09-25",
+      "listedQtty": 21000000
+    },
+    {
+      "code": "CHPG2609",
+      "issuer": "HCM",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 24100.0,
+      "exerciseRatio": 3.5704,
+      "expiryDate": "2027-01-08",
+      "lastTradingDate": "2027-01-06",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CHPG2610",
+      "issuer": "SSV",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 26331.0,
+      "exerciseRatio": 3.5704,
+      "expiryDate": "2027-01-14",
+      "lastTradingDate": "2027-01-12",
+      "listedQtty": 1500000
+    },
+    {
+      "code": "CHPG2613",
+      "issuer": "PHS",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 26778.0,
+      "exerciseRatio": 4.463,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHPG2614",
+      "issuer": "SSV",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25439.0,
+      "exerciseRatio": 3.5704,
+      "expiryDate": "2026-11-09",
+      "lastTradingDate": "2026-11-05",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHPG2615",
+      "issuer": "SSV",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25885.0,
+      "exerciseRatio": 3.5704,
+      "expiryDate": "2027-02-11",
+      "lastTradingDate": "2027-02-02",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHPG2616",
+      "issuer": "MSVN",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 24100.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-12-29",
+      "lastTradingDate": "2026-12-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CHPG2617",
+      "issuer": "MSVN",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25400.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-03-29",
+      "lastTradingDate": "2027-03-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CHPG2618",
+      "issuer": "KISVN",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 28888.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHPG2619",
+      "issuer": "KISVN",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 28333.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHPG2620",
+      "issuer": "KISVN",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 26999.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-09-28",
+      "lastTradingDate": "2026-09-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHPG2621",
+      "issuer": "KISVN",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 27999.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-10-28",
+      "lastTradingDate": "2026-10-26",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHPG2625",
+      "issuer": "ACBS",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-02-17",
+      "lastTradingDate": "2027-02-15",
+      "listedQtty": 18000000
+    },
+    {
+      "code": "CHPG2626",
+      "issuer": "HCM",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 23000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2026-12-16",
+      "lastTradingDate": "2026-12-14",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CHPG2627",
+      "issuer": "HCM",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 23500.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-03-16",
+      "lastTradingDate": "2027-03-12",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CHPG2628",
+      "issuer": "VND",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 24600.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CHPG2629",
+      "issuer": "MBS",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-04-05",
+      "lastTradingDate": "2027-04-01",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CHPG2630",
+      "issuer": "KBSV",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25300.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-05-06",
+      "lastTradingDate": "2027-05-04",
+      "listedQtty": 6000000
+    },
+    {
+      "code": "CHPG2631",
+      "issuer": "SSV",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 24500.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHPG2632",
+      "issuer": "SSV",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-04-02",
+      "lastTradingDate": "2027-03-31",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CHPG2633",
+      "issuer": "LPS",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 25000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 24000000
+    },
+    {
+      "code": "CHPG2634",
+      "issuer": "LPS",
+      "underlyingAsset": "HPG",
+      "exercisePrice": 21000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 21000000
+    },
+    {
+      "code": "CLPB2603",
+      "issuer": "MSVN",
+      "underlyingAsset": "LPB",
+      "exercisePrice": 53400.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2026-12-29",
+      "lastTradingDate": "2026-12-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CLPB2604",
+      "issuer": "MSVN",
+      "underlyingAsset": "LPB",
+      "exercisePrice": 56200.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2027-03-29",
+      "lastTradingDate": "2027-03-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CLPB2605",
+      "issuer": "KISVN",
+      "underlyingAsset": "LPB",
+      "exercisePrice": 61999.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CLPB2606",
+      "issuer": "KISVN",
+      "underlyingAsset": "LPB",
+      "exercisePrice": 63979.0,
+      "exerciseRatio": 8.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CLPB2607",
+      "issuer": "MBS",
+      "underlyingAsset": "LPB",
+      "exercisePrice": 55000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CLPB2608",
+      "issuer": "SSV",
+      "underlyingAsset": "LPB",
+      "exercisePrice": 60000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 2500000
+    },
+    {
+      "code": "CLPB2609",
+      "issuer": "KAFI",
+      "underlyingAsset": "LPB",
+      "exercisePrice": 50400.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CLPB2610",
+      "issuer": "KAFI",
+      "underlyingAsset": "LPB",
+      "exercisePrice": 58300.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CMBB2517",
+      "issuer": "SSI",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 16219.0,
+      "exerciseRatio": 1.2014,
+      "expiryDate": "2026-09-23",
+      "lastTradingDate": "2026-09-21",
+      "listedQtty": 2500000
+    },
+    {
+      "code": "CMBB2521",
+      "issuer": "VND",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 25951.0,
+      "exerciseRatio": 1.6019,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CMBB2522",
+      "issuer": "KAFI",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 23228.0,
+      "exerciseRatio": 3.2038,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CMBB2523",
+      "issuer": "KAFI",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 24028.0,
+      "exerciseRatio": 3.2038,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CMBB2602",
+      "issuer": "TCBS",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 20825.0,
+      "exerciseRatio": 1.6019,
+      "expiryDate": "2026-09-21",
+      "lastTradingDate": "2026-09-17",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CMBB2603",
+      "issuer": "TCBS",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 21626.0,
+      "exerciseRatio": 1.6019,
+      "expiryDate": "2026-12-21",
+      "lastTradingDate": "2026-12-17",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CMBB2604",
+      "issuer": "ACBS",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 21626.0,
+      "exerciseRatio": 2.4028,
+      "expiryDate": "2026-10-26",
+      "lastTradingDate": "2026-10-22",
+      "listedQtty": 19000000
+    },
+    {
+      "code": "CMBB2605",
+      "issuer": "LPBS",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 21626.0,
+      "exerciseRatio": 1.6019,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 3200000
+    },
+    {
+      "code": "CMBB2606",
+      "issuer": "VPBS",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 18422.0,
+      "exerciseRatio": 2.4028,
+      "expiryDate": "2026-09-30",
+      "lastTradingDate": "2026-09-28",
+      "listedQtty": 9000000
+    },
+    {
+      "code": "CMBB2607",
+      "issuer": "SSI",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 20825.0,
+      "exerciseRatio": 1.6019,
+      "expiryDate": "2026-09-29",
+      "lastTradingDate": "2026-09-25",
+      "listedQtty": 15000000
+    },
+    {
+      "code": "CMBB2609",
+      "issuer": "HCM",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 23628.0,
+      "exerciseRatio": 3.2038,
+      "expiryDate": "2027-01-08",
+      "lastTradingDate": "2027-01-06",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CMBB2610",
+      "issuer": "PHS",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 24830.0,
+      "exerciseRatio": 2.4028,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CMBB2614",
+      "issuer": "ACBS",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 20825.0,
+      "exerciseRatio": 1.6019,
+      "expiryDate": "2027-02-17",
+      "lastTradingDate": "2027-02-15",
+      "listedQtty": 18000000
+    },
+    {
+      "code": "CMBB2615",
+      "issuer": "HCM",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 19223.0,
+      "exerciseRatio": 1.6019,
+      "expiryDate": "2026-12-16",
+      "lastTradingDate": "2026-12-14",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CMBB2616",
+      "issuer": "HCM",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 19624.0,
+      "exerciseRatio": 1.6019,
+      "expiryDate": "2027-03-16",
+      "lastTradingDate": "2027-03-12",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CMBB2617",
+      "issuer": "VND",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 18342.0,
+      "exerciseRatio": 3.2038,
+      "expiryDate": "2026-12-30",
+      "lastTradingDate": "2026-12-28",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CMBB2618",
+      "issuer": "VND",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 18422.0,
+      "exerciseRatio": 3.2038,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CMBB2619",
+      "issuer": "KAFI",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 18822.0,
+      "exerciseRatio": 3.2038,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CMBB2620",
+      "issuer": "KAFI",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 21225.0,
+      "exerciseRatio": 3.2038,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CMBB2621",
+      "issuer": "LPS",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 23000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 24000000
+    },
+    {
+      "code": "CMBB2622",
+      "issuer": "LPS",
+      "underlyingAsset": "MBB",
+      "exercisePrice": 22000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 21000000
+    },
+    {
+      "code": "CMSN2522",
+      "issuer": "VND",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 93900.0,
+      "exerciseRatio": 15.0,
+      "expiryDate": "2026-12-08",
+      "lastTradingDate": "2026-12-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CMSN2601",
+      "issuer": "LPBS",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 80000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 3200000
+    },
+    {
+      "code": "CMSN2605",
+      "issuer": "SSI",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 79000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2026-09-29",
+      "lastTradingDate": "2026-09-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CMSN2609",
+      "issuer": "ACBS",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 85000.0,
+      "exerciseRatio": 8.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CMSN2610",
+      "issuer": "SSV",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 80000.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2026-11-09",
+      "lastTradingDate": "2026-11-05",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CMSN2611",
+      "issuer": "MSVN",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 80200.0,
+      "exerciseRatio": 8.0,
+      "expiryDate": "2027-03-29",
+      "lastTradingDate": "2027-03-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CMSN2612",
+      "issuer": "MSVN",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 76200.0,
+      "exerciseRatio": 8.0,
+      "expiryDate": "2026-12-29",
+      "lastTradingDate": "2026-12-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CMSN2613",
+      "issuer": "KISVN",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 86789.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2026-09-28",
+      "lastTradingDate": "2026-09-24",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CMSN2614",
+      "issuer": "KISVN",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 89999.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CMSN2615",
+      "issuer": "KISVN",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 91789.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CMSN2619",
+      "issuer": "HCM",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 70000.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2027-03-16",
+      "lastTradingDate": "2027-03-12",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CMSN2620",
+      "issuer": "VND",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 74400.0,
+      "exerciseRatio": 8.0,
+      "expiryDate": "2027-04-29",
+      "lastTradingDate": "2027-04-27",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CMSN2621",
+      "issuer": "SSV",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 76000.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CMSN2622",
+      "issuer": "KAFI",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 67800.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CMSN2623",
+      "issuer": "KAFI",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 76400.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CMSN2624",
+      "issuer": "LPS",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 79000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 21000000
+    },
+    {
+      "code": "CMSN2625",
+      "issuer": "LPS",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 76000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 19000000
+    },
+    {
+      "code": "CMSN2626",
+      "issuer": "ACBS",
+      "underlyingAsset": "MSN",
+      "exercisePrice": 69000.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-04-26",
+      "lastTradingDate": "2027-04-22",
+      "listedQtty": 15000000
+    },
+    {
+      "code": "CMWG2525",
+      "issuer": "VND",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 80742.0,
+      "exerciseRatio": 3.9387,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CMWG2526",
+      "issuer": "KAFI",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 89604.0,
+      "exerciseRatio": 7.8773,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CMWG2527",
+      "issuer": "KAFI",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 93543.0,
+      "exerciseRatio": 7.8773,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CMWG2602",
+      "issuer": "TCBS",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 85666.0,
+      "exerciseRatio": 4.9233,
+      "expiryDate": "2026-09-21",
+      "lastTradingDate": "2026-09-17",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CMWG2603",
+      "issuer": "TCBS",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 86650.0,
+      "exerciseRatio": 4.9233,
+      "expiryDate": "2026-12-21",
+      "lastTradingDate": "2026-12-17",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CMWG2604",
+      "issuer": "ACBS",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 83696.0,
+      "exerciseRatio": 6.8926,
+      "expiryDate": "2026-10-26",
+      "lastTradingDate": "2026-10-22",
+      "listedQtty": 19000000
+    },
+    {
+      "code": "CMWG2609",
+      "issuer": "SSI",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 88620.0,
+      "exerciseRatio": 4.9233,
+      "expiryDate": "2026-09-29",
+      "lastTradingDate": "2026-09-25",
+      "listedQtty": 13000000
+    },
+    {
+      "code": "CMWG2610",
+      "issuer": "HCM",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 100436.0,
+      "exerciseRatio": 7.8773,
+      "expiryDate": "2027-01-08",
+      "lastTradingDate": "2027-01-06",
+      "listedQtty": 7000000
+    },
+    {
+      "code": "CMWG2611",
+      "issuer": "PHS",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 99451.0,
+      "exerciseRatio": 9.8466,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CMWG2612",
+      "issuer": "MSVN",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 82909.0,
+      "exerciseRatio": 7.8773,
+      "expiryDate": "2027-03-29",
+      "lastTradingDate": "2027-03-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CMWG2616",
+      "issuer": "ACBS",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 80742.0,
+      "exerciseRatio": 6.8926,
+      "expiryDate": "2027-02-17",
+      "lastTradingDate": "2027-02-15",
+      "listedQtty": 18000000
+    },
+    {
+      "code": "CMWG2617",
+      "issuer": "HCM",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 74342.0,
+      "exerciseRatio": 4.9233,
+      "expiryDate": "2026-12-16",
+      "lastTradingDate": "2026-12-14",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CMWG2618",
+      "issuer": "HCM",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 75819.0,
+      "exerciseRatio": 5.908,
+      "expiryDate": "2027-03-16",
+      "lastTradingDate": "2027-03-12",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CMWG2619",
+      "issuer": "VND",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 71093.0,
+      "exerciseRatio": 7.8773,
+      "expiryDate": "2026-12-30",
+      "lastTradingDate": "2026-12-28",
+      "listedQtty": 6000000
+    },
+    {
+      "code": "CMWG2620",
+      "issuer": "VND",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 72865.0,
+      "exerciseRatio": 7.8773,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 6000000
+    },
+    {
+      "code": "CMWG2621",
+      "issuer": "MBS",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 86650.0,
+      "exerciseRatio": 7.8773,
+      "expiryDate": "2027-04-05",
+      "lastTradingDate": "2027-04-01",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CMWG2622",
+      "issuer": "KAFI",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 73456.0,
+      "exerciseRatio": 9.8466,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CMWG2623",
+      "issuer": "KAFI",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 82712.0,
+      "exerciseRatio": 9.8466,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CMWG2624",
+      "issuer": "LPS",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 79000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 21500000
+    },
+    {
+      "code": "CMWG2625",
+      "issuer": "LPS",
+      "underlyingAsset": "MWG",
+      "exercisePrice": 82000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 24000000
+    },
+    {
+      "code": "CSHB2606",
+      "issuer": "PHS",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 17000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSHB2607",
+      "issuer": "SSV",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 15500.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-02-11",
+      "lastTradingDate": "2027-02-02",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CSHB2608",
+      "issuer": "SSV",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 15300.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2026-11-09",
+      "lastTradingDate": "2026-11-05",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CSHB2609",
+      "issuer": "KISVN",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 16333.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSHB2610",
+      "issuer": "KISVN",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 15999.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-10-28",
+      "lastTradingDate": "2026-10-26",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSHB2611",
+      "issuer": "KISVN",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 14999.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-09-28",
+      "lastTradingDate": "2026-09-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSHB2612",
+      "issuer": "KISVN",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 16789.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSHB2613",
+      "issuer": "VND",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 13100.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-12-30",
+      "lastTradingDate": "2026-12-28",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CSHB2614",
+      "issuer": "VND",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 14000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-04-29",
+      "lastTradingDate": "2027-04-27",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CSHB2615",
+      "issuer": "MBS",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 15000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CSHB2616",
+      "issuer": "SSV",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 15000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CSHB2617",
+      "issuer": "SSV",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 15500.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-04-02",
+      "lastTradingDate": "2027-03-31",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CSHB2618",
+      "issuer": "LPS",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 14000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CSHB2619",
+      "issuer": "LPS",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 13000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CSHB2620",
+      "issuer": "ACBS",
+      "underlyingAsset": "SHB",
+      "exercisePrice": 12500.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-04-26",
+      "lastTradingDate": "2027-04-22",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CSSB2603",
+      "issuer": "PHS",
+      "underlyingAsset": "SSB",
+      "exercisePrice": 15763.0,
+      "exerciseRatio": 2.4888,
+      "expiryDate": "2027-05-10",
+      "lastTradingDate": "2027-05-06",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSSB2604",
+      "issuer": "KISVN",
+      "underlyingAsset": "SSB",
+      "exercisePrice": 17777.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSSB2605",
+      "issuer": "KISVN",
+      "underlyingAsset": "SSB",
+      "exercisePrice": 17111.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSSB2606",
+      "issuer": "KISVN",
+      "underlyingAsset": "SSB",
+      "exercisePrice": 15999.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-09-28",
+      "lastTradingDate": "2026-09-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSSB2607",
+      "issuer": "KISVN",
+      "underlyingAsset": "SSB",
+      "exercisePrice": 16888.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-10-28",
+      "lastTradingDate": "2026-10-26",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSTB2533",
+      "issuer": "VND",
+      "underlyingAsset": "STB",
+      "exercisePrice": 71000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CSTB2536",
+      "issuer": "KAFI",
+      "underlyingAsset": "STB",
+      "exercisePrice": 64000.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CSTB2537",
+      "issuer": "KAFI",
+      "underlyingAsset": "STB",
+      "exercisePrice": 65000.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CSTB2602",
+      "issuer": "TCBS",
+      "underlyingAsset": "STB",
+      "exercisePrice": 50000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-09-21",
+      "lastTradingDate": "2026-09-17",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSTB2603",
+      "issuer": "TCBS",
+      "underlyingAsset": "STB",
+      "exercisePrice": 51000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-12-21",
+      "lastTradingDate": "2026-12-17",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSTB2604",
+      "issuer": "ACBS",
+      "underlyingAsset": "STB",
+      "exercisePrice": 60000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2026-10-26",
+      "lastTradingDate": "2026-10-22",
+      "listedQtty": 19000000
+    },
+    {
+      "code": "CSTB2606",
+      "issuer": "HCM",
+      "underlyingAsset": "STB",
+      "exercisePrice": 66000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-01-08",
+      "lastTradingDate": "2027-01-06",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CSTB2608",
+      "issuer": "PHS",
+      "underlyingAsset": "STB",
+      "exercisePrice": 79000.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2027-04-08",
+      "lastTradingDate": "2027-04-06",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSTB2609",
+      "issuer": "SSV",
+      "underlyingAsset": "STB",
+      "exercisePrice": 66000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-11-09",
+      "lastTradingDate": "2026-11-05",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CSTB2610",
+      "issuer": "MSVN",
+      "underlyingAsset": "STB",
+      "exercisePrice": 74700.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2027-03-29",
+      "lastTradingDate": "2027-03-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CSTB2611",
+      "issuer": "MSVN",
+      "underlyingAsset": "STB",
+      "exercisePrice": 71000.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2026-12-29",
+      "lastTradingDate": "2026-12-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CSTB2612",
+      "issuer": "KISVN",
+      "underlyingAsset": "STB",
+      "exercisePrice": 80888.0,
+      "exerciseRatio": 8.0,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSTB2613",
+      "issuer": "KISVN",
+      "underlyingAsset": "STB",
+      "exercisePrice": 77777.0,
+      "exerciseRatio": 8.0,
+      "expiryDate": "2026-09-28",
+      "lastTradingDate": "2026-09-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSTB2614",
+      "issuer": "KISVN",
+      "underlyingAsset": "STB",
+      "exercisePrice": 78888.0,
+      "exerciseRatio": 8.0,
+      "expiryDate": "2026-10-28",
+      "lastTradingDate": "2026-10-26",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSTB2615",
+      "issuer": "KISVN",
+      "underlyingAsset": "STB",
+      "exercisePrice": 81888.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSTB2619",
+      "issuer": "ACBS",
+      "underlyingAsset": "STB",
+      "exercisePrice": 79000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-02-17",
+      "lastTradingDate": "2027-02-15",
+      "listedQtty": 18000000
+    },
+    {
+      "code": "CSTB2620",
+      "issuer": "HCM",
+      "underlyingAsset": "STB",
+      "exercisePrice": 70000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-12-29",
+      "lastTradingDate": "2026-12-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CSTB2621",
+      "issuer": "HCM",
+      "underlyingAsset": "STB",
+      "exercisePrice": 71500.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-03-29",
+      "lastTradingDate": "2027-03-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CSTB2622",
+      "issuer": "VND",
+      "underlyingAsset": "STB",
+      "exercisePrice": 69700.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2026-12-30",
+      "lastTradingDate": "2026-12-28",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CSTB2623",
+      "issuer": "VND",
+      "underlyingAsset": "STB",
+      "exercisePrice": 81000.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CSTB2624",
+      "issuer": "MBS",
+      "underlyingAsset": "STB",
+      "exercisePrice": 80000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CSTB2625",
+      "issuer": "SSV",
+      "underlyingAsset": "STB",
+      "exercisePrice": 80000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 2200000
+    },
+    {
+      "code": "CSTB2626",
+      "issuer": "KAFI",
+      "underlyingAsset": "STB",
+      "exercisePrice": 71500.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CSTB2627",
+      "issuer": "KAFI",
+      "underlyingAsset": "STB",
+      "exercisePrice": 81100.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CSTB2628",
+      "issuer": "LPS",
+      "underlyingAsset": "STB",
+      "exercisePrice": 82000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 24000000
+    },
+    {
+      "code": "CSTB2629",
+      "issuer": "LPS",
+      "underlyingAsset": "STB",
+      "exercisePrice": 79000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 21500000
+    },
+    {
+      "code": "CTCB2521",
+      "issuer": "VND",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 41723.0,
+      "exerciseRatio": 1.9588,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CTCB2522",
+      "issuer": "KAFI",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 43584.0,
+      "exerciseRatio": 3.9176,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CTCB2523",
+      "issuer": "KAFI",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 44563.0,
+      "exerciseRatio": 3.9176,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CTCB2601",
+      "issuer": "ACBS",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 36238.0,
+      "exerciseRatio": 3.9176,
+      "expiryDate": "2026-10-26",
+      "lastTradingDate": "2026-10-22",
+      "listedQtty": 19000000
+    },
+    {
+      "code": "CTCB2603",
+      "issuer": "VPBS",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 35259.0,
+      "exerciseRatio": 2.9382,
+      "expiryDate": "2026-09-30",
+      "lastTradingDate": "2026-09-28",
+      "listedQtty": 9000000
+    },
+    {
+      "code": "CTCB2605",
+      "issuer": "SSI",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 34279.0,
+      "exerciseRatio": 1.9588,
+      "expiryDate": "2026-09-29",
+      "lastTradingDate": "2026-09-25",
+      "listedQtty": 7000000
+    },
+    {
+      "code": "CTCB2606",
+      "issuer": "HCM",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 38687.0,
+      "exerciseRatio": 3.9176,
+      "expiryDate": "2027-01-08",
+      "lastTradingDate": "2027-01-06",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CTCB2607",
+      "issuer": "PHS",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 35259.0,
+      "exerciseRatio": 3.9176,
+      "expiryDate": "2027-04-08",
+      "lastTradingDate": "2027-04-06",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CTCB2611",
+      "issuer": "ACBS",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 34000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-02-17",
+      "lastTradingDate": "2027-02-15",
+      "listedQtty": 18000000
+    },
+    {
+      "code": "CTCB2612",
+      "issuer": "HCM",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 30000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2026-12-16",
+      "lastTradingDate": "2026-12-14",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CTCB2613",
+      "issuer": "HCM",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 30500.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-03-16",
+      "lastTradingDate": "2027-03-12",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CTCB2614",
+      "issuer": "VND",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 35500.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-04-29",
+      "lastTradingDate": "2027-04-27",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CTCB2615",
+      "issuer": "MBS",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 36000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CTCB2616",
+      "issuer": "KAFI",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 31700.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CTCB2617",
+      "issuer": "KAFI",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 35700.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CTCB2618",
+      "issuer": "LPS",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 35000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 21000000
+    },
+    {
+      "code": "CTCB2619",
+      "issuer": "LPS",
+      "underlyingAsset": "TCB",
+      "exercisePrice": 32000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 18000000
+    },
+    {
+      "code": "CTPB2605",
+      "issuer": "ACBS",
+      "underlyingAsset": "TPB",
+      "exercisePrice": 18000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CTPB2606",
+      "issuer": "PHS",
+      "underlyingAsset": "TPB",
+      "exercisePrice": 18000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-05-10",
+      "lastTradingDate": "2027-05-06",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CTPB2607",
+      "issuer": "KISVN",
+      "underlyingAsset": "TPB",
+      "exercisePrice": 19399.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CTPB2608",
+      "issuer": "KISVN",
+      "underlyingAsset": "TPB",
+      "exercisePrice": 18888.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CTPB2609",
+      "issuer": "MBS",
+      "underlyingAsset": "TPB",
+      "exercisePrice": 18000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CTPB2610",
+      "issuer": "SSV",
+      "underlyingAsset": "TPB",
+      "exercisePrice": 18000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CTPB2611",
+      "issuer": "KAFI",
+      "underlyingAsset": "TPB",
+      "exercisePrice": 15300.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CTPB2612",
+      "issuer": "KAFI",
+      "underlyingAsset": "TPB",
+      "exercisePrice": 16900.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVHM2523",
+      "issuer": "KAFI",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 67408.0,
+      "exerciseRatio": 3.8519,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVHM2524",
+      "issuer": "KAFI",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 70778.0,
+      "exerciseRatio": 3.8519,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVHM2602",
+      "issuer": "TCBS",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 48148.0,
+      "exerciseRatio": 3.8519,
+      "expiryDate": "2026-09-21",
+      "lastTradingDate": "2026-09-17",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVHM2603",
+      "issuer": "TCBS",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 49111.0,
+      "exerciseRatio": 3.8519,
+      "expiryDate": "2026-12-21",
+      "lastTradingDate": "2026-12-17",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVHM2604",
+      "issuer": "LPBS",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 51037.0,
+      "exerciseRatio": 4.8148,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 2800000
+    },
+    {
+      "code": "CVHM2607",
+      "issuer": "SSI",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 65000.0,
+      "exerciseRatio": 2.4074,
+      "expiryDate": "2026-09-29",
+      "lastTradingDate": "2026-09-25",
+      "listedQtty": 6000000
+    },
+    {
+      "code": "CVHM2609",
+      "issuer": "ACBS",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 62593.0,
+      "exerciseRatio": 4.3334,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CVHM2610",
+      "issuer": "MSVN",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 89556.0,
+      "exerciseRatio": 3.8519,
+      "expiryDate": "2026-12-29",
+      "lastTradingDate": "2026-12-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CVHM2611",
+      "issuer": "MSVN",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 91482.0,
+      "exerciseRatio": 3.8519,
+      "expiryDate": "2027-03-29",
+      "lastTradingDate": "2027-03-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CVHM2612",
+      "issuer": "KISVN",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 81852.0,
+      "exerciseRatio": 9.6297,
+      "expiryDate": "2026-09-28",
+      "lastTradingDate": "2026-09-24",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVHM2613",
+      "issuer": "KISVN",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 83768.0,
+      "exerciseRatio": 9.6297,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVHM2614",
+      "issuer": "KISVN",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 85159.0,
+      "exerciseRatio": 9.6297,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVHM2615",
+      "issuer": "MBS",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 90000.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2027-04-05",
+      "lastTradingDate": "2027-04-01",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CVHM2616",
+      "issuer": "KAFI",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 75641.0,
+      "exerciseRatio": 9.6297,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVHM2617",
+      "issuer": "KAFI",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 85800.0,
+      "exerciseRatio": 9.6297,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVHM2618",
+      "issuer": "LPS",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 80000.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 18000000
+    },
+    {
+      "code": "CVHM2619",
+      "issuer": "LPS",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 68000.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 16000000
+    },
+    {
+      "code": "CVHM2620",
+      "issuer": "ACBS",
+      "underlyingAsset": "VHM",
+      "exercisePrice": 76000.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-04-26",
+      "lastTradingDate": "2027-04-22",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVIB2513",
+      "issuer": "VND",
+      "underlyingAsset": "VIB",
+      "exercisePrice": 18185.0,
+      "exerciseRatio": 1.732,
+      "expiryDate": "2026-12-08",
+      "lastTradingDate": "2026-12-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CVIB2601",
+      "issuer": "LPBS",
+      "underlyingAsset": "VIB",
+      "exercisePrice": 15587.0,
+      "exerciseRatio": 1.732,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 3200000
+    },
+    {
+      "code": "CVIB2604",
+      "issuer": "ACBS",
+      "underlyingAsset": "VIB",
+      "exercisePrice": 16020.0,
+      "exerciseRatio": 1.732,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 15000000
+    },
+    {
+      "code": "CVIB2605",
+      "issuer": "PHS",
+      "underlyingAsset": "VIB",
+      "exercisePrice": 17353.0,
+      "exerciseRatio": 1.8267,
+      "expiryDate": "2027-03-08",
+      "lastTradingDate": "2027-03-04",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVIB2606",
+      "issuer": "MBS",
+      "underlyingAsset": "VIB",
+      "exercisePrice": 15983.0,
+      "exerciseRatio": 1.8267,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVIB2607",
+      "issuer": "KAFI",
+      "underlyingAsset": "VIB",
+      "exercisePrice": 13974.0,
+      "exerciseRatio": 3.6533,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVIB2608",
+      "issuer": "KAFI",
+      "underlyingAsset": "VIB",
+      "exercisePrice": 15527.0,
+      "exerciseRatio": 3.6533,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVIB2609",
+      "issuer": "LPS",
+      "underlyingAsset": "VIB",
+      "exercisePrice": 15527.0,
+      "exerciseRatio": 1.8267,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CVIB2610",
+      "issuer": "LPS",
+      "underlyingAsset": "VIB",
+      "exercisePrice": 14613.0,
+      "exerciseRatio": 1.8267,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CVIB2611",
+      "issuer": "ACBS",
+      "underlyingAsset": "VIB",
+      "exercisePrice": 13700.0,
+      "exerciseRatio": 1.8267,
+      "expiryDate": "2027-04-26",
+      "lastTradingDate": "2027-04-22",
+      "listedQtty": 15000000
+    },
+    {
+      "code": "CVIC2515",
+      "issuer": "KAFI",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 122500.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVIC2516",
+      "issuer": "KAFI",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 125000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVIC2602",
+      "issuer": "KISVN",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 248888.0,
+      "exerciseRatio": 20.0,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVIC2603",
+      "issuer": "KISVN",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 250789.0,
+      "exerciseRatio": 20.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVIC2604",
+      "issuer": "KISVN",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 252789.0,
+      "exerciseRatio": 20.0,
+      "expiryDate": "2027-01-28",
+      "lastTradingDate": "2027-01-26",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVIC2605",
+      "issuer": "KISVN",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 244567.0,
+      "exerciseRatio": 20.0,
+      "expiryDate": "2026-09-28",
+      "lastTradingDate": "2026-09-24",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVIC2606",
+      "issuer": "KISVN",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 246789.0,
+      "exerciseRatio": 20.0,
+      "expiryDate": "2026-10-28",
+      "lastTradingDate": "2026-10-26",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVIC2607",
+      "issuer": "MBS",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 250000.0,
+      "exerciseRatio": 12.0,
+      "expiryDate": "2027-04-05",
+      "lastTradingDate": "2027-04-01",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CVIC2608",
+      "issuer": "KAFI",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 221200.0,
+      "exerciseRatio": 20.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVIC2609",
+      "issuer": "KAFI",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 244000.0,
+      "exerciseRatio": 20.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVIC2610",
+      "issuer": "LPS",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 250000.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CVIC2611",
+      "issuer": "LPS",
+      "underlyingAsset": "VIC",
+      "exercisePrice": 240000.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CVJC2602",
+      "issuer": "KISVN",
+      "underlyingAsset": "VJC",
+      "exercisePrice": 152252.0,
+      "exerciseRatio": 15.3838,
+      "expiryDate": "2026-10-28",
+      "lastTradingDate": "2026-10-26",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVJC2603",
+      "issuer": "KISVN",
+      "underlyingAsset": "VJC",
+      "exercisePrice": 158205.0,
+      "exerciseRatio": 15.3838,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVJC2604",
+      "issuer": "KISVN",
+      "underlyingAsset": "VJC",
+      "exercisePrice": 154606.0,
+      "exerciseRatio": 15.3838,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVJC2605",
+      "issuer": "KAFI",
+      "underlyingAsset": "VJC",
+      "exercisePrice": 132500.0,
+      "exerciseRatio": 20.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVJC2606",
+      "issuer": "KAFI",
+      "underlyingAsset": "VJC",
+      "exercisePrice": 153500.0,
+      "exerciseRatio": 20.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVNM2523",
+      "issuer": "VND",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 58460.0,
+      "exerciseRatio": 9.2645,
+      "expiryDate": "2026-12-08",
+      "lastTradingDate": "2026-12-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CVNM2601",
+      "issuer": "LPBS",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 62024.0,
+      "exerciseRatio": 4.8456,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 3200000
+    },
+    {
+      "code": "CVNM2603",
+      "issuer": "HCM",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 62024.0,
+      "exerciseRatio": 7.753,
+      "expiryDate": "2027-01-08",
+      "lastTradingDate": "2027-01-06",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CVNM2605",
+      "issuer": "ACBS",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 62993.0,
+      "exerciseRatio": 5.8148,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CVNM2606",
+      "issuer": "PHS",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 63962.0,
+      "exerciseRatio": 6.7839,
+      "expiryDate": "2027-04-08",
+      "lastTradingDate": "2027-04-06",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVNM2607",
+      "issuer": "SSV",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 60086.0,
+      "exerciseRatio": 9.6913,
+      "expiryDate": "2026-11-09",
+      "lastTradingDate": "2026-11-05",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVNM2608",
+      "issuer": "KISVN",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 64930.0,
+      "exerciseRatio": 9.6913,
+      "expiryDate": "2026-09-28",
+      "lastTradingDate": "2026-09-24",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVNM2609",
+      "issuer": "KISVN",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 67946.0,
+      "exerciseRatio": 9.6913,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVNM2613",
+      "issuer": "HCM",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 56209.0,
+      "exerciseRatio": 2.9074,
+      "expiryDate": "2026-12-16",
+      "lastTradingDate": "2026-12-14",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CVNM2614",
+      "issuer": "HCM",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 56209.0,
+      "exerciseRatio": 3.8765,
+      "expiryDate": "2027-03-16",
+      "lastTradingDate": "2027-03-12",
+      "listedQtty": 5000000
+    },
+    {
+      "code": "CVNM2615",
+      "issuer": "VND",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 54500.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-04-29",
+      "lastTradingDate": "2027-04-27",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CVNM2616",
+      "issuer": "SSV",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 60000.0,
+      "exerciseRatio": 10.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3500000
+    },
+    {
+      "code": "CVNM2617",
+      "issuer": "LPS",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 58000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 16000000
+    },
+    {
+      "code": "CVNM2618",
+      "issuer": "LPS",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 68000.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 18000000
+    },
+    {
+      "code": "CVNM2619",
+      "issuer": "ACBS",
+      "underlyingAsset": "VNM",
+      "exercisePrice": 64000.0,
+      "exerciseRatio": 6.0,
+      "expiryDate": "2027-04-26",
+      "lastTradingDate": "2027-04-22",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CVPB2528",
+      "issuer": "VND",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 36649.0,
+      "exerciseRatio": 2.9476,
+      "expiryDate": "2026-12-08",
+      "lastTradingDate": "2026-12-04",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CVPB2531",
+      "issuer": "KAFI",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 33407.0,
+      "exerciseRatio": 3.9302,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVPB2532",
+      "issuer": "KAFI",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 34389.0,
+      "exerciseRatio": 3.9302,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVPB2602",
+      "issuer": "TCBS",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 29476.0,
+      "exerciseRatio": 1.9651,
+      "expiryDate": "2026-09-21",
+      "lastTradingDate": "2026-09-17",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVPB2603",
+      "issuer": "TCBS",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 30459.0,
+      "exerciseRatio": 1.9651,
+      "expiryDate": "2026-12-21",
+      "lastTradingDate": "2026-12-17",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVPB2606",
+      "issuer": "SSI",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 29476.0,
+      "exerciseRatio": 1.9651,
+      "expiryDate": "2026-09-29",
+      "lastTradingDate": "2026-09-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CVPB2608",
+      "issuer": "ACBS",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 29476.0,
+      "exerciseRatio": 1.9651,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 15000000
+    },
+    {
+      "code": "CVPB2609",
+      "issuer": "PHS",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 29476.0,
+      "exerciseRatio": 3.9302,
+      "expiryDate": "2027-04-08",
+      "lastTradingDate": "2027-04-06",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVPB2610",
+      "issuer": "SSV",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 28494.0,
+      "exerciseRatio": 3.9302,
+      "expiryDate": "2026-11-09",
+      "lastTradingDate": "2026-11-05",
+      "listedQtty": 3500000
+    },
+    {
+      "code": "CVPB2611",
+      "issuer": "MSVN",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 28400.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-03-29",
+      "lastTradingDate": "2027-03-25",
+      "listedQtty": 8000000
+    },
+    {
+      "code": "CVPB2612",
+      "issuer": "KISVN",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 31999.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2026-09-28",
+      "lastTradingDate": "2026-09-24",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVPB2613",
+      "issuer": "KISVN",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 32888.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVPB2614",
+      "issuer": "KISVN",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 33456.0,
+      "exerciseRatio": 5.0,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVPB2615",
+      "issuer": "ACBS",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 28500.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-02-17",
+      "lastTradingDate": "2027-02-15",
+      "listedQtty": 18000000
+    },
+    {
+      "code": "CVPB2616",
+      "issuer": "HCM",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 25000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2026-12-16",
+      "lastTradingDate": "2026-12-14",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CVPB2617",
+      "issuer": "HCM",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 25500.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-03-16",
+      "lastTradingDate": "2027-03-12",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CVPB2618",
+      "issuer": "VND",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 27200.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-04-29",
+      "lastTradingDate": "2027-04-27",
+      "listedQtty": 10000000
+    },
+    {
+      "code": "CVPB2619",
+      "issuer": "MBS",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 29000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVPB2620",
+      "issuer": "SSV",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 28000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-01-04",
+      "lastTradingDate": "2026-12-30",
+      "listedQtty": 3500000
+    },
+    {
+      "code": "CVPB2621",
+      "issuer": "SSV",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 28000.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-04-02",
+      "lastTradingDate": "2027-03-31",
+      "listedQtty": 3500000
+    },
+    {
+      "code": "CVPB2622",
+      "issuer": "KAFI",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 25400.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVPB2623",
+      "issuer": "KAFI",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 28600.0,
+      "exerciseRatio": 4.0,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVPB2624",
+      "issuer": "LPS",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 29000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 21000000
+    },
+    {
+      "code": "CVPB2625",
+      "issuer": "LPS",
+      "underlyingAsset": "VPB",
+      "exercisePrice": 27000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 18000000
+    },
+    {
+      "code": "CVRE2525",
+      "issuer": "KAFI",
+      "underlyingAsset": "VRE",
+      "exercisePrice": 46356.0,
+      "exerciseRatio": 3.863,
+      "expiryDate": "2026-10-16",
+      "lastTradingDate": "2026-10-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVRE2526",
+      "issuer": "KAFI",
+      "underlyingAsset": "VRE",
+      "exercisePrice": 47805.0,
+      "exerciseRatio": 3.863,
+      "expiryDate": "2027-01-18",
+      "lastTradingDate": "2027-01-14",
+      "listedQtty": 3000000
+    },
+    {
+      "code": "CVRE2603",
+      "issuer": "ACBS",
+      "underlyingAsset": "VRE",
+      "exercisePrice": 29938.0,
+      "exerciseRatio": 2.8973,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CVRE2604",
+      "issuer": "KISVN",
+      "underlyingAsset": "VRE",
+      "exercisePrice": 34766.0,
+      "exerciseRatio": 4.8288,
+      "expiryDate": "2026-12-28",
+      "lastTradingDate": "2026-12-24",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVRE2605",
+      "issuer": "KISVN",
+      "underlyingAsset": "VRE",
+      "exercisePrice": 36173.0,
+      "exerciseRatio": 4.8288,
+      "expiryDate": "2026-11-30",
+      "lastTradingDate": "2026-11-26",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVRE2606",
+      "issuer": "KAFI",
+      "underlyingAsset": "VRE",
+      "exercisePrice": 28103.0,
+      "exerciseRatio": 3.863,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 4000000
+    },
+    {
+      "code": "CVRE2607",
+      "issuer": "KAFI",
+      "underlyingAsset": "VRE",
+      "exercisePrice": 31870.0,
+      "exerciseRatio": 3.863,
+      "expiryDate": "2027-06-30",
+      "lastTradingDate": "2027-06-28",
+      "listedQtty": 2000000
+    },
+    {
+      "code": "CVRE2608",
+      "issuer": "LPS",
+      "underlyingAsset": "VRE",
+      "exercisePrice": 30000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-05-14",
+      "lastTradingDate": "2027-05-12",
+      "listedQtty": 12000000
+    },
+    {
+      "code": "CVRE2609",
+      "issuer": "LPS",
+      "underlyingAsset": "VRE",
+      "exercisePrice": 23000.0,
+      "exerciseRatio": 2.0,
+      "expiryDate": "2027-02-15",
+      "lastTradingDate": "2027-02-11",
+      "listedQtty": 11000000
+    },
+    {
+      "code": "CVRE2610",
+      "issuer": "ACBS",
+      "underlyingAsset": "VRE",
+      "exercisePrice": 25000.0,
+      "exerciseRatio": 3.0,
+      "expiryDate": "2027-04-26",
+      "lastTradingDate": "2027-04-22",
+      "listedQtty": 4000000
+    }
+  ]
+}
