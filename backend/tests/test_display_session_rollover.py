@@ -93,6 +93,38 @@ async def test_resolver_holds_overnight_then_waits_for_real_new_session_trade(mo
 
 
 @pytest.mark.asyncio
+async def test_resolver_exposes_ato_projection_without_promoting_it_to_a_trade(monkeypatch):
+    monkeypatch.setattr(market_state, "_quotes", {})
+    resolver = MarketSnapshotResolver()
+    resolver._load_snapshots = AsyncMock(return_value={})
+    resolver._recent_daily_bars = AsyncMock(
+        side_effect=AssertionError("live auction data must not wait for history")
+    )
+    market_state.apply_reference_metadata(
+        "HPG", session_date="2026-09-04", reference_price=21600,
+        ceiling_price=23100, floor_price=20100,
+    )
+    market_state.apply_auction_event({
+        "Ticker": "HPG", "IndicativePrice": 21750, "IndicativeVolume": 12800,
+        "Change": 150, "PercentPriceChange": 150 / 21600,
+        "TradingDate": "2026-09-04", "Timestamp": "2026-09-04T09:05:00+07:00",
+        "MarketStatus": "ATO", "_full_auction_snapshot": True,
+    })
+
+    resolved = (await resolver.resolve_rows(["HPG"], now=at(4, "09:05")))[0]
+    wire = resolved.to_wire()
+
+    assert wire["Traded"] == 21.75
+    assert wire["Traded_Qty"] == 12800
+    assert wire["_auction_indicative"] is True
+    assert "indicative" in wire["provenance"]["quote"]["note"].lower()
+    canonical = market_state.get_quote("HPG")
+    assert canonical.last_price is None
+    assert canonical.traded_quantity is None
+    assert canonical.trade_revision is None
+
+
+@pytest.mark.asyncio
 async def test_redis_restore_before_8_keeps_closing_trade_and_bands(monkeypatch):
     from app.market_data.market_session import market_session
     import app.market_data.market_subscription_manager as module

@@ -153,6 +153,8 @@ class SubscriptionManager:
                             }
                     except Exception as err:  # noqa: BLE001 - the tape must never break the feed
                         logger.debug("Traded-log record failed for %s: %s", quote.symbol, err)
+            elif event_type == "auction":
+                quote, diff = self.state.apply_auction_event(raw_data)
             else:
                 quote, diff = self.state.apply_bidask_event(raw_data)
 
@@ -312,6 +314,18 @@ class SubscriptionManager:
         self._schedule_reference_refresh(target)
         phase = (target, market_session.get_market_phase(now).value)
         if phase != self._last_clock_phase:
+            for quote, diff in self.state.clear_auction_indicatives(phase[1]):
+                self.store.enqueue_save(quote.symbol, quote)
+                message = {
+                    "type": "patch", "symbol": quote.symbol,
+                    "patch": quote.to_wire_patch(diff),
+                    "ts": int(now.timestamp() * 1000),
+                }
+                for listener in self._patch_listeners:
+                    try:
+                        listener(message)
+                    except Exception:
+                        logger.exception("Auction phase patch listener failed")
             self._last_clock_phase = phase
             self._notify_status_change()
 
@@ -352,6 +366,8 @@ class SubscriptionManager:
             logger.warning("Session trade snapshot unavailable: %s", exc)
             return
         target_iso = target.isoformat()
+        phase = market_session.get_market_phase().value
+        is_auction = phase in {"ATO", "ATC"}
         for sym, values in snapshot.items():
             last = values.get("last_price")
             if last is None or last <= 0:
@@ -360,7 +376,7 @@ class SubscriptionManager:
             ref = values.get("reference_price")
             event: Dict[str, Any] = {
                 "Ticker": sym,
-                "Close": last,
+                ("IndicativePrice" if is_auction else "Close"): last,
                 "Open": values.get("open_price"),
                 "High": values.get("high_price"),
                 "Low": values.get("low_price"),
@@ -371,13 +387,16 @@ class SubscriptionManager:
                 # print it, or the tape would fill with a phantom row every 20 seconds.
                 "_synthetic_session_snapshot": True,
             }
+            if is_auction:
+                event["MarketStatus"] = phase
             if as_of:
                 event["Timestamp"] = as_of
             if ref is not None:
                 event["Reference"] = ref
                 event["Change"] = last - ref
-            # Routes through apply_trade_event (session prep, stale guard, diff, broadcast).
-            self._on_provider_event("trade", event, sym)
+            # Auction snapshots remain projections.  Continuous-session snapshots route
+            # through the ordinary trade state with the existing stale guard.
+            self._on_provider_event("auction" if is_auction else "trade", event, sym)
 
     def get_desired_symbols(self) -> List[str]:
         return sorted(list(self._desired_symbols))

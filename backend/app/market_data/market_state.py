@@ -22,6 +22,12 @@ _INTRADAY_FIELDS = (
     "total_volume",
     "trading_value",
     "traded_quantity",
+    "auction_price",
+    "auction_quantity",
+    "auction_change",
+    "auction_change_percent",
+    "auction_timestamp",
+    "auction_received_timestamp",
     "bid1_price",
     "bid1_quantity",
     "ask1_price",
@@ -50,6 +56,10 @@ _INTRADAY_FIELDS = (
 _INDEX_SYMBOLS = frozenset({
     "VNINDEX", "VN30", "VN30INDEX", "VNFINLEAD", "VNDIAMOND",
     "HNXINDEX", "HNX30", "UPCOM", "UPCOMINDEX",
+})
+_NON_AUCTION_PHASES = frozenset({
+    "PRE_OPEN", "CONTINUOUS_AM", "LUNCH_BREAK", "CONTINUOUS_PM",
+    "POST_CLOSE_NEGOTIATED", "CLOSED",
 })
 
 
@@ -271,6 +281,125 @@ class MarketState:
                     self._expire_reference_metadata(quote, session_date, diff)
                     updates.append((quote.model_copy(), diff))
         return updates
+
+    @staticmethod
+    def _clear_auction_fields(quote: CanonicalQuote, diff: Dict[str, Any]) -> None:
+        for field_name in (
+            "auction_price", "auction_quantity", "auction_change",
+            "auction_change_percent", "auction_timestamp",
+            "auction_received_timestamp",
+        ):
+            if getattr(quote, field_name) is not None:
+                setattr(quote, field_name, None)
+                diff[field_name] = None
+
+    def clear_auction_indicatives(
+        self, market_status: str
+    ) -> list[tuple[CanonicalQuote, Dict[str, Any]]]:
+        """Remove projected prices at a phase boundary without touching real trades."""
+        if market_status in {"ATO", "ATC"}:
+            return []
+        updates: list[tuple[CanonicalQuote, Dict[str, Any]]] = []
+        with self._lock:
+            for quote in self._quotes.values():
+                if not any(
+                    getattr(quote, field) is not None
+                    for field in (
+                        "auction_price", "auction_quantity", "auction_change",
+                        "auction_change_percent", "auction_timestamp",
+                        "auction_received_timestamp",
+                    )
+                ):
+                    continue
+                diff: Dict[str, Any] = {}
+                self._clear_auction_fields(quote, diff)
+                if quote.provider_market_status != market_status:
+                    quote.provider_market_status = market_status
+                    diff["provider_market_status"] = market_status
+                updates.append((quote.model_copy(), diff))
+        return updates
+
+    def apply_auction_event(
+        self, raw_event: Dict[str, Any]
+    ) -> Tuple[CanonicalQuote, Dict[str, Any]]:
+        """Merge an ATO/ATC indicative match without fabricating an execution."""
+        raw_event = normalize_event(raw_event)
+        sym = str(raw_event.get("Ticker", "")).upper()
+        if not sym:
+            raise ValueError("Missing Ticker in auction event")
+        phase = str(raw_event.get("MarketStatus") or "")
+        if phase not in {"ATO", "ATC"}:
+            quote = self.get_or_create_quote(sym)
+            return quote.model_copy(), {}
+
+        price = _number(raw_event.get("IndicativePrice", raw_event.get("Close")))
+        quantity = _integer(raw_event.get("IndicativeVolume", raw_event.get("MatchVolume")))
+        change = _number(raw_event.get("Change"))
+        change_pct = _number(raw_event.get("PercentPriceChange"))
+        reference = _number(
+            raw_event.get("Reference", raw_event.get("ReferencePrice"))
+        )
+        if price is not None and price <= 0:
+            price = None
+        if quantity is not None and quantity <= 0:
+            quantity = None
+        if price is not None and reference not in (None, 0):
+            if change is None:
+                change = price - reference
+            if change_pct is None:
+                change_pct = round((price - reference) / reference, 6)
+        session_date = self._event_session_date(raw_event)
+        has_explicit_session = self._explicit_event_session_date(raw_event) is not None
+        source_ts = _source_ms(raw_event.get("Timestamp"), raw_event.get("TradingDate"))
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        full_snapshot = bool(raw_event.get("_full_auction_snapshot"))
+        diff: Dict[str, Any] = {}
+
+        with self._lock:
+            q = self._quotes.get(sym)
+            if q is None:
+                q = CanonicalQuote(
+                    symbol=sym,
+                    instrument_type=self._determine_instrument_type(sym),
+                    received_timestamp=0,
+                )
+                self._quotes[sym] = q
+            if source_ts is not None and q.auction_timestamp is not None and source_ts < q.auction_timestamp:
+                return q.model_copy(), diff
+            if not has_explicit_session:
+                session_date = self._quote_market_session_date(q) or session_date
+            if not self._prepare_intraday_session(q, session_date, diff):
+                return q.model_copy(), diff
+            self._expire_reference_metadata(q, session_date, diff)
+
+            values = {
+                "auction_price": price,
+                "auction_quantity": quantity,
+                "auction_change": change,
+                "auction_change_percent": change_pct,
+            }
+            for field_name, value in values.items():
+                if value is None and not full_snapshot:
+                    continue
+                if getattr(q, field_name) != value:
+                    setattr(q, field_name, value)
+                    diff[field_name] = value
+            if q.provider_market_status != phase:
+                q.provider_market_status = phase
+                diff["provider_market_status"] = phase
+            publish_observation = bool(diff)
+            if source_ts is not None:
+                q.auction_timestamp = source_ts
+                if publish_observation:
+                    diff["auction_timestamp"] = source_ts
+            q.auction_received_timestamp = now_ms
+            if publish_observation:
+                diff["auction_received_timestamp"] = now_ms
+            q.provider_trading_date = str(raw_event.get("TradingDate") or session_date)
+            if raw_event.get("Timestamp"):
+                q.provider_timestamp = str(raw_event["Timestamp"])
+            q.received_timestamp = now_ms
+            return q.model_copy(), diff
 
     def apply_reference_metadata(
         self,
@@ -593,7 +722,7 @@ class MarketState:
                 try:
                     advance = float(tot_vol) - float(q.total_volume)
                     if advance > 0:
-                        traded_qty = int(advance) if float(advance).is_integer() else advance
+                        traded_qty = int(advance)
                 except (TypeError, ValueError):
                     pass
 
@@ -621,6 +750,8 @@ class MarketState:
 
             if provider_market_status is not None:
                 status = str(provider_market_status)
+                if status in _NON_AUCTION_PHASES:
+                    self._clear_auction_fields(q, diff)
                 if q.provider_market_status != status:
                     q.provider_market_status = status
                     diff["provider_market_status"] = status
@@ -774,6 +905,8 @@ class MarketState:
 
             if provider_market_status is not None:
                 status = str(provider_market_status)
+                if status in _NON_AUCTION_PHASES:
+                    self._clear_auction_fields(q, diff)
                 if q.provider_market_status != status:
                     q.provider_market_status = status
                     diff["provider_market_status"] = status

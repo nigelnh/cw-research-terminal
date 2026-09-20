@@ -21,6 +21,16 @@ class CanonicalQuote(BaseModel):
     trading_value: Optional[float] = None
     traded_quantity: Optional[int] = None
 
+    # ATO/ATC indicative match.  These fields are deliberately separate from the
+    # last confirmed execution: an indicative auction price/quantity may change many
+    # times without producing a trade, bar, volume increment, or IV-trade input.
+    auction_price: Optional[float] = None
+    auction_quantity: Optional[int] = None
+    auction_change: Optional[float] = None
+    auction_change_percent: Optional[float] = None
+    auction_timestamp: Optional[int] = None
+    auction_received_timestamp: Optional[int] = None
+
     # Top-of-Book & Depth
     bid1_price: Optional[float] = None
     bid1_quantity: Optional[int] = None
@@ -100,11 +110,36 @@ class CanonicalQuote(BaseModel):
                 return None
             return round(val * 100.0, 4)
 
-        traded = to_wire_prc(self.last_price) if display_eligible else None
-        change = to_wire_prc(self.price_change) if display_eligible else None
-        chg_pct = self.price_change_percent if display_eligible else None
+        auction_indicative = bool(
+            display_eligible
+            and self.provider_market_status in {"ATO", "ATC"}
+            and self.auction_price is not None
+        )
+        auction_change_valid = bool(
+            auction_indicative
+            and self.reference_price is not None
+            and self.reference_session_date == self.market_session_date
+        )
+        effective_price = self.auction_price if auction_indicative else self.last_price
+        effective_change = (
+            self.auction_change if auction_change_valid
+            else self.price_change if not auction_indicative else None
+        )
+        effective_change_pct = (
+            self.auction_change_percent if auction_change_valid
+            else self.price_change_percent if not auction_indicative else None
+        )
+        effective_quantity = (
+            self.auction_quantity if auction_indicative else self.traded_quantity
+        )
+        effective_timestamp = (
+            self.auction_timestamp if auction_indicative else self.source_timestamp
+        )
+        traded = to_wire_prc(effective_price) if display_eligible else None
+        change = to_wire_prc(effective_change) if display_eligible else None
+        chg_pct = effective_change_pct if display_eligible else None
         total_vol = self.total_volume if display_eligible else None
-        traded_qty = self.traded_quantity if display_eligible else None
+        traded_qty = effective_quantity if display_eligible else None
         trading_val = to_wire_prc(self.trading_value) if display_eligible else None
 
         bid1_prc = to_wire_prc(self.bid1_price) if display_eligible else None
@@ -172,7 +207,10 @@ class CanonicalQuote(BaseModel):
             "_ts_reference": self.reference_timestamp,
             "_reference_session_date": self.reference_session_date,
             "_provider_market_status": self.provider_market_status,
-            "ExchangeTime": self.source_timestamp,
+            "_auction_indicative": auction_indicative,
+            "_ts_auction": self.auction_timestamp,
+            "_received_auction": self.auction_received_timestamp,
+            "ExchangeTime": effective_timestamp,
             "is_realtime_eligible": display_eligible,
         }
 
@@ -235,13 +273,57 @@ class CanonicalQuote(BaseModel):
             "market_session_date": ("_market_session_date", lambda v: v),
             "reference_timestamp": ("_ts_reference", lambda v: v),
             "reference_session_date": ("_reference_session_date", lambda v: v),
+            "auction_timestamp": ("_ts_auction", lambda v: v),
+            "auction_received_timestamp": ("_received_auction", lambda v: v),
         }
 
         for field_name, (wire_key, transform_fn) in mapping.items():
             if field_name in updated_fields:
                 patch[wire_key] = transform_fn(updated_fields[field_name])
 
-        if "_ts_source" not in patch and self.source_timestamp:
+        auction_fields = {
+            "auction_price", "auction_quantity", "auction_change",
+            "auction_change_percent", "auction_timestamp",
+            "auction_received_timestamp", "provider_market_status",
+        }
+        display_trade_fields = auction_fields | {
+            "last_price", "traded_quantity", "price_change", "price_change_percent",
+        }
+        display_trade_patch = bool(display_trade_fields.intersection(updated_fields))
+        auction_indicative = bool(
+            self.provider_market_status in {"ATO", "ATC"}
+            and self.auction_price is not None
+        )
+        auction_change_valid = bool(
+            auction_indicative
+            and self.reference_price is not None
+            and self.reference_session_date == self.market_session_date
+        )
+        if display_trade_patch:
+            patch.update({
+                "Traded": to_wire_prc(
+                    self.auction_price if auction_indicative else self.last_price
+                ),
+                "Traded_Qty": (
+                    self.auction_quantity if auction_indicative else self.traded_quantity
+                ),
+                "change": to_wire_prc(
+                    self.auction_change if auction_change_valid
+                    else self.price_change if not auction_indicative else None
+                ),
+                "ChangePercent": (
+                    self.auction_change_percent if auction_change_valid
+                    else self.price_change_percent if not auction_indicative else None
+                ),
+                "_auction_indicative": auction_indicative,
+                "_ts_auction": self.auction_timestamp,
+                "_received_auction": self.auction_received_timestamp,
+                "ExchangeTime": (
+                    self.auction_timestamp if auction_indicative else self.source_timestamp
+                ),
+            })
+
+        if "_ts_source" not in patch and self.source_timestamp and not auction_indicative:
             patch["_ts_source"] = self.source_timestamp
 
         return patch
