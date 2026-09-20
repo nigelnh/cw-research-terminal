@@ -11,6 +11,7 @@ from app.market_data.market_state import MarketState
 from app.market_data.market_state_store import NullMarketStateStore
 from app.market_data.market_subscription_manager import SubscriptionManager
 from app.market_data.session_reference import reference_session_date
+from app.market_data.trading_calendar import MarketPhase
 from tests.fixtures.mock_market_provider import MockMarketDataProvider
 
 pytestmark = pytest.mark.asyncio
@@ -36,7 +37,11 @@ def _manager(provider):
     return mgr
 
 
-async def test_poll_seeds_trade_group_for_a_flat_cw():
+async def test_poll_seeds_trade_group_for_a_flat_cw(monkeypatch):
+    monkeypatch.setattr(
+        "app.market_data.market_subscription_manager.market_session.get_market_phase",
+        lambda *args, **kwargs: MarketPhase.CONTINUOUS_AM,
+    )
     today = reference_session_date().isoformat()
     provider = _SnapshotProvider({
         "CHPG2627": {
@@ -59,7 +64,11 @@ async def test_poll_seeds_trade_group_for_a_flat_cw():
     assert any(m["symbol"] == "CHPG2627" and "Traded" in m["patch"] for m in patches)
 
 
-async def test_poll_does_not_overwrite_a_fresher_live_tick():
+async def test_poll_does_not_overwrite_a_fresher_live_tick(monkeypatch):
+    monkeypatch.setattr(
+        "app.market_data.market_subscription_manager.market_session.get_market_phase",
+        lambda *args, **kwargs: MarketPhase.CONTINUOUS_AM,
+    )
     today = reference_session_date().isoformat()
     mgr = _manager(_SnapshotProvider({
         "CHPG2627": {
@@ -78,3 +87,26 @@ async def test_poll_does_not_overwrite_a_fresher_live_tick():
     quote = mgr.state.get_quote("CHPG2627")
     assert quote.last_price == 1120.0        # the live tick wins
     assert quote.total_volume == 700000
+
+
+async def test_poll_keeps_call_auction_snapshot_out_of_confirmed_trade_state(monkeypatch):
+    monkeypatch.setattr(
+        "app.market_data.market_subscription_manager.market_session.get_market_phase",
+        lambda *args, **kwargs: MarketPhase.ATO,
+    )
+    today = reference_session_date().isoformat()
+    mgr = _manager(_SnapshotProvider({
+        "CHPG2627": {
+            "last_price": 1090.0, "total_volume": 0.0,
+            "reference_price": 1100.0, "as_of": f"{today} 09:05",
+        }
+    }))
+
+    await mgr._poll_session_trades()
+
+    quote = mgr.state.get_quote("CHPG2627")
+    assert quote.last_price is None
+    assert quote.traded_quantity is None
+    assert quote.trade_revision is None
+    assert quote.auction_price == 1090.0
+    assert quote.to_wire_snapshot_row()["Traded"] == 1.09

@@ -23,6 +23,19 @@ SSI_FRAME = (
 )
 
 
+def auction_frame(
+    *, symbol="HPG", price="21350", quantity="39700", change="150", percent="0.71"
+):
+    parts = SSI_FRAME.split("|")
+    parts.extend([""] * (102 - len(parts)))
+    parts[1] = f"S#{symbol}"
+    parts[42] = ""
+    parts[43] = ""
+    parts[54] = "0"
+    parts[-6:] = [price, quantity, change, percent, "1789697060263", "1789697060263"]
+    return "|".join(parts)
+
+
 def board_row(symbol="CHPG2625", session="08/09/2026"):
     return {
         "symbol": symbol, "TD": session, "time": STAMP_MS,
@@ -71,6 +84,18 @@ def test_ssi_realtime_parser_keeps_terminal_raw_vnd_units():
     assert quote["total_volume"] == 11_773_300
 
 
+def test_ssi_realtime_parser_reads_call_auction_trailer_without_inventing_a_trade():
+    quote = parse_realtime_frame(auction_frame())
+    assert quote["matched_price"] is None
+    assert quote["matched_volume"] is None
+    assert quote["total_volume"] == 0
+    assert quote["auction_payload_present"] is True
+    assert quote["indicative_price"] == 21_350
+    assert quote["indicative_volume"] == 39_700
+    assert quote["indicative_change"] == 150
+    assert quote["indicative_change_percent"] == pytest.approx(.71)
+
+
 def test_ssi_subscription_contract_is_stable_and_deduplicated():
     import json
 
@@ -106,6 +131,94 @@ def test_ssi_realtime_frame_emits_book_and_observed_latest_match():
     assert trade["_trade_identity"].startswith("SSI_OBSERVED|2026-09-09|MBB|")
     assert trade["TradingDate"] == "2026-09-09"
     assert p._realtime_observed_symbols == {"MBB"}
+
+
+def test_ssi_ato_frame_emits_realtime_indicative_price_and_amount_without_trade():
+    p = provider()
+    p._active_symbols = ["HPG"]
+    events = []
+    p.set_event_callback(lambda kind, row, symbol: events.append((kind, row, symbol)))
+
+    observed = datetime(2026, 9, 18, 9, 5, tzinfo=VN_TZ)
+    assert p._handle_realtime_text(auction_frame(), received_at=observed) is True
+
+    assert [kind for kind, _, _ in events] == ["bidask", "auction"]
+    projected = events[1][1]
+    assert projected["IndicativePrice"] == 21_350
+    assert projected["IndicativeVolume"] == 39_700
+    assert projected["PercentPriceChange"] == pytest.approx(.0071)
+    assert projected["MarketStatus"] == "ATO"
+    assert p._last_trade_at_ms is None
+
+    events.clear()
+    assert p._handle_realtime_text(
+        auction_frame(), received_at=observed.replace(second=1)
+    ) is True
+    assert [kind for kind, _, _ in events] == ["bidask"]
+
+    events.clear()
+    assert p._handle_realtime_text(
+        auction_frame(quantity="40100"), received_at=observed.replace(second=2)
+    ) is True
+    assert [kind for kind, _, _ in events] == ["bidask", "auction"]
+    assert events[1][1]["IndicativeVolume"] == 40_100
+
+
+def test_market_state_keeps_auction_projection_separate_from_confirmed_trade():
+    state = MarketState()
+    state.apply_reference_metadata(
+        "HPG", session_date="2026-09-18", reference_price=21_200,
+    )
+    projected, diff = state.apply_auction_event({
+        "Ticker": "HPG",
+        "IndicativePrice": 21_350,
+        "IndicativeVolume": 39_700,
+        "Change": 150,
+        "PercentPriceChange": .0071,
+        "TradingDate": "2026-09-18",
+        "Timestamp": "2026-09-18T09:05:00+07:00",
+        "MarketStatus": "ATO",
+        "_full_auction_snapshot": True,
+    })
+
+    assert projected.last_price is None
+    assert projected.traded_quantity is None
+    assert projected.total_volume is None
+    assert projected.trade_revision is None
+    assert projected.auction_price == 21_350
+    assert projected.auction_quantity == 39_700
+    row = projected.to_wire_snapshot_row()
+    assert row["Traded"] == 21.35
+    assert row["Traded_Qty"] == 39_700
+    assert row["change"] == .15
+    assert row["_auction_indicative"] is True
+    patch = projected.to_wire_patch(diff)
+    assert patch["Traded"] == 21.35
+    assert patch["Traded_Qty"] == 39_700
+    assert "_ts_source" not in patch
+
+    repeated, repeated_diff = state.apply_auction_event({
+        "Ticker": "HPG",
+        "IndicativePrice": 21_350,
+        "IndicativeVolume": 39_700,
+        "Change": 150,
+        "PercentPriceChange": .0071,
+        "TradingDate": "2026-09-18",
+        "Timestamp": "2026-09-18T09:05:01+07:00",
+        "MarketStatus": "ATO",
+        "_full_auction_snapshot": True,
+    })
+    assert repeated_diff == {}
+    assert repeated.auction_timestamp > projected.auction_timestamp
+
+    cleared = state.clear_auction_indicatives("CONTINUOUS_AM")
+    assert len(cleared) == 1
+    confirmed, clear_diff = cleared[0]
+    assert confirmed.auction_price is None
+    clear_patch = confirmed.to_wire_patch(clear_diff)
+    assert clear_patch["Traded"] is None
+    assert clear_patch["Traded_Qty"] is None
+    assert clear_patch["_auction_indicative"] is False
 
 
 def test_ssi_realtime_repeated_book_frame_does_not_duplicate_latest_match():
@@ -485,6 +598,14 @@ def test_health_does_not_report_previous_session_data_as_fresh(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_overview_keeps_other_indices_when_one_dataset_fails(monkeypatch):
+    monkeypatch.setattr(
+        "app.market_data.providers.vnstock_provider.market_session.get_market_phase",
+        lambda *args, **kwargs: MarketPhase.CONTINUOUS_AM,
+    )
+    monkeypatch.setattr(
+        "app.market_data.providers.vnstock_provider.market_session.is_trading_active",
+        lambda *args, **kwargs: True,
+    )
     def history(symbol, source, start, end, interval):
         if symbol == "VNFINLEAD":
             raise RuntimeError("connection error")

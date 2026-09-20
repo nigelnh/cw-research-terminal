@@ -293,6 +293,13 @@ async def test_redis_market_state_store_save_load_preserves_canonical_units():
         price_change=50.0,
         price_change_percent=0.0023,
         total_volume=12500000,
+        auction_price=21950.0,
+        auction_quantity=39700,
+        auction_change=150.0,
+        auction_change_percent=0.00688,
+        auction_timestamp=now_ms,
+        auction_received_timestamp=now_ms,
+        provider_market_status="ATC",
         received_timestamp=now_ms,
         source_timestamp=now_ms,
     )
@@ -312,6 +319,12 @@ async def test_redis_market_state_store_save_load_preserves_canonical_units():
     assert loaded_stock.ask1_price == 21900.0
     assert loaded_stock.price_change == 50.0
     assert loaded_stock.price_change_percent == 0.0023
+    assert loaded_stock.auction_price == 21950.0
+    assert loaded_stock.auction_quantity == 39700
+    assert loaded_stock.to_wire_snapshot_row()["Traded_Qty"] == 39700
+    # Redis hydration preserves the projection without turning it into a match.
+    assert loaded_stock.last_price == 21850.0
+    assert loaded_stock.traded_quantity is None
 
     # 2. Test Index Quote in Points (1280.5)
     index_quote = CanonicalQuote(
@@ -623,7 +636,8 @@ async def test_backend_restart_warm_cache_restoration_and_overwrite():
     test_store = RedisMarketStateStore(
         enabled=True,
         ttl_seconds=3600,
-        max_staleness_seconds=86400,
+        # The displayed Friday session remains current through a weekend/holiday.
+        max_staleness_seconds=14 * 86400,
         redis_client=mock_redis,
     )
     await test_store.initialize()

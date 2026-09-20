@@ -87,6 +87,13 @@ def parse_realtime_frame(raw: str) -> dict[str, Any]:
     if not _SYMBOL.fullmatch(symbol):
         raise SsiRealtimeParseError("realtime frame has no valid symbol")
 
+    # During HOSE call auctions SSI leaves the ordinary latest-match group
+    # (42/43/54) empty and appends the indicative match to a six-field trailer:
+    # price, quantity, change, percent, and two provider clocks.  This trailer is
+    # present on the currently observed 102-field schema.  Do not interpret the
+    # shorter legacy frame's final fields as an auction group.
+    has_auction_trailer = len(parts) >= 102
+
     return {
         "exchange": parts[0].strip().upper() or None,
         "symbol": symbol,
@@ -110,4 +117,14 @@ def parse_realtime_frame(raw: str) -> dict[str, Any]:
         "total_value": _number(parts, 55),
         "provider_updated": _quantity(parts, 65),
         "side": "buy" if parts[66].strip().lower() == "b" else "sell",
+        "auction_payload_present": has_auction_trailer,
+        "indicative_price": _price(parts, len(parts) - 6) if has_auction_trailer else None,
+        "indicative_volume": _quantity(parts, len(parts) - 5) if has_auction_trailer else None,
+        "indicative_change": _number(parts, len(parts) - 4) if has_auction_trailer else None,
+        "indicative_change_percent": (
+            _number(parts, len(parts) - 3) if has_auction_trailer else None
+        ),
+        "auction_updated": (
+            _quantity(parts, len(parts) - 1) if has_auction_trailer else None
+        ),
     }

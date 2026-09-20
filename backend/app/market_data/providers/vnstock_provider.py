@@ -253,6 +253,9 @@ class VnstockProvider(MarketDataProvider):
         # match-state footprint across socket reconnects so one observed match becomes one
         # tape row instead of one row per price-table frame.
         self._realtime_match_identities: dict[str, str] = {}
+        # ATO/ATC projected matches have their own lifecycle.  Deduplicate them
+        # independently so book-only frames do not flash the same projection again.
+        self._realtime_auction_identities: dict[str, str] = {}
         # Some HOSE CW frames omit the latest-match quantity. Keep the cumulative total
         # observed on every frame so a real increase can supply that quantity without
         # guessing. A symbol first seen mid-session has no baseline and stays unavailable.
@@ -323,6 +326,7 @@ class VnstockProvider(MarketDataProvider):
             self._connected = False
             self._realtime_connected = False
             self._realtime_match_identities.clear()
+            self._realtime_auction_identities.clear()
             self._realtime_cumulative_volumes.clear()
         self._notify_status()
 
@@ -338,6 +342,7 @@ class VnstockProvider(MarketDataProvider):
             removed_symbols = set(self._active_symbols).difference(clean)
             for symbol in removed_symbols:
                 self._realtime_match_identities.pop(symbol, None)
+                self._realtime_auction_identities.pop(symbol, None)
                 self._realtime_cumulative_volumes.pop(symbol, None)
             old = [
                 task for task in (self._quote_task, self._tape_task, self._realtime_task)
@@ -484,6 +489,7 @@ class VnstockProvider(MarketDataProvider):
             self._realtime_session = session
             self._realtime_observed_symbols.clear()
             self._realtime_match_identities.clear()
+            self._realtime_auction_identities.clear()
             self._realtime_cumulative_volumes.clear()
         stamp = observed.isoformat()
         stamp_ms = int(observed.timestamp() * 1000)
@@ -493,6 +499,7 @@ class VnstockProvider(MarketDataProvider):
         self._last_data_at_ms = max(self._last_data_at_ms or 0, stamp_ms)
         self._last_data_session = session
 
+        phase = market_session.get_market_phase(observed).value
         bids, asks = quote["bids"], quote["asks"]
         book_event = {
             "Ticker": symbol,
@@ -502,13 +509,47 @@ class VnstockProvider(MarketDataProvider):
             **{f"Best{level}AskVolume": asks[level - 1]["volume"] for level in (1, 2, 3)},
             "TradingDate": session,
             "Timestamp": stamp,
-            "MarketStatus": market_session.get_market_phase(observed).value,
+            "MarketStatus": phase,
             "_full_book_snapshot": True,
             "_provider_source": "VNSTOCK_JS_SSI_REALTIME",
         }
         if self._callback is not None:
             self._callback("bidask", book_event, symbol)
         self._last_book_at_ms = max(self._last_book_at_ms or 0, stamp_ms)
+
+        # SSI publishes the call-auction projection in a dedicated trailer while the
+        # ordinary latest-match fields remain empty (ATO) or retain the last continuous
+        # execution (ATC).  Publish it immediately as an indicative event; it must never
+        # enter tape, bars, cumulative volume, or IV_TRADE.
+        if phase in {"ATO", "ATC"} and quote["auction_payload_present"]:
+            indicative_volume = quote["indicative_volume"]
+            if indicative_volume is not None and indicative_volume <= 0:
+                indicative_volume = None
+            auction_identity = "|".join(map(str, (
+                session, symbol, phase, quote["indicative_price"], indicative_volume,
+                quote["indicative_change"], quote["indicative_change_percent"],
+            )))
+            previous_auction = self._realtime_auction_identities.get(symbol)
+            if auction_identity != previous_auction:
+                self._realtime_auction_identities[symbol] = auction_identity
+                auction_percent = quote["indicative_change_percent"]
+                auction_event = {
+                    "Ticker": symbol,
+                    "IndicativePrice": quote["indicative_price"],
+                    "IndicativeVolume": indicative_volume,
+                    "Change": quote["indicative_change"],
+                    "PercentPriceChange": (
+                        auction_percent / 100.0 if auction_percent is not None else None
+                    ),
+                    "TradingDate": session,
+                    "Timestamp": stamp,
+                    "MarketStatus": phase,
+                    "_full_auction_snapshot": True,
+                    "_timestamp_basis": "SERVER_OBSERVED",
+                    "_provider_source": "VNSTOCK_JS_SSI_REALTIME",
+                }
+                if self._callback is not None:
+                    self._callback("auction", auction_event, symbol)
 
         price = quote["matched_price"]
         matched_volume = quote["matched_volume"]
@@ -550,7 +591,7 @@ class VnstockProvider(MarketDataProvider):
                 "TotalMatchValue": quote["total_value"],
                 "TradingDate": session,
                 "Timestamp": stamp,
-                "MarketStatus": market_session.get_market_phase(observed).value,
+                "MarketStatus": phase,
                 "_trade_identity": f"SSI_OBSERVED|{match_identity}",
                 "_timestamp_basis": "SERVER_OBSERVED",
                 "_observed_latest_match": True,
@@ -702,17 +743,35 @@ class VnstockProvider(MarketDataProvider):
             if stamp is None:
                 continue
             stamp_ms: int | None = None
-            stamp_ms = int(datetime.fromisoformat(stamp).timestamp() * 1000)
+            stamp_dt = datetime.fromisoformat(stamp)
+            stamp_ms = int(stamp_dt.timestamp() * 1000)
             valid_rows += 1
             self._last_data_at_ms = max(self._last_data_at_ms or 0, stamp_ms)
             self._last_book_at_ms = max(self._last_book_at_ms or 0, stamp_ms)
             self._last_data_session = max(self._last_data_session or "", session or "") or None
-            trade_event = self._trade_event(row, symbol, session, stamp)
+            phase = market_session.get_market_phase(stamp_dt).value
+            is_auction = phase in {"ATO", "ATC"}
+            # SSI is the low-latency auction source.  KBS remains a fallback only for
+            # symbols not yet observed on the current realtime socket.
+            if is_auction:
+                trade_event = (
+                    None
+                    if symbol in self._realtime_observed_symbols
+                    else self._auction_event(row, symbol, session, stamp, phase)
+                )
+            else:
+                trade_event = self._trade_event(row, symbol, session, stamp)
             book_event = self._book_event(row, symbol, session, stamp)
+            if is_auction and book_event is not None:
+                book_event["MarketStatus"] = phase
             if self._callback is not None and trade_event is not None:
-                self._callback("trade", trade_event, symbol)
+                self._callback("auction" if is_auction else "trade", trade_event, symbol)
                 emitted += 1
-                if stamp_ms is not None and _finite(row.get("close_price")) not in (None, 0):
+                if (
+                    not is_auction
+                    and stamp_ms is not None
+                    and _finite(row.get("close_price")) not in (None, 0)
+                ):
                     self._last_trade_at_ms = max(self._last_trade_at_ms or 0, stamp_ms)
             if self._callback is not None and book_event is not None:
                 self._callback("bidask", book_event, symbol)
@@ -744,6 +803,35 @@ class VnstockProvider(MarketDataProvider):
             "TradingDate": session,
             "Timestamp": stamp,
             "MarketStatus": row.get("market_status") or row.get("MS"),
+            "_synthetic_session_snapshot": True,
+            "_provider_source": "VNSTOCK_KBS_PRICE_BOARD",
+        }
+
+    @staticmethod
+    def _auction_event(
+        row: dict[str, Any], symbol: str, session: str | None,
+        stamp: str | None, phase: str,
+    ) -> dict[str, Any] | None:
+        if not session:
+            return None
+        percent_change = _finite(row.get("percent_change"))
+        quantity = None
+        for key in ("match_volume", "matched_volume", "volume_last", "last_volume"):
+            quantity = _integer(row.get(key))
+            if quantity is not None:
+                break
+        return {
+            "Ticker": symbol,
+            "IndicativePrice": _finite(row.get("close_price")),
+            "IndicativeVolume": quantity,
+            "Change": _finite(row.get("price_change")),
+            "PercentPriceChange": percent_change / 100.0 if percent_change is not None else None,
+            "TradingDate": session,
+            "Timestamp": stamp,
+            "MarketStatus": phase,
+            # KBS does not consistently expose auction quantity.  Preserve a quantity
+            # already received from SSI instead of clearing it with a partial fallback.
+            "_full_auction_snapshot": False,
             "_synthetic_session_snapshot": True,
             "_provider_source": "VNSTOCK_KBS_PRICE_BOARD",
         }

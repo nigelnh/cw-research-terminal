@@ -55,6 +55,10 @@ _BOOK_FIELDS = (
     "bid2_price", "bid2_quantity", "ask2_price", "ask2_quantity",
     "bid3_price", "bid3_quantity", "ask3_price", "ask3_quantity",
 )
+_AUCTION_FIELDS = (
+    "auction_price", "auction_quantity", "auction_change",
+    "auction_change_percent", "auction_timestamp", "auction_received_timestamp",
+)
 
 
 @dataclass
@@ -64,6 +68,9 @@ class ResolvedRow:
     values: dict[str, Optional[float]] = field(default_factory=dict)  # RAW VND / points
     underlying_symbol: Optional[str] = None
     trade_revision: Optional[int] = None
+    auction_indicative: bool = False
+    auction_timestamp: Optional[int] = None
+    auction_received_timestamp: Optional[int] = None
     analytics: Optional[dict[str, Any]] = None
     quote_prov: FieldProvenance = field(
         default_factory=lambda: FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE)
@@ -96,21 +103,35 @@ class ResolvedRow:
                 spread_pct = round((a - b) / ((a + b) / 2.0) * 100.0, 4)
 
         groups = [g for g in (self.quote_prov, self.book_prov, self.analytics_prov) if g is not None]
+        effective_price_key = "auction_price" if self.auction_indicative else "last_price"
+        auction_change_valid = bool(
+            self.auction_indicative and v.get("reference_price") is not None
+            and self.reference_prov.session_date == self.quote_prov.session_date
+        )
+        effective_quantity_key = (
+            "auction_quantity" if self.auction_indicative else "traded_quantity"
+        )
         row: dict[str, Any] = {
             "Symbol": self.symbol,
             "InstrumentType": self.instrument_type,
             "Ref": p("reference_price"),
             "Ceil": p("ceiling_price"),
             "Floor": p("floor_price"),
-            "Traded": p("last_price"),
-            "change": p("price_change"),
-            "ChangePercent": v.get("price_change_percent"),
+            "Traded": p(effective_price_key),
+            "change": (
+                p("auction_change") if auction_change_valid
+                else p("price_change") if not self.auction_indicative else None
+            ),
+            "ChangePercent": (
+                v.get("auction_change_percent") if auction_change_valid
+                else v.get("price_change_percent") if not self.auction_indicative else None
+            ),
             "Open_Prc": p("open_price"),
             "High_Prc": p("high_price"),
             "Low_Prc": p("low_price"),
             "Avg_Prc": p("average_price"),
             "Total_Vol": v.get("total_volume"),
-            "Traded_Qty": v.get("traded_quantity"),
+            "Traded_Qty": v.get(effective_quantity_key),
             "_trade_revision": self.trade_revision,
             "Trading_Val": p("trading_value"),
             "Bid1_Prc": p("bid1_price"), "Bid1_Qty": v.get("bid1_quantity"),
@@ -124,6 +145,12 @@ class ResolvedRow:
             "Under_Symbol": self.underlying_symbol,
             "Under_Prc": p("underlying_price"),
             "is_realtime_eligible": self.is_realtime_eligible,
+            "_auction_indicative": self.auction_indicative,
+            "_ts_auction": self.auction_timestamp,
+            "_received_auction": self.auction_received_timestamp,
+            "ExchangeTime": (
+                self.auction_timestamp if self.auction_indicative else None
+            ),
             "displayState": derive_display_state(groups).value,
             "provenance": {
                 "quote": self.quote_prov.to_wire(),
@@ -188,8 +215,14 @@ class MarketSnapshotResolver:
                     row.values.update({f: None for f in fields})
                     setattr(row, attr, FieldProvenance(DataTemporalState.UNAVAILABLE, DataSource.NONE,
                         session_date=display, note="No confirmed observation for the display session"))
+            if row.quote_prov.session_date != display:
+                row.values.update({field: None for field in _AUCTION_FIELDS})
+                row.auction_indicative = False
+                row.auction_timestamp = None
+                row.auction_received_timestamp = None
             if row.reference_prov.session_date != row.quote_prov.session_date or row.values.get("reference_price") is None:
                 row.values["price_change"] = row.values["price_change_percent"] = None
+                row.values["auction_change"] = row.values["auction_change_percent"] = None
         await self._derive_cw_bands(rows)
         # Redis is restored into the quant engine during application startup, so a
         # dashboard reload can receive the quote and its matching analytics in one
@@ -373,7 +406,7 @@ class MarketSnapshotResolver:
             and cal.is_trading_day(date.fromisoformat(live_sd))
             and any(
                 getattr(live, f, None) is not None and getattr(live, f) > 0
-                for f in ("last_price", "bid1_price", "ask1_price")
+                for f in ("last_price", "auction_price", "bid1_price", "ask1_price")
             )
         )
         if memory_ok and live is not None:
@@ -382,8 +415,16 @@ class MarketSnapshotResolver:
                 row.values[f] = getattr(live, f, None)
             for f in _BOOK_FIELDS:
                 row.values[f] = getattr(live, f, None)
+            for f in _AUCTION_FIELDS:
+                row.values[f] = getattr(live, f, None)
             row.underlying_symbol = live.underlying_symbol
             row.trade_revision = live.trade_revision
+            row.auction_indicative = bool(
+                live.provider_market_status in {"ATO", "ATC"}
+                and live.auction_price is not None
+            )
+            row.auction_timestamp = live.auction_timestamp
+            row.auction_received_timestamp = live.auction_received_timestamp
             sd = str(live_sd)
             def group_provenance(ts, received, has_value):
                 if not has_value:
@@ -399,9 +440,20 @@ class MarketSnapshotResolver:
                                        stale=bool(session_active and not fresh),
                                        note=None if ts else "observation timestamp unavailable")
             row.quote_prov = group_provenance(
-                live.trade_timestamp or live.source_timestamp or live.received_timestamp,
-                live.trade_received_timestamp or live.received_timestamp,
-                live.last_price is not None)
+                (
+                    live.auction_timestamp if row.auction_indicative
+                    else live.trade_timestamp or live.source_timestamp or live.received_timestamp
+                ),
+                (
+                    live.auction_received_timestamp if row.auction_indicative
+                    else live.trade_received_timestamp or live.received_timestamp
+                ),
+                live.last_price is not None or row.auction_indicative)
+            if row.auction_indicative:
+                row.quote_prov = replace(
+                    row.quote_prov,
+                    note="ATO/ATC indicative price and quantity; not an execution",
+                )
             row.book_prov = group_provenance(
                 live.book_timestamp or (live.source_timestamp if live.trade_timestamp is None else None),
                 live.book_received_timestamp or (live.received_timestamp if live.book_timestamp is None else None),
