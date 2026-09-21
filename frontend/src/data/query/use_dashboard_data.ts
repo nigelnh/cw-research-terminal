@@ -1,8 +1,8 @@
 import { acceptMarketContext, useMarketContext, marketNow } from "@/data/market_session_store";
 import { resolveDashboardAnalytics } from "./resolve_dashboard_analytics";
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { MarketQuote } from "@/domain/models";
+import type { CoveredWarrant, MarketQuote } from "@/domain/models";
 import {
   type DisplayState,
   type RowProvenance,
@@ -97,22 +97,68 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
   }, [marketSessionActive, marketPhase, qc]);
 
   const data = query.data;
-  const fallbackBySymbol = new Map<string, any>();
-  for (const row of data?.rows ?? []) {
-    fallbackBySymbol.set(String(row.Symbol).toUpperCase(), row);
-  }
-  const analyticsBySymbol = new Map<string, any>();
-  for (const row of analyticsQuery.data?.rows ?? []) {
-    analyticsBySymbol.set(String(row.Symbol).toUpperCase(), row);
-  }
+  const fallbackBySymbol = useMemo(() => {
+    const rows = new Map<string, any>();
+    for (const row of data?.rows ?? []) rows.set(String(row.Symbol).toUpperCase(), row);
+    return rows;
+  }, [data?.rows]);
+  const analyticsBySymbol = useMemo(() => {
+    const rows = new Map<string, any>();
+    for (const row of analyticsQuery.data?.rows ?? []) rows.set(String(row.Symbol).toUpperCase(), row);
+    return rows;
+  }, [analyticsQuery.data?.rows]);
+  type CachedRow = {
+    live: MarketQuote | undefined;
+    fallback: any;
+    analyticsFallback: any;
+    warrant: CoveredWarrant | undefined;
+    underlyingQuote: MarketQuote | undefined;
+    sessionDate: string | undefined;
+    active: boolean;
+    tracked: boolean;
+    freshnessBucket: number;
+    value: DashboardRow | undefined;
+  };
+  const rowCache = useRef(new Map<string, CachedRow>());
 
-  const getRow = (symbol: string): DashboardRow | undefined => {
+  const getRow = useCallback((symbol: string): DashboardRow | undefined => {
     const sym = symbol.toUpperCase();
     const live = quotes.get(sym);
     const fb = fallbackBySymbol.get(sym);
     const analyticsFallback = analyticsBySymbol.get(sym);
+    const cw = warrants?.get(sym);
+    const underlyingQuote = cw?.underlyingSymbol ? quotes.get(cw.underlyingSymbol) : undefined;
+    const sessionDate = sessionContext?.displaySessionDate;
+    const tracked = isRealtimeTracked(sym);
+    const now = marketNow();
+    // Re-evaluate age-based provenance even when a quiet symbol has not produced a new
+    // object. Five-second buckets keep STALE transitions truthful without rebuilding every
+    // row on every 80 ms render batch.
+    const freshnessBucket = Math.floor(now / 5_000);
+    const cached = rowCache.current.get(sym);
 
-    if (!fb && !live) return undefined;
+    if (
+      cached &&
+      cached.live === live &&
+      cached.fallback === fb &&
+      cached.analyticsFallback === analyticsFallback &&
+      cached.warrant === cw &&
+      cached.underlyingQuote === underlyingQuote &&
+      cached.sessionDate === sessionDate &&
+      cached.active === marketSessionActive &&
+      cached.tracked === tracked &&
+      cached.freshnessBucket === freshnessBucket
+    ) {
+      return cached.value;
+    }
+
+    if (!fb && !live) {
+      rowCache.current.set(sym, {
+        live, fallback: fb, analyticsFallback, warrant: cw, underlyingQuote,
+        sessionDate, active: marketSessionActive, tracked, freshnessBucket, value: undefined,
+      });
+      return undefined;
+    }
     const fallbackQuote = mapRawSnapshotToQuote(fb ?? { Symbol: sym });
     const sourceProvenance = (fb?.provenance ?? {
       quote: { state: "UNAVAILABLE", source: "NONE" },
@@ -127,21 +173,33 @@ export function useDashboardData(symbols: string[]): UseDashboardDataResult {
         ? { analytics: { ...analyticsFallback.provenance } }
         : {}),
     };
-    const resolved = resolveDashboardQuote(fallbackQuote, live, provenance, marketSessionActive, marketNow(), sessionContext?.displaySessionDate);
-    const cw = warrants?.get(sym);
+    const resolved = resolveDashboardQuote(fallbackQuote, live, provenance, marketSessionActive, now, sessionContext?.displaySessionDate);
     const analytics = resolveDashboardAnalytics(
       [cw?.analyticsSnapshot, analyticsFallback?.analytics, fb?.analytics], resolved.quote,
-      sessionContext?.displaySessionDate ?? resolved.provenance.quote.sessionDate,
-      cw?.underlyingSymbol ? quotes.get(cw.underlyingSymbol) : undefined,
+      sessionDate ?? resolved.provenance.quote.sessionDate,
+      underlyingQuote,
     );
 
-    return {
+    const value: DashboardRow = {
       symbol: sym,
       ...resolved,
       analytics,
-      trackedRealtime: Boolean(fb?.tracked_realtime ?? isRealtimeTracked(sym)),
+      trackedRealtime: Boolean(fb?.tracked_realtime ?? tracked),
     };
-  };
+    rowCache.current.set(sym, {
+      live, fallback: fb, analyticsFallback, warrant: cw, underlyingQuote,
+      sessionDate, active: marketSessionActive, tracked, freshnessBucket, value,
+    });
+    return value;
+  }, [
+    analyticsBySymbol,
+    fallbackBySymbol,
+    isRealtimeTracked,
+    marketSessionActive,
+    quotes,
+    sessionContext?.displaySessionDate,
+    warrants,
+  ]);
 
   const meta: DashboardMeta = data
     ? {

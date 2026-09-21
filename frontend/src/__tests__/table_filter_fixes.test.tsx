@@ -126,6 +126,24 @@ afterEach(() => {
 });
 
 describe("Targeted watchlist columns", () => {
+  it("windows a large universe instead of mounting every market row", () => {
+    const original = [...fixture.items];
+    fixture.items.splice(0, fixture.items.length, ...Array.from({ length: 349 }, (_, index) => ({
+      symbol: `CZZZ${String(index).padStart(4, "0")}`,
+      instrumentType: "CW",
+      underlyingSymbol: "HPG",
+    })));
+    try {
+      const page = render(<PersonalDashboard />);
+      const table = page.getByRole("table");
+      expect(table.getAttribute("aria-rowcount")).toBe("350");
+      expect(page.container.querySelectorAll("tbody tr[data-symbol]").length).toBeLessThan(60);
+      expect(page.container.querySelectorAll(".watchlist-virtual-spacer")).toHaveLength(1);
+    } finally {
+      fixture.items.splice(0, fixture.items.length, ...original);
+    }
+  });
+
   it("keeps typing and suggestion selection separate from the submitted watchlist search", () => {
     const page = render(<PersonalDashboard />);
     const input = page.getByRole("combobox", { name: "Search watchlist symbols" });

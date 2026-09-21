@@ -192,7 +192,7 @@ const TS_HEAD: React.CSSProperties = {
 /** Rows drawn initially, and added each time the tape is scrolled near its end. A liquid
  *  name prints thousands of times a session; painting all of them up front would cost tens
  *  of thousands of nodes for history nobody has scrolled to yet. */
-const TAPE_PAGE = 300;
+const TAPE_PAGE = 100;
 
 /**
  * TRADED LOGS panel (OVERVIEW tab) - server-side time & sales.

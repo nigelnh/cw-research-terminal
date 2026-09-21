@@ -19,6 +19,9 @@ export interface ResearchMarketState {
 }
 
 const ws = backendWebSocketClient;
+const isRealtimeTracked = (symbol: string) => ws.isRealtimeTracked(symbol);
+const getWarrant = (symbol: string) => ws.getCoveredWarrant(symbol.toUpperCase());
+const getQuote = (symbol: string) => ws.getQuote(symbol.toUpperCase());
 
 /**
  * Subscribe to the ONE canonical realtime store (BackendWebSocketClient) via
@@ -34,7 +37,7 @@ export function useResearchMarket() {
   }, [provider]);
 
   // Re-render on any observable change (quote / warrant / connection / feed / session).
-  useSyncExternalStore(ws.subscribe, ws.getRevision, () => 0);
+  const revision = useSyncExternalStore(ws.subscribe, ws.getRevision, () => 0);
 
   return {
     connectionState: ws.getGatewayState(),
@@ -45,11 +48,12 @@ export function useResearchMarket() {
     marketSessionActive: ws.isMarketSessionActive(),
     dataMode: config.dataMode,
     isDemo: false,
+    revision,
     warrants: ws.getAllCoveredWarrants(),
     quotes: ws.getAllQuotes(),
-    isRealtimeTracked: (symbol: string) => ws.isRealtimeTracked(symbol),
-    getWarrant: (symbol: string) => ws.getCoveredWarrant(symbol.toUpperCase()),
-    getQuote: (symbol: string) => ws.getQuote(symbol.toUpperCase()),
+    isRealtimeTracked,
+    getWarrant,
+    getQuote,
   };
 }
 
