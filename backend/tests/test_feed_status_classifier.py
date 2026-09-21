@@ -273,6 +273,35 @@ def test_optional_overview_groups_never_promote_to_a_feed_wide_banner():
     }
 
 
+def test_optional_overview_index_series_never_promote_to_a_feed_wide_banner():
+    """At PRE_OPEN every current-session intraday index query can be empty together.
+    Four expected empty charts are still four components of one overview, not evidence
+    that the quote feed is unavailable."""
+    access = FeedAccess()
+    access.record("overview_index_vn30_1m", "upstream_unavailable")
+    access.record("overview_index_vnindex_1m", "upstream_unavailable")
+
+    wire = access.wire(fresh=False, active=True, last_data_at=None)
+
+    assert wire["code"] == "AWAITING_DATA"
+    assert {item["scope"] for item in wire["datasets"]} == {
+        "overview_index_vn30_1m",
+        "overview_index_vnindex_1m",
+    }
+
+
+def test_preopen_dataset_failures_do_not_promote_to_a_feed_wide_banner():
+    """Cross-scope promotion is meaningful only while matching should be producing data."""
+    access = FeedAccess()
+    access.record("history", "upstream_unavailable")
+    access.record("tape", "upstream_unavailable")
+
+    wire = access.wire(fresh=False, active=False, last_data_at=None)
+
+    assert wire["code"] == "SESSION_PAUSED"
+    assert {item["scope"] for item in wire["datasets"]} == {"history", "tape"}
+
+
 def test_fresh_realtime_stream_wins_over_old_optional_dataset_failures():
     """Production may keep a failed history/tape scope until that dataset is retried.
     Current live ticks are direct evidence that the market feed itself is available."""

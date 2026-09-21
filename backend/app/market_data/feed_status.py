@@ -28,10 +28,10 @@ MESSAGES = {
 }
 
 # Failures below these prefixes describe optional components of one composite
-# response.  Two index groups failing the same VCI constituent endpoint are not
-# two independent observations that the whole market-data provider is down.
+# response. Several index groups or intraday series failing together are not
+# independent observations that the whole market-data provider is down.
 # They remain in ``datasets`` so the owning cards can disclose partial coverage.
-_BANNER_PROMOTION_EXCLUDED_PREFIXES = ("overview_group_",)
+_BANNER_PROMOTION_EXCLUDED_PREFIXES = ("overview_",)
 
 
 #: HTTP status codes must match as whole tokens. This classifier is fed CAPTURED SDK
@@ -165,7 +165,7 @@ class FeedAccess:
             error for error in errors
             if not error["scope"].startswith(_BANNER_PROMOTION_EXCLUDED_PREFIXES)
         ]
-        if global_error is None and not fresh and len(promotion_errors) > 1:
+        if global_error is None and active and not fresh and len(promotion_errors) > 1:
             # An account-wide condition is DISCOVERED, never assumed: when several
             # independent scopes are rejected the same way, that is the feed talking, not
             # one endpoint. A single failure only ever speaks for itself - `get_ceilingfloor`
