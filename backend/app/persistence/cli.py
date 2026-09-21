@@ -16,6 +16,7 @@ SignalR stream.
 from __future__ import annotations
 
 import argparse
+import os
 import asyncio
 import json
 import logging
@@ -102,6 +103,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="persist valuation + quarterly statements (run OFF the production box)",
     )
     fd.add_argument("--symbols", required=True, type=_split_symbols)
+    fd.add_argument(
+        "--api-url", default="",
+        help="POST to this ingest endpoint instead of writing the database directly "
+             "(needs FUNDAMENTALS_INGEST_TOKEN in the environment)",
+    )
     fd.add_argument(
         "--delay", type=float, default=1.5,
         help="seconds between symbols; paced because hammering the source earns a block",
@@ -334,6 +340,28 @@ async def _cmd_recent_runs(args) -> int:
 
 
 
+async def _post_fundamentals(api_url: str, items: list[dict]) -> None:
+    """Hand the rows to the backend, which owns the database connection.
+
+    The token is read from the environment, never a CLI argument: an argument would land
+    in the process table and in CI step logs.
+    """
+    import httpx
+
+    token = os.environ.get("FUNDAMENTALS_INGEST_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError(
+            "FUNDAMENTALS_INGEST_TOKEN is not set; the ingest route rejects unauthenticated writes"
+        )
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            api_url, json={"items": items}, headers={"Authorization": f"Bearer {token}"}
+        )
+    if response.status_code != 200:
+        # Body, not the request - the request carries the bearer token.
+        raise RuntimeError(f"ingest rejected: HTTP {response.status_code} {response.text[:200]}")
+
+
 async def _cmd_fundamentals(args) -> int:
     """Fetch valuation + quarterly statement lines and persist them.
 
@@ -344,16 +372,25 @@ async def _cmd_fundamentals(args) -> int:
     can move Railway's egress. So the API reads `instrument_fundamentals` and this command,
     scheduled on GitHub Actions, is the only thing that writes it.
     """
-    from app.persistence import database as db
     from app.market_data.providers.provider_factory import create_market_provider
-    from app.persistence.repositories import fundamentals_repository as repo
 
-    engine = db.create_engine_from_url(_resolve_db_url(args))
-    sm = db.configure(engine)
     provider = create_market_provider()  # reads only; no live poller is started
+
+    # Two sinks. `--api-url` posts to the running backend, which is how the scheduled job
+    # works: Railway Postgres has no public TCP proxy and resolves only on
+    # `*.railway.internal`, so a GitHub runner cannot write to it even though it CAN reach
+    # Vietcap - which production cannot. Without the flag it writes the database directly,
+    # which is the local-development path.
+    engine = sm = None
+    if not args.api_url:
+        from app.persistence import database as db
+
+        engine = db.create_engine_from_url(_resolve_db_url(args))
+        sm = db.configure(engine)
 
     symbols = sorted({s.strip().upper() for s in args.symbols if s and s.strip()})
     written: list[str] = []
+    payload: list[dict] = []
     empty: list[str] = []
     failed: dict[str, str] = {}
 
@@ -377,19 +414,35 @@ async def _cmd_fundamentals(args) -> int:
             if not valuation and not quarters:
                 empty.append(sym)
                 continue
-            async with sm() as session:
-                await repo.upsert_fundamentals(
-                    session,
-                    symbol=sym,
-                    valuation=valuation,
-                    quarters=quarters,
-                    source=str(valuation.get("source") or "VNSTOCK_VCI"),
-                    observed_at=observed,
-                )
-                await session.commit()
+            payload.append({
+                "symbol": sym,
+                "valuation": valuation,
+                "quarters": quarters,
+                "source": str(valuation.get("source") or "VNSTOCK_VCI"),
+                "observed_at": observed.isoformat(),
+            })
             written.append(sym)
+
+        if payload:
+            if args.api_url:
+                await _post_fundamentals(args.api_url, payload)
+            else:
+                from app.persistence.repositories import fundamentals_repository as repo
+
+                async with sm() as session:
+                    for row in payload:
+                        await repo.upsert_fundamentals(
+                            session,
+                            symbol=row["symbol"],
+                            valuation=row["valuation"],
+                            quarters=row["quarters"],
+                            source=row["source"],
+                            observed_at=datetime.fromisoformat(row["observed_at"]),
+                        )
+                    await session.commit()
     finally:
-        await engine.dispose()
+        if engine is not None:
+            await engine.dispose()
 
     _emit(args, {
         "requested": len(symbols),

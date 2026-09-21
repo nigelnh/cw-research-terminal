@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     MARKET_DATA_DEBOUNCE_MS: int = Field(default=300, description="Subscription debounce delay in milliseconds")
     VNSTOCK_ENABLED: bool = Field(default=True, description="Enable the Vnstock market-data adapter")
     VNSTOCK_API_KEY: str = Field(default="", description="Vnstock API key (server-side only; never returned or logged)")
+    FUNDAMENTALS_INGEST_TOKEN: str = Field(
+        default="",
+        description=(
+            "Shared secret for POST /api/market/fundamentals/ingest. The scheduled "
+            "GitHub Actions job is the only caller: production's egress (AS400940) is "
+            "answered 403 by Vietcap's fundamentals query, so the data has to arrive "
+            "from a network that can reach it. Empty means the route is DISABLED - it "
+            "fails closed rather than accepting unauthenticated writes."
+        ),
+    )
     VNSTOCK_QUOTE_POLL_SECONDS: float = Field(
         default=5.0,
         description="Seconds between batched KBS price-board observations while the provider is active",

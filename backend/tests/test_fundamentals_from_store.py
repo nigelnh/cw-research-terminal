@@ -142,3 +142,100 @@ def test_the_endpoint_still_answers_when_both_layers_are_empty():
     assert response.status_code == 200
     assert body["errors"] == ["valuation", "ratios"]
     assert set(body["unavailable"]) == {"eps", "roe", "roa", "roic", "gross_margin"}
+
+
+# --------------------------------------------------------------------------- #
+# The write path. Production cannot fetch fundamentals (Railway's ASN is 403'd by
+# Vietcap) and the GitHub runner that CAN fetch them cannot reach Railway Postgres
+# (no public TCP proxy, `*.railway.internal` only). So the rows arrive over HTTP on
+# an authenticated write-only route and the backend does the insert privately.
+# --------------------------------------------------------------------------- #
+INGEST = "/api/market/fundamentals/ingest"
+GOOD_ITEM = {"symbol": "HPG", "valuation": {"pe": 7.9, "pb": 1.3},
+             "quarters": [{"period": "2026Q2", "roe": 0.21}]}
+
+
+class _FakeSession:
+    def __init__(self, sink): self.sink = sink
+    async def __aenter__(self): return self
+    async def __aexit__(self, *exc): return False
+    async def commit(self): self.sink["committed"] = True
+
+
+def _writable_db(sink):
+    return (
+        patch("app.market_data.market_router.persistence_db.is_configured", return_value=True),
+        patch("app.market_data.market_router.persistence_db.get_sessionmaker",
+              return_value=lambda: _FakeSession(sink)),
+        patch("app.market_data.market_router.fundamentals_repository.upsert_fundamentals",
+              new=AsyncMock(side_effect=lambda *a, **kw: sink.setdefault("rows", []).append(kw))),
+    )
+
+
+def _token(value):
+    return patch("app.security.ingest_token.settings.FUNDAMENTALS_INGEST_TOKEN", value)
+
+
+def test_an_unconfigured_token_disables_the_route_entirely():
+    """Fails closed. A deployment that forgot to set the token must not leave an
+    unauthenticated write open."""
+    with _token(""), TestClient(app) as client:
+        r = client.post(INGEST, json={"items": [GOOD_ITEM]},
+                        headers={"Authorization": "Bearer anything"})
+    assert r.status_code == 503
+    assert r.json()["detail"]["reason"] == "ingest_token_not_configured"
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{}, {"Authorization": "Bearer wrong-token"}, {"Authorization": "Basic secret-token"}],
+    ids=["no-header", "wrong-token", "wrong-scheme"],
+)
+def test_only_the_configured_bearer_token_is_accepted(headers):
+    with _token("secret-token"), TestClient(app) as client:
+        r = client.post(INGEST, json={"items": [GOOD_ITEM]}, headers=headers)
+    assert r.status_code == 401
+    # The presented token must never be echoed back to the caller.
+    assert "wrong-token" not in r.text and "secret-token" not in r.text
+
+
+def test_a_valid_token_persists_every_item():
+    sink: dict = {}
+    a, b, c = _writable_db(sink)
+    with _token("secret-token"), a, b, c, TestClient(app) as client:
+        r = client.post(
+            INGEST,
+            json={"items": [GOOD_ITEM, {"symbol": "vpb", "valuation": {"pe": 9.0}, "quarters": []}]},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+    body = r.json()
+    assert r.status_code == 200
+    assert body["written"] == ["HPG", "VPB"]  # symbol is normalised upward
+    assert body["count"] == 2
+    assert sink["committed"] is True
+    assert [row["symbol"] for row in sink["rows"]] == ["HPG", "VPB"]
+
+
+def test_an_item_with_no_fundamentals_is_refused_before_it_can_overwrite():
+    """The exact shape a failed upstream fetch produces. Accepting it would replace a good
+    stored row with the nulls this whole pipeline exists to end."""
+    sink: dict = {}
+    a, b, c = _writable_db(sink)
+    with _token("secret-token"), a, b, c, TestClient(app) as client:
+        r = client.post(
+            INGEST,
+            json={"items": [{"symbol": "HPG", "valuation": {}, "quarters": []}]},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+    assert r.status_code == 422
+    assert "rows" not in sink  # nothing reached the database
+
+
+def test_ingest_without_a_database_reports_that_rather_than_silently_succeeding():
+    with _token("secret-token"), \
+         patch("app.market_data.market_router.persistence_db.is_configured", return_value=False), \
+         TestClient(app) as client:
+        r = client.post(INGEST, json={"items": [GOOD_ITEM]},
+                        headers={"Authorization": "Bearer secret-token"})
+    assert r.status_code == 503
+    assert r.json()["detail"]["reason"] == "database_not_configured"

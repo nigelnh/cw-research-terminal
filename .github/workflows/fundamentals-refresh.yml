@@ -1,24 +1,30 @@
-name: Fundamentals refresh — Vietcap → Postgres
+name: Fundamentals refresh — Vietcap → backend → Postgres
 
-# Production cannot fetch fundamentals itself. Railway's egress (AS400940, Amsterdam) is
-# answered with HTTP 403 on Vietcap's VCI GraphQL fundamentals query, while the identical
-# library version and query succeed from a university network (AS11231) and from a
-# GitHub-hosted runner (Azure, AS8075) - verified by probing from inside the production
-# container and from a runner on 2026-09-21. The rejection tracks the calling ASN, and
-# nothing in this repository can move Railway's egress.
+# Neither half of the obvious design works here, which is why the data takes this route.
 #
-# The consequence in production was total: /api/market/fundamentals/{symbol} answered
-# pe, pb, eps, roe and roa all null for every equity, with quarters: [].
+#   Production cannot FETCH.  Railway's egress (AS400940, Amsterdam) is answered with HTTP
+#   403 on Vietcap's VCI GraphQL fundamentals query. The identical library version and
+#   query succeed from a university network (AS11231) and from a GitHub-hosted runner
+#   (Azure, AS8075), and Vietcap answers 200 to a bare POST on that host from Railway - so
+#   the rejection tracks the calling ASN for that one query, and nothing in this repository
+#   can move Railway's egress. Verified by probing from inside the production container.
 #
-# So this job is the ONLY writer of `instrument_fundamentals`; the API only reads it.
-# Fundamentals change once a quarter, so a daily refresh is already generous and the run
-# is paced (--delay) because hammering the source is the most plausible way an egress
-# earns a block in the first place.
+#   The runner cannot WRITE.  Railway Postgres has no public TCP proxy (list-tcp-proxies
+#   returns []) and resolves only on `*.railway.internal`, so a runner cannot reach the
+#   database even with credentials.
+#
+# So: the runner fetches, posts to an authenticated write-only route, and the backend does
+# the insert over Railway's private network. Postgres is never exposed to the internet.
+#
+# Before this, /api/market/fundamentals/{symbol} answered pe, pb, eps, roe and roa all null
+# for every equity, with quarters: [].
 #
 # ACTIVATION GATE (needs the repo owner):
-#   Add repo secret PRODUCTION_DATABASE_URL (the Railway Postgres URL).
-# The schedule below is already live but every step no-ops until that secret exists, so
-# there is exactly one thing left to do.
+#   1. Pick a long random token.
+#   2. Railway  -> backend service -> variable  FUNDAMENTALS_INGEST_TOKEN=<token>
+#   3. GitHub   -> gh secret set FUNDAMENTALS_INGEST_TOKEN   (the same value)
+# The route fails closed until step 2: with no token configured it rejects every call
+# rather than accepting unauthenticated writes. Every step below no-ops until step 3.
 
 on:
   workflow_dispatch:
@@ -38,9 +44,10 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     # GitHub does not allow secrets in job/step `if` expressions. Expose only a presence
-    # flag to the guards; the URL itself stays scoped to the step that needs it.
+    # flag to the guards; the token itself stays scoped to the step that needs it.
     env:
-      HAS_PRODUCTION_DATABASE: ${{ secrets.PRODUCTION_DATABASE_URL != '' }}
+      HAS_INGEST_TOKEN: ${{ secrets.FUNDAMENTALS_INGEST_TOKEN != '' }}
+      INGEST_URL: https://backend-production-626f.up.railway.app/api/market/fundamentals/ingest
       # The 20 underlyings behind every currently listed covered warrant.
       DEFAULT_SYMBOLS: "ACB,FPT,HDB,HPG,LPB,MBB,MSN,MWG,SHB,SSB,STB,TCB,TPB,VHM,VIB,VIC,VJC,VNM,VPB,VRE"
     timeout-minutes: 20
@@ -48,26 +55,29 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - name: Skip when database secret is absent
-        if: ${{ env.HAS_PRODUCTION_DATABASE != 'true' }}
+      - name: Skip when the ingest token is absent
+        if: ${{ env.HAS_INGEST_TOKEN != 'true' }}
         working-directory: .
-        run: echo 'PRODUCTION_DATABASE_URL is not configured; fundamentals refresh skipped.'
+        run: echo 'FUNDAMENTALS_INGEST_TOKEN is not configured; fundamentals refresh skipped.'
       - uses: actions/checkout@v4
-        if: ${{ env.HAS_PRODUCTION_DATABASE == 'true' }}
+        if: ${{ env.HAS_INGEST_TOKEN == 'true' }}
       - uses: actions/setup-python@v5
-        if: ${{ env.HAS_PRODUCTION_DATABASE == 'true' }}
+        if: ${{ env.HAS_INGEST_TOKEN == 'true' }}
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt
-        if: ${{ env.HAS_PRODUCTION_DATABASE == 'true' }}
-      - name: Refresh fundamentals
-        if: ${{ env.HAS_PRODUCTION_DATABASE == 'true' }}
+        if: ${{ env.HAS_INGEST_TOKEN == 'true' }}
+      - name: Fetch from Vietcap and post to the backend
+        if: ${{ env.HAS_INGEST_TOKEN == 'true' }}
         env:
-          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          # Read from the environment by the CLI, never passed as an argument - an argument
+          # would land in the process table and in this step's log.
+          FUNDAMENTALS_INGEST_TOKEN: ${{ secrets.FUNDAMENTALS_INGEST_TOKEN }}
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
           ACCEPT_TC: "tôi đồng ý"
           SYMBOLS: ${{ github.event.inputs.symbols }}
         run: |
           python -m app.persistence.cli fundamentals \
             --symbols "${SYMBOLS:-$DEFAULT_SYMBOLS}" \
+            --api-url "$INGEST_URL" \
             --json

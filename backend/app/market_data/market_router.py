@@ -1,9 +1,11 @@
 import logging
 import re
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.market_data.market_schemas import (
+    FundamentalsIngestRequest,
+    FundamentalsIngestResponse,
     CanonicalQuote,
     HistoricalBar,
     MarketHealthResponse,
@@ -28,6 +30,7 @@ from app.market_data import trading_calendar as cal
 from app.core.config import settings
 from app.persistence import database as persistence_db
 from app.persistence.repositories import fundamentals_repository
+from app.security.ingest_token import require_ingest_token
 
 logger = logging.getLogger(__name__)
 from app.market_data.market_session import market_session
@@ -423,6 +426,51 @@ async def get_fundamentals(symbol: str):
         "observed_at": observed_at,
         "errors": errors,
     }
+
+
+
+@market_router.post(
+    "/fundamentals/ingest",
+    response_model=FundamentalsIngestResponse,
+    dependencies=[Depends(require_ingest_token)],
+)
+async def ingest_fundamentals(payload: FundamentalsIngestRequest):
+    """Accept fundamentals fetched elsewhere and persist them. Machine callers only.
+
+    This exists because neither half of the obvious design works here. Production cannot
+    fetch fundamentals - Railway's egress (AS400940) is answered with HTTP 403 on Vietcap's
+    VCI GraphQL query, while a GitHub-hosted runner (AS8075) is not - and the runner cannot
+    write to the database directly, because Railway Postgres has no public TCP proxy and
+    resolves only on `*.railway.internal`. So the runner fetches, posts here, and the
+    backend does the write over the private network.
+
+    Write-only and idempotent: one row per symbol, replaced wholesale. The request model
+    has already rejected any item carrying neither valuation nor quarters, so a failed
+    upstream fetch cannot overwrite a good row with nulls.
+    """
+    if not persistence_db.is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "persistence_unavailable", "reason": "database_not_configured"},
+        )
+
+    maker = persistence_db.get_sessionmaker()
+    written: List[str] = []
+    async with maker() as session:
+        for item in payload.items:
+            await fundamentals_repository.upsert_fundamentals(
+                session,
+                symbol=item.symbol,
+                valuation=item.valuation,
+                quarters=item.quarters,
+                source=item.source,
+                observed_at=item.observed_at,
+            )
+            written.append(item.symbol)
+        await session.commit()
+
+    logger.info("Fundamentals ingested for %d symbols: %s", len(written), ",".join(written))
+    return FundamentalsIngestResponse(written=written, count=len(written))
 
 
 @market_router.get("/overview")
