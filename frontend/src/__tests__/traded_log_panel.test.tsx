@@ -160,13 +160,13 @@ describe("a full session's tape", () => {
     );
     const view = panel(true);
     const scroller = view.container.querySelector(".instrument-tape") as HTMLElement;
-    expect(scroller.querySelectorAll(".instrument-tape-row")).toHaveLength(300);
+    expect(scroller.querySelectorAll(".instrument-tape-row")).toHaveLength(100);
 
     // Reaching the end of the painted rows extends the window.
     Object.defineProperty(scroller, "scrollHeight", { value: 6_000, configurable: true });
     Object.defineProperty(scroller, "clientHeight", { value: 400, configurable: true });
     Object.defineProperty(scroller, "scrollTop", { value: 5_500, configurable: true });
     fireEvent.scroll(scroller);
-    expect(scroller.querySelectorAll(".instrument-tape-row")).toHaveLength(600);
+    expect(scroller.querySelectorAll(".instrument-tape-row")).toHaveLength(200);
   });
 });

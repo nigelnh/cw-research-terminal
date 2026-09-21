@@ -33,10 +33,31 @@ type Listener = () => void;
 const MAX_PER_SYMBOL = 8000;
 const prints = new Map<string, TradePrint[]>();
 const listeners = new Set<Listener>();
+const symbolListeners = new Map<string, Set<Listener>>();
 const identities = new Map<string, Set<string>>();
+const symbolRevisions = new Map<string, number>();
+const pendingSymbols = new Set<string>();
+let notifyTimer: ReturnType<typeof setTimeout> | null = null;
 let revision = 0;
 
 const key = (symbol: string) => symbol.trim().toUpperCase();
+
+/**
+ * Tape consumers only care about the open instrument. Batch notifications for that symbol
+ * so a liquid name producing dozens of prints per second does one React render per visual
+ * frame window, while every print is still retained in the store.
+ */
+function scheduleSymbolNotification(symbol: string): void {
+  if (!symbolListeners.get(symbol)?.size) return;
+  pendingSymbols.add(symbol);
+  if (notifyTimer !== null) return;
+  notifyTimer = setTimeout(() => {
+    notifyTimer = null;
+    const symbols = [...pendingSymbols];
+    pendingSymbols.clear();
+    for (const sym of symbols) symbolListeners.get(sym)?.forEach((fn) => fn());
+  }, 80);
+}
 
 export function acceptTradePrintMessage(message: unknown): boolean {
   const m = message as { symbol?: unknown; print?: TradePrint } | null;
@@ -62,7 +83,9 @@ export function acceptTradePrintMessage(message: unknown): boolean {
   prints.set(sym, tape);
   identities.set(sym, seen);
   revision++;
+  symbolRevisions.set(sym, (symbolRevisions.get(sym) ?? 0) + 1);
   listeners.forEach((fn) => fn());
+  scheduleSymbolNotification(sym);
   return true;
 }
 
@@ -71,7 +94,23 @@ export const tradePrintStore = {
     listeners.add(listener);
     return () => listeners.delete(listener);
   },
+  subscribeSymbol(symbol: string, listener: Listener) {
+    const sym = key(symbol);
+    let scoped = symbolListeners.get(sym);
+    if (!scoped) {
+      scoped = new Set<Listener>();
+      symbolListeners.set(sym, scoped);
+    }
+    scoped.add(listener);
+    return () => {
+      scoped!.delete(listener);
+      if (scoped!.size === 0) symbolListeners.delete(sym);
+    };
+  },
   getRevision: () => revision,
+  getSymbolRevision(symbol: string): number {
+    return symbolRevisions.get(key(symbol)) ?? 0;
+  },
   /** Newest first. */
   get(symbol: string): TradePrint[] {
     return prints.get(key(symbol)) ?? [];
@@ -80,7 +119,10 @@ export const tradePrintStore = {
   clear(symbol: string) {
     prints.delete(key(symbol));
     identities.delete(key(symbol));
+    const sym = key(symbol);
+    symbolRevisions.set(sym, (symbolRevisions.get(sym) ?? 0) + 1);
     revision++;
     listeners.forEach((fn) => fn());
+    scheduleSymbolNotification(sym);
   },
 };

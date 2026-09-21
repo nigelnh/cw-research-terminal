@@ -1,5 +1,5 @@
 import { useMarketContext } from "@/data/market_session_store";
-import { useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { backendClient } from "@/data/backend/backend_client";
 import { tradePrintStore, tradePrintKey, type TradePrint } from "@/data/backend/trade_print_store";
@@ -58,22 +58,29 @@ export function useTradedLog(symbol: string | null | undefined, marketSessionAct
     retry: 1,
   });
 
-  useSyncExternalStore(
-    tradePrintStore.subscribe,
-    tradePrintStore.getRevision,
-    tradePrintStore.getRevision,
+  const subscribeLive = useCallback(
+    (listener: () => void) => sym ? tradePrintStore.subscribeSymbol(sym, listener) : () => {},
+    [sym],
   );
+  const getLiveRevision = useCallback(
+    () => sym ? tradePrintStore.getSymbolRevision(sym) : 0,
+    [sym],
+  );
+  const liveRevision = useSyncExternalStore(subscribeLive, getLiveRevision, getLiveRevision);
 
   const archived = session.data?.items ?? [];
   const recent = repair.data?.items ?? [];
-  const live = sym ? tradePrintStore.get(sym) : [];
-
-  const byKey = new Map<string, TradePrint>();
-  for (const p of [...archived, ...recent, ...live] as TradePrint[]) {
-    if (day && p.session_date !== day) continue;
-    byKey.set(tradePrintKey(p), p);
-  }
-  const items = [...byKey.values()].sort((a, b) => b.ts - a.ts);
+  const items = useMemo(() => {
+    const live = sym ? tradePrintStore.get(sym) : [];
+    const byKey = new Map<string, TradePrint>();
+    for (const source of [archived, recent, live] as TradePrint[][]) {
+      for (const p of source) {
+        if (day && p.session_date !== day) continue;
+        byKey.set(tradePrintKey(p), p);
+      }
+    }
+    return [...byKey.values()].sort((a, b) => b.ts - a.ts);
+  }, [archived, recent, sym, day, liveRevision]);
 
   return {
     items,

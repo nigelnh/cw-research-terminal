@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RealtimePulseMap, WatchlistItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
@@ -141,6 +141,10 @@ const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
 
 const TD: React.CSSProperties = { padding: "0 8px", textAlign: "right" };
 const ROW_BORDER = "1px solid var(--border-row)";
+const TABLE_ROW_HEIGHT = 26;
+const TABLE_HEADER_HEIGHT = 27;
+const VIRTUALIZE_AFTER = 80;
+const VIRTUAL_OVERSCAN = 12;
 
 export function PersonalDashboard({
   onNavigateToUniverse,
@@ -149,7 +153,7 @@ export function PersonalDashboard({
   filter = "",
 }: PersonalDashboardProps) {
   const { items } = useWatchlist();
-  const { quotes, warrants, isRealtimeTracked } = useResearchMarket();
+  const { quotes, warrants, isRealtimeTracked, revision: marketRevision } = useResearchMarket();
   const { getSpec } = useInstrumentSpecs();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
   const [symbolSearch, setSymbolSearch] = useState("");
@@ -196,7 +200,7 @@ export function PersonalDashboard({
         })
         .filter((r) => textMatch(r.symbol))
         .filter((r) => !hiddenRows.isHidden(r.symbol)),
-    [items, getRow, quotes, q, hiddenRows, isRealtimeTracked],
+    [items, getRow, quotes, q, hiddenRows, isRealtimeTracked, marketRevision],
   );
 
   const unfilteredCwRows: CwRow[] = useMemo(
@@ -246,7 +250,7 @@ export function PersonalDashboard({
         })
         .filter((r) => textMatch(r.symbol, r.underlying))
         .filter((r) => !hiddenRows.isHidden(r.symbol)),
-    [items, getRow, quotes, warrants, getSpec, q, hiddenRows, isRealtimeTracked],
+    [items, getRow, quotes, warrants, getSpec, q, hiddenRows, isRealtimeTracked, marketRevision],
   );
 
   const cwRows = useMemo(
@@ -353,6 +357,54 @@ export function PersonalDashboard({
   }), [view.ordered, profilesBySymbol]);
   const searchMatches = useMemo(() => matchingSymbols(searchOptions, symbolSearch), [searchOptions, symbolSearch]);
   const searched = useMemo(() => prioritizeWatchlist(view.ordered, searchMatches), [view.ordered, searchMatches]);
+
+  // Rendering 349 instruments used to create roughly 15k DOM/accessibility nodes. During
+  // a busy SSI burst React then monopolised the browser main thread long enough to delay
+  // both the clock timer and the WebSocket heartbeat. Keep the full ordered data model,
+  // but only mount the rows around the scroll viewport.
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const scrollFrame = useRef<number | null>(null);
+  const [viewport, setViewport] = useState({ top: 0, height: 520 });
+  const measureViewport = useCallback(() => {
+    const node = tableScrollRef.current;
+    if (!node) return;
+    const next = { top: node.scrollTop, height: node.clientHeight || 520 };
+    setViewport((current) => current.top === next.top && current.height === next.height ? current : next);
+  }, []);
+  const onTableScroll = useCallback(() => {
+    if (scrollFrame.current !== null) return;
+    scrollFrame.current = window.requestAnimationFrame(() => {
+      scrollFrame.current = null;
+      measureViewport();
+    });
+  }, [measureViewport]);
+  useEffect(() => {
+    measureViewport();
+    const node = tableScrollRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measureViewport);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    };
+  }, [measureViewport]);
+  useEffect(() => {
+    if (!symbolSearch || !tableScrollRef.current) return;
+    tableScrollRef.current.scrollTop = 0;
+    measureViewport();
+  }, [symbolSearch, measureViewport]);
+
+  const virtualized = searched.rows.length > VIRTUALIZE_AFTER;
+  const bodyTop = Math.max(0, viewport.top - TABLE_HEADER_HEIGHT);
+  const windowSize = Math.ceil(viewport.height / TABLE_ROW_HEIGHT) + VIRTUAL_OVERSCAN * 2;
+  const unclampedStart = Math.max(0, Math.floor(bodyTop / TABLE_ROW_HEIGHT) - VIRTUAL_OVERSCAN);
+  const startIndex = virtualized
+    ? Math.min(unclampedStart, Math.max(0, searched.rows.length - windowSize))
+    : 0;
+  const endIndex = virtualized ? Math.min(searched.rows.length, startIndex + windowSize) : searched.rows.length;
+  const renderedRows = searched.rows.slice(startIndex, endIndex);
+  const spacerColSpan = columns.length + 2;
 
   const symbolWidth = `calc(${Math.max(8, ...unifiedRows.map((r) => r.symbol.length + (r.kind === "cw" ? 1 : 0)))}ch + 24px)`;
   const renderRow = (r: UnifiedRow) => {
@@ -473,9 +525,10 @@ export function PersonalDashboard({
       )}
 
       {(stockRows.length > 0 || cwRows.length > 0) && (
-        <div className="watchlist-table-scroll">
+        <div className="watchlist-table-scroll" ref={tableScrollRef} onScroll={onTableScroll}>
         <table
           className="mono grid-lined watchlist-table"
+          aria-rowcount={searched.rows.length + 1}
           style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}
         >
           <thead>
@@ -514,7 +567,17 @@ export function PersonalDashboard({
             </tr>
           </thead>
           <tbody>
-            {searched.rows.map(renderRow)}
+            {virtualized && startIndex > 0 && (
+              <tr aria-hidden="true" className="watchlist-virtual-spacer">
+                <td colSpan={spacerColSpan} style={{ height: startIndex * TABLE_ROW_HEIGHT, padding: 0, border: 0 }} />
+              </tr>
+            )}
+            {renderedRows.map(renderRow)}
+            {virtualized && endIndex < searched.rows.length && (
+              <tr aria-hidden="true" className="watchlist-virtual-spacer">
+                <td colSpan={spacerColSpan} style={{ height: (searched.rows.length - endIndex) * TABLE_ROW_HEIGHT, padding: 0, border: 0 }} />
+              </tr>
+            )}
           </tbody>
         </table>
         </div>

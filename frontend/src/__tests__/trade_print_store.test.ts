@@ -67,6 +67,26 @@ describe("tradePrintStore", () => {
     stop();
   });
 
+  it("batches the open symbol and ignores prints for unrelated symbols", () => {
+    vi.useFakeTimers();
+    try {
+      const seen = vi.fn();
+      const stop = tradePrintStore.subscribeSymbol("HPG", seen);
+      acceptTradePrintMessage({ type: "trade_print", symbol: "VPB", print: print(1000, 27_000) });
+      vi.advanceTimersByTime(80);
+      expect(seen).not.toHaveBeenCalled();
+
+      acceptTradePrintMessage({ type: "trade_print", symbol: "HPG", print: print(2000, 21_850) });
+      acceptTradePrintMessage({ type: "trade_print", symbol: "HPG", print: print(3000, 21_900) });
+      expect(seen).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(80);
+      expect(seen).toHaveBeenCalledTimes(1);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("drops malformed frames instead of poisoning the tape", () => {
     for (const bad of [null, {}, { symbol: "HPG" }, { symbol: "", print: print(1, 1) },
                        { symbol: "HPG", print: { ts: "x", price: 1 } }]) {
