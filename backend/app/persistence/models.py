@@ -587,3 +587,50 @@ class SourceFetchLog(Base):
     __table_args__ = (
         Index("ix_source_fetch_log_source_time", "source", "fetched_at"),
     )
+
+
+class InstrumentFundamentals(Base):
+    """Valuation ratios and recent quarterly statement lines for one equity, as last
+    fetched from the active provider. One row per symbol.
+
+    This table exists because the REQUEST PATH must not depend on reaching Vietcap.
+    Production (Railway, AS400940) receives HTTP 403 on the VCI GraphQL fundamentals
+    query while the same library, version and query succeed from a US university
+    network and from a GitHub-hosted runner (Azure, AS8075) - the block tracks the
+    ASN, not the country, and nothing in this repository can change Railway's egress.
+    A scheduled job writes here from an egress that works; the API reads here only.
+
+    The provider's two outputs are stored as they were returned rather than re-modelled
+    into columns. They already carry per-field provenance (`ratio_source`,
+    `statement_source`, `period`), and splitting them into typed columns would drop the
+    provenance the fundamentals endpoint is contractually required to report. Fundamentals
+    change once a quarter, so there is no query pattern here that columns would serve.
+    """
+
+    __tablename__ = "instrument_fundamentals"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    #: `provider.get_stock_valuation([symbol])[symbol]` verbatim - pe, pb, as_of.
+    valuation: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    #: `provider.get_financial_ratios(symbol)` verbatim - oldest quarter first.
+    quarters: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: When the ingestion run actually reached the provider. This is the age the API
+    #: reports, and it is NOT the time the row was written.
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("symbol", name="uq_instrument_fundamentals_symbol"),
+    )

@@ -26,6 +26,8 @@ from app.market_data.market_overview_service import market_overview_service
 from app.instruments.instrument_registry import instrument_registry
 from app.market_data import trading_calendar as cal
 from app.core.config import settings
+from app.persistence import database as persistence_db
+from app.persistence.repositories import fundamentals_repository
 
 logger = logging.getLogger(__name__)
 from app.market_data.market_session import market_session
@@ -311,6 +313,28 @@ async def get_stock_profiles(symbols: str = Query(..., max_length=1000)):
     return {"items": items}
 
 
+async def _stored_fundamentals(symbol: str):
+    """The persisted fundamentals row for `symbol`, or None when there is nothing to
+    serve. Never raises: a persistence fault must degrade to the provider path, not 500
+    an endpoint whose whole job is to answer partially."""
+    if not persistence_db.is_configured():
+        return None
+    try:
+        maker = persistence_db.get_sessionmaker()
+        async with maker() as session:
+            row = await fundamentals_repository.get_fundamentals(session, symbol)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        logger.warning("Stored fundamentals unavailable for %s: %s", symbol, exc)
+        return None
+    if row is None or (not row.valuation and not row.quarters):
+        return None
+    return row
+
+
+def _iso_or_none(value) -> Optional[str]:
+    return value.isoformat() if value is not None else None
+
+
 @market_router.get("/fundamentals/{symbol}")
 async def get_fundamentals(symbol: str):
     """Valuation and recent quarterly statement lines for one equity.
@@ -325,16 +349,36 @@ async def get_fundamentals(symbol: str):
     valuation: Dict[str, Any] = {}
     quarters: List[Dict[str, Any]] = []
     errors: List[str] = []
-    try:
-        valuation = (await subscription_manager.provider.get_stock_valuation([sym])).get(sym, {})
-    except Exception as exc:  # noqa: BLE001 - a partial answer beats a 500
-        logger.warning("Valuation unavailable for %s: %s", sym, exc)
-        errors.append("valuation")
-    try:
-        quarters = await subscription_manager.provider.get_financial_ratios(sym)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Financial ratios unavailable for %s: %s", sym, exc)
-        errors.append("ratios")
+    served_from = "provider"
+    observed_at: Optional[str] = None
+
+    # Postgres first. Production cannot reach Vietcap's fundamentals endpoint at all -
+    # Railway's egress (AS400940) is answered 403 on the VCI GraphQL query while the same
+    # library version and query succeed from other networks - so a live fetch here
+    # returned pe/pb/eps/roe/roa all null for every equity. A scheduled job writes this
+    # table from an egress that works (see migration 0009); this path only reads.
+    stored = await _stored_fundamentals(sym)
+    if stored is not None:
+        valuation = stored.valuation or {}
+        quarters = stored.quarters or []
+        served_from = "store"
+        observed_at = _iso_or_none(stored.observed_at)
+
+    # Only when the store has nothing to say. Keeps local development working, keeps any
+    # provider whose egress does reach its source working, and is the path the ingestion
+    # job itself exercises.
+    if not valuation and not quarters:
+        served_from = "provider"
+        try:
+            valuation = (await subscription_manager.provider.get_stock_valuation([sym])).get(sym, {})
+        except Exception as exc:  # noqa: BLE001 - a partial answer beats a 500
+            logger.warning("Valuation unavailable for %s: %s", sym, exc)
+            errors.append("valuation")
+        try:
+            quarters = await subscription_manager.provider.get_financial_ratios(sym)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Financial ratios unavailable for %s: %s", sym, exc)
+            errors.append("ratios")
 
     latest = quarters[-1] if quarters else {}
     available_metrics = {
@@ -372,6 +416,11 @@ async def get_fundamentals(symbol: str):
         },
         "provenance": provenance,
         "source": "VNSTOCK_VCI",
+        # Additive: which layer answered, and when that answer was actually observed
+        # upstream. `observed_at` is the ingestion's fetch time, never the row's write
+        # time, so a stale table is visible rather than silently served as current.
+        "served_from": served_from,
+        "observed_at": observed_at,
         "errors": errors,
     }
 
