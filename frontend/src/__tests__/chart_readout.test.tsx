@@ -96,4 +96,35 @@ describe("Chart OHLCV readout", () => {
     act(() => chart.hover({}));
     expect(page.getByText("5.0k")).toBeTruthy();
   });
+
+  // The chart header carried a provenance strip - "2026-08-27 · RAW · MARKET_TRADE_FEED",
+  // plus " · PARTIAL" on a forming bar and "Basis unavailable" / "Source unavailable" when
+  // a bar lacked either. It read as debug output left in by accident, so it is gone. The
+  // provenance itself is untouched: the API still carries it and `aggregateProvenance`
+  // still tests it. This pins the strip out of the header, the same way the overview card
+  // pins its removed POLLED / PARTIAL row.
+  it("does not print provenance in the header", () => {
+    const page = render(
+      <TradingChart
+        symbol="HPG"
+        bars={[
+          {
+            symbol: "HPG",
+            date: "2026-08-27",
+            open: 100, high: 130, low: 90, close: 115, volume: 5000,
+            sessionDate: "2026-08-27",
+            priceBasis: "RAW",
+            source: "MARKET_TRADE_FEED",
+            complete: false,
+          } as never,
+        ]}
+      />,
+    );
+    for (const leaked of [/RAW/, /MARKET_TRADE_FEED/, /PARTIAL/, /Basis unavailable/, /Source unavailable/]) {
+      expect(page.queryByText(leaked)).toBeNull();
+    }
+    // ...while the readout it shares a row with still works.
+    expect(page.getAllByText("115")).toHaveLength(1);
+    expect(page.getByText("5.0k")).toBeTruthy();
+  });
 });
