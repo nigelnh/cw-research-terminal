@@ -92,11 +92,34 @@ async def news_count_for_symbol(session: AsyncSession, symbol: str, *, lang: str
 
 # ------------------------------------------------------------------- company events
 def _event_sort_col():
+    """Which calendar day an event belongs to. The FEED filters dates on this - widening
+    it moves rows between days - so ordering concerns do not get to change it."""
     return func.coalesce(
         CompanyEvent.ex_date,
         CompanyEvent.public_date,
         CompanyEvent.record_date,
         CompanyEvent.disclosure_date,
+    )
+
+
+def _event_recency_col():
+    """When the market LEARNED of an event. Ordering only.
+
+    Both symbol-scoped event lists ordered on `_event_sort_col`, so `ex_date` led - and for
+    a LISTING event VNDirect puts the ESOP vesting date there. FPT carried rows dated 2027
+    through 2036, which sorted above everything, so the instrument panel opened on a 2036
+    vesting schedule while the Q2/2026 financial statements filed weeks earlier sat below
+    seven rows of them. A row whose `ex_date` is NULL - most financial statements - fell to
+    the bottom however recently it had been disclosed.
+
+    `ex_date` keeps its own column in the panel, so an upcoming dividend stays visible; it
+    just no longer decides the order.
+    """
+    return func.coalesce(
+        CompanyEvent.public_date,
+        CompanyEvent.disclosure_date,
+        CompanyEvent.ex_date,
+        CompanyEvent.record_date,
     )
 
 
@@ -114,7 +137,7 @@ async def list_company_events(
         stmt = stmt.where(CompanyEvent.event_class.in_([c.upper() for c in classes]))
     if types:
         stmt = stmt.where(CompanyEvent.event_type.in_([t.upper() for t in types]))
-    stmt = stmt.order_by(desc(_event_sort_col())).limit(limit)
+    stmt = stmt.order_by(desc(_event_recency_col())).limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
 
@@ -133,7 +156,7 @@ async def list_corporate_actions(
     )
     if action_types:
         stmt = stmt.where(CompanyEvent.event_type.in_(action_types))
-    stmt = stmt.order_by(desc(_event_sort_col())).limit(limit)
+    stmt = stmt.order_by(desc(_event_recency_col())).limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
 

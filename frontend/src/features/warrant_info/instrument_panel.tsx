@@ -169,13 +169,70 @@ function isoDay(v: string | null | undefined): string {
   return v.slice(0, 10);
 }
 
+/** The statement-series metrics. PE and PB are absent on purpose - see `QoQ`. */
+type QuarterMetric = "eps" | "roe" | "roa" | "roic" | "gross_margin" | "net_margin";
+
+/** Only the fields `QoQ` reads. Narrower than the fundamentals payload, so it stays
+ *  assignable while saying exactly what this component depends on. */
+type QuarterlyMetrics = { period?: string | null } & Partial<Record<QuarterMetric, number | null>>;
+
+/**
+ * Latest-quarter change for a metric that HAS a quarterly series.
+ *
+ * Eight bare numbers told you where a company is and nothing about where it is going,
+ * while the series needed to say so was already on screen in the chart beside them. PE and
+ * PB deliberately carry no delta: they come from a trailing valuation snapshot, not from
+ * the statement series, so a quarter-on-quarter figure for them would be invented.
+ *
+ * A move too small to matter renders nothing - an arrow on every row is noise, not signal.
+ */
+function QoQ({
+  rows,
+  field,
+  unit,
+}: {
+  rows: ReadonlyArray<QuarterlyMetrics>;
+  field: QuarterMetric;
+  unit: "pp" | "vnd";
+}) {
+  // Index arithmetic, not Array.prototype.at - the project's TS lib target predates it.
+  const latest = rows[rows.length - 1];
+  const prior = rows[rows.length - 2];
+  const now = latest?.[field];
+  const before = prior?.[field];
+  if (typeof now !== "number" || typeof before !== "number") return null;
+
+  const delta = unit === "pp" ? (now - before) * 100 : now - before;
+  const floor = unit === "pp" ? 0.05 : 0.5;
+  if (!Number.isFinite(delta) || Math.abs(delta) < floor) return null;
+
+  const up = delta > 0;
+  const magnitude = unit === "pp"
+    ? `${Math.abs(delta).toFixed(1)}pp`
+    : Math.round(Math.abs(delta)).toLocaleString("en-US");
+  return (
+    <span
+      className="tnum"
+      title={`vs ${prior?.period ?? "previous quarter"}`}
+      style={{ marginLeft: 5, fontSize: 9, color: up ? "var(--up)" : "var(--down)" }}
+    >
+      {up ? "\u25B2" : "\u25BC"}{magnitude}
+    </span>
+  );
+}
+
 function corpEventDesc(ev: CorporateActionItem): string {
   if (ev.action_type === "CASH_DIVIDEND" && typeof ev.cash_amount_vnd === "number") {
     return `${Math.round(ev.cash_amount_vnd).toLocaleString("en-US")} VND/sh`;
   }
   if (ev.ratio_text) return ev.ratio_text;
   if (typeof ev.ratio_pct === "number") return `${ev.ratio_pct}%`;
-  // the raw `note` is Vietnamese — not shown as a primary UI label (LANGUAGE_POLICY.md)
+  // The raw `note` is Vietnamese and still never rendered (LANGUAGE_POLICY.md). The
+  // backend now derives a canonical English line from the templated shapes - a listing's
+  // share count, a statement's period, a dividend's rate - and returns null for anything
+  // out of pattern rather than glossing it. Without this the column was a dash on every
+  // row: 0 of 12 FPT events carried `cash_amount_vnd` or `ratio_text`.
+  if (ev.note_en) return ev.note_en;
   return DASH;
 }
 
@@ -648,7 +705,7 @@ export function InstrumentPanel({
             </>
           ) : (
             <>
-              <div className="mono" style={{ width: 220, flexShrink: 0 }}>
+              <div className="mono" style={{ width: 248, flexShrink: 0 }}>
                 <h3 className="instrument-section-heading">FINANCIAL INDICATORS</h3>
                 {isIndex ? (
                   <div style={{ fontSize: 11, color: "var(--t-42)", padding: "8px 0" }}>
@@ -660,7 +717,7 @@ export function InstrumentPanel({
                       label="EPS"
                       color="var(--t-85)"
                       compact
-                      value={fundamentals.data?.eps == null ? DASH : `${Math.round(fundamentals.data.eps).toLocaleString("en-US")} VND`}
+                      value={fundamentals.data?.eps == null ? DASH : (<>{`${Math.round(fundamentals.data.eps).toLocaleString("en-US")} VND`}<QoQ rows={fundamentals.quarters} field="eps" unit="vnd" /></>)}
                       title={fundamentalHint("eps")}
                     />
                     <MetricRow
@@ -677,10 +734,10 @@ export function InstrumentPanel({
                       value={fundamentals.data?.pb == null ? DASH : fundamentals.data.pb.toFixed(2)}
                       title={valuationHint}
                     />
-                    <MetricRow label="ROE" color="var(--t-85)" compact value={fmtPercent(fundamentals.data?.roe)} title={fundamentalHint("roe")} />
-                    <MetricRow label="ROA" color="var(--t-85)" compact value={fmtPercent(fundamentals.data?.roa)} title={fundamentalHint("roa")} />
-                    <MetricRow label="ROIC" color="var(--t-85)" compact value={fmtPercent(fundamentals.data?.roic)} title={fundamentalHint("roic")} />
-                    <MetricRow label="GROSS MARGIN" color="var(--t-85)" compact value={fmtPercent(fundamentals.data?.gross_margin)} title={fundamentalHint("gross_margin")} />
+                    <MetricRow label="ROE" color="var(--t-85)" compact value={<>{fmtPercent(fundamentals.data?.roe)}<QoQ rows={fundamentals.quarters} field="roe" unit="pp" /></>} title={fundamentalHint("roe")} />
+                    <MetricRow label="ROA" color="var(--t-85)" compact value={<>{fmtPercent(fundamentals.data?.roa)}<QoQ rows={fundamentals.quarters} field="roa" unit="pp" /></>} title={fundamentalHint("roa")} />
+                    <MetricRow label="ROIC" color="var(--t-85)" compact value={<>{fmtPercent(fundamentals.data?.roic)}<QoQ rows={fundamentals.quarters} field="roic" unit="pp" /></>} title={fundamentalHint("roic")} />
+                    <MetricRow label="GROSS MARGIN" color="var(--t-85)" compact value={<>{fmtPercent(fundamentals.data?.gross_margin)}<QoQ rows={fundamentals.quarters} field="gross_margin" unit="pp" /></>} title={fundamentalHint("gross_margin")} />
                     <MetricRow
                       label="NET MARGIN"
                       color="var(--t-85)"
@@ -688,7 +745,7 @@ export function InstrumentPanel({
                       value={
                         fundamentals.data?.net_margin == null
                           ? DASH
-                          : `${(fundamentals.data.net_margin * 100).toFixed(1)}%`
+                          : (<>{`${(fundamentals.data.net_margin * 100).toFixed(1)}%`}<QoQ rows={fundamentals.quarters} field="net_margin" unit="pp" /></>)
                       }
                       title={fundamentalHint("net_margin")}
                     />
@@ -714,8 +771,12 @@ export function InstrumentPanel({
                       <thead>
                         <tr>
                           <th scope="col">EVENT TYPE</th>
-                          <th scope="col">EX-DIV</th>
-                          <th scope="col">ISSUE</th>
+                          {/* DISCLOSED leads because it is what the list is ordered by.
+                              EX-DATE was labelled EX-DIV, which is only true for a
+                              dividend - a listing or a statement has no ex-dividend date,
+                              and those are most of the rows. */}
+                          <th scope="col">DISCLOSED</th>
+                          <th scope="col">EX-DATE</th>
                           <th scope="col">DESC</th>
                         </tr>
                       </thead>
@@ -740,8 +801,8 @@ export function InstrumentPanel({
                           corpActions.items.map((ev) => (
                             <tr key={ev.id}>
                               <td style={{ color: "var(--t-80)" }}>{ev.event_label || corpEventLabel(ev.action_type)}</td>
-                              <td style={{ color: "var(--t-55)" }}>{isoDay(ev.ex_date)}</td>
-                              <td style={{ color: "var(--t-50)" }}>{isoDay(ev.record_date ?? ev.disclosure_date)}</td>
+                              <td style={{ color: "var(--t-55)" }}>{isoDay(ev.public_date ?? ev.disclosure_date)}</td>
+                              <td style={{ color: "var(--t-50)" }}>{isoDay(ev.ex_date)}</td>
                               <td style={{ color: "var(--t-60)" }}>{corpEventDesc(ev)}</td>
                             </tr>
                           ))

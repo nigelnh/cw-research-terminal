@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from app.enrichment import repository as repo
 from app.enrichment.english import (
+    note_en,
     category_en,
     event_class_label_en,
     event_label_en,
@@ -77,7 +78,10 @@ class CorporateActionItem(BaseModel):
     ratio_text: str | None
     value_text: str | None = None
     dividend_year: int | None
-    note: str | None
+    note: str | None            # original Vietnamese, provenance only
+    #: Canonical English for `note`, or None when it is out of pattern - see
+    #: english.note_en. The UI shows a dash for None rather than a machine gloss.
+    note_en: str | None = None
     source: str
 
 
@@ -215,6 +219,7 @@ def _event_item(r) -> CorporateActionItem:
         value_text=r.value_text,
         dividend_year=r.dividend_year,
         note=r.note,
+        note_en=note_en(r.note),
         source=r.source,
     )
 
