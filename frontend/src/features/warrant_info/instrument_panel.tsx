@@ -202,8 +202,16 @@ const TAPE_PAGE = 300;
  * with server-observed time; confirmed provider history may extend the window backward.
  * The B/S column is derived from the latest book when the provider does not publish it.
  */
-function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
-  const { items, isLoading, isError, coverage, truncated, sessionDate } = useTradedLog(symbol, live);
+function TimeSalesPanel({
+  symbol,
+  live,
+  quote,
+}: {
+  symbol: string;
+  live: boolean;
+  quote?: MarketQuote | null;
+}) {
+  const { items, isLoading, isError, truncated } = useTradedLog(symbol, live);
   const [visible, setVisible] = useState(TAPE_PAGE);
   // A different instrument is a different tape; start it at the top again.
   useEffect(() => setVisible(TAPE_PAGE), [symbol]);
@@ -217,6 +225,12 @@ function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
   };
 
   const cellStyle: React.CSSProperties = { textAlign: "right", fontVariantNumeric: "tabular-nums" };
+  const auctionPhase = quote?.providerMarketStatus === "ATO" || quote?.providerMarketStatus === "ATC"
+    ? quote.providerMarketStatus
+    : null;
+  const indicative = Boolean(
+    live && quote?.auctionIndicative && auctionPhase && quote.lastPrice != null,
+  );
   const note = isError
     ? "Traded logs unavailable."
     : isLoading
@@ -228,7 +242,11 @@ function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
   return (
     <div className="mono instrument-data-panel">
       <h3 className="instrument-section-heading">TRADED LOGS</h3>
-      <div className="muted" style={{ fontSize: 10 }}>{coverage} · {sessionDate ?? "Session unavailable"}{truncated ? " · Earlier prints omitted" : ""}</div>
+      {truncated && (
+        <div className="muted" style={{ fontSize: 10, padding: "0 10px 5px" }}>
+          Earlier prints omitted
+        </div>
+      )}
       <div
         style={{
           display: "grid",
@@ -246,16 +264,37 @@ function TimeSalesPanel({ symbol, live }: { symbol: string; live: boolean }) {
         <span style={TS_HEAD}>+/-</span>
         <span style={TS_HEAD}>%CHG</span>
         <span style={TS_HEAD}>VOL</span>
-        <span style={{ textAlign: "right" }} title="Aggressor side, derived from the order book. The exchange publishes no per-match buy/sell flag, so a print inside the spread is left blank.">
+        <span style={{ textAlign: "right" }} title="Aggressor side, derived from the order book. The exchange publishes no per-match buy/sell flag, so a print inside the spread is left blank. IND denotes an ATO/ATC indicative projection, not a trade.">
           B/S
         </span>
       </div>
-      {items.length === 0 ? (
+      {items.length === 0 && !indicative ? (
         <div style={{ fontSize: 10.5, color: "var(--t-75)", padding: "8px 10px", lineHeight: 1.5 }}>
           {note}
         </div>
       ) : (
         <div className="instrument-tape" onScroll={onScroll}>
+          {indicative && (
+            <div
+              className="instrument-tape-row instrument-tape-indicative"
+              title={`${auctionPhase} indicative match projection; not an executed trade`}
+            >
+              <span style={{ borderRight: "1px solid var(--border-row)", paddingRight: 4, color: "var(--ref)" }}>
+                {auctionPhase}
+              </span>
+              <span style={{ ...cellStyle, color: quote!.priceChange == null || quote!.priceChange === 0 ? "var(--flat)" : quote!.priceChange > 0 ? "var(--up)" : "var(--down)" }}>
+                {fmtPrice(quote!.lastPrice)}
+              </span>
+              <span style={{ ...cellStyle, color: quote!.priceChange == null || quote!.priceChange === 0 ? "var(--flat)" : quote!.priceChange > 0 ? "var(--up)" : "var(--down)" }}>
+                {quote!.priceChange == null ? DASH : fmtPrice(Math.abs(quote!.priceChange))}
+              </span>
+              <span style={{ ...cellStyle, color: quote!.priceChange == null || quote!.priceChange === 0 ? "var(--flat)" : quote!.priceChange > 0 ? "var(--up)" : "var(--down)" }}>
+                {quote!.priceChangePercent == null ? DASH : `${Math.abs(quote!.priceChangePercent * 100).toFixed(2)}%`}
+              </span>
+              <span style={{ ...cellStyle, color: "var(--t-92)" }}>{fmtVol(quote!.tradedQuantity)}</span>
+              <span style={{ textAlign: "right", color: "var(--ref)" }}>IND</span>
+            </div>
+          )}
           {shown.map((row) => {
             const tone =
               row.change == null || row.change === 0
@@ -577,7 +616,7 @@ export function InstrumentPanel({
                 />
               )}
             </div>
-            {!isIndex && <TimeSalesPanel symbol={instrument.symbol} live={marketSessionActive} />}
+            {!isIndex && <TimeSalesPanel symbol={instrument.symbol} live={marketSessionActive} quote={q} />}
           </div>
         </div>
       )}

@@ -715,6 +715,10 @@ select:focus-visible,
   border-bottom: 1px solid var(--border-19);
 }
 .instrument-tape-row:last-child { border-bottom: 0; }
+.instrument-tape-indicative {
+  background: color-mix(in srgb, var(--ref) 7%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--ref) 28%, transparent);
+}
 
 /* Quarterly revenue & profit (QUANT tab). */
 .quarterly-results { flex: 1; min-width: 0; height: 100%; border: 1px solid var(--border); display: flex; flex-direction: column; }

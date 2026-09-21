@@ -75,6 +75,27 @@ describe("incremental realtime feedback", () => {
     expect(after.realtimePulses?.priceChangePercent?.direction).toBe("up");
   });
 
+  it("preserves the explicit auction-indicative marker across snapshots and patches", () => {
+    const before = mapRawSnapshotToQuote(snapshot({
+      _auction_indicative: true,
+      _provider_market_status: "ATO",
+      _ts_auction: 1_780_000_001_000,
+      _received_auction: 1_780_000_001_100,
+    }));
+    expect(before.auctionIndicative).toBe(true);
+    expect(before.auctionTimestamp).toBe(1_780_000_001_000);
+
+    const after = applyRawPatchToQuote(before, "HPG", {
+      _auction_indicative: false,
+      _provider_market_status: "CONTINUOUS_AM",
+      _ts_auction: null,
+      _received_auction: null,
+    });
+    expect(after.auctionIndicative).toBe(false);
+    expect(after.auctionTimestamp).toBeNull();
+    expect(after.auctionReceivedTimestamp).toBeNull();
+  });
+
   it("renders a change-only patch without waiting for another trade-price patch", () => {
     const before = mapRawSnapshotToQuote(snapshot());
     const after = applyRawPatchToQuote(before, "HPG", { change: 0.2 });
