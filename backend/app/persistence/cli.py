@@ -21,7 +21,7 @@ import asyncio
 import json
 import logging
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from app.core.config import settings
 
