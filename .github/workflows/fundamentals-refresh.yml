@@ -77,7 +77,6 @@ jobs:
           ACCEPT_TC: "tôi đồng ý"
           SYMBOLS: ${{ github.event.inputs.symbols }}
         run: |
-          python -m app.persistence.cli fundamentals \
+          python -m app.persistence.cli --json fundamentals \
             --symbols "${SYMBOLS:-$DEFAULT_SYMBOLS}" \
-            --api-url "$INGEST_URL" \
-            --json
+            --api-url "$INGEST_URL"
