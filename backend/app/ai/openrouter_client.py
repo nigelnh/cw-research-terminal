@@ -241,15 +241,27 @@ class OpenRouterClient(AiProvider):
                                 break
                             try:
                                 parsed = json.loads(raw_data)
-                                choice = parsed.get("choices", [{}])[0]
-                                # Kept from every frame: only the final one carries it.
-                                finish_reason = choice.get("finish_reason") or finish_reason
-                                delta = choice.get("delta", {})
-                                token = delta.get("content")
-                                if token:
-                                    yield token
                             except json.JSONDecodeError:
                                 continue
+                            # OpenRouter closes a stream with a usage/accounting frame
+                            # carrying `"choices": []`, and routes provider keep-alives
+                            # the same way. `.get("choices", [{}])` only substitutes when
+                            # the KEY is absent, so an empty list indexed straight into
+                            # IndexError - which nothing here caught, tearing down a
+                            # stream that had already delivered tokens to the browser.
+                            # A frame we cannot read is skipped; only the transport ends
+                            # the stream. `or {}` (not a get-default) for the same
+                            # reason: these fields arrive as an explicit null.
+                            choices = parsed.get("choices") or []
+                            if not choices:
+                                continue
+                            choice = choices[0] or {}
+                            # Kept from every frame: only the final one carries it.
+                            finish_reason = choice.get("finish_reason") or finish_reason
+                            delta = choice.get("delta") or {}
+                            token = delta.get("content")
+                            if token:
+                                yield token
 
                     # `length` means the model hit max_tokens and stopped mid-sentence.
                     # Without this the half-answer renders as though it were complete.
