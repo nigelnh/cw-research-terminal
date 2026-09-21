@@ -156,8 +156,6 @@ export function TradingChart({
       symbol: displaySym,
       interval,
       timestamp: latestBar.date,
-      source: latestBar.source, sessionDate: latestBar.sessionDate,
-      priceBasis: latestBar.priceBasis, asOf: latestBar.asOf, complete: latestBar.complete,
       open: latestBar.open,
       high: latestBar.high,
       low: latestBar.low,
@@ -398,8 +396,6 @@ export function TradingChart({
           symbol: mode === "UNDERLYING" ? underlyingSymbol || symbol : symbol,
           interval,
           timestamp: hovered?.date ?? String(param.time),
-          source: hovered?.source, sessionDate: hovered?.sessionDate,
-          priceBasis: hovered?.priceBasis, asOf: hovered?.asOf, complete: hovered?.complete,
           open: data.open,
           high: data.high,
           low: data.low,
@@ -478,7 +474,6 @@ export function TradingChart({
             </span>
           </div>
 
-          {activeReadout && <span style={{ fontSize: 9, color: "var(--t-75)" }} title={activeReadout.asOf ?? "Observation time unavailable"}>{activeReadout.sessionDate ?? activeReadout.timestamp} · {activeReadout.priceBasis ?? "Basis unavailable"} · {activeReadout.source ?? "Source unavailable"}{activeReadout.complete === false ? " · PARTIAL" : ""}</span>}
           {activeReadout && activeReadout.open !== null && (
             <div
               style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--muted-foreground)", fontSize: "10.5px" }}
