@@ -31,12 +31,13 @@ const EXPIRED = {
   lastDataAt: "2026-09-07T14:45:00+07:00",
 };
 
-function header() {
+function header(marketSessionActive = false) {
   return render(
     <AppHeader
       activeTab="dashboard" onTabChange={vi.fn()}
       filter="" onFilterChange={vi.fn()}
-      marketSessionActive={false} marketPhase="CONTINUOUS_AM"
+      marketSessionActive={marketSessionActive}
+      marketPhase={marketSessionActive ? "CONTINUOUS_AM" : "PRE_OPEN"}
     />,
   );
 }
@@ -78,6 +79,26 @@ describe("header feed notice", () => {
     feed.current = { code: "SESSION_PAUSED", scope: "market_data", message: "Matching is paused." };
     header();
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("does not present pre-open transport gaps as a terminal-wide outage", () => {
+    feed.current = {
+      code: "UPSTREAM_UNAVAILABLE",
+      scope: "overview_index_vn30_1m",
+      message: "The market data provider is temporarily unavailable.",
+    };
+    header(false);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("still reports a transport outage while matching is active", () => {
+    feed.current = {
+      code: "UPSTREAM_UNAVAILABLE",
+      scope: "market_data",
+      message: "The market data provider is temporarily unavailable.",
+    };
+    header(true);
+    expect(screen.getByRole("status").textContent).toContain("temporarily unavailable");
   });
 
   it("renders nothing at all before any status has arrived", () => {

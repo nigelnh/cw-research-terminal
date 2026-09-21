@@ -30,9 +30,22 @@ interface AppHeaderProps {
   onJump?: (option: GlobalSearchOption) => void;
 }
 
-function FeedNotice() {
+const INACTIVE_SESSION_NOTICE_CODES = new Set([
+  "AWAITING_DATA",
+  "RATE_LIMITED",
+  "STALE",
+  "UPSTREAM_UNAVAILABLE",
+]);
+
+function FeedNotice({ marketSessionActive }: { marketSessionActive: boolean }) {
   const { feedStatus } = useMarketContext();
   if (!feedStatus || ["AVAILABLE", "SESSION_PAUSED"].includes(feedStatus.code)) return null;
+  // Before ATO there is no current-session tape or intraday index series yet. Optional
+  // overview fetches may therefore report a transient transport/freshness condition even
+  // though the board is correctly waiting for matching to start. PRE-OPEN/CLOSED already
+  // communicates that state; keep access/authentication failures visible, but do not make
+  // an expected empty session look like a terminal-wide outage.
+  if (!marketSessionActive && INACTIVE_SESSION_NOTICE_CODES.has(feedStatus.code)) return null;
   // Truncates rather than pushing the group wider. The end column is a 1fr track with
   // nowrap, so an unshrinkable child overflows LEFTWARDS and slides under the centred
   // search box - which paints on top of it, hiding the clock entirely.
@@ -344,7 +357,7 @@ export function AppHeader({
           <span style={{ width: 6, height: 6, background: feedTone }} aria-hidden />
           {feedLabel}
         </span>}
-        <FeedNotice />
+        <FeedNotice marketSessionActive={marketSessionActive} />
         <SignInControl />
       </div>
     </header>
