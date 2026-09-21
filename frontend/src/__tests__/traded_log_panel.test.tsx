@@ -35,11 +35,16 @@ const cw = {
   metadataVerification: "VERIFIED_CURRENT" as const,
 };
 
-function panel(live: boolean) {
+function panel(live: boolean, quote?: Record<string, unknown>) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <InstrumentPanel instrument={cw as never} marketSessionActive={live} onClose={() => {}} />
+      <InstrumentPanel
+        instrument={cw as never}
+        dashRow={quote ? ({ symbol: cw.symbol, quote, analytics: null } as never) : undefined}
+        marketSessionActive={live}
+        onClose={() => {}}
+      />
     </QueryClientProvider>,
   );
 }
@@ -73,9 +78,42 @@ describe("TRADED LOGS", () => {
     expect(text).not.toContain("+7.21%");
     expect(text).toContain("12,000");
     expect(text).toContain("B");
-    // The session date chip was removed from the heading: the tape's own rows carry the
-    // time, and the panel already states which instrument and session it is showing.
-    expect(text).toContain("2026-09-07");
+    expect(text).not.toContain("Observed window");
+    expect(text).not.toContain("2026-09-07");
+  });
+
+  it("shows an ATO projection as indicative without pretending it is an execution", () => {
+    const quote = {
+      symbol: cw.symbol,
+      lastPrice: 510,
+      tradedQuantity: 2_600,
+      priceChange: 10,
+      priceChangePercent: 0.02,
+      providerMarketStatus: "ATO",
+      auctionIndicative: true,
+    };
+    const view = panel(true, quote);
+    const row = view.container.querySelector(".instrument-tape-indicative") as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.textContent).toContain("ATO");
+    expect(row.textContent).toContain("510");
+    expect(row.textContent).toContain("2,600");
+    expect(row.textContent).toContain("IND");
+    expect(row.title).toMatch(/not an executed trade/i);
+    expect(view.container.textContent).not.toContain("No matches yet this session.");
+  });
+
+  it("does not render a non-indicative board value as a tape row", () => {
+    const quote = {
+      symbol: cw.symbol,
+      lastPrice: 510,
+      tradedQuantity: 2_600,
+      providerMarketStatus: "ATO",
+      auctionIndicative: false,
+    };
+    const view = panel(true, quote);
+    expect(view.container.querySelector(".instrument-tape-indicative")).toBeNull();
+    expect(view.container.textContent).toContain("No matches yet this session.");
   });
 
   it("keeps showing the tape after the close, not an 'unavailable' message", () => {

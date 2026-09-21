@@ -114,6 +114,15 @@ export function applyRawPatchToQuote(
   if (patch._market_session_date !== undefined) q.marketSessionDate = patch._market_session_date;
   if (patch._reference_session_date !== undefined) q.referenceSessionDate = patch._reference_session_date;
   if (patch._provider_market_status !== undefined) q.providerMarketStatus = patch._provider_market_status;
+  if (patch._auction_indicative !== undefined) q.auctionIndicative = patch._auction_indicative === true;
+  if (patch._ts_auction !== undefined) {
+    q.auctionTimestamp = patch._ts_auction == null ? null : Number(patch._ts_auction);
+  }
+  if (patch._received_auction !== undefined) {
+    q.auctionReceivedTimestamp = patch._received_auction == null
+      ? null
+      : Number(patch._received_auction);
+  }
 
   const touched: string[] = [];
   const fieldByWireKey: Record<string, string> = {

@@ -75,6 +75,10 @@ export interface MarketQuote {
   marketSessionDate?: string | null;
   referenceSessionDate?: string | null;
   providerMarketStatus?: string | null;
+  /** True only while Traded/Traded_Qty represent an ATO/ATC indicative match. */
+  auctionIndicative?: boolean;
+  auctionTimestamp?: number | null;
+  auctionReceivedTimestamp?: number | null;
   receivedTimestamp: number;
 
   realtimePulses?: RealtimePulseMap;

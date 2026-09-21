@@ -118,6 +118,9 @@ export function mapRawSnapshotToQuote(raw: any): MarketQuote {
     marketSessionDate: raw._market_session_date ?? null,
     referenceSessionDate: raw._reference_session_date ?? null,
     providerMarketStatus: raw._provider_market_status ?? null,
+    auctionIndicative: raw._auction_indicative === true,
+    auctionTimestamp: raw._ts_auction ? Number(raw._ts_auction) : null,
+    auctionReceivedTimestamp: raw._received_auction ? Number(raw._received_auction) : null,
     receivedTimestamp: Date.now(),
   };
 }
