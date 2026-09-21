@@ -545,3 +545,77 @@ async def test_stream_adds_no_marker_on_a_complete_answer():
 
     assert out == "Delta is a hedge ratio."
     assert "cut off" not in out
+
+
+# --------------------------------------------------------------------------- #
+# Production 2026-09-21 03:16 UTC: OpenRouter answered 200 OK, then the stream
+# died with `IndexError: list index out of range` at openrouter_client.py:244
+# and the panel showed "An unexpected error occurred while generating the AI
+# response." The killer frame is the usage/accounting one OpenRouter closes a
+# stream with - it carries `"choices": []`. `.get("choices", [{}])` only
+# substitutes when the KEY is missing, so the empty list went into `[0]`.
+# Nothing in the loop caught IndexError, so one unreadable frame tore down a
+# stream that had already delivered tokens. Whether such a frame arrives depends
+# on which upstream provider OpenRouter routed the request to, which is why the
+# same question failed only sometimes.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_stream_survives_the_usage_frame_that_carries_no_choices():
+    from app.ai.openrouter_client import OpenRouterClient
+
+    client_ = OpenRouterClient(api_key="k", model="m")
+    lines = [
+        _sse("The VN market "),
+        "data: " + json.dumps({"choices": [], "usage": {"total_tokens": 42}}),
+        _sse("opens at 09:00."),
+        "data: [DONE]",
+    ]
+    with patch("httpx.AsyncClient.stream", return_value=_FakeStream(lines)):
+        out = "".join([tok async for tok in client_.stream_chat([{"role": "user", "content": "hi"}])])
+
+    assert out == "The VN market opens at 09:00.", "an empty-choices frame must be skipped, not fatal"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "frame",
+    [
+        {"choices": []},                       # usage / accounting frame
+        {"choices": [None]},                   # routing keep-alive
+        {"choices": [{"delta": None}]},        # explicit null delta
+        {"choices": [{}]},                     # no delta at all
+        {"usage": {"total_tokens": 1}},        # no choices key whatsoever
+    ],
+    ids=["empty-list", "null-choice", "null-delta", "no-delta", "no-choices-key"],
+)
+async def test_no_unreadable_frame_shape_can_kill_the_stream(frame):
+    """Every one of these is a real shape an OpenAI-compatible relay emits. A frame the
+    parser cannot read is skipped - only the transport is allowed to end the stream."""
+    from app.ai.openrouter_client import OpenRouterClient
+
+    client_ = OpenRouterClient(api_key="k", model="m")
+    lines = [_sse("before "), "data: " + json.dumps(frame), _sse("after"), "data: [DONE]"]
+    with patch("httpx.AsyncClient.stream", return_value=_FakeStream(lines)):
+        out = "".join([tok async for tok in client_.stream_chat([{"role": "user", "content": "hi"}])])
+
+    assert out == "before after"
+
+
+@pytest.mark.asyncio
+async def test_a_trailing_usage_frame_does_not_discard_the_truncation_marker():
+    """The cap marker is driven by `finish_reason` held across frames. A usage frame
+    arriving after it must not erase what an earlier frame established."""
+    from app.ai.openrouter_client import OpenRouterClient
+
+    client_ = OpenRouterClient(api_key="k", model="m")
+    lines = [
+        _sse("Delta measures"),
+        _sse(finish="length"),
+        "data: " + json.dumps({"choices": [], "usage": {"total_tokens": 99}}),
+        "data: [DONE]",
+    ]
+    with patch("httpx.AsyncClient.stream", return_value=_FakeStream(lines)):
+        out = "".join([tok async for tok in client_.stream_chat([{"role": "user", "content": "hi"}])])
+
+    assert out.startswith("Delta measures")
+    assert "cut off at the response limit" in out
