@@ -22,6 +22,7 @@ let state: { sessionContext: SessionContext | null; feedStatus: FeedStatus | nul
   sessionContext: null, feedStatus: null,
 };
 let receivedAt = 0;
+let clockBaseMs = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach(fn => fn());
@@ -29,19 +30,26 @@ const elapsedNow = () => typeof performance === "undefined" ? Date.now() : perfo
 
 export function marketNow(): number {
   return state.sessionContext
-    ? Date.parse(state.sessionContext.serverTime) + elapsedNow() - receivedAt : Date.now();
+    ? clockBaseMs + elapsedNow() - receivedAt : Date.now();
 }
 
 export function acceptMarketContext(payload: { sessionContext?: SessionContext; feedStatus?: FeedStatus | null }): void {
   const next = payload.sessionContext;
   const previous = state.sessionContext;
-  if (!next || !Number.isFinite(Date.parse(next.serverTime)) ||
-      (previous && (next.displaySessionDate < previous.displaySessionDate || Date.parse(next.serverTime) < Date.parse(previous.serverTime)))) return;
+  const nextServerMs = next ? Date.parse(next.serverTime) : Number.NaN;
+  if (!next || !Number.isFinite(nextServerMs) ||
+      (previous && (next.displaySessionDate < previous.displaySessionDate || nextServerMs < Date.parse(previous.serverTime)))) return;
+  // A REST response or status frame can be newer than the previous payload while still
+  // being older than the extrapolated clock at the instant it arrives. Resetting the
+  // anchor to that payload made the header freeze or move backwards under load. Preserve
+  // the authoritative context fields, but never move the running server clock backwards.
+  const currentClock = previous ? marketNow() : nextServerMs;
+  clockBaseMs = Math.max(nextServerMs, currentClock);
   receivedAt = elapsedNow();
   state = { sessionContext: next, feedStatus: payload.feedStatus ?? state.feedStatus };
   if (timer) clearTimeout(timer);
   if (previous && previous.displaySessionDate !== next.displaySessionDate) void appQueryClient.invalidateQueries();
-  const delay = next.nextRolloverAt ? Date.parse(next.nextRolloverAt) - Date.parse(next.serverTime) : 0;
+  const delay = next.nextRolloverAt ? Date.parse(next.nextRolloverAt) - clockBaseMs : 0;
   if (delay > 0) timer = setTimeout(() => {
     // The server already supplied this trading-day boundary. No browser holiday logic.
     const boundary = next.nextRolloverAt!;

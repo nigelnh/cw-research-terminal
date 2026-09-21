@@ -100,6 +100,25 @@ describe("marketSessionStore", () => {
     expect(drift).toBeLessThan(5_000);
   });
 
+  it("does not move the running clock backwards when a delayed response arrives", () => {
+    let elapsed = 1_000;
+    const now = vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+    acceptMarketContext({ sessionContext: ctx() });
+    elapsed += 2_000;
+    const before = marketNow();
+
+    // The payload itself advanced by one second, but it spent more than one second in
+    // flight. Its session fields are valid; its timestamp must not reset the live clock.
+    acceptMarketContext({ sessionContext: ctx({
+      serverTime: "2026-09-08T09:04:01+07:00",
+      marketPhase: "MORNING_SESSION",
+    }) });
+
+    expect(marketNow()).toBeGreaterThanOrEqual(before);
+    expect(marketSessionStore.getSnapshot().sessionContext?.marketPhase).toBe("MORNING_SESSION");
+    now.mockRestore();
+  });
+
   it("notifies subscribers so panels re-read", () => {
     const seen = vi.fn();
     const off = marketSessionStore.subscribe(seen);
