@@ -16,6 +16,7 @@ SignalR stream.
 from __future__ import annotations
 
 import argparse
+import os
 import asyncio
 import json
 import logging
@@ -96,6 +97,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     rr = sub.add_parser("recent-runs", help="recent ingestion_runs")
     rr.add_argument("--limit", type=int, default=15)
+
+    fd = sub.add_parser(
+        "fundamentals",
+        help="persist valuation + quarterly statements (run OFF the production box)",
+    )
+    fd.add_argument("--symbols", required=True, type=_split_symbols)
+    fd.add_argument(
+        "--api-url", default="",
+        help="POST to this ingest endpoint instead of writing the database directly "
+             "(needs FUNDAMENTALS_INGEST_TOKEN in the environment)",
+    )
+    fd.add_argument(
+        "--delay", type=float, default=1.5,
+        help="seconds between symbols; paced because hammering the source earns a block",
+    )
 
     return p
 
@@ -323,6 +339,123 @@ async def _cmd_recent_runs(args) -> int:
         await engine.dispose()
 
 
+
+async def _post_fundamentals(api_url: str, items: list[dict]) -> None:
+    """Hand the rows to the backend, which owns the database connection.
+
+    The token is read from the environment, never a CLI argument: an argument would land
+    in the process table and in CI step logs.
+    """
+    import httpx
+
+    token = os.environ.get("FUNDAMENTALS_INGEST_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError(
+            "FUNDAMENTALS_INGEST_TOKEN is not set; the ingest route rejects unauthenticated writes"
+        )
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            api_url, json={"items": items}, headers={"Authorization": f"Bearer {token}"}
+        )
+    if response.status_code != 200:
+        # Body, not the request - the request carries the bearer token.
+        raise RuntimeError(f"ingest rejected: HTTP {response.status_code} {response.text[:200]}")
+
+
+async def _cmd_fundamentals(args) -> int:
+    """Fetch valuation + quarterly statement lines and persist them.
+
+    Runs OFF the production box on purpose. Railway's egress (AS400940) is answered with
+    HTTP 403 on Vietcap's VCI GraphQL fundamentals query, while the identical library
+    version and query succeed from a university network (AS11231) and from a GitHub-hosted
+    runner (Azure, AS8075) - the rejection tracks the calling ASN and no code change here
+    can move Railway's egress. So the API reads `instrument_fundamentals` and this command,
+    scheduled on GitHub Actions, is the only thing that writes it.
+    """
+    from app.market_data.providers.provider_factory import create_market_provider
+
+    provider = create_market_provider()  # reads only; no live poller is started
+
+    # Two sinks. `--api-url` posts to the running backend, which is how the scheduled job
+    # works: Railway Postgres has no public TCP proxy and resolves only on
+    # `*.railway.internal`, so a GitHub runner cannot write to it even though it CAN reach
+    # Vietcap - which production cannot. Without the flag it writes the database directly,
+    # which is the local-development path.
+    engine = sm = None
+    if not args.api_url:
+        from app.persistence import database as db
+
+        engine = db.create_engine_from_url(_resolve_db_url(args))
+        sm = db.configure(engine)
+
+    symbols = sorted({s.strip().upper() for s in args.symbols if s and s.strip()})
+    written: list[str] = []
+    payload: list[dict] = []
+    empty: list[str] = []
+    failed: dict[str, str] = {}
+
+    try:
+        for index, sym in enumerate(symbols):
+            # Paced deliberately. Hammering this endpoint is the most plausible way an
+            # egress earns a block, and nothing here is time-critical: fundamentals change
+            # once a quarter.
+            if index:
+                await asyncio.sleep(args.delay)
+            observed = datetime.now(timezone.utc)
+            try:
+                valuation = (await provider.get_stock_valuation([sym])).get(sym, {}) or {}
+                quarters = await provider.get_financial_ratios(sym) or []
+            except Exception as exc:  # noqa: BLE001 - one bad symbol must not end the run
+                failed[sym] = f"{exc.__class__.__name__}: {exc}"
+                logging.getLogger(__name__).warning("fundamentals fetch failed for %s: %s", sym, exc)
+                continue
+            # A fetch that produced nothing is NOT an answer. Writing it would replace a
+            # good previous row with nulls - exactly the failure this table exists to end.
+            if not valuation and not quarters:
+                empty.append(sym)
+                continue
+            payload.append({
+                "symbol": sym,
+                "valuation": valuation,
+                "quarters": quarters,
+                "source": str(valuation.get("source") or "VNSTOCK_VCI"),
+                "observed_at": observed.isoformat(),
+            })
+            written.append(sym)
+
+        if payload:
+            if args.api_url:
+                await _post_fundamentals(args.api_url, payload)
+            else:
+                from app.persistence.repositories import fundamentals_repository as repo
+
+                async with sm() as session:
+                    for row in payload:
+                        await repo.upsert_fundamentals(
+                            session,
+                            symbol=row["symbol"],
+                            valuation=row["valuation"],
+                            quarters=row["quarters"],
+                            source=row["source"],
+                            observed_at=datetime.fromisoformat(row["observed_at"]),
+                        )
+                    await session.commit()
+    finally:
+        if engine is not None:
+            await engine.dispose()
+
+    _emit(args, {
+        "requested": len(symbols),
+        "written": written,
+        "empty": empty,
+        "failed": failed,
+    })
+    # An empty result is a provider/egress problem worth failing the scheduled run for,
+    # but only when NOTHING was written - a few illiquid symbols with no statements is
+    # normal and must not turn the job red.
+    return 0 if written else 1
+
+
 _HANDLERS = {
     "seed-instruments": _cmd_seed,
     "backfill": _cmd_backfill,
@@ -331,6 +464,7 @@ _HANDLERS = {
     "repair": _cmd_repair,
     "status": _cmd_status,
     "recent-runs": _cmd_recent_runs,
+    "fundamentals": _cmd_fundamentals,
 }
 
 

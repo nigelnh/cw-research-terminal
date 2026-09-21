@@ -1,5 +1,6 @@
+import re
 from typing import Optional, List, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timezone
 
 class CanonicalQuote(BaseModel):
@@ -488,3 +489,59 @@ class StockProfilesResponse(BaseModel):
 class ClientControlMessage(BaseModel):
     type: Literal["subscribe", "unsubscribe"]
     symbols: List[str]
+
+
+#: One symbol's fundamentals, handed over by the scheduled ingestion job. Production
+#: cannot fetch these itself - Railway's egress (AS400940) is answered 403 by Vietcap's
+#: VCI GraphQL query - and the job cannot reach the database either, because Railway
+#: Postgres has no public TCP proxy. So the rows arrive over HTTP and the backend writes
+#: them across the private network.
+class FundamentalsIngestItem(BaseModel):
+    symbol: str = Field(min_length=2, max_length=12)
+    #: The provider's payloads, stored as returned - they carry the per-field provenance
+    #: (`ratio_source`, `statement_source`, `period`) the read endpoint must report.
+    valuation: Dict[str, Any] = Field(default_factory=dict)
+    quarters: List[Dict[str, Any]] = Field(default_factory=list)
+    source: str = Field(default="VNSTOCK_VCI", max_length=32)
+    #: When the job actually reached the provider. Not the write time - a stale table has
+    #: to stay visible as stale.
+    observed_at: Optional[datetime] = None
+
+    @field_validator("symbol")
+    @classmethod
+    def _upper_and_shaped(cls, value: str) -> str:
+        sym = value.strip().upper()
+        if not re.fullmatch(r"[A-Z][A-Z0-9]{1,11}", sym):
+            raise ValueError(f"invalid symbol: {value!r}")
+        return sym
+
+    @field_validator("quarters")
+    @classmethod
+    def _bounded(cls, value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if len(value) > 60:  # 15 years of quarters is already far past any use here
+            raise ValueError("too many quarters")
+        return value
+
+
+class FundamentalsIngestRequest(BaseModel):
+    #: Bounded: the whole point is ~20 CW underlyings on a daily schedule, not a bulk load.
+    items: List[FundamentalsIngestItem] = Field(min_length=1, max_length=200)
+
+    @field_validator("items")
+    @classmethod
+    def _no_empty_answers(cls, items: List[FundamentalsIngestItem]) -> List[FundamentalsIngestItem]:
+        """An item carrying neither valuation nor quarters is not an answer.
+
+        Accepting it would let one failed upstream fetch overwrite a good stored row with
+        nulls - which is precisely the production failure this pipeline exists to end. The
+        job already drops these; rejecting here means a future caller cannot reintroduce it.
+        """
+        empty = [i.symbol for i in items if not i.valuation and not i.quarters]
+        if empty:
+            raise ValueError(f"items carry no fundamentals: {', '.join(sorted(empty))}")
+        return items
+
+
+class FundamentalsIngestResponse(BaseModel):
+    written: List[str]
+    count: int
