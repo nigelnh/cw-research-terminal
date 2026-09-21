@@ -6,6 +6,24 @@ import { useChartTheme, token } from "@/components/common/chart_card";
 /** Billion VND. Statements arrive in plain VND, which is unreadable on an axis. */
 const BILLION = 1_000_000_000;
 
+/**
+ * Shared by both series, and wide enough that a four-quarter panel is not mostly air.
+ *
+ * chart.js leaves `hoverBackgroundColor` undefined, which resolves to its global
+ * `backgroundColor` default of rgba(0,0,0,0.1) - on this dark ground a hovered bar
+ * turned black and looked like it had failed to render. Every dataset below therefore
+ * states its own hover colour explicitly.
+ */
+const BAR_THICKNESS = 34;
+
+/**
+ * Both series are one reading of the same quarter, so they share a category and sit
+ * tight inside it. chart.js' defaults (0.8 / 0.9) leave a category mostly empty at
+ * this bar count, which is what made four quarters read as a half-built chart in a
+ * wide panel. These are DATASET options in v4, not chart options.
+ */
+const GROUPING = { categoryPercentage: 0.78, barPercentage: 0.92 } as const;
+
 export interface QuarterRow {
   period: string;
   revenue: number | null;
@@ -84,12 +102,17 @@ export function QuarterlyResultsChart({
         labels: plottableRows.map(r => r.period),
         datasets: [
           {
+            // Equal thickness. The two series are peers on their own axes; the old
+            // 26/14 split read as one of them being half-rendered rather than as a
+            // deliberate hierarchy.
             label: "Revenue", data: plottableRows.map(r => r.revenue),
-            backgroundColor: revenue, borderWidth: 0, yAxisID: "y", maxBarThickness: 26,
+            backgroundColor: revenue, hoverBackgroundColor: revenue,
+            borderWidth: 0, yAxisID: "y", maxBarThickness: BAR_THICKNESS, ...GROUPING,
           },
           {
             label: "Net profit", data: plottableRows.map(r => r.net_profit),
-            backgroundColor: profit, borderWidth: 0, yAxisID: "y1", maxBarThickness: 14,
+            backgroundColor: profit, hoverBackgroundColor: profit,
+            borderWidth: 0, yAxisID: "y1", maxBarThickness: BAR_THICKNESS, ...GROUPING,
           },
         ],
       },

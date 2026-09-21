@@ -144,6 +144,7 @@ function SkewCard({
         label: u,
         data: mine.map(p => ({ x: p.moneyness, y: (p.ivMid as number) * 100, sym: p.symbol })),
         backgroundColor: color,
+        pointHoverBackgroundColor: color,
         borderColor: theme.panel,
         pointRadius: mine.map(p => (p.symbol === selectedSymbol ? 6 : 3.5)),
         pointHoverRadius: 6,
@@ -286,6 +287,7 @@ function SpreadCard({
         datasets: [{
           data: shown.map(p => p.spreadPp),
           backgroundColor: shown.map(p => ((p.spreadPp as number) >= 0 ? theme.down : theme.up)),
+      hoverBackgroundColor: shown.map(p => ((p.spreadPp as number) >= 0 ? theme.down : theme.up)),
           borderWidth: 0,
           barThickness: "flex" as const,
           maxBarThickness: 11,
@@ -333,6 +335,7 @@ function MaturityCard({
       label: u,
       data: months.map(m => points.filter(p => p.maturityMonth === m && p.underlying === u).length),
       backgroundColor: colorOf(u),
+    hoverBackgroundColor: colorOf(u),
       borderWidth: 0,
       maxBarThickness: 26,
     }));
