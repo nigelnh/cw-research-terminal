@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
+const corpActions = vi.hoisted(() => ({ items: [] as any[], isLoading: false, isError: false }));
 const fundamentals = vi.hoisted(() => ({
   data: null as any,
   quarters: [] as any[],
@@ -27,7 +28,7 @@ vi.mock("@/data/query", async (orig) => {
   return {
     ...actual,
     useHistoricalBars: () => ({ bars: [], isLoading: false, isFetching: false, isError: false, isEmpty: true, refetch: () => {} }),
-    useCorporateActions: () => ({ items: [], isLoading: false, isError: false }),
+    useCorporateActions: () => corpActions,
   };
 });
 
@@ -60,6 +61,7 @@ afterEach(() => {
   fundamentals.quarters = [];
   fundamentals.isLoading = false;
   fundamentals.isError = false;
+  corpActions.items = [];
 });
 
 describe("FINANCIAL INDICATORS", () => {
@@ -141,5 +143,96 @@ describe("REVENUE & PROFIT chart", () => {
   it("distinguishes a failed read from an empty one", () => {
     fundamentals.isError = true;
     expect(quantTab().container.textContent).toContain("Financial statements unavailable.");
+  });
+});
+
+// --------------------------------------------------------------------------- #
+describe("Quarter-on-quarter context", () => {
+  const withSeries = () => {
+    fundamentals.data = {
+      pe: 12.23, pb: 3.08, valuation_as_of: "2026-09-04",
+      eps: 1507, roe: .2647, roa: .1278, roic: .167,
+      gross_margin: .347, net_margin: .172, latest_period: "2026Q2",
+      unavailable: {}, provenance: {},
+    };
+    fundamentals.quarters = [
+      { period: "2026Q1", eps: 1400, roe: .2500, roa: .1200, roic: .1600,
+        gross_margin: .3400, net_margin: .1700, revenue: 1, net_profit: 1 },
+      { period: "2026Q2", eps: 1507, roe: .2647, roa: .1278, roic: .1670,
+        gross_margin: .3470, net_margin: .1720, revenue: 1, net_profit: 1 },
+    ];
+  };
+
+  it("says which way the statement metrics moved last quarter", () => {
+    // Eight bare numbers said where the company is and nothing about where it is going,
+    // while the series needed to say so was already on screen in the chart beside them.
+    withSeries();
+    const text = quantTab().container.textContent ?? "";
+    expect(text).toContain("\u25B2107");   // EPS 1400 -> 1507 VND
+    expect(text).toContain("\u25B21.5pp"); // ROE 25.00% -> 26.47%
+    expect(text).toContain("\u25B20.8pp"); // ROA 12.00% -> 12.78%
+  });
+
+  it("gives PE and PB no delta, because there is no series behind them", () => {
+    // They come from a trailing valuation snapshot. A quarter-on-quarter figure for them
+    // would be invented, and this panel does not invent numbers.
+    withSeries();
+    const view = quantTab();
+    const pe = view.getByText("PE").closest("div")?.textContent ?? "";
+    const pb = view.getByText("PB").closest("div")?.textContent ?? "";
+    for (const cell of [pe, pb]) {
+      expect(cell).not.toContain("\u25B2");
+      expect(cell).not.toContain("\u25BC");
+    }
+  });
+
+  it("stays silent when there is only one quarter to go on", () => {
+    withSeries();
+    fundamentals.quarters = [fundamentals.quarters[1]];
+    const text = quantTab().container.textContent ?? "";
+    expect(text).not.toContain("\u25B2");
+    expect(text).not.toContain("\u25BC");
+  });
+});
+
+// --------------------------------------------------------------------------- #
+describe("CORPORATE EVENTS", () => {
+  const event = (over: Record<string, unknown>) => ({
+    id: 1, symbol: "HPG", event_label: "New listing", action_type: "ADDITIONAL_LISTING",
+    event_type: "ADDITIONAL_LISTING", event_class: "LISTING", status: "CONFIRMED",
+    ex_date: null, record_date: null, payment_date: null, disclosure_date: null,
+    public_date: null, cash_amount_vnd: null, ratio_pct: null, ratio_text: null,
+    dividend_year: null, note: null, note_en: null, source: "VNDIRECT", ...over,
+  });
+
+  it("labels the date column for every event, not just dividends", () => {
+    // It read EX-DIV. A listing and a financial statement have no ex-dividend date, and
+    // those are most of the rows.
+    corpActions.items = [event({ ex_date: "2036-06-24", public_date: "2026-08-20" })];
+    const text = quantTab().container.textContent ?? "";
+    expect(text).toContain("DISCLOSED");
+    expect(text).toContain("EX-DATE");
+    expect(text).not.toContain("EX-DIV");
+  });
+
+  it("shows the disclosure date the list is ordered by", () => {
+    corpActions.items = [event({ ex_date: "2036-06-24", public_date: "2026-08-20" })];
+    const text = quantTab().container.textContent ?? "";
+    expect(text).toContain("2026-08-20");   // when the market learned of it
+    expect(text).toContain("2036-06-24");   // the vesting date, still on the row
+  });
+
+  it("renders the English note instead of a dash on every row", () => {
+    // 0 of 12 FPT events carried `cash_amount_vnd` or `ratio_text`, so DESC was a dash
+    // for all of them while the substance sat in the Vietnamese `note`.
+    corpActions.items = [event({ note: "Số lượng 2,302,000 CP", note_en: "2,302,000 shares" })];
+    expect(quantTab().container.textContent ?? "").toContain("2,302,000 shares");
+  });
+
+  it("never renders the raw Vietnamese note", () => {
+    // Out of pattern upstream, so the backend declined to translate it. A dash is the
+    // honest answer; the original must not leak through as a fallback.
+    corpActions.items = [event({ note: "Công ty Cổ phần FPT (FPT) niêm yết bổ sung", note_en: null })];
+    expect(quantTab().container.textContent ?? "").not.toContain("Công ty");
   });
 });

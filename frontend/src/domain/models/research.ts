@@ -102,11 +102,14 @@ export interface CorporateActionItem {
   record_date: string | null;
   payment_date: string | null;
   disclosure_date: string | null;
+  public_date?: string | null;
   cash_amount_vnd: number | null;
   ratio_pct: number | null;
   ratio_text: string | null;
   dividend_year: number | null;
-  note: string | null;
+  note: string | null;                 // original Vietnamese, provenance only
+  /** Canonical English for `note`, or null when it is out of pattern. */
+  note_en?: string | null;
   source: string;
 }
 

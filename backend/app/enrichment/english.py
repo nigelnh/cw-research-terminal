@@ -365,3 +365,85 @@ def event_search_label(class_column, type_column):
     from sqlalchemy import case
     fallback = case(_EVENT_CLASS_LABELS, value=class_column, else_="Company event")
     return case(_EVENT_TYPE_LABELS, value=type_column, else_=fallback)
+
+
+# --------------------------------------------------------------------------- #
+# note_en - the short detail line on a company event
+# --------------------------------------------------------------------------- #
+# VNDirect's `note` is the only place several events carry their substance: a listing's
+# share count, a statement's period, a dividend's rate. The instrument panel showed a dash
+# for all of it (0 of 12 FPT events had the structured `cash_amount_vnd` / `ratio_text`
+# that the UI preferred), so the column rendered empty for every row.
+#
+# Some notes arrive as raw HTML fragments from the source feed. They are stripped here and
+# never handed onward as markup.
+_RE_HTML_TAG = re.compile(r"<[^>]+>")
+_RE_WS = re.compile(r"\s+")
+_RE_SHARE_COUNT = re.compile(r"số\s*lượng[:\s]*([\d.,]+)\s*(?:cp|cổ\s*phiếu)", re.I)
+_RE_RATE = re.compile(r"tỷ\s*lệ[:\s]*(\d+\s*:\s*\d+)", re.I)
+_RE_PER_SHARE = re.compile(r"([\d.,]+)\s*(?:đ|đồng|vnd)\s*/\s*(?:cp|cổ\s*phiếu)", re.I)
+
+#: Presence of any of these means the note is Vietnamese-canonical and needs rendering.
+#: Diacritics alone are not the test - `BCTC` and `CP` carry none.
+_VI_NOTE_MARKERS = (
+    "bctc", "số lượng", "cổ tức", "tỷ lệ", "niêm yết", "cổ phiếu", "riêng lẻ",
+    "kiểm toán", "quý", "công ty", "phát hành", "đợt", "năm",
+)
+
+
+def _clean_note(note: str) -> str:
+    return _RE_WS.sub(" ", _RE_HTML_TAG.sub(" ", note)).strip(" :-")
+
+
+def note_en(note: str | None) -> str | None:
+    """Canonical English for a company-event note, or ``None`` when it cannot be rendered.
+
+    ``None`` is a real answer, and the caller shows a dash for it. The alternative - a
+    machine-shaped gloss of an out-of-pattern Vietnamese sentence - would put words in the
+    issuer's mouth on a screen people trade against. Same rule as ``headline_en``: classify
+    what is templated, decline the rest.
+    """
+    if not note or not note.strip():
+        return None
+    text = _clean_note(note)
+    if not text:
+        return None
+    low = text.lower()
+
+    # Already English at the source (VNDirect mixes both). Hand it back cleaned, not reworded.
+    if not any(marker in low for marker in _VI_NOTE_MARKERS):
+        return text
+
+    # Financial statements - by far the most templated shape.
+    if "bctc" in low or "báo cáo tài chính" in low:
+        parts = ["Audited"] if "kiểm toán" in low else []
+        parts.append("separate" if "riêng lẻ" in low else "consolidated")
+        label = " ".join(parts) + " financial statements"
+        label = label[0].upper() + label[1:]
+        period = _period_token(text)
+        sym = text.split("-", 1)[0].strip().upper()
+        head = f"{sym} — " if 1 <= len(sym) <= 12 and " " not in sym else ""
+        return f"{head}{label}, {period}" if period else f"{head}{label}"
+
+    # A listing's share count. The number is the whole point and is language-neutral.
+    m = _RE_SHARE_COUNT.search(text)
+    if m:
+        return f"{m.group(1)} shares"
+
+    # Dividends: a rate and/or a cash amount per share.
+    rate = _RE_RATE.search(text)
+    cash = _RE_PER_SHARE.search(text)
+    if rate or cash:
+        period = _period_token(text)
+        bits = ["Dividend"]
+        if period:
+            bits.append(period)
+        detail = []
+        if cash:
+            detail.append(f"{cash.group(1)} VND/share")
+        if rate:
+            detail.append(f"rate {rate.group(1).replace(' ', '')}")
+        return f"{' '.join(bits)}, {', '.join(detail)}"
+
+    # Out of pattern. Declining is the honest answer.
+    return None
