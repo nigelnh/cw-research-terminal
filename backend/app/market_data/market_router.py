@@ -14,6 +14,7 @@ from app.market_data.market_schemas import (
     HistoricalCircuitOpenError,
     HistoricalEntitlementError,
     HistoricalRateLimitError,
+    HistoricalNoDataError,
     HistoricalUpstreamError,
     HistoricalTransportError,
     StockProfilesResponse,
@@ -159,6 +160,11 @@ async def get_historical_data(
         raise HTTPException(status_code=403, detail=str(e))
     except HistoricalRateLimitError:
         raise HTTPException(status_code=429, detail="Upstream provider rate limited")
+    except HistoricalNoDataError:
+        # The provider is healthy and holds nothing for this window. An empty series is
+        # the answer; a 5xx here would be the server calling its own correct reply a fault,
+        # and the bare `except Exception` below would otherwise turn it into a 500.
+        return []
     except (HistoricalUpstreamError, HistoricalTransportError) as e:
         raise HTTPException(status_code=503, detail=f"Upstream market data provider unavailable: {e}")
     except Exception as e:

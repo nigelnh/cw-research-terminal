@@ -35,6 +35,7 @@ from app.market_data.market_schemas import (
     HistoricalAuthError,
     HistoricalBar,
     HistoricalEntitlementError,
+    HistoricalNoDataError,
     HistoricalRateLimitError,
     HistoricalTransportError,
     HistoricalUpstreamError,
@@ -1056,6 +1057,15 @@ class VnstockProvider(MarketDataProvider):
                 raise HistoricalRateLimitError("Vnstock rate limit reached") from exc
             if code == "UPSTREAM_UNAVAILABLE":
                 raise HistoricalTransportError("Vnstock historical transport is unavailable") from exc
+            # vnstock raises ValueError for BOTH "no rows for this symbol and window"
+            # (`Dữ liệu trống cho mã X với interval 1D.`) and for a parameter it will not
+            # accept. Neither is fixed by sending the identical request again, so both are
+            # answers rather than faults. Matching on the TYPE, not that Vietnamese string,
+            # because the string is a third-party message that can be translated or reworded.
+            if isinstance(exc, ValueError):
+                raise HistoricalNoDataError(
+                    f"Vnstock holds no {interval} data for {sym} over {start[:10]}..{end[:10]}"
+                ) from exc
             raise HistoricalUpstreamError("Vnstock returned no usable historical data") from exc
 
         now_vn = market_session.get_vn_now()

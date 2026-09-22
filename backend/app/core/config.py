@@ -569,6 +569,20 @@ class Settings(BaseSettings):
     )
 
     # ---- history HTTP-layer protection (separate from ingestion throttling) ----
+    HISTORY_NIGHTLY_WARM_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Warm the daily-bar table for the whole server universe once per session, after "
+            "the close. Without it the first viewer of each symbol each day pays the gap-fill "
+            "on the request path, and 345 symbols cannot be filled on demand at all: the "
+            "process-wide upstream floor of 1.2s/request makes one day's universe ~7 minutes "
+            "of budget, behind a 2-slot gate."
+        ),
+    )
+    HISTORY_NIGHTLY_WARM_HOUR_ICT: int = Field(
+        default=16,
+        description="Hour (ICT) to start the warm pass. After the 15:00 close, before midnight.",
+    )
     HISTORY_MAX_CONCURRENT_GAPFILLS: int = Field(
         default=2, description="Max distinct history streams triggering a provider gap-fill at once (HTTP layer)"
     )

@@ -19,6 +19,7 @@ from app.market_data.market_schemas import (
     HistoricalCircuitOpenError,
     HistoricalDataError,
     HistoricalEntitlementError,
+    HistoricalNoDataError,
     HistoricalRangeLimitError,
     HistoricalRateLimitError,
     HistoricalTransportError,
@@ -39,6 +40,9 @@ NON_RETRYABLE: tuple[type[BaseException], ...] = (
     HistoricalRangeLimitError,
     HistoricalAuthError,
     HistoricalEntitlementError,
+    # "the provider holds nothing for this window" is an ANSWER, not a fault. Retrying
+    # identical parameters cannot change it, and each attempt held a global gap-fill slot.
+    HistoricalNoDataError,
 )
 
 
@@ -63,6 +67,7 @@ def classify(exc: BaseException) -> str:
         ("AUTH", HistoricalAuthError),
         ("ENTITLEMENT", HistoricalEntitlementError),
         ("RATE_LIMIT", HistoricalRateLimitError),
+        ("NO_DATA", HistoricalNoDataError),
         ("UPSTREAM", HistoricalUpstreamError),
         ("TRANSPORT", HistoricalTransportError),
     ):

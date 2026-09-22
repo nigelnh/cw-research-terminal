@@ -372,12 +372,56 @@ async def lifespan(app: FastAPI):
 
     _universe_refresh_task = asyncio.create_task(_refresh_realtime_universe())
 
+    async def _warm_daily_bars() -> None:
+        """Fill the daily-bar table for the whole universe once per session, after the close.
+
+        Without this the first person to open each symbol each day pays the gap-fill on the
+        request path - measured at 20s, which is the 25s gate timeout, after which they are
+        served a DB partial anyway. A universe cannot be filled on demand: 345 symbols at
+        the 1.2s process-wide upstream floor is ~7 minutes of budget behind a 2-slot gate.
+
+        It runs in-process rather than on GitHub Actions - the pattern the news and
+        fundamentals jobs use - because a runner cannot reach Railway Postgres (no public
+        TCP proxy) while this process reaches both it and the bar sources. The reason
+        fundamentals had to leave the box, Vietcap's GraphQL refusing Railway's ASN, does
+        not apply to the chart endpoints.
+        """
+        warmed_session: str | None = None
+        while True:
+            await asyncio.sleep(300.0)
+            if not settings.HISTORY_NIGHTLY_WARM_ENABLED:
+                continue
+            try:
+                now_vn = market_session.get_vn_now()
+                session_date = reference_session_date().isoformat()
+                if warmed_session == session_date:
+                    continue
+                if now_vn.hour < int(settings.HISTORY_NIGHTLY_WARM_HOUR_ICT):
+                    continue
+                # Never compete with the live poller for the same upstream quota.
+                if market_session.is_trading_active():
+                    continue
+                symbols = subscription_manager.get_server_universe_symbols()
+                if not symbols:
+                    continue
+                warmed_session = session_date
+                logger.info("history warm pass starting for %d symbols (%s)", len(symbols), session_date)
+                await history_read_service.warm_universe(symbols)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - a warm pass must never take the app down
+                logger.exception("history warm pass failed; will retry next session")
+
+    _warm_bars_task = asyncio.create_task(_warm_daily_bars())
+
+
     yield
     # Shutdown: stop ingestion first (no new ticks), then drain the analytics scheduler,
     # then background refreshers.
     logger.info("Shutting down CW Research Terminal Backend...")
     _universe_refresh_task.cancel()
-    await asyncio.gather(_universe_refresh_task, return_exceptions=True)
+    _warm_bars_task.cancel()
+    await asyncio.gather(_universe_refresh_task, _warm_bars_task, return_exceptions=True)
     await market_overview_service.close()
     try:
         await live_quant_engine.shutdown()

@@ -381,6 +381,19 @@ class HistoricalUpstreamError(HistoricalDataError):
     pass
 
 
+class HistoricalNoDataError(HistoricalDataError):
+    """The provider answered, and the answer is that it holds nothing for this window.
+
+    Not a failure. A covered warrant that did not trade on the two days asked for has no
+    bars to give, and the identical request will say so again forever - `CFPT2617` over
+    2026-09-21..2026-09-22 is empty while the same symbol over 2026-09-01..2026-09-22
+    returns ten rows. Classifying it as a transient upstream error meant five retries with
+    backoff reaching ~26s, all of which held one of the two global gap-fill slots while
+    every other chart waited behind it.
+    """
+    pass
+
+
 # Canonical reasons a historical circuit can be open. AUTH_FAILURE / ENTITLEMENT do not
 # self-heal; RATE_LIMIT / UPSTREAM clear after their cooldown.
 CIRCUIT_REASON_AUTH = "AUTH_FAILURE"
