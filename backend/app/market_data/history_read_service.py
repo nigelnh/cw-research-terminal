@@ -33,6 +33,7 @@ from app.market_data.market_schemas import (
     HistoricalBar,
     HistoricalCircuitOpenError,
     HistoricalEntitlementError,
+    HistoricalNoDataError,
     HistoricalRateLimitError,
     HistoricalTransportError,
     HistoricalUpstreamError,
@@ -391,6 +392,53 @@ class HistoryReadService:
         return await self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
     # ------------------------------------------------------------------ #
+    async def warm_universe(self, symbols: list[str], *, timeframe: str = "1d") -> dict:
+        """Fill the recent daily window for every symbol BEFORE anyone asks for a chart.
+
+        The read path can gap-fill one stream at a time behind a 2-slot gate, which is the
+        right shape for a user request and the wrong shape for a universe: 345 symbols at
+        the process-wide 1.2s upstream floor is about 7 minutes of budget, so the first
+        viewer of each symbol each day was paying a 20s wait and then being served a DB
+        partial anyway.
+
+        Deliberately sequential and unhurried. It reuses `fill_range`, so a stream already
+        covered costs one DB read and no provider call, and the shared rate limiter paces
+        everything else. Runs only while the exchange is closed, so it never competes with
+        the live poller for the same quota.
+        """
+        if self._mode() != "postgres_first" or self._ingestion is None or self._sm is None:
+            return {"skipped": "not postgres_first"}
+        tf = normalize_timeframe(timeframe)
+        req_from, req_to = self._resolve_window(None, None, tf)
+        filled = covered = failed = 0
+        for sym in symbols:
+            sym = sym.strip().upper()
+            if not sym:
+                continue
+            try:
+                async with self._sm() as session:
+                    inst = await InstrumentRepository(session).get_by_symbol(sym)
+                if inst is None:
+                    continue
+                price_basis = "RAW" if inst.instrument_type == "CW" else "ADJUSTED"
+                rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
+                assessment = await self._assess(inst, tf, price_basis, req_from, req_to, rows)
+                if assessment.covered:
+                    covered += 1
+                    continue
+                await self._ingestion.fill_range(
+                    sym, timeframe=tf, price_basis=price_basis,
+                    from_date=assessment.fill_from or req_from,
+                    to_date=assessment.fill_to or req_to,
+                )
+                filled += 1
+            except Exception as err:  # noqa: BLE001 - one symbol must not end the pass
+                failed += 1
+                logger.warning("history warm: %s skipped (%s)", sym, type(err).__name__)
+        result = {"requested": len(symbols), "filled": filled, "already_covered": covered, "failed": failed}
+        logger.info("history warm pass complete: %s", result)
+        return result
+
     async def _provider_direct_or_observed(
         self, sym, timeframe, from_date, to_date, adjusted, tf, req_from, req_to
     ):
@@ -410,6 +458,13 @@ class HistoryReadService:
         price_basis = "ADJUSTED" if adjusted else "RAW"
         try:
             bars = await self._provider_direct(sym, timeframe, from_date, to_date, adjusted)
+        except HistoricalNoDataError:
+            # Not a fault - upstream answered, and it holds nothing for this window. Serve
+            # whatever this server observed itself, or an honest empty series. "This
+            # warrant did not trade on these two days" is a valid chart, not a 503.
+            return await self._with_session_bar(
+                [], sym, tf, req_from, req_to, adjusted=adjusted, price_basis=price_basis
+            )
         except _PROVIDER_FAULTS as err:
             observed = await self._with_session_bar(
                 [], sym, tf, req_from, req_to, adjusted=adjusted, price_basis=price_basis
