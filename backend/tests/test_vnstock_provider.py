@@ -792,3 +792,99 @@ async def test_preopen_overview_is_reference_only_and_does_not_rank_zero_volume_
 def test_adapter_disables_vendor_agent_file_injection():
     assert os.environ["VNSTOCK_DISABLE_AGENT_SETUP"] == "1"
     assert os.environ["VNSTOCK_DISABLE_GLOBAL_AGENT"] == "1"
+
+
+# --------------------------------------------------------------------------- #
+# Covered-warrant volume does not come from the price board.
+#
+# Verified against KBS on 2026-09-23, mid-session, one call, four symbols:
+#   CACB2606  volume_accumulated=0          close_price=0      reference_price=600
+#   CFPT2614  volume_accumulated=0          close_price=0      reference_price=640
+#   HPG       volume_accumulated=2,476,300  close_price=21150
+#   TPB       volume_accumulated=13,562,800 close_price=14650
+# At that same moment /api/market/dashboard held 740,700 for CACB2606 from the realtime
+# feed. So the board is simply not a source of CW volume, the zero-volume guard correctly
+# dropped every warrant, and TOP COVERED WARRANTS TRADING VOLUME read DATA UNAVAILABLE.
+# --------------------------------------------------------------------------- #
+def _overview_provider(board_rows):
+    return provider(
+        board_fetcher=lambda symbols: board_rows(symbols),
+        history_fetcher=lambda *a, **k: [{"time": "2026-09-08 09:05:00", "close": 1005, "volume": 1}],
+        listing_fetcher=lambda: [{"symbol": "HPG", "exchange": "HSX", "type": "STOCK"}],
+        group_fetcher=lambda name: ["HPG"],
+    )
+
+
+def _pin_session(monkeypatch):
+    monkeypatch.setattr(
+        "app.market_data.providers.vnstock_provider.reference_session_date",
+        lambda *a, **k: date(2026, 9, 8),
+    )
+
+
+def _zero_volume_cw_board(symbols):
+    """What KBS actually returns: real numbers for the stock, zeros for every warrant."""
+    rows = []
+    for symbol in symbols:
+        row = board_row(symbol=symbol)
+        if symbol.startswith("C") and len(symbol) == 8:
+            row = {**row, "volume_accumulated": 0, "close_price": 0}
+        else:
+            row = {**row, "volume_accumulated": 2_476_300, "close_price": 21150}
+        rows.append(row)
+    return rows
+
+
+@pytest.mark.asyncio
+async def test_warrants_are_ranked_from_supplied_live_quotes_not_the_board(monkeypatch):
+    _pin_session(monkeypatch)
+    p = _overview_provider(_zero_volume_cw_board)
+    result = await p.get_market_overview(
+        ["CHPG2625", "CFPT2614"],
+        cw_quotes={
+            "CHPG2625": {"total_volume": 740_700, "last_price": 590, "reference_price": 550,
+                         "ceiling_price": 1300, "floor_price": 10, "as_of": "2026-09-08T10:00:00+07:00"},
+            "CFPT2614": {"total_volume": 127_800, "last_price": 640, "reference_price": 640,
+                         "ceiling_price": 1400, "floor_price": 20, "as_of": "2026-09-08T10:00:00+07:00"},
+        },
+    )
+    rows = result["top_cw_volume"]
+    assert [r["symbol"] for r in rows] == ["CHPG2625", "CFPT2614"], "ranked by real volume"
+    assert rows[0]["volume"] == 740_700
+    assert rows[0]["price"] == 590, "the board's zero close must not win over the live price"
+    assert result["components"]["top_cw_volume"] == "AVAILABLE"
+    assert rows[0]["provenance"]["volume"]["source"] == "REALTIME_MARKET_STATE"
+
+
+@pytest.mark.asyncio
+async def test_without_live_quotes_the_zero_volume_guard_still_holds(monkeypatch):
+    """The guard is not the bug and must not be loosened: a zero-volume board row is a
+    pre-open placeholder, and ranking it fabricates a table out of whichever zero arrived
+    first."""
+    _pin_session(monkeypatch)
+    p = _overview_provider(_zero_volume_cw_board)
+    result = await p.get_market_overview(["CHPG2625", "CFPT2614"])
+    assert result["top_cw_volume"] == []
+    assert result["components"]["top_cw_volume"] == "UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_a_live_quote_with_no_volume_is_not_ranked_either(monkeypatch):
+    _pin_session(monkeypatch)
+    p = _overview_provider(_zero_volume_cw_board)
+    result = await p.get_market_overview(
+        ["CHPG2625"],
+        cw_quotes={"CHPG2625": {"total_volume": 0, "last_price": 590, "reference_price": 550}},
+    )
+    assert result["top_cw_volume"] == []
+
+
+@pytest.mark.asyncio
+async def test_stocks_keep_coming_from_the_board(monkeypatch):
+    """The board is right for equities - only warrants move sources."""
+    _pin_session(monkeypatch)
+    p = _overview_provider(_zero_volume_cw_board)
+    result = await p.get_market_overview(["CHPG2625"], cw_quotes={})
+    stocks = result["top_stock_volume"]
+    assert stocks and stocks[0]["symbol"] == "HPG"
+    assert stocks[0]["provenance"]["volume"]["source"] == "VNSTOCK_KBS_PRICE_BOARD"

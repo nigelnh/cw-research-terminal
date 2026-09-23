@@ -62,8 +62,18 @@ class MarketDataProvider(ABC):
         """
         pass
 
-    async def get_market_overview(self, cw_symbols: List[str]) -> Dict[str, Any]:
-        """Return a cached, read-only market overview when the vendor supports it."""
+    async def get_market_overview(
+        self,
+        cw_symbols: List[str],
+        *,
+        cw_quotes: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Return a cached, read-only market overview when the vendor supports it.
+
+        ``cw_quotes`` optionally carries live covered-warrant values from the caller's
+        canonical state, keyed by symbol, for vendors whose own board does not report
+        covered-warrant volume. An implementation is free to ignore it.
+        """
         raise NotImplementedError("market overview is not supported by this provider")
 
     async def get_realtime_universe_snapshot(

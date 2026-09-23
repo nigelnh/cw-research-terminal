@@ -49,7 +49,7 @@ def store(saved=None):
 async def test_two_cold_tabs_share_refresh_and_do_not_cancel_it_on_timeout():
     gate = asyncio.Event()
 
-    async def slow(symbols):
+    async def slow(symbols, *, cw_quotes=None):
         await gate.wait()
         return overview()
 
@@ -75,7 +75,7 @@ async def test_inflight_refresh_restarts_with_the_newest_cw_universe():
     release_first = asyncio.Event()
     calls: list[tuple[str, ...]] = []
 
-    async def changing(symbols):
+    async def changing(symbols, *, cw_quotes=None):
         calls.append(tuple(symbols))
         if len(calls) == 1:
             first_started.set()
@@ -107,10 +107,10 @@ async def test_inflight_refresh_restarts_with_the_newest_cw_universe():
 async def test_restart_restores_stale_snapshot_without_waiting_for_provider():
     original = overview()
     saved = {"payload": original, "cached_at": time.time() - 3600}
-    provider = SimpleNamespace(get_market_overview=AsyncMock(side_effect=lambda _: None))
+    provider = SimpleNamespace(get_market_overview=AsyncMock(side_effect=lambda _s, **_k: None))
     gate = asyncio.Event()
 
-    async def slow(symbols):
+    async def slow(symbols, *, cw_quotes=None):
         await gate.wait()
         return overview()
 
