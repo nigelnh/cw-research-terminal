@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any
 
 from app.market_data.market_session import market_session
+from app.market_data.market_state import market_state
 from app.market_data.session_reference import reference_session_date
 from app.market_data.trading_calendar import session_context
 
@@ -45,6 +46,36 @@ def _sparkline_settled(cache: dict[str, Any]) -> bool:
         if first_minutes > _SESSION_OPEN_MIN + 20:
             return False
     return True
+
+
+def _live_cw_quotes(symbols: list[str], session: str) -> dict[str, dict[str, Any]]:
+    """Live covered-warrant values from this server's canonical state.
+
+    The KBS price board reports `volume_accumulated` and `close_price` as literal 0 for
+    every covered warrant while giving stocks real numbers, so the provider's zero-volume
+    guard dropped all of them and TOP COVERED WARRANTS TRADING VOLUME read DATA UNAVAILABLE
+    for a whole session. The figures exist - the watchlist shows them - they just arrive on
+    the realtime feed rather than that board.
+
+    A quote stamped for a different session is skipped rather than ranked: yesterday's
+    volume presented as today's is the failure this table already guards against.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for symbol in symbols:
+        quote = market_state.get_quote(symbol)
+        if quote is None or not quote.total_volume:
+            continue
+        if quote.market_session_date and quote.market_session_date != session:
+            continue
+        out[symbol] = {
+            "total_volume": quote.total_volume,
+            "last_price": quote.last_price,
+            "reference_price": quote.reference_price,
+            "ceiling_price": quote.ceiling_price,
+            "floor_price": quote.floor_price,
+            "as_of": quote.trade_timestamp or quote.source_timestamp,
+        }
+    return out
 
 
 class MarketOverviewService:
@@ -176,7 +207,11 @@ class MarketOverviewService:
             raise RuntimeError("market overview provider is not configured")
         while True:
             generation = self._symbols_generation
-            result = await provider.get_market_overview(list(self._symbols))
+            symbols = list(self._symbols)
+            result = await provider.get_market_overview(
+                symbols,
+                cw_quotes=_live_cw_quotes(symbols, reference_session_date().isoformat()),
+            )
             if generation == self._symbols_generation:
                 break
         # At the 08:00 display rollover Vnstock can confirm today's official index

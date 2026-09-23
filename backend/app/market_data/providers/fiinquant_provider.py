@@ -2259,7 +2259,12 @@ class FiinQuantProvider(MarketDataProvider):
                 return False
         return True
 
-    async def get_market_overview(self, cw_symbols: List[str]) -> Dict[str, Any]:
+    async def get_market_overview(
+        self,
+        cw_symbols: List[str],
+        *,
+        cw_quotes: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         """Read the four index cards and HOSE volume leaders without new streams.
 
         Snapshot reads only (no stream mutations). ``MarketBreadth`` is not on this
@@ -2269,6 +2274,10 @@ class FiinQuantProvider(MarketDataProvider):
         unless the cached payload still lacks stock leaders, or an index chart is missing
         its early bars, because a sweep/fetch hadn't finished or hiccuped when it was
         built - in which case it stays on the short TTL until a clean result lands.
+
+        ``cw_quotes`` is accepted to satisfy the provider protocol and deliberately
+        ignored: this vendor's own snapshot reports covered-warrant volume, so there is
+        nothing here for the caller's canonical state to stand in for.
         """
         from app.market_data.trading_calendar import reference_session_date
         request_display_session = reference_session_date(market_session.get_vn_now()).isoformat()

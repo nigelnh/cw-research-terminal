@@ -1493,7 +1493,26 @@ class VnstockProvider(MarketDataProvider):
             return "UP" if price > reference else "DOWN"
         return "UNAVAILABLE"
 
-    async def get_market_overview(self, cw_symbols: list[str]) -> dict[str, Any]:
+    async def get_market_overview(
+        self,
+        cw_symbols: list[str],
+        *,
+        cw_quotes: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Market-wide strip. `cw_quotes` carries live covered-warrant values from the
+        caller's canonical state.
+
+        The KBS price board returns `volume_accumulated` and `close_price` as literal 0 for
+        every covered warrant while giving stocks real figures - verified on 2026-09-23,
+        where the board reported 0 for CACB2606 at the same moment the dashboard held
+        740,700 for it from the realtime feed. So every CW was dropped by the zero-volume
+        guard and TOP COVERED WARRANTS TRADING VOLUME rendered DATA UNAVAILABLE all session.
+
+        The guard is right - a zero-volume board row IS a placeholder - and the board is
+        right for stocks. It simply is not a source of covered-warrant volume, so the caller
+        supplies those from where the rest of the app already reads them. Absent the map,
+        the board path still applies, which keeps every other caller working.
+        """
         cached_at, cached = self._overview_cache
         if cached and time.monotonic() - cached_at < self._OVERVIEW_TTL:
             return cached
@@ -1519,32 +1538,49 @@ class VnstockProvider(MarketDataProvider):
             row = board.get(symbol)
             return row if row and _date_text(row.get("TD") or row.get("trading_date")) == session else None
 
-        def leaders(symbols: list[str]) -> list[dict[str, Any]]:
+        def leaders(
+            symbols: list[str], *, live: dict[str, dict[str, Any]] | None = None
+        ) -> list[dict[str, Any]]:
             values = []
             for symbol in symbols:
-                row = valid_row(symbol)
-                if row is None:
-                    continue
-                volume = _finite(row.get("volume_accumulated"))
-                # A zero-volume board row is only a pre-open placeholder. Ranking it
-                # fabricated a top-five table from whichever zero happened to arrive
-                # first and made an empty new session look active.
+                supplied = (live or {}).get(symbol)
+                if supplied is not None:
+                    source = "REALTIME_MARKET_STATE"
+                    volume = _finite(supplied.get("total_volume"))
+                    price = _finite(supplied.get("last_price"))
+                    ref = _finite(supplied.get("reference_price"))
+                    ceiling = _finite(supplied.get("ceiling_price"))
+                    floor = _finite(supplied.get("floor_price"))
+                    as_of = supplied.get("as_of") or _iso_timestamp(None, session_date=session)
+                else:
+                    row = valid_row(symbol)
+                    if row is None:
+                        continue
+                    source = "VNSTOCK_KBS_PRICE_BOARD"
+                    volume = _finite(row.get("volume_accumulated"))
+                    price = _finite(row.get("close_price"))
+                    ref = _finite(row.get("reference_price"))
+                    ceiling = _finite(row.get("ceiling_price"))
+                    floor = _finite(row.get("floor_price"))
+                    as_of = _iso_timestamp(row.get("time"), session_date=session)
+                # A zero-volume row is only a pre-open placeholder. Ranking it fabricated a
+                # top-five table from whichever zero happened to arrive first and made an
+                # empty new session look active. It is also exactly what the KBS board
+                # reports for EVERY covered warrant, which is why they now come from `live`.
                 if volume is None or volume <= 0:
                     continue
-                price, ref = _finite(row.get("close_price")), _finite(row.get("reference_price"))
                 if price is not None and price <= 0:
                     price = None
-                ceiling, floor = _finite(row.get("ceiling_price")), _finite(row.get("floor_price"))
                 values.append({
                     "symbol": symbol, "volume": volume, "price": price, "reference": ref,
                     "ceiling": ceiling, "floor": floor,
                     "market_state": self._market_state(price, ref, ceiling, floor),
-                    "as_of": _iso_timestamp(row.get("time"), session_date=session),
+                    "as_of": as_of,
                     "session_date": session,
                     "provenance": {
-                        "price": {"source": "VNSTOCK_KBS_PRICE_BOARD", "session_date": session},
-                        "volume": {"source": "VNSTOCK_KBS_PRICE_BOARD", "session_date": session},
-                        "bands": {"source": "VNSTOCK_KBS_PRICE_BOARD", "session_date": session},
+                        "price": {"source": source, "session_date": session},
+                        "volume": {"source": source, "session_date": session},
+                        "bands": {"source": source, "session_date": session},
                     },
                 })
             return sorted(values, key=lambda item: item["volume"], reverse=True)[:5]
@@ -1694,7 +1730,7 @@ class VnstockProvider(MarketDataProvider):
                 },
             })
         stock_leaders = leaders(groups["VNINDEX"])
-        cw_leaders = leaders([s.upper() for s in cw_symbols])
+        cw_leaders = leaders([s.upper() for s in cw_symbols], live=cw_quotes)
         stock_rows = [
             row for symbol in groups["VNINDEX"] if (row := valid_row(symbol)) is not None
         ]
