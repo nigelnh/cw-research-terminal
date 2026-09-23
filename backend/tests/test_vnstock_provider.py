@@ -888,3 +888,39 @@ async def test_stocks_keep_coming_from_the_board(monkeypatch):
     stocks = result["top_stock_volume"]
     assert stocks and stocks[0]["symbol"] == "HPG"
     assert stocks[0]["provenance"]["volume"]["source"] == "VNSTOCK_KBS_PRICE_BOARD"
+
+
+@pytest.mark.asyncio
+async def test_an_epoch_stamp_from_the_feed_is_rendered_as_an_iso_string(monkeypatch):
+    """The realtime feed stamps epoch milliseconds; the board path stamps ISO text. Passing
+    the feed's number straight through blanked the whole dashboard - `as_of` is sliced as
+    text downstream, and `row.as_of?.slice` survives null but not a number."""
+    _pin_session(monkeypatch)
+    p = _overview_provider(_zero_volume_cw_board)
+    result = await p.get_market_overview(
+        ["CHPG2625"],
+        cw_quotes={"CHPG2625": {"total_volume": 740_700, "last_price": 590,
+                                "reference_price": 550, "as_of": 1790136335009}},
+    )
+    as_of = result["top_cw_volume"][0]["as_of"]
+    assert isinstance(as_of, str), f"as_of must be text, got {type(as_of).__name__}"
+    assert as_of.startswith("2026-09-"), as_of
+
+
+@pytest.mark.asyncio
+async def test_every_row_in_the_payload_carries_a_text_timestamp(monkeypatch):
+    """Swept rather than spot-checked: one numeric `as_of` anywhere in this payload is
+    enough to take the dashboard down, so no row type is exempt."""
+    _pin_session(monkeypatch)
+    p = _overview_provider(_zero_volume_cw_board)
+    result = await p.get_market_overview(
+        ["CHPG2625"],
+        cw_quotes={"CHPG2625": {"total_volume": 740_700, "last_price": 590,
+                                "reference_price": 550, "as_of": 1790136335009}},
+    )
+    for section in ("indices", "top_stock_volume", "top_cw_volume"):
+        for row in result.get(section) or []:
+            stamp = row.get("as_of")
+            assert stamp is None or isinstance(stamp, str), (
+                f"{section}/{row.get('symbol')}: as_of is {type(stamp).__name__}"
+            )
