@@ -22,7 +22,11 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.config import settings
-from app.market_data.market_schemas import HistoricalBar, HistoricalDataError
+from app.market_data.market_schemas import (
+    HistoricalBar,
+    HistoricalDataError,
+    HistoricalNoDataError,
+)
 from app.persistence.ingestion.chunking import BackfillPlan, generate_chunks, plan_backfill_windows
 from app.persistence.ingestion.locks import stream_lock
 from app.persistence.ingestion.mapping import map_history
@@ -621,7 +625,20 @@ class IngestionService:
                 co.error = f"{classify(exc)}: {exc}"
                 any_fail = True
                 if not is_retryable(exc):
-                    logger.error("%s %s: non-retryable %s - halting stream", symbol, tf, classify(exc))
+                    # NO_DATA is a complete answer, not a fault: the provider holds nothing
+                    # for this window and says so. Logging it at ERROR put an expected
+                    # outcome - an illiquid warrant that did not trade on the days asked
+                    # for - into the error stream on every sweep. The stream still halts
+                    # and still enters the read path's cooldown, because re-asking an empty
+                    # window is exactly what we do not want to do.
+                    level = (
+                        logging.INFO
+                        if isinstance(exc, HistoricalNoDataError)
+                        else logging.ERROR
+                    )
+                    logger.log(
+                        level, "%s %s: non-retryable %s - halting stream", symbol, tf, classify(exc)
+                    )
                     outcome.error = co.error
                     break
             except Exception as exc:  # noqa: BLE001
