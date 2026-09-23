@@ -1551,7 +1551,10 @@ class VnstockProvider(MarketDataProvider):
                     ref = _finite(supplied.get("reference_price"))
                     ceiling = _finite(supplied.get("ceiling_price"))
                     floor = _finite(supplied.get("floor_price"))
-                    as_of = supplied.get("as_of") or _iso_timestamp(None, session_date=session)
+                    # Through the normalizer, never raw: the realtime feed stamps epoch
+                    # milliseconds while every other row here carries an ISO string, and
+                    # the dashboard slices this value as text.
+                    as_of = _iso_timestamp(supplied.get("as_of"), session_date=session)
                 else:
                     row = valid_row(symbol)
                     if row is None:
