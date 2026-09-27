@@ -22,8 +22,11 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Dependency layer — cached until requirements.txt changes.
+# Dependency layer — cached until requirements.txt or a vendored wheel changes.
+# vendor/ carries vnstock and vnai, which upstream removed from PyPI; requirements.txt
+# points at it with --find-links, so it must be in place before the install runs.
 COPY requirements.txt ./
+COPY vendor/ ./vendor/
 RUN pip install -r requirements.txt
 
 # Application code (see .dockerignore — no .env, no tests, no __pycache__).
