@@ -666,7 +666,12 @@ export function InstrumentPanel({
                   symbol={instrument!.symbol}
                   isCW={isCW}
                   bars={bars.bars}
-                  liveQuote={marketSessionActive ? q ?? null : null}
+                  // Not gated on marketSessionActive: at the lunch break and after the close
+                  // that flag drops, and the candle would snap back to the last history
+                  // refetch - up to a minute stale - until the next one. The chart applies a
+                  // quote only to the bar for that quote's own session, which is the gate
+                  // that actually matters.
+                  liveQuote={q ?? null}
                   interval="1D"
                   referencePrice={ref}
                   height={300}

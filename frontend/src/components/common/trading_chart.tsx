@@ -5,7 +5,7 @@
  * - Canvas OHLCV candlesticks + synchronized volume sub-pane
  * - Interactive crosshair with a synchronized OHLCV header readout
  * - Horizontal reference-price level, technical overlays, CW modes (BOTH / RELATIVE)
- * - Incremental live-quote updates (CurrentBarBuilder)
+ * - 1D: today's candle follows the live quote between history refetches (live_session_bar)
  *
  * Viewport / update strategy (see the bottom-panel chart QA):
  * - The chart is BUILT WITH its data in one effect, keyed on a coarse signature
@@ -48,8 +48,8 @@ import {
   calculateVWAP,
   calculateNormalizedRelative,
 } from "@/domain/historical/technical_overlays";
+import { withLiveSessionBar } from "@/domain/historical/live_session_bar";
 import { RotateCcw } from "lucide-react";
-import { RealtimeValue } from "./realtime_value";
 
 /** Initial px between bars; the visible-range call below recomputes it to frame N bars. */
 const BAR_SPACING = 12;
@@ -114,9 +114,14 @@ export function TradingChart({
   const overlayList = useMemo(() => Array.from(overlays ?? []), [overlays]);
   const overlayKey = overlayList.slice().sort().join(",");
 
-  // Bars are canonical backend bars. Quotes never synthesize OHLC or copy the
-  // session-total volume into an interval candle.
-  const effectiveCwBars = bars;
+  // Bars are canonical backend bars. On 1D the live quote's session aggregates ARE
+  // today's bar, so the last candle follows the tape between the once-a-minute history
+  // refetches instead of trailing it. Intraday intervals are never patched: copying
+  // session high/low/volume into a 5-minute candle would fabricate it.
+  const effectiveCwBars = useMemo(
+    () => (interval === "1D" ? withLiveSessionBar(bars, liveQuote) : bars),
+    [bars, liveQuote, interval],
+  );
 
   const effectiveUndBars = useMemo(() => {
     if (!underlyingBars || underlyingBars.length === 0) return [];
@@ -124,8 +129,8 @@ export function TradingChart({
       if ("open" in b) return b as HistoricalBar;
       return { symbol: b.symbol, date: b.date, open: b.close, high: b.close, low: b.close, close: b.close, volume: 0 };
     });
-    return normalizedUnd;
-  }, [underlyingBars]);
+    return interval === "1D" ? withLiveSessionBar(normalizedUnd, underlyingLiveQuote) : normalizedUnd;
+  }, [underlyingBars, underlyingLiveQuote, interval]);
 
   // Fresh-every-render mirrors so the build effect (keyed on a coarse signature) can
   // read the current bars without listing the array refs as deps.
@@ -165,8 +170,6 @@ export function TradingChart({
       changePercent: chgPct,
     };
   }, [hoveredReadout, latestBar, mode, underlyingSymbol, symbol, interval]);
-  const activeLiveQuote = mode === "UNDERLYING" ? underlyingLiveQuote : liveQuote;
-  const livePulses = hoveredReadout ? undefined : activeLiveQuote?.realtimePulses;
 
   const formatVnd = (val: number | null | undefined): string => {
     if (val === null || val === undefined || isNaN(val)) return "—";
@@ -479,10 +482,10 @@ export function TradingChart({
               style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--muted-foreground)", fontSize: "10.5px" }}
               className="tnum"
             >
-              <span>O <RealtimeValue as="strong" style={{ color: "var(--foreground)" }} pulse={livePulses?.openPrice}>{formatVnd(activeReadout.open)}</RealtimeValue></span>
-              <span>H <RealtimeValue as="strong" style={{ color: "var(--foreground)" }} pulse={livePulses?.highPrice}>{formatVnd(activeReadout.high)}</RealtimeValue></span>
-              <span>L <RealtimeValue as="strong" style={{ color: "var(--foreground)" }} pulse={livePulses?.lowPrice}>{formatVnd(activeReadout.low)}</RealtimeValue></span>
-              <span>C <RealtimeValue as="strong" style={{ color: "var(--foreground)" }} pulse={livePulses?.lastPrice}>{formatVnd(activeReadout.close)}</RealtimeValue></span>
+              <span>O <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.open)}</strong></span>
+              <span>H <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.high)}</strong></span>
+              <span>L <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.low)}</strong></span>
+              <span>C <strong style={{ color: "var(--foreground)" }}>{formatVnd(activeReadout.close)}</strong></span>
               {activeReadout.change !== null && activeReadout.changePercent !== null && (
                 <span
                   title="Bar change: close − open"
@@ -495,17 +498,13 @@ export function TradingChart({
                         : "var(--subtle-foreground)",
                   }}
                 >
-                  <RealtimeValue pulse={livePulses?.priceChange}>
-                    {formatVnd(Math.abs(activeReadout.change))}
-                  </RealtimeValue>{" "}(
-                  <RealtimeValue pulse={livePulses?.priceChangePercent}>
-                    {Math.abs(activeReadout.changePercent * 100).toFixed(2)}%
-                  </RealtimeValue>)
+                  {formatVnd(Math.abs(activeReadout.change))} (
+                  {Math.abs(activeReadout.changePercent * 100).toFixed(2)}%)
                 </span>
               )}
 
               {activeReadout.volume !== null && (
-                <span>V <RealtimeValue as="strong" style={{ color: "var(--foreground)" }} pulse={livePulses?.totalVolume}>{formatVol(activeReadout.volume)}</RealtimeValue></span>
+                <span>V <strong style={{ color: "var(--foreground)" }}>{formatVol(activeReadout.volume)}</strong></span>
               )}
             </div>
           )}
