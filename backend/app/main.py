@@ -330,16 +330,21 @@ async def lifespan(app: FastAPI):
 
     async def _refresh_realtime_universe() -> None:
         interval = max(300.0, float(settings.REALTIME_UNIVERSE_REFRESH_SECONDS))
+        # A universe that came up DEGRADED (the curated 30-symbol fallback) is retried within
+        # minutes rather than on the hourly cadence: twice on 2026-09-29 the listing failed
+        # in a new container's first seconds and the terminal ran on 30 of 359 symbols.
+        retry = max(60.0, float(settings.REALTIME_UNIVERSE_DEGRADED_RETRY_SECONDS))
         last_session = reference_session_date().isoformat()
-        next_refresh = asyncio.get_running_loop().time() + interval
+        last_attempt = asyncio.get_running_loop().time()
         while True:
             await asyncio.sleep(30.0)
             current_session = reference_session_date().isoformat()
             now = asyncio.get_running_loop().time()
-            if current_session == last_session and now < next_refresh:
+            degraded = subscription_manager.get_universe_health().get("status") != "OK"
+            if current_session == last_session and now - last_attempt < (retry if degraded else interval):
                 continue
             last_session = current_session
-            next_refresh = now + interval
+            last_attempt = now
             candidate = await resolve_default_research_universe(
                 instrument_registry,
                 provider=subscription_manager.provider,

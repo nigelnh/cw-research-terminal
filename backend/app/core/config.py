@@ -46,6 +46,14 @@ class Settings(BaseSettings):
         default=3600.0,
         description="Background refresh interval for current VN30 and covered-warrant listings",
     )
+    REALTIME_UNIVERSE_DEGRADED_RETRY_SECONDS: float = Field(
+        default=300.0,
+        description=(
+            "Refresh interval while the universe is DEGRADED (fell back to the curated list). "
+            "Twice on 2026-09-29 the listing call failed in a new container's first seconds, "
+            "the terminal ran on 30 symbols instead of 359, and the next attempt was an hour away."
+        ),
+    )
     MARKET_DATA_DEBOUNCE_MS: int = Field(default=300, description="Subscription debounce delay in milliseconds")
     VNSTOCK_ENABLED: bool = Field(default=True, description="Enable the Vnstock market-data adapter")
     VNSTOCK_API_KEY: str = Field(default="", description="Vnstock API key (server-side only; never returned or logged)")
@@ -291,12 +299,20 @@ class Settings(BaseSettings):
     # any window whose oldest date is >~365 days old returns HTTP 403. Request *span*
     # up to ~355 days is fine.
     INGEST_MAX_LOOKBACK_DAYS: int = Field(
-        default=360,
-        description="Oldest date a historical request may reach back to (account entitlement ~1 year; keep < 365)",
+        default=3700,
+        description=(
+            "Oldest date a historical request may reach back to, in days. Was 360: the FiinQuant "
+            "trial's ~1-year entitlement. vnstock's KBS source serves about ten years of daily "
+            "bars (HPG from 2016-05-25), and charts are now built from that depth."
+        ),
     )
     INGEST_MAX_CHUNK_SPAN_DAYS: int = Field(
-        default=350,
-        description="Maximum span of a single provider request window in calendar days (safely inside the observed ~355)",
+        default=4000,
+        description=(
+            "Maximum span of a single provider request window in calendar days. Was 350, inside "
+            "FiinQuant's observed ~355-day page. KBS returns a symbol's whole daily history in "
+            "one call, so a ten-year series is one request rather than eleven."
+        ),
     )
     INGEST_MAX_CONCURRENT_REQUESTS: int = Field(
         default=1,
@@ -365,8 +381,8 @@ class Settings(BaseSettings):
         default=400, description="Default requested span (days back from today) when from_date/to_date are omitted"
     )
     HISTORY_MAX_RANGE_DAYS: int = Field(
-        default=1500,
-        description="Hard cap on the calendar span of a single /api/market/history request (~4y; PG may hold more than the 360d provider horizon)",
+        default=4000,
+        description="Hard cap on the calendar span of a single /api/market/history request (~11y, the depth charts are built from)",
     )
     HISTORY_MAX_RESULT_BARS: int = Field(
         default=6000, description="Hard cap on rows returned by a single /api/market/history request"

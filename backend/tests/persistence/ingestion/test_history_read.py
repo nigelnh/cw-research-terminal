@@ -242,7 +242,11 @@ async def test_probed_but_missing_day_retries_only_within_the_recent_window(hist
     assert old_gap.isoformat() not in [b.date for b in bars2]
 
 
-async def test_C_old_range_outside_entitlement_makes_zero_provider_calls(history_service, fake_provider):
+async def test_C_old_range_outside_entitlement_makes_zero_provider_calls(history_service, fake_provider, monkeypatch):
+    # This test is about the entitlement clamp itself, so it pins the horizon it clamps at
+    # rather than inheriting the default (360 in the FiinQuant era, ~10 years for vnstock).
+    monkeypatch.setattr(settings, "INGEST_MAX_LOOKBACK_DAYS", 360)
+    monkeypatch.setattr(settings, "INGEST_MAX_CHUNK_SPAN_DAYS", 350)
     iid = await _seed_instrument("HPG")
     await _insert_bars(iid, _weekdays(_CUTOFF - timedelta(days=20), _CUTOFF))
     # request a range ~2 years old, absent from DB and outside the ~360d provider horizon

@@ -417,9 +417,12 @@ async def test_kbs_history_is_rescaled_to_raw_vnd(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_vci_equity_history_is_rescaled_and_marked_adjusted():
+async def test_adjusted_equity_history_comes_from_kbs_rescaled_and_marked_adjusted():
+    """KBS serves the restated series too (HPG 2025-12-01 is 23,654 on both, no HOSE tick),
+    and unlike VCI it is reachable from Railway. The label is ADJUSTED because that is what
+    the numbers are."""
     def fetch(symbol, source, start, end, interval):
-        assert source == "vci"
+        assert source == "kbs"
         return [{"time": "2026-09-07 07:00:00", "open": 21.8, "high": 22.15,
                  "low": 21.55, "close": 21.55, "volume": 19957800}]
 
@@ -430,7 +433,21 @@ async def test_vci_equity_history_is_rescaled_and_marked_adjusted():
     assert bars[0].close == 21550
     assert bars[0].adjusted is True
     assert bars[0].price_basis == "ADJUSTED"
-    assert bars[0].source == "VNSTOCK_VCI"
+    assert bars[0].source == "VNSTOCK_KBS"
+
+
+@pytest.mark.asyncio
+async def test_indices_still_come_from_vci():
+    sources = []
+
+    def fetch(symbol, source, start, end, interval):
+        sources.append(source)
+        return [{"time": "2026-09-07 07:00:00", "open": 1900, "high": 1910,
+                 "low": 1890, "close": 1905, "volume": 1}]
+
+    p = provider(history_fetcher=fetch)
+    await p.get_historical_bars("VN30", from_date="2026-09-07", to_date="2026-09-07", adjusted=False)
+    assert sources == ["vci"]
 
 
 @pytest.mark.asyncio
@@ -928,9 +945,9 @@ async def test_every_row_in_the_payload_carries_a_text_timestamp(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_refused_vci_series_does_not_block_kbs_chart_bars():
-    """RAW bars come from KBS and ADJUSTED from VCI. Vietcap refuses some Railway egress
-    outright; under one shared "history" scope each refusal blocked every KBS chart fill for
-    the next 60 seconds as well - the chart's series held hostage by an analytics series."""
+    """Indices come from VCI, everything the instrument chart reads from KBS. Vietcap refuses
+    some Railway egress outright; under one shared "history" scope each refusal blocked every
+    KBS chart fill for the next 60 seconds as well."""
     def fetch(symbol, source, start, end, interval):
         if source == "vci":
             raise ConnectionError("Failed to fetch data: 400 - Bad Request")
@@ -939,6 +956,6 @@ async def test_a_refused_vci_series_does_not_block_kbs_chart_bars():
 
     p = provider(history_fetcher=fetch)
     with pytest.raises(Exception):
-        await p.get_historical_bars("HPG", from_date="2026-09-07", to_date="2026-09-08", adjusted=True)
-    bars = await p.get_historical_bars("HPG", from_date="2026-09-07", to_date="2026-09-08", adjusted=False)
+        await p.get_historical_bars("VN30", from_date="2026-09-07", to_date="2026-09-08", adjusted=False)
+    bars = await p.get_historical_bars("HPG", from_date="2026-09-07", to_date="2026-09-08", adjusted=True)
     assert [bar.session_date for bar in bars] == ["2026-09-08"]
