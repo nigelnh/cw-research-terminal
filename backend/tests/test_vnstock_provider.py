@@ -6,7 +6,7 @@ from datetime import date, datetime
 
 import pytest
 
-from app.market_data.market_schemas import CanonicalQuote
+from app.market_data.market_schemas import CanonicalQuote, HistoricalNoDataError
 from app.market_data.market_state import MarketState
 from app.market_data.providers.ssi_realtime import parse_realtime_frame, subscription_message
 from app.market_data.providers.vnstock_provider import VnstockProvider
@@ -959,3 +959,23 @@ async def test_a_refused_vci_series_does_not_block_kbs_chart_bars():
         await p.get_historical_bars("VN30", from_date="2026-09-07", to_date="2026-09-08", adjusted=False)
     bars = await p.get_historical_bars("HPG", from_date="2026-09-07", to_date="2026-09-08", adjusted=True)
     assert [bar.session_date for bar in bars] == ["2026-09-08"]
+
+
+@pytest.mark.asyncio
+async def test_an_empty_answer_does_not_take_other_symbols_offline():
+    """The first warm-up on 2026-09-29: a warrant with an unknown listing date asked for a
+    pre-listing range, vnstock answered ValueError("Dữ liệu trống ..."), and `_call` recorded
+    that as upstream_unavailable - blocking the whole history scope for 60 seconds. Every
+    symbol after it failed as TRANSPORT: 33 warrants and 13 of 31 stock restatements."""
+    def fetch(symbol, source, start, end, interval):
+        if symbol == "CFPT2621":
+            raise ValueError("Dữ liệu trống cho mã CFPT2621 với interval 1D.")
+        return [{"time": "2026-09-08 07:00:00", "open": 22, "high": 23,
+                 "low": 21, "close": 22, "volume": 2}]
+
+    p = provider(history_fetcher=fetch)
+    with pytest.raises(HistoricalNoDataError):
+        await p.get_historical_bars("CFPT2621", from_date="2025-08-25", to_date="2025-09-19", adjusted=False)
+    bars = await p.get_historical_bars("HPG", from_date="2026-09-07", to_date="2026-09-08", adjusted=True)
+    assert [bar.session_date for bar in bars] == ["2026-09-08"]
+    assert p.get_health()["request_failure_count"] == 0, "an answer is not a failure"
