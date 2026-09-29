@@ -12,6 +12,18 @@ pytest-asyncio>=0.23.0,<1.0.0
 
 # Market data provider. vnai is required by Vnstock's public decorators and API-key
 # entitlement/rate-limit layer; Sponsor-only packages are deliberately not runtime deps.
+#
+# Both are served from vendor/ rather than PyPI. Upstream deleted them from PyPI between
+# 2026-09-23 and 2026-09-24 - the index still holds the names but reports zero versions and
+# zero files, and pypi.org/pypi/vnai/json answers 404 - so `pip install` stopped resolving
+# them and took the nightly workflows and, more seriously, every Railway image rebuild with
+# it. Installing from the upstream git tag does not work either: vnstock v4.0.7 fails to
+# build from source and vnai has no public repository at all. These are the exact wheels
+# this project has always installed, recovered intact from the pip cache:
+#   vnstock 4.0.7  sha256 5b73bcaacb9edc93ef7fc4f5c91924a2801929bf501c57faa5656ce1aa5257bb
+#   vnai    2.5.9  sha256 923270b10a354e988493969c939bf8ca70cfaea6e999ec83641b30adb20500fe
+# Every other dependency, vnstock's own included, still resolves from PyPI as before.
+--find-links ./vendor
 vnstock==4.0.7
 vnai==2.5.9
 
