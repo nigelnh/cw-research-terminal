@@ -924,3 +924,21 @@ async def test_every_row_in_the_payload_carries_a_text_timestamp(monkeypatch):
             assert stamp is None or isinstance(stamp, str), (
                 f"{section}/{row.get('symbol')}: as_of is {type(stamp).__name__}"
             )
+
+
+@pytest.mark.asyncio
+async def test_a_refused_vci_series_does_not_block_kbs_chart_bars():
+    """RAW bars come from KBS and ADJUSTED from VCI. Vietcap refuses some Railway egress
+    outright; under one shared "history" scope each refusal blocked every KBS chart fill for
+    the next 60 seconds as well - the chart's series held hostage by an analytics series."""
+    def fetch(symbol, source, start, end, interval):
+        if source == "vci":
+            raise ConnectionError("Failed to fetch data: 400 - Bad Request")
+        return [{"time": "2026-09-08 07:00:00", "open": 22, "high": 23,
+                 "low": 21, "close": 22, "volume": 2}]
+
+    p = provider(history_fetcher=fetch)
+    with pytest.raises(Exception):
+        await p.get_historical_bars("HPG", from_date="2026-09-07", to_date="2026-09-08", adjusted=True)
+    bars = await p.get_historical_bars("HPG", from_date="2026-09-07", to_date="2026-09-08", adjusted=False)
+    assert [bar.session_date for bar in bars] == ["2026-09-08"]

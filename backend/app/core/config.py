@@ -347,6 +347,16 @@ class Settings(BaseSettings):
         default=25.0,
         description="Max seconds a concurrent cache-miss waits on the per-stream fill lock before serving the current DB result",
     )
+    HISTORY_REQUEST_FILL_WAIT_SECONDS: float = Field(
+        default=3.0,
+        description=(
+            "How long a chart request waits for a gap-fill before answering with what "
+            "PostgreSQL already holds. The fill is not cancelled: it keeps running in the "
+            "background and the next request is served the completed range. Was effectively "
+            "the 25s lock wait, so an uncovered chart blocked for 25s and then got the partial "
+            "anyway."
+        ),
+    )
     HISTORY_GAPFILL_FAILURE_COOLDOWN_SECONDS: float = Field(
         default=120.0,
         description="After a failed gap-fill for a stream, suppress further fill attempts for this long (thundering-herd guard)",

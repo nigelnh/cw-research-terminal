@@ -1046,7 +1046,12 @@ class VnstockProvider(MarketDataProvider):
         use_adjusted = bool(adjusted and not _is_cw(sym) and not _is_index(sym) and interval == "1D")
         source_name = "vci" if use_adjusted or _is_index(sym) else "kbs"
         try:
-            rows = _records(await self._call("history", self._history_fetcher, sym, source_name, start, end, interval))
+            # Scoped by source. RAW bars come from KBS and ADJUSTED from VCI, and Vietcap refuses
+            # some Railway egress outright; under one shared "history" scope each refusal
+            # blocked every KBS chart fill for the next 60 seconds as well.
+            rows = _records(await self._call(
+                f"history_{source_name}", self._history_fetcher, sym, source_name, start, end, interval
+            ))
         except Exception as exc:
             code = classify_provider_error(exc)
             if code == "AUTH_REQUIRED":
