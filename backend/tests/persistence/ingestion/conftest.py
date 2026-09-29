@@ -7,6 +7,7 @@ for the provider and records every request.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -25,12 +26,18 @@ class FakeHistoricalProvider:
     whose date is within the inclusive request window. Hooks:
       * ``fail_symbol[symbol] = Exception``  -> always raised for that symbol
       * ``raise_on_call[n] = Exception``     -> raised on the n-th (0-based) call, once
+      * ``fail_adjusted[symbol] = Exception`` -> raised for that symbol's ADJUSTED series only
+        (Vietcap/VCI serves ADJUSTED and refuses some Railway egress; KBS/RAW does not)
+      * ``hold[symbol] = asyncio.Event()``    -> the answer waits until the event is set, so
+        a test decides exactly when a slow upstream replies
     """
 
     bars: dict[str, dict[str, HistoricalBar]] = field(default_factory=dict)
     calls: list[tuple] = field(default_factory=list)
     fail_symbol: dict[str, Exception] = field(default_factory=dict)
     raise_on_call: dict[int, Exception] = field(default_factory=dict)
+    fail_adjusted: dict[str, Exception] = field(default_factory=dict)
+    hold: dict[str, asyncio.Event] = field(default_factory=dict)
 
     def seed_daily(
         self, symbol: str, start: date, end: date, *, base: float = 100.0, step: float = 0.25,
@@ -64,6 +71,10 @@ class FakeHistoricalProvider:
         self.calls.append((symbol.upper(), timeframe, from_date, to_date, adjusted))
         if symbol.upper() in self.fail_symbol:
             raise self.fail_symbol[symbol.upper()]
+        if adjusted and symbol.upper() in self.fail_adjusted:
+            raise self.fail_adjusted[symbol.upper()]
+        if symbol.upper() in self.hold:
+            await self.hold[symbol.upper()].wait()
         if n in self.raise_on_call:
             exc = self.raise_on_call.pop(n)
             raise exc

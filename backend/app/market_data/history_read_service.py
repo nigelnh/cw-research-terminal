@@ -20,6 +20,7 @@ The wire shape is identical regardless of source. No internal DB fields are expo
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -84,6 +85,8 @@ class HistoryReadService:
         self._provider = None  # HistoricalBarProvider - always set
         self._ingestion: IngestionService | None = None
         self._fill_failure_until: dict[str, float] = {}
+        #: One background gap-fill per stream, shared by every request that needs it.
+        self._inflight_fills: dict[str, asyncio.Task] = {}
         self._counters: dict[str, int] = {
             "db_hit_reads": 0,
             "db_partial_reads": 0,
@@ -96,6 +99,7 @@ class HistoryReadService:
             "gap_fills_suppressed_cooldown": 0,
             "gap_fill_lock_timeouts": 0,
             "gap_fills_rejected_saturated": 0,
+            "fills_continued_in_background": 0,
         }
         self._last_fill: dict | None = None
 
@@ -122,6 +126,9 @@ class HistoryReadService:
     def reset(self) -> None:
         self._engine = self._sm = self._ingestion = None
         self._fill_failure_until.clear()
+        for task in self._inflight_fills.values():
+            task.cancel()
+        self._inflight_fills.clear()
 
     def ingestion_service(self) -> IngestionService | None:
         return self._ingestion
@@ -359,37 +366,75 @@ class HistoryReadService:
             self._counters["db_partial_reads"] += 1
             return await self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
-        # HTTP-layer global cap on how many DISTINCT streams may trigger a provider
-        # gap-fill at once. This is SEPARATE from ingestion's own request throttling /
-        # per-stream advisory lock - it just stops a burst of many-symbol cache misses
-        # from each occupying a worker on an upstream call. Saturated -> serve the DB
-        # partial now (graceful), never queue.
-        from app.security.concurrency import GateTimeout, history_gapfill_gate
-
-        self._counters["gap_fills_attempted"] += 1
+        # The request waits a short, bounded time for the fill and then answers with what
+        # PostgreSQL holds. The fill itself is not cancelled - it runs to completion in the
+        # background, shared by every request for the same stream - so the next request is
+        # served the complete range. Before, the request held on for up to the 25s lock
+        # wait and was usually served the partial anyway.
+        fill = self._background_fill(
+            stream_key, sym, tf, price_basis,
+            assessment.fill_from or req_from, assessment.fill_to or req_to,
+        )
         try:
-            # Wait for a slot up to the same budget a concurrent miss already spends waiting
-            # on the per-stream advisory lock; a genuine flood beyond that serves the DB
-            # partial rather than piling upstream calls.
-            async with history_gapfill_gate.acquire(
-                timeout=float(settings.HISTORY_GAPFILL_LOCK_WAIT_SECONDS)
-            ):
-                outcome = await self._ingestion.fill_range(
-                    sym, timeframe=tf, price_basis=price_basis,
-                    from_date=assessment.fill_from or req_from, to_date=assessment.fill_to or req_to,
-                )
-            self._record_fill(stream_key, outcome)
-        except GateTimeout:
-            self._counters["gap_fills_rejected_saturated"] += 1
-            self._counters["db_partial_reads"] += 1
-            logger.info(
-                "history: %s gap-fill deferred (global concurrency cap %d reached); serving DB partial",
-                stream_key, settings.HISTORY_MAX_CONCURRENT_GAPFILLS,
+            await asyncio.wait_for(
+                asyncio.shield(fill), timeout=float(settings.HISTORY_REQUEST_FILL_WAIT_SECONDS)
             )
+        except asyncio.TimeoutError:
+            self._counters["fills_continued_in_background"] += 1
+            self._counters["db_partial_reads"] += 1
+            logger.info("history: %s fill still running; serving DB partial now", stream_key)
             return await self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
 
         rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
         return await self._session_wrapped(rows, sym, tf, req_from, req_to, adjusted, price_basis)
+
+    def _background_fill(
+        self, stream_key: str, sym: str, tf: str, price_basis: str, fill_from: date, fill_to: date,
+    ) -> asyncio.Task:
+        """The fill for one stream: started once, shared by every request that needs it."""
+        task = self._inflight_fills.get(stream_key)
+        if task is not None and not task.done():
+            return task
+        task = asyncio.create_task(self._run_fill(stream_key, sym, tf, price_basis, fill_from, fill_to))
+        self._inflight_fills[stream_key] = task
+
+        def _forget(done: asyncio.Task, key: str = stream_key) -> None:
+            if self._inflight_fills.get(key) is done:
+                del self._inflight_fills[key]
+
+        task.add_done_callback(_forget)
+        return task
+
+    async def _run_fill(
+        self, stream_key: str, sym: str, tf: str, price_basis: str, fill_from: date, fill_to: date,
+    ) -> None:
+        # HTTP-layer global cap on how many DISTINCT streams may run a provider gap-fill at
+        # once. This is SEPARATE from ingestion's own request throttling / per-stream
+        # advisory lock - it just stops a burst of many-symbol cache misses from each
+        # occupying a worker on an upstream call. A fill that cannot get a slot within the
+        # lock budget is dropped; the next request for the stream starts another.
+        from app.security.concurrency import GateTimeout, history_gapfill_gate
+
+        self._counters["gap_fills_attempted"] += 1
+        try:
+            async with history_gapfill_gate.acquire(
+                timeout=float(settings.HISTORY_GAPFILL_LOCK_WAIT_SECONDS)
+            ):
+                outcome = await self._ingestion.fill_range(
+                    sym, timeframe=tf, price_basis=price_basis, from_date=fill_from, to_date=fill_to,
+                )
+            self._record_fill(stream_key, outcome)
+        except GateTimeout:
+            self._counters["gap_fills_rejected_saturated"] += 1
+            logger.info(
+                "history: %s gap-fill deferred (global concurrency cap %d reached)",
+                stream_key, settings.HISTORY_MAX_CONCURRENT_GAPFILLS,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - nobody awaits a background fill; say so here
+            self._counters["gap_fills_failed"] += 1
+            logger.exception("history: %s background gap-fill failed", stream_key)
 
     # ------------------------------------------------------------------ #
     async def warm_universe(self, symbols: list[str], *, timeframe: str = "1d") -> dict:
@@ -401,43 +446,121 @@ class HistoryReadService:
         viewer of each symbol each day was paying a 20s wait and then being served a DB
         partial anyway.
 
-        Deliberately sequential and unhurried. It reuses `fill_range`, so a stream already
-        covered costs one DB read and no provider call, and the shared rate limiter paces
-        everything else. Runs only while the exchange is closed, so it never competes with
-        the live poller for the same quota.
+        Two phases, in this order:
+
+        1. RAW for every instrument - the basis the instrument chart reads, served by KBS.
+           This pass used to warm ADJUSTED for stocks, so even had it ever run, every stock
+           chart would still have gap-filled on the request.
+        2. ADJUSTED for stocks - what the volatility analytics read, served by VCI. Last,
+           and best effort: Vietcap refuses some Railway egress outright, and nothing in
+           that phase may cost the chart its bars.
+
+        Symbols with no ``instruments`` row are registered first; they used to be skipped
+        without a word. Deliberately sequential and unhurried. It reuses `fill_range`, so a
+        stream already covered costs one DB read and no provider call, and the shared rate
+        limiter paces everything else. Runs only while the exchange is closed, so it never
+        competes with the live poller for the same quota.
         """
         if self._mode() != "postgres_first" or self._ingestion is None or self._sm is None:
             return {"skipped": "not postgres_first"}
         tf = normalize_timeframe(timeframe)
         req_from, req_to = self._resolve_window(None, None, tf)
+        wanted = [s.strip().upper() for s in symbols if s and s.strip()]
+
+        registered = await self._register_missing(wanted)
+
+        instruments = []
+        async with self._sm() as session:
+            repo = InstrumentRepository(session)
+            for sym in wanted:
+                inst = await repo.get_by_symbol(sym)
+                if inst is not None:
+                    instruments.append(inst)
+
+        raw = await self._warm_basis(instruments, tf, "RAW", req_from, req_to)
+        adjusted = await self._warm_basis(
+            [i for i in instruments if i.instrument_type == "STOCK"], tf, "ADJUSTED", req_from, req_to
+        )
+        result = {
+            "requested": len(symbols),
+            "registered": len(registered),
+            "unresolved": len(wanted) - len(instruments),
+            "raw": raw,
+            "adjusted": adjusted,
+        }
+        logger.info("history warm pass complete: %s", result)
+        return result
+
+    async def _warm_basis(self, instruments, tf: str, price_basis: str, req_from: date, req_to: date) -> dict:
         filled = covered = failed = 0
-        for sym in symbols:
-            sym = sym.strip().upper()
-            if not sym:
-                continue
+        for inst in instruments:
             try:
-                async with self._sm() as session:
-                    inst = await InstrumentRepository(session).get_by_symbol(sym)
-                if inst is None:
-                    continue
-                price_basis = "RAW" if inst.instrument_type == "CW" else "ADJUSTED"
                 rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
                 assessment = await self._assess(inst, tf, price_basis, req_from, req_to, rows)
                 if assessment.covered:
                     covered += 1
                     continue
-                await self._ingestion.fill_range(
-                    sym, timeframe=tf, price_basis=price_basis,
+                outcome = await self._ingestion.fill_range(
+                    inst.symbol, timeframe=tf, price_basis=price_basis,
                     from_date=assessment.fill_from or req_from,
                     to_date=assessment.fill_to or req_to,
                 )
-                filled += 1
+                # fill_range never raises; a refused upstream comes back as an outcome, and
+                # counting every return as "filled" reported failures as successes.
+                if outcome.status == "FILLED":
+                    filled += 1
+                elif outcome.status == "ALREADY_COVERED":
+                    covered += 1
+                else:
+                    failed += 1
             except Exception as err:  # noqa: BLE001 - one symbol must not end the pass
                 failed += 1
-                logger.warning("history warm: %s skipped (%s)", sym, type(err).__name__)
-        result = {"requested": len(symbols), "filled": filled, "already_covered": covered, "failed": failed}
-        logger.info("history warm pass complete: %s", result)
-        return result
+                logger.warning("history warm: %s %s skipped (%s)", inst.symbol, price_basis, type(err).__name__)
+        return {"filled": filled, "already_covered": covered, "failed": failed}
+
+    async def _register_missing(self, symbols: list[str]) -> list[str]:
+        """Give every universe symbol that has no ``instruments`` row one, and return them.
+
+        The table is seeded from the canonical registry, which knew 28 active warrants while
+        the live universe held 328 - so most of today's warrants had no row, and both this
+        pass and the read path skipped them: 146 "not in instruments" reads in six minutes
+        of one evening's logs, each one a provider-direct call.
+
+        Only ABSENT symbols are written. ``InstrumentRepository.upsert`` overwrites every
+        column on conflict, so re-upserting a seeded row from what little is known here
+        would erase its issuer, lifecycle and trading dates.
+        """
+        from app.instruments.instrument_registry import instrument_registry
+        from app.persistence.ingestion.seed import KNOWN_INDICES, _warrant_upsert
+        from app.persistence.repositories.instrument_repository import InstrumentUpsert
+
+        indices = dict(KNOWN_INDICES)
+        registered: list[str] = []
+        async with self._sm() as session:
+            async with session.begin():
+                repo = InstrumentRepository(session)
+                missing = [s for s in dict.fromkeys(symbols) if await repo.get_by_symbol(s) is None]
+                # Stocks before warrants, so a warrant's underlying resolves in the same pass.
+                for sym in sorted(missing, key=lambda s: (len(s) == 8 and s.startswith("C"), s)):
+                    if len(sym) == 8 and sym.startswith("C"):
+                        spec = await instrument_registry.get_instrument(sym)
+                        upsert = _warrant_upsert(spec) if spec is not None else InstrumentUpsert(
+                            symbol=sym, instrument_type="CW", metadata={"registered_by": "history_warm"},
+                        )
+                    elif sym in indices:
+                        upsert = InstrumentUpsert(
+                            symbol=sym, instrument_type="INDEX", exchange=indices[sym],
+                            metadata={"registered_by": "history_warm"},
+                        )
+                    else:
+                        upsert = InstrumentUpsert(
+                            symbol=sym, instrument_type="STOCK", metadata={"registered_by": "history_warm"},
+                        )
+                    await repo.upsert(upsert)
+                    registered.append(sym)
+        if registered:
+            logger.info("history warm: registered %d new instruments", len(registered))
+        return registered
 
     async def _provider_direct_or_observed(
         self, sym, timeframe, from_date, to_date, adjusted, tf, req_from, req_to

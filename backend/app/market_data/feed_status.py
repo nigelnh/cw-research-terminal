@@ -153,7 +153,7 @@ class FeedAccess:
     def success(self, scope: str) -> None:
         with self._lock:
             self._errors.pop(scope, None)
-            if scope in ("history", "overview", "session_snapshot", "stream"):
+            if scope in ("history", "overview", "session_snapshot", "stream") or scope.startswith("history_"):
                 self._errors.pop("market_data", None)
                 self._errors.pop("authentication", None)
 
