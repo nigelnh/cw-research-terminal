@@ -208,3 +208,19 @@ async def test_warrants_are_never_warmed_on_an_adjusted_basis(history_service, f
     assert result["stocks_adjusted"] == {"restated": 0, "failed": 0, "bars_written": 0}
     assert result["warrants_raw"]["filled"] == 1
     assert all(call[4] is False for call in fake_provider.calls)
+
+
+async def test_a_full_ten_year_series_is_restated_in_one_go(history_service, fake_provider):
+    """Production volume, not a sample. Ten years is ~2,600 daily bars in ONE provider call;
+    written as one INSERT that is ~34,000 bind parameters, past Postgres's 32,767. Every
+    stock with that much history failed its restatement on 2026-09-29 while the tests,
+    seeded with a few hundred bars, passed."""
+    await _seed_instrument("VNM")
+    start = _CUTOFF - timedelta(days=3690)
+    fake_provider.seed_daily("VNM", start, _CUTOFF)
+
+    result = await history_service.warm_universe(["VNM"])
+    assert result["stocks_adjusted"]["restated"] == 1, result
+    stored = await _closes("VNM", "ADJUSTED")
+    assert len(stored) > 2520, "a series longer than one statement's parameter budget"
+    assert len(stored) == len(fake_provider.bars["VNM"])

@@ -20,6 +20,9 @@ from app.persistence.market_time import (
 from app.persistence.models import Instrument, MarketBar
 from app.persistence.rows import BarCoverage, BarRow, BarUpsert, UpsertResult
 
+#: Postgres's limit on bind parameters in one statement (asyncpg enforces it client-side).
+_PG_MAX_BIND_PARAMS = 32767
+
 _INSERTED_FLAG = literal_column("(xmax = 0)")  # true on INSERT, false on ON CONFLICT UPDATE
 
 
@@ -105,6 +108,15 @@ class MarketBarRepository:
         for row in payload:
             deduped[(row["instrument_id"], row["timeframe"], row["ts"], row["price_basis"])] = row
         rows = list(deduped.values())
+
+        # Postgres (and asyncpg) bind at most 32,767 parameters per statement, and every
+        # column of every row is one. With 13 columns that is 2,520 rows - but the configured
+        # chunk was 5,000. It never mattered while ingestion fetched 350-day chunks (~240
+        # bars); a ten-year series fetched in one call is ~2,600, and every stock with that
+        # much history failed its restatement ("the number of query arguments cannot exceed
+        # 32767") while the newer listings, with fewer bars, went through. The ceiling is a
+        # property of the database, so it caps whatever the setting says.
+        chunk = min(chunk, max(1, (_PG_MAX_BIND_PARAMS - 64) // max(1, len(rows[0]))))
 
         inserted = 0
         updated = 0
