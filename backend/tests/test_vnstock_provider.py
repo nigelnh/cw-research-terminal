@@ -979,3 +979,36 @@ async def test_an_empty_answer_does_not_take_other_symbols_offline():
     bars = await p.get_historical_bars("HPG", from_date="2026-09-07", to_date="2026-09-08", adjusted=True)
     assert [bar.session_date for bar in bars] == ["2026-09-08"]
     assert p.get_health()["request_failure_count"] == 0, "an answer is not a failure"
+
+
+def test_index_groups_come_from_kbs_and_fall_back_to_vci(monkeypatch):
+    """On 2026-09-30 VCI failed from everywhere around 06:00 ICT and the realtime universe
+    sat on its 30-symbol fallback through three restarts, while KBS served the same groups
+    (its CW list matched VCI's 328 exactly)."""
+    import vnstock.explorer.kbs.listing as kbs
+    import vnstock.explorer.vci.listing as vci
+    asked = []
+
+    class Kbs:
+        def __init__(self, **_):
+            pass
+
+        def symbols_by_group(self, group, **_):
+            asked.append(("kbs", group))
+            if group == "VNFINLEAD":
+                raise ValueError("Nhóm không hợp lệ.")
+            return ["S1", "S2"]
+
+    class Vci:
+        def __init__(self, **_):
+            pass
+
+        def symbols_by_group(self, group, **_):
+            asked.append(("vci", group))
+            return ["V1"]
+
+    monkeypatch.setattr(kbs, "Listing", Kbs)
+    monkeypatch.setattr(vci, "Listing", Vci)
+    assert VnstockProvider._fetch_group_sync("VN30") == ["S1", "S2"]
+    assert VnstockProvider._fetch_group_sync("VNFINLEAD") == ["V1"]
+    assert asked == [("kbs", "VN30"), ("kbs", "VNFINLEAD"), ("vci", "VNFINLEAD")]

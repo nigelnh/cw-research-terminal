@@ -691,9 +691,21 @@ class VnstockProvider(MarketDataProvider):
 
     @staticmethod
     def _fetch_group_sync(group: str) -> Any:
-        from vnstock.explorer.vci.listing import Listing
+        # KBS first. It serves the VN30 and covered-warrant groups - the CW list matched
+        # VCI's 328 symbols exactly - and it is reachable when Vietcap is not: VCI refuses
+        # some Railway egress, and around 06:00 ICT on 2026-09-30 it failed from everywhere,
+        # leaving the realtime universe on its 30-symbol fallback through three restarts.
+        # VCI stays the fallback for groups KBS does not carry (VNFINLEAD, VNDIAMOND). The
+        # universe keeps its VNSTOCK_VCI_CURRENT_GROUPS identifier; it names the snapshot
+        # kind, not the vendor that answered.
+        from vnstock.explorer.kbs.listing import Listing as KbsListing
 
-        return Listing(show_log=False).symbols_by_group(group=group, show_log=False)
+        try:
+            return KbsListing(show_log=False).symbols_by_group(group=group, show_log=False)
+        except Exception:
+            from vnstock.explorer.vci.listing import Listing as VciListing
+
+            return VciListing(show_log=False).symbols_by_group(group=group, show_log=False)
 
     @staticmethod
     def _fetch_fundamentals_sync(symbol: str) -> Any:
