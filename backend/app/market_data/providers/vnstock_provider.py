@@ -631,6 +631,17 @@ class VnstockProvider(MarketDataProvider):
                 result = await asyncio.to_thread(self._silenced_sync_call, func, *args)
             except asyncio.CancelledError:
                 raise
+            except ValueError:
+                # vnstock raises ValueError for "no rows for this symbol and window" and for a
+                # parameter it will not accept - the upstream answered, so this is not an
+                # outage. It used to be recorded as upstream_unavailable, which blocks the
+                # whole scope for 60 seconds: every warrant with an unknown listing date asked
+                # for a pre-listing range, got the empty answer, and took every other symbol's
+                # KBS history offline for a minute. The first warm-up on 2026-09-29 lost 13 of
+                # 31 stock restatements and 33 warrants to that cascade. Callers still see the
+                # ValueError and classify it (NO_DATA for history).
+                self._access.success(scope)
+                raise
             except Exception as exc:
                 self._request_failures += 1
                 self._last_error_code = self._access.record(scope, exc)
