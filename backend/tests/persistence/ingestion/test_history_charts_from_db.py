@@ -94,23 +94,85 @@ async def test_a_fast_fill_is_still_answered_in_full(history_service, fake_provi
 # --------------------------------------------------------------------------- #
 # The warm pass fills what the chart reads, for every symbol in the universe
 # --------------------------------------------------------------------------- #
+async def _closes(symbol: str, price_basis: str) -> dict[str, float]:
+    async with session_scope() as s:
+        inst = await InstrumentRepository(s).get_by_symbol(symbol)
+        rows = await s.execute(
+            select(MarketBar.session_date, MarketBar.close).where(
+                MarketBar.instrument_id == inst.id, MarketBar.price_basis == price_basis
+            )
+        )
+        return {d.isoformat(): float(c) for d, c in rows.all()}
+
+
 async def test_the_warm_pass_warms_the_series_the_chart_reads(history_service, fake_provider):
-    """The chart asks for adjusted=false. The pass used to warm only ADJUSTED for stocks."""
+    """A stock chart reads the ADJUSTED series; after the pass it is served with no upstream call."""
     await _seed_instrument("HPG")
-    fake_provider.seed_daily("HPG", _CUTOFF - timedelta(days=500), _CUTOFF, adjusted=False)
+    fake_provider.seed_daily("HPG", _CUTOFF - timedelta(days=500), _CUTOFF)
 
     result = await history_service.warm_universe(["HPG"])
-    assert result["raw"]["filled"] == 1
-    assert await _bars("HPG", "RAW") > 0
+    assert result["stocks_adjusted"]["restated"] == 1
+    assert await _bars("HPG", "ADJUSTED") > 0
 
     fake_provider.calls.clear()
-    bars = await history_service.get_history("HPG", timeframe="1D", from_date=None, to_date=None, adjusted=False)
+    bars = await history_service.get_history("HPG", timeframe="1D", from_date=None, to_date=None, adjusted=True)
     assert bars and fake_provider.calls == [], "the chart was not served from the warmed table"
+
+
+async def test_the_restatement_reaches_years_back(history_service, fake_provider):
+    """Charts are built from the source's full depth, not the FiinQuant-era 360 days."""
+    await _seed_instrument("VNM")
+    fake_provider.seed_daily("VNM", _CUTOFF - timedelta(days=3 * 365), _CUTOFF)
+
+    await history_service.warm_universe(["VNM"])
+    oldest = min(await _closes("VNM", "ADJUSTED"))
+    assert date.fromisoformat(oldest) <= _CUTOFF - timedelta(days=3 * 365 - 7)
+
+
+async def test_restatement_overwrites_a_series_stored_on_an_old_basis(history_service, fake_provider):
+    """After a dividend the source restates every earlier close. A series that keeps the old
+    closes beside newly fetched ones shows a step on the ex-date that nobody traded."""
+    days = _weekdays(_CUTOFF - timedelta(days=60), _CUTOFF)
+    iid = await _seed_instrument("FPT")
+    await _insert_bars(iid, days, price_basis="ADJUSTED", base=100.0)   # yesterday's basis
+    # The ingestion cursor already claims the range, as it does in production: a plain
+    # backfill would skip it as covered, so only a forced re-fetch can restate it.
+    await _set_cursor(iid, _CUTOFF - timedelta(days=3700), _CUTOFF, price_basis="ADJUSTED")
+    fake_provider.seed_daily("FPT", days[0], _CUTOFF, base=90.0)          # the source, restated
+
+    await history_service.warm_universe(["FPT"])
+    stored = await _closes("FPT", "ADJUSTED")
+    restated = {iso: b.close for iso, b in fake_provider.bars["FPT"].items()}
+    assert stored[days[0].isoformat()] == restated[days[0].isoformat()]
+    assert all(stored[d] == restated[d] for d in stored if d in restated)
+
+
+async def test_a_refused_restatement_keeps_the_stored_series(history_service, fake_provider):
+    days = _weekdays(_CUTOFF - timedelta(days=30), _CUTOFF)
+    iid = await _seed_instrument("VPB")
+    await _insert_bars(iid, days, price_basis="ADJUSTED")
+    before = await _closes("VPB", "ADJUSTED")
+    fake_provider.fail_symbol["VPB"] = HistoricalTransportError("Failed to fetch data: 400 - Bad Request")
+
+    result = await history_service.warm_universe(["VPB"])
+    assert result["stocks_adjusted"] == {"restated": 0, "failed": 1, "bars_written": 0}
+    assert await _closes("VPB", "ADJUSTED") == before
+
+
+async def test_stocks_are_not_warmed_on_raw(history_service, fake_provider):
+    """The source has no as-traded history; filling RAW from it wrote restated closes into
+    the as-traded series wherever a gap predated the stock's latest corporate action."""
+    await _seed_instrument("MWG")
+    fake_provider.seed_daily("MWG", _CUTOFF - timedelta(days=200), _CUTOFF)
+
+    await history_service.warm_universe(["MWG"])
+    assert await _bars("MWG", "RAW") == 0
+    assert all(call[4] is True for call in fake_provider.calls)
 
 
 async def test_the_warm_pass_registers_symbols_it_has_never_seen(history_service, fake_provider):
     for sym in ("SHB", "CSHB2610"):
-        fake_provider.seed_daily(sym, _CUTOFF - timedelta(days=500), _CUTOFF, adjusted=False)
+        fake_provider.seed_daily(sym, _CUTOFF - timedelta(days=300), _CUTOFF)
 
     result = await history_service.warm_universe(["SHB", "CSHB2610"])
     assert result["registered"] == 2
@@ -120,7 +182,8 @@ async def test_the_warm_pass_registers_symbols_it_has_never_seen(history_service
         shb, cw = await repo.get_by_symbol("SHB"), await repo.get_by_symbol("CSHB2610")
     assert shb.instrument_type == "STOCK"
     assert cw.instrument_type == "CW"
-    assert await _bars("SHB", "RAW") > 0 and await _bars("CSHB2610", "RAW") > 0
+    assert await _bars("SHB", "ADJUSTED") > 0
+    assert await _bars("CSHB2610", "RAW") > 0
 
 
 async def test_registering_never_rewrites_a_seeded_instrument(history_service, fake_provider):
@@ -137,22 +200,11 @@ async def test_registering_never_rewrites_a_seeded_instrument(history_service, f
     assert (row.first_trade_date, row.last_trade_date) == (listed, expires)
 
 
-async def test_a_refused_adjusted_series_does_not_cost_the_chart_its_bars(history_service, fake_provider):
-    """VCI (ADJUSTED) refusing the host must leave the KBS (RAW) phase whole."""
-    await _seed_instrument("VPB")
-    fake_provider.seed_daily("VPB", _CUTOFF - timedelta(days=500), _CUTOFF, adjusted=False)
-    fake_provider.fail_adjusted["VPB"] = HistoricalTransportError("Failed to fetch data: 400 - Bad Request")
-
-    result = await history_service.warm_universe(["VPB"])
-    assert result["raw"] == {"filled": 1, "already_covered": 0, "failed": 0}
-    assert result["adjusted"]["failed"] == 1, "a refused fill must be reported as failed, not filled"
-    assert await _bars("VPB", "RAW") > 0
-
-
 async def test_warrants_are_never_warmed_on_an_adjusted_basis(history_service, fake_provider):
     await _seed_instrument("CFPT2614", "CW")
     fake_provider.seed_daily("CFPT2614", _CUTOFF - timedelta(days=200), _CUTOFF, adjusted=False)
 
     result = await history_service.warm_universe(["CFPT2614"])
-    assert result["adjusted"] == {"filled": 0, "already_covered": 0, "failed": 0}
+    assert result["stocks_adjusted"] == {"restated": 0, "failed": 0, "bars_written": 0}
+    assert result["warrants_raw"]["filled"] == 1
     assert all(call[4] is False for call in fake_provider.calls)

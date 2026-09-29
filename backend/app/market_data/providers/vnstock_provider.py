@@ -1041,10 +1041,19 @@ class VnstockProvider(MarketDataProvider):
         requested_start = date.fromisoformat(start[:10])
         requested_end = date.fromisoformat(end[:10])
 
-        # VCI's chart history is a restated adjusted series for equities. KBS is used for
-        # as-traded RAW data and every CW. Indices have no corporate-action basis.
+        # Neither source has an as-traded history. KBS and VCI both serve prices restated
+        # for every corporate action up to the day of the call, and agree to within 0.5% on
+        # almost every day (FPT on all of them). A past close matches what printed only
+        # after the stock's latest action: HPG's 2025-12-01 close is 23,654 on both today,
+        # which is no HOSE tick, while the tape printed 26,500 before the May 2026 dividends.
+        #
+        # So the ADJUSTED label is the truthful one for equities, and KBS serves it: it is
+        # reachable from Railway, whose egress Vietcap refuses often enough that VCI cannot
+        # be the chart's source, and it returns ~10 years in one call. VCI goes back to
+        # listing but is left for indices, which KBS does not carry. CWs carry no corporate
+        # actions, so their KBS series is as-traded and stays RAW.
         use_adjusted = bool(adjusted and not _is_cw(sym) and not _is_index(sym) and interval == "1D")
-        source_name = "vci" if use_adjusted or _is_index(sym) else "kbs"
+        source_name = "vci" if _is_index(sym) else "kbs"
         try:
             # Scoped by source. RAW bars come from KBS and ADJUSTED from VCI, and Vietcap refuses
             # some Railway egress outright; under one shared "history" scope each refusal

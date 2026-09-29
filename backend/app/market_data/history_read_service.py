@@ -446,14 +446,17 @@ class HistoryReadService:
         viewer of each symbol each day was paying a 20s wait and then being served a DB
         partial anyway.
 
-        Two phases, in this order:
+        Two phases, one per kind of series the chart reads:
 
-        1. RAW for every instrument - the basis the instrument chart reads, served by KBS.
-           This pass used to warm ADJUSTED for stocks, so even had it ever run, every stock
-           chart would still have gap-filled on the request.
-        2. ADJUSTED for stocks - what the volatility analytics read, served by VCI. Last,
-           and best effort: Vietcap refuses some Railway egress outright, and nothing in
-           that phase may cost the chart its bars.
+        1. Warrants, RAW - a CW has no corporate actions, so its series is as-traded and
+           only its gaps need filling.
+        2. Stocks, ADJUSTED, re-fetched whole and overwritten (``_restate_adjusted``). The
+           source only ever serves restated prices, so this is the series the chart can be
+           honest about, and restating nightly keeps it on one basis across ex-dates.
+
+        Stocks are no longer warmed on RAW: the only historical series the source has is the
+        restated one, and filling RAW gaps from it wrote adjusted closes into the as-traded
+        series wherever a gap predated the stock's latest corporate action.
 
         Symbols with no ``instruments`` row are registered first; they used to be skipped
         without a word. Deliberately sequential and unhurried. It reuses `fill_range`, so a
@@ -477,19 +480,52 @@ class HistoryReadService:
                 if inst is not None:
                     instruments.append(inst)
 
-        raw = await self._warm_basis(instruments, tf, "RAW", req_from, req_to)
-        adjusted = await self._warm_basis(
-            [i for i in instruments if i.instrument_type == "STOCK"], tf, "ADJUSTED", req_from, req_to
+        warrants = await self._warm_basis(
+            [i for i in instruments if i.instrument_type == "CW"], tf, "RAW", req_from, req_to
         )
+        stocks = await self._restate_adjusted([i for i in instruments if i.instrument_type == "STOCK"], tf)
         result = {
             "requested": len(symbols),
             "registered": len(registered),
             "unresolved": len(wanted) - len(instruments),
-            "raw": raw,
-            "adjusted": adjusted,
+            "warrants_raw": warrants,
+            "stocks_adjusted": stocks,
         }
         logger.info("history warm pass complete: %s", result)
         return result
+
+    async def _restate_adjusted(self, stocks, tf: str) -> dict:
+        """Re-fetch each stock's whole adjusted series and overwrite what is stored.
+
+        The source restates every past close when a corporate action lands, so a stored
+        adjusted series goes stale on each ex-date: bars fetched before it sit on the old
+        basis, bars fetched after on the new one, and the chart shows a step nobody traded.
+        Re-fetching the whole series nightly keeps it on one basis without having to detect
+        the action. KBS returns ten years in one call, so thirty stocks cost about a minute
+        of upstream budget.
+        """
+        to_d = last_completed_session_date()
+        from_d = to_d - timedelta(days=int(settings.INGEST_MAX_LOOKBACK_DAYS))
+        restated = failed = written = 0
+        for inst in stocks:
+            try:
+                result = await self._ingestion.backfill(
+                    [inst.symbol], timeframe=tf, adjusted=True, from_date=from_d, to_date=to_d, force=True,
+                )
+                stream = result.streams[0] if result.streams else None
+                if stream is not None and stream.status in ("SUCCEEDED", "PARTIAL"):
+                    restated += 1
+                    written += stream.inserted + stream.updated
+                else:
+                    failed += 1
+                    logger.warning(
+                        "history warm: %s ADJUSTED restatement %s (%s)", inst.symbol,
+                        stream.status if stream else "NO_STREAM", (stream.error if stream else None) or "",
+                    )
+            except Exception as err:  # noqa: BLE001 - one symbol must not end the pass
+                failed += 1
+                logger.warning("history warm: %s ADJUSTED restatement skipped (%s)", inst.symbol, type(err).__name__)
+        return {"restated": restated, "failed": failed, "bars_written": written}
 
     async def _warm_basis(self, instruments, tf: str, price_basis: str, req_from: date, req_to: date) -> dict:
         filled = covered = failed = 0

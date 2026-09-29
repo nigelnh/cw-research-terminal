@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pytest
+
+from app.core.config import settings
 from sqlalchemy import func, select
 
 from app.persistence.database import session_scope
@@ -64,7 +66,11 @@ async def test_incremental_when_already_current_is_a_noop(ingestion_service, fak
     assert all(c.inserted == 0 for s in res.streams for c in s.chunks)
 
 
-async def test_incremental_from_empty_does_bounded_first_fill(ingestion_service, fake_provider):
+async def test_incremental_from_empty_does_bounded_first_fill(ingestion_service, fake_provider, monkeypatch):
+    # This test is about the entitlement clamp itself, so it pins the horizon it clamps at
+    # rather than inheriting the default (360 in the FiinQuant era, ~10 years for vnstock).
+    monkeypatch.setattr(settings, "INGEST_MAX_LOOKBACK_DAYS", 360)
+    monkeypatch.setattr(settings, "INGEST_MAX_CHUNK_SPAN_DAYS", 350)
     iid = await _seed_stock("SSI")
     fake_provider.seed_daily("SSI", _TODAY - timedelta(days=500), _TODAY)
     res = await ingestion_service.incremental(["SSI"], timeframe="1D", adjusted=True)

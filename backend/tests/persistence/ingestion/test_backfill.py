@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import pytest
 from sqlalchemy import func, select
 
+from app.core.config import settings
 from app.market_data.market_schemas import (
     HistoricalEntitlementError,
     HistoricalNoDataError,
@@ -236,7 +237,11 @@ async def _min_session(iid: int):
         return (await s.execute(select(func.min(MarketBar.session_date)).where(MarketBar.instrument_id == iid))).scalar_one()
 
 
-async def test_dry_run_makes_zero_provider_calls_and_zero_writes(ingestion_service, fake_provider):
+async def test_dry_run_makes_zero_provider_calls_and_zero_writes(ingestion_service, fake_provider, monkeypatch):
+    # This test is about the entitlement clamp itself, so it pins the horizon it clamps at
+    # rather than inheriting the default (360 in the FiinQuant era, ~10 years for vnstock).
+    monkeypatch.setattr(settings, "INGEST_MAX_LOOKBACK_DAYS", 360)
+    monkeypatch.setattr(settings, "INGEST_MAX_CHUNK_SPAN_DAYS", 350)
     fake_provider.seed_daily("NEWSYM", _TODAY - timedelta(days=30), _TODAY)
     res = await ingestion_service.backfill(
         ["NEWSYM"], timeframe="1D", adjusted=True, from_date=_TODAY - timedelta(days=800),
@@ -252,7 +257,11 @@ async def test_dry_run_makes_zero_provider_calls_and_zero_writes(ingestion_servi
             assert (await s.execute(select(func.count()).select_from(model))).scalar_one() == 0
 
 
-async def test_entitlement_clamp_marks_run_partial(ingestion_service, fake_provider):
+async def test_entitlement_clamp_marks_run_partial(ingestion_service, fake_provider, monkeypatch):
+    # This test is about the entitlement clamp itself, so it pins the horizon it clamps at
+    # rather than inheriting the default (360 in the FiinQuant era, ~10 years for vnstock).
+    monkeypatch.setattr(settings, "INGEST_MAX_LOOKBACK_DAYS", 360)
+    monkeypatch.setattr(settings, "INGEST_MAX_CHUNK_SPAN_DAYS", 350)
     await _seed_stock("HPG")
     fake_provider.seed_daily("HPG", _TODAY - timedelta(days=365), _TODAY)
     res = await ingestion_service.backfill(
