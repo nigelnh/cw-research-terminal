@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { MarketQuote, RealtimePulse } from "@/domain/models";
 import type { SelectedInstrumentView } from "@/data/selected_instrument";
 import type { DashboardRow } from "@/data/query/use_dashboard_data";
@@ -11,6 +11,15 @@ import { tradePrintKey } from "@/data/backend/trade_print_store";
 import { useFundamentals } from "@/data/query/use_fundamentals";
 import { QuarterlyResultsChart } from "./quarterly_results_chart";
 import { TradingChart } from "@/components/common/trading_chart";
+import {
+  aggregateDaily,
+  historyRequestFor,
+  isIntradayInterval,
+  type DayInterval,
+  type InstrumentChartInterval,
+} from "@/domain/historical/chart_intervals";
+import { withLiveSessionBar } from "@/domain/historical/live_session_bar";
+import { ChartIntervalPicker } from "./chart_interval_picker";
 import { DASH, fmtIV, fmtPrice, fmtVol, dteDisplay } from "@/components/common/grid_table";
 import { RealtimeValue, type FlashTone } from "@/components/common/realtime_value";
 
@@ -416,14 +425,21 @@ export function InstrumentPanel({
 
   const tableLayout = useWatchlistLayout();
 
-  // Daily bars, ~6 months of recent sessions. "1D" is the bar INTERVAL; the "6M"
-  // timeframe is the client-side window over the Postgres-first `daily_1y` dataset
-  // (same backend call as any other daily request — no extra provider traffic).
+  // Candle interval. Intraday comes from the source at that granularity; every
+  // day-or-longer interval is built from one deep daily series (~10 years for a stock, a
+  // warrant's whole life), so switching between them never refetches.
+  const [chartInterval, setChartInterval] = useState<InstrumentChartInterval>("1D");
+  const intradayChart = isIntradayInterval(chartInterval);
+  const chartRequest = historyRequestFor(chartInterval);
   const bars = useHistoricalBars({
     symbol: symbol ?? undefined,
-    timeframe: "6M",
-    interval: "1D",
-    adjusted: false,
+    timeframe: chartRequest.timeframe,
+    interval: chartRequest.interval,
+    // A stock charts its restated (ADJUSTED) series: the source has no as-traded history,
+    // and a long as-traded chart steps down at every stock dividend. Warrants have no
+    // corporate actions and stay RAW, as does intraday - it spans only the months since a
+    // stock's latest action, and the RAW key is what the server's live socket candles merge on.
+    adjusted: !intradayChart && !isCW,
     enabled: hasInstrument && !isIndex,
   });
 
@@ -456,6 +472,18 @@ export function InstrumentPanel({
 
   const cw = instrument?.cw;
   const q = dashRow?.quote ?? instrument?.quote ?? cw?.quote;
+
+  // 1D is patched by the chart itself. Longer candles are built here from the daily series
+  // AFTER today's bar is brought up to the live quote, so the current week / month / year
+  // candle follows the tape too.
+  const liveDaily = useMemo(
+    () => (intradayChart || chartInterval === "1D" ? bars.bars : withLiveSessionBar(bars.bars, q ?? null)),
+    [bars.bars, q, intradayChart, chartInterval],
+  );
+  const chartBars = useMemo(
+    () => (intradayChart || chartInterval === "1D" ? liveDaily : aggregateDaily(liveDaily, chartInterval as DayInterval)),
+    [liveDaily, intradayChart, chartInterval],
+  );
   const an = dashRow?.analytics ?? null;
 
   const ref = q?.referencePrice ?? null;
@@ -655,24 +683,32 @@ export function InstrumentPanel({
                 height: "100%",
                 border: "1px solid var(--border)",
                 display: "flex",
+                flexDirection: "column",
               }}
             >
-              {bars.isLoading || bars.isEmpty || bars.bars.length === 0 ? (
+              <ChartIntervalPicker
+                value={chartInterval}
+                onChange={setChartInterval}
+                note={isCW && intradayChart ? "warrant intraday: current session only (source limit)" : null}
+              />
+              {bars.isLoading || bars.isEmpty || chartBars.length === 0 ? (
                 <div style={{ margin: "auto", fontSize: 11, color: "var(--t-42)" }}>
-                  {bars.isLoading ? "loading daily bars…" : "no daily history"}
+                  {bars.isLoading
+                    ? `loading ${intradayChart ? "intraday" : "daily"} bars…`
+                    : `no ${intradayChart ? "intraday" : "daily"} history`}
                 </div>
               ) : (
                 <TradingChart
                   symbol={instrument!.symbol}
                   isCW={isCW}
-                  bars={bars.bars}
+                  bars={chartBars}
                   // Not gated on marketSessionActive: at the lunch break and after the close
                   // that flag drops, and the candle would snap back to the last history
                   // refetch - up to a minute stale - until the next one. The chart applies a
                   // quote only to the bar for that quote's own session, which is the gate
                   // that actually matters.
                   liveQuote={q ?? null}
-                  interval="1D"
+                  interval={chartInterval}
                   referencePrice={ref}
                   height={300}
                 />
