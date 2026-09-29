@@ -64,6 +64,36 @@ const RIGHT_OFFSET = 4;
  */
 const INITIAL_VISIBLE_BARS = 45;
 
+// lightweight-charts draws its axis and crosshair in UTC. Chart times here are UTC epoch
+// seconds, so every label is shifted to the Vietnam wall clock: an intraday candle opened
+// at 09:15 ICT would otherwise read 02:15.
+const ICT_OFFSET_MS = 7 * 3600_000;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+function ictClock(t: Time): Date {
+  const secs =
+    typeof t === "number" ? t
+      : typeof t === "string" ? Date.parse(t) / 1000
+        : Date.UTC(t.year, t.month - 1, t.day) / 1000;
+  return new Date(secs * 1000 + ICT_OFFSET_MS); // read back with getUTC*
+}
+
+export function formatIctTime(t: Time, withClock: boolean): string {
+  const d = ictClock(t);
+  const day = `${pad2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} '${String(d.getUTCFullYear()).slice(2)}`;
+  return withClock ? `${day} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}` : day;
+}
+
+/** Axis labels. `kind` is lightweight-charts' TickMarkType: 0 year, 1 month, 2 day, 3+ time. */
+export function formatIctTick(t: Time, kind: number): string {
+  const d = ictClock(t);
+  if (kind === 0) return String(d.getUTCFullYear());
+  if (kind === 1) return MONTHS[d.getUTCMonth()];
+  if (kind === 2) return String(d.getUTCDate());
+  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
+}
+
 const UP = "#22c55e";
 const DOWN = "#ef4444";
 const VOL_UP = "rgba(34, 197, 94, 0.4)";
@@ -245,6 +275,8 @@ export function TradingChart({
     const cwBars = cwBarsRef.current;
     const undBars = undBarsRef.current;
 
+    const intradayAxis =
+      interval === "1m" || interval === "5m" || interval === "15m" || interval === "30m" || interval === "1h";
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth || 640,
       height,
@@ -267,11 +299,14 @@ export function TradingChart({
         borderColor: "rgba(255, 255, 255, 0.08)",
         scaleMargins: { top: 0.12, bottom: mode === "RELATIVE" ? 0.1 : 0.25 },
       },
+      localization: {
+        timeFormatter: (t: Time) => formatIctTime(t, intradayAxis),
+      },
       timeScale: {
         borderColor: "rgba(255, 255, 255, 0.08)",
-        timeVisible:
-          interval === "1m" || interval === "5m" || interval === "15m" || interval === "30m" || interval === "1h",
+        timeVisible: intradayAxis,
         secondsVisible: false,
+        tickMarkFormatter: (t: Time, kind: number) => formatIctTick(t, kind),
         barSpacing: BAR_SPACING,
         minBarSpacing: MIN_BAR_SPACING,
         rightOffset: RIGHT_OFFSET,

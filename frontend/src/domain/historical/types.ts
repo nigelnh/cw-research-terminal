@@ -3,7 +3,9 @@
  */
 
 export type ChartRange = "1D" | "5D" | "1M" | "3M" | "6M" | "1Y" | "MAX";
-export type ChartInterval = "1m" | "5m" | "15m" | "30m" | "1h" | "1D" | "1W" | "1M";
+export type ChartInterval =
+  | "1m" | "5m" | "15m" | "30m" | "1h"
+  | "1D" | "5D" | "1W" | "3W" | "1M" | "3M" | "6M" | "1Y";
 export type CWHistoryMode = "CW" | "UNDERLYING" | "BOTH" | "RELATIVE";
 export type TechnicalOverlay = "REF" | "EMA20" | "EMA50" | "EMA200" | "VWAP";
 

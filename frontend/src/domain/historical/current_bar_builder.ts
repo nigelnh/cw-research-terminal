@@ -10,8 +10,13 @@ export function getIntervalDurationMs(interval: ChartInterval): number {
     case "30m": return 30 * 60_000;
     case "1h": return 60 * 60_000;
     case "1D": return 24 * 60 * 60_000;
+    case "5D": return 5 * 24 * 60 * 60_000;
     case "1W": return 7 * 24 * 60 * 60_000;
+    case "3W": return 21 * 24 * 60 * 60_000;
     case "1M": return 30 * 24 * 60 * 60_000;
+    case "3M": return 91 * 24 * 60 * 60_000;
+    case "6M": return 182 * 24 * 60 * 60_000;
+    case "1Y": return 365 * 24 * 60 * 60_000;
   }
 }
 

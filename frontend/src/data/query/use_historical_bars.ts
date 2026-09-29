@@ -44,13 +44,16 @@ export function useHistoricalBars({
   const sym = (symbol ?? "").trim().toUpperCase();
   const { sessionContext } = useMarketContext();
   const active = enabled && sym.length > 0;
+  const deep = timeframe.toUpperCase() === "MAX";
 
   const query = useQuery({
     queryKey: queryKeys.history.bars({ symbol: sym, timeframe, interval, adjusted }),
     queryFn: ({ signal }) => fetchHistoricalBars({ symbol: sym, timeframe, interval, adjusted }, signal),
     enabled: active,
-    staleTime: 60_000,
-    refetchInterval: 60_000,
+    // The deep daily series is completed sessions; today's candle follows the live quote.
+    // Re-pulling ~2,600 bars a minute bought nothing.
+    staleTime: deep ? 300_000 : 60_000,
+    refetchInterval: deep ? 300_000 : 60_000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });

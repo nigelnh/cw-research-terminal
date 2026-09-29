@@ -72,11 +72,14 @@ export async function fetchHistoricalBars(
   const requested = String(targetInterval);
   if (["1m", "5m", "15m", "30m", "1h"].includes(requested)) backendTimeframe = requested;
   const intraday = ["1m", "5m", "15m", "30m", "1h"].includes(backendTimeframe);
-  const days = ({ "1D": 4, "5D": 10, "1M": 35, "3M": 100, "6M": 190 } as Record<string, number>)[req.timeframe.toUpperCase()] ?? 366;
+  // MAX is the instrument chart's deep daily series - about ten years for a stock, served
+  // from PostgreSQL - which every day-or-longer candle interval is built from.
+  const days = ({ "1D": 4, "5D": 10, "1M": 35, "3M": 100, "6M": 190, MAX: 3650 } as Record<string, number>)[req.timeframe.toUpperCase()] ?? 366;
+  const explicitWindow = intraday || req.timeframe.toUpperCase() === "MAX";
   const vnDate = (ms: number) => new Date(ms + 7 * 3600000).toISOString().slice(0, 10);
   const raw = await client.getMarketHistory(sym, backendTimeframe,
-    intraday ? vnDate(marketNow() - days * 86400000) : undefined,
-    intraday ? vnDate(marketNow()) : undefined, req.adjusted, signal);
+    explicitWindow ? vnDate(marketNow() - days * 86400000) : undefined,
+    explicitWindow ? vnDate(marketNow()) : undefined, req.adjusted, signal);
   const mapped = (raw || []).map(mapRawCWDataToHistoricalBar);
   const sliced = sliceBars(mapped, req.timeframe);
   return coarsenBarsToInterval(sliced, targetInterval, backendTimeframe);
