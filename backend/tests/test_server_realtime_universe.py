@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,6 +57,10 @@ async def test_a_live_match_publishes_quote_before_the_shared_trade_flash(monkey
         "session_date": session_day.isoformat(),
     }
     monkeypatch.setattr(traded_log, "record", lambda *_args, **_kwargs: printed)
+    # Queued for the tape's single writer, not a task and a pipeline per print: that drained
+    # the Redis pool the quote and quant caches share (2026-09-30, "Too many connections").
+    enqueue = Mock()
+    monkeypatch.setattr(traded_log, "enqueue", enqueue)
     persist = AsyncMock()
     monkeypatch.setattr(traded_log, "persist", persist)
 
@@ -73,7 +77,66 @@ async def test_a_live_match_publishes_quote_before_the_shared_trade_flash(monkey
     kinds = [message["type"] for message in messages]
     assert kinds.index("patch") < kinds.index("trade_print")
     assert messages[kinds.index("trade_print")]["print"]["id"] == "match-1"
-    persist.assert_awaited_once_with("HPG", printed)
+    enqueue.assert_called_once_with("HPG", printed)
+    persist.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_provider_confirmed_print_is_queued_for_the_tape_not_given_a_task(monkeypatch):
+    session_day = reference_session_date()
+    managed = SubscriptionManager(
+        provider=MockMarketDataProvider(max_symbols=33),
+        state=MarketState(),
+        store=NullMarketStateStore(),
+        max_symbols=33,
+    )
+    managed._reference_refresh_session = session_day.isoformat()
+    printed = {"id": "print-1", "ts": 1_789_000_000_000, "time": "10:06:53", "price": 22_100,
+               "volume": 100, "side": None, "session_date": session_day.isoformat()}
+    monkeypatch.setattr(traded_log, "record_provider_print", lambda *_args, **_kwargs: printed)
+    enqueue = Mock()
+    monkeypatch.setattr(traded_log, "enqueue", enqueue)
+    persist = AsyncMock()
+    monkeypatch.setattr(traded_log, "persist", persist)
+
+    managed._on_provider_event("trade_print", {
+        "Ticker": "HPG", "Price": 22_100, "Volume": 100,
+        "TradingDate": f"{session_day.isoformat()}T10:06:53+07:00",
+    }, "HPG")
+    await asyncio.sleep(0)
+
+    enqueue.assert_called_once_with("HPG", printed)
+    persist.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_writes_the_queued_prints_before_the_store_closes(monkeypatch):
+    events: list[str] = []
+
+    class _Pipe:
+        def rpush(self, *_a): return self
+        def ltrim(self, *_a): return self
+        def expire(self, *_a): return self
+        async def execute(self): events.append("tape written")
+
+    class _Client:
+        def pipeline(self): return _Pipe()
+
+    class _Store(NullMarketStateStore):
+        async def close(self): events.append("store closed")
+
+    managed = SubscriptionManager(
+        provider=MockMarketDataProvider(max_symbols=33), state=MarketState(),
+        store=_Store(), max_symbols=33,
+    )
+    monkeypatch.setattr(traded_log, "_redis", _Client())
+    monkeypatch.setattr(traded_log, "_unwritten", {})
+    monkeypatch.setattr(traded_log, "_unwritten_owner", {})
+    monkeypatch.setattr(traded_log, "_writer", None)
+    traded_log.enqueue("HPG", {"id": "last-print", "session_date": reference_session_date().isoformat()})
+
+    await managed.shutdown()
+    assert events == ["tape written", "store closed"]
 
 
 async def _resolved_default():

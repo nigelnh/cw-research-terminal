@@ -1,4 +1,5 @@
 """Time & sales tape: only real matches, an honest derived side, 08:00 ICT retention."""
+import asyncio
 import json
 from datetime import datetime, timedelta
 from unittest import mock
@@ -213,6 +214,67 @@ class _FakeRedis:
 
     async def delete(self, key):
         self.lists.pop(key, None)
+
+
+async def test_one_pipeline_is_in_flight_however_fast_prints_arrive():
+    """A task and a pipeline per print drained redis-py 8's 100-connection pool on
+    2026-09-30. Prints now queue behind a single writer; a burst costs one round trip."""
+    redis = _FakeRedis()
+    gate = asyncio.Event()
+    seen = {"in_flight": 0, "peak": 0, "pipelines": 0}
+    make_pipeline = redis.pipeline
+
+    def slow_pipeline():
+        pipe = make_pipeline()
+        execute = pipe.execute
+
+        async def gated():
+            seen["pipelines"] += 1
+            seen["in_flight"] += 1
+            seen["peak"] = max(seen["peak"], seen["in_flight"])
+            await gate.wait()
+            try:
+                await execute()
+            finally:
+                seen["in_flight"] -= 1
+
+        pipe.execute = gated
+        return pipe
+
+    redis.pipeline = slow_pipeline
+    log = TradedLog(max_entries=6000, memory_entries=600)
+    log.set_redis(redis)
+
+    def entry(symbol, i):
+        return {"id": f"{symbol}-{i}", "price": 21_000 + i, "session_date": TODAY.isoformat()}
+
+    for i in range(100):
+        for symbol in ("HPG", "MWG", "FPT"):
+            log.enqueue(symbol, entry(symbol, i))
+    await asyncio.sleep(0)            # the writer takes the first batch and waits on Redis
+    for i in range(100, 150):         # ...while more prints keep arriving
+        log.enqueue("HPG", entry("HPG", i))
+    gate.set()
+    await log.flush()
+
+    assert seen["peak"] == 1
+    assert seen["pipelines"] == 2, "one round trip per burst, not per print"
+    stored = [json.loads(v)["price"] for v in redis.lists[TradedLog._key("HPG")]]
+    assert stored == [21_000 + i for i in range(150)]
+    assert len(redis.lists[TradedLog._key("FPT")]) == 100
+
+
+async def test_a_stalled_writer_queues_at_most_the_memory_window_per_symbol():
+    """Redis down for minutes must not grow the queue by the session's prints."""
+    redis = _FakeRedis()
+    log = TradedLog(max_entries=6000, memory_entries=50)
+    log.set_redis(redis)
+    for i in range(1000):
+        log.enqueue("HPG", {"id": f"HPG-{i}", "price": 21_000 + i, "session_date": TODAY.isoformat()})
+    assert len(log._unwritten[TradedLog._key("HPG")]) == 50
+    await log.flush()
+    stored = [json.loads(v)["price"] for v in redis.lists[TradedLog._key("HPG")]]
+    assert stored == [21_000 + i for i in range(950, 1000)]
 
 
 async def test_a_redeploy_mid_session_does_not_wipe_the_tape():

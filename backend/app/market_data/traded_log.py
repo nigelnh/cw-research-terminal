@@ -20,6 +20,7 @@ Two honesty constraints shape this module:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -92,6 +93,10 @@ class TradedLog:
         self._pending_resets: set[str] = set()
         # Symbols already warned about, so a Redis outage logs once rather than per tick.
         self._persist_failed: set[str] = set()
+        # Prints waiting for the single writer, per Redis key in arrival order.
+        self._unwritten: Dict[str, List[str]] = {}
+        self._unwritten_owner: Dict[str, str] = {}
+        self._writer: Optional[asyncio.Task] = None
 
     def set_redis(self, client: Any) -> None:
         """Attach an already-connected client. Redis is optional: without it the tape is
@@ -276,8 +281,16 @@ class TradedLog:
         tape.append(entry)
         return entry
 
-    async def persist(self, symbol: str, entry: Dict[str, Any]) -> None:
-        """Append ONE print to the symbol's Redis list. Never raises.
+    def enqueue(self, symbol: str, entry: Dict[str, Any]) -> None:
+        """Queue ONE print for the symbol's Redis list. Never raises, never waits.
+
+        Every print used to start its own task and send its own pipeline. redis-py 8's
+        async pool caps a client at 100 connections and fails the next one at once instead
+        of waiting, so a burst of prints - or Redis slowing down for a moment - drained the
+        pool the quote cache and the quant cache share: between 10:49 and 10:52 ICT on
+        2026-09-30 all three failed with "Too many connections", and those prints never
+        reached the shared tape. Now one writer drains the queue, with a single pipeline in
+        flight however fast prints arrive.
 
         A Redis LIST, not a JSON blob. The blob version re-serialised the entire tape on
         every print, which is fine at 200 entries and ruinous at session length - HPG
@@ -289,28 +302,60 @@ class TradedLog:
         if self._redis is None:
             return
         symbol = symbol.upper()
+        # Session is part of the key; old and new writers cannot erase one another.
+        self._pending_resets.discard(symbol)
         key = self._key(symbol, entry["session_date"])
-        try:
-            if symbol in self._pending_resets:
-                self._pending_resets.discard(symbol)
-                # Session is part of the key; old and new writers cannot erase one another.
-                pass
-            pipe = self._redis.pipeline()
-            pipe.rpush(key, json.dumps(entry))
-            # Bound the stored tape the same way the in-memory deque is bounded.
-            pipe.ltrim(key, -self._max, -1)
-            pipe.expire(key, seconds_until_rollover())
-            await pipe.execute()
-            self._persist_failed.discard(symbol)
-        except Exception as err:  # noqa: BLE001 - a cache fault must never break the feed
-            # Debug-only logging here once hid a dead persistence path for hours. The first
-            # failure per symbol is worth a warning; the rest stay quiet so a Redis outage
-            # cannot flood the log at tick rate.
-            if symbol in self._persist_failed:
-                logger.debug("Traded-log persist failed for %s: %s", symbol, err)
-            else:
-                self._persist_failed.add(symbol)
-                logger.warning("Traded-log persist failed for %s: %s", symbol, err)
+        queue = self._unwritten.setdefault(key, [])
+        queue.append(json.dumps(entry))
+        # A stalled writer keeps at most the memory window per symbol, not the session.
+        if len(queue) > self._memory:
+            del queue[: len(queue) - self._memory]
+        self._unwritten_owner[key] = symbol
+        if self._writer is None or self._writer.done():
+            try:
+                self._writer = asyncio.get_running_loop().create_task(self._write_unwritten())
+            except RuntimeError:
+                pass  # no loop yet: the next print queued from the loop starts the writer
+
+    async def _write_unwritten(self) -> None:
+        """Drain the queue one pipeline at a time until it is empty."""
+        while self._unwritten and self._redis is not None:
+            batch, self._unwritten = self._unwritten, {}
+            owners, self._unwritten_owner = self._unwritten_owner, {}
+            try:
+                pipe = self._redis.pipeline()
+                for key, values in batch.items():
+                    for value in values:
+                        pipe.rpush(key, value)
+                    # Bound the stored tape the same way the in-memory deque is bounded.
+                    pipe.ltrim(key, -self._max, -1)
+                    pipe.expire(key, seconds_until_rollover())
+                await pipe.execute()
+            except Exception as err:  # noqa: BLE001 - a cache fault must never break the feed
+                # Debug-only logging here once hid a dead persistence path for hours. A
+                # symbol's first failure is worth a warning - one line per batch - and the
+                # rest stay quiet so a Redis outage cannot flood the log at tick rate.
+                newly = sorted(set(owners.values()) - self._persist_failed)
+                self._persist_failed.update(owners.values())
+                if newly:
+                    shown = ", ".join(newly[:8]) + (f" (+{len(newly) - 8} more)" if len(newly) > 8 else "")
+                    logger.warning("Traded-log persist failed for %s: %s", shown, err)
+                else:
+                    logger.debug("Traded-log persist still failing: %s", err)
+                continue
+            self._persist_failed.difference_update(owners.values())
+
+    async def flush(self) -> None:
+        """Wait until every print queued so far has been written, or its write has failed."""
+        while self._writer is not None and not self._writer.done():
+            await asyncio.shield(self._writer)
+
+    async def persist(self, symbol: str, entry: Dict[str, Any]) -> None:
+        """Queue ONE print and wait for the writer. Never raises."""
+        if self._redis is None:
+            return
+        self.enqueue(symbol, entry)
+        await self.flush()
 
     async def persist_many(self, symbol: str, entries: List[Dict[str, Any]]) -> None:
         """Persist a bounded on-demand backfill in one Redis transaction."""
