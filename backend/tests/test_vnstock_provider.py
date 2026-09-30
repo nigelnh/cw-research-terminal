@@ -852,6 +852,48 @@ async def test_the_overview_service_keeps_retrying_while_a_card_is_carried(monke
 
 
 @pytest.mark.asyncio
+async def test_a_restart_onto_a_refused_vietcap_keeps_the_saved_cards(monkeypatch):
+    """The join across a restart (2026-09-30 11:38 ICT): the payload the service saved from a
+    working provider is what it measures a fresh, Vietcap-refused provider's answer against."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.market_data.market_overview_service import MarketOverviewService
+
+    monkeypatch.setattr(
+        "app.market_data.market_overview_service.reference_session_date",
+        lambda *args: date(2026, 9, 8),
+    )
+    saved: dict = {}
+
+    async def save(payload):
+        saved.update(payload)
+
+    before = MarketOverviewService()
+    before.configure(_OverviewWorld(monkeypatch).provider, SimpleNamespace(
+        load_market_overview=AsyncMock(return_value=None), save_market_overview=save,
+    ))
+    await before._refresh([])
+    assert {c["symbol"]: c["value"] for c in saved["payload"]["indices"]}["VNFINLEAD"] == 1010
+
+    restarted = _OverviewWorld(monkeypatch)  # a new process: nothing fetched, nothing to carry
+    restarted.fail = {
+        (index, interval)
+        for index in ("VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND") for interval in ("1D", "5m")
+    }
+    after = MarketOverviewService()
+    after.configure(restarted.provider, SimpleNamespace(
+        load_market_overview=AsyncMock(return_value=dict(saved)), save_market_overview=AsyncMock(),
+    ))
+    await after._refresh([])
+    cards = {c["symbol"]: c for c in after._payload()["indices"]}
+    assert cards["VNFINLEAD"]["value"] == 1010
+    assert cards["VNFINLEAD"]["reference"] == 1000
+    assert "CARD_CARRIED_FORWARD" in cards["VNFINLEAD"]["partial_reasons"]
+    assert len(cards) == 4 and all(c["value"] is not None for c in cards.values())
+
+
+@pytest.mark.asyncio
 async def test_no_board_at_all_is_unknown_breadth_not_a_market_where_nothing_moved(monkeypatch):
     world = _OverviewWorld(monkeypatch)
     world.board_fails = True
