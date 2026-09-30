@@ -669,10 +669,12 @@ class _OverviewWorld:
     """One provider refreshed twice, the way production refreshes it every minute: the
     first refresh answers everything, the second loses whatever `fail` names."""
 
-    def __init__(self, monkeypatch):
+    def __init__(self, monkeypatch, *, fallback: bool = False):
         self.monkeypatch = monkeypatch
         self.fail: set[tuple[str, str]] = set()
         self.board_fails = False
+        self.fallback_fails = False
+        self.fallback_calls: list[tuple[str, str]] = []
         self.close, self.volume = 1010, 2
         self.bar_time, self.bar = "09:20:00", 1005
         self.set_session(date(2026, 9, 8))
@@ -707,11 +709,27 @@ class _OverviewWorld:
                 for symbol in symbols
             ]
 
+        def second_source(symbol, start, end, interval):
+            """VNDirect's shape once converted: prices, no daily volume."""
+            self.fallback_calls.append((symbol, interval))
+            if self.fallback_fails:
+                raise ConnectionError("dchart unavailable")
+            if interval == "1D":
+                return [
+                    {"time": "2026-09-07", "close": 1000, "volume": None},
+                    {"time": end, "close": 1011, "volume": None},
+                ]
+            return [
+                {"time": f"{end} 09:15:00", "close": 1003, "volume": 4},
+                {"time": f"{end} 09:25:00", "close": 1011, "volume": 6},
+            ]
+
         self.provider = provider(
             board_fetcher=board,
             history_fetcher=history,
             listing_fetcher=lambda: [{"symbol": "HPG", "exchange": "HSX", "type": "STOCK"}],
             group_fetcher=lambda name: ["HPG"],
+            index_fallback_fetcher=second_source if fallback else None,
         )
 
     def set_session(self, day):
@@ -891,6 +909,155 @@ async def test_a_restart_onto_a_refused_vietcap_keeps_the_saved_cards(monkeypatc
     assert cards["VNFINLEAD"]["reference"] == 1000
     assert "CARD_CARRIED_FORWARD" in cards["VNFINLEAD"]["partial_reasons"]
     assert len(cards) == 4 and all(c["value"] is not None for c in cards.values())
+
+
+ALL_VCI_INDEX_CALLS = {
+    (index, interval) for index in ("VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND") for interval in ("1D", "5m")
+}
+
+
+@pytest.mark.asyncio
+async def test_a_refused_vietcap_serves_the_index_cards_from_the_second_source(monkeypatch):
+    """Vietcap's CDN refuses some Railway egress IPs for the container's whole life (3 of 4
+    deploys on 2026-09-30). The cards now come from VNDirect's chart feed meanwhile."""
+    world = _OverviewWorld(monkeypatch, fallback=True)
+    world.fail = set(ALL_VCI_INDEX_CALLS)  # a fresh, refused container: nothing to carry
+    _, cards = await world.refresh()
+    card = cards["VNFINLEAD"]
+
+    assert (card["value"], card["reference"], card["change"]) == (1011, 1000, 11)
+    assert [p["value"] for p in card["sparkline"]] == [1003, 1011]
+    assert card["volume"] is None, "VNDirect's daily volume is matched orders only - not shown"
+    assert "INDEX_FALLBACK_SOURCE" in card["partial_reasons"]
+    assert not {"DAILY_CARRIED_FORWARD", "INTRADAY_CARRIED_FORWARD"} & set(card["partial_reasons"])
+    assert card["availability"] == "PARTIAL"
+    prov = card["provenance"]
+    assert prov["price"]["source"] == "VNDIRECT_DCHART"
+    assert prov["reference"]["source"] == "VNDIRECT_DCHART_PRIOR_CLOSE"
+    assert prov["sparkline"]["source"] == "VNDIRECT_DCHART"
+
+
+@pytest.mark.asyncio
+async def test_the_second_source_is_asked_only_when_vietcap_does_not_answer(monkeypatch):
+    world = _OverviewWorld(monkeypatch, fallback=True)
+    _, cards = await world.refresh()
+    assert world.fallback_calls == []
+    assert cards["VNFINLEAD"]["provenance"]["price"]["source"] == "VNSTOCK_VCI"
+    assert cards["VNFINLEAD"]["partial_reasons"] == []
+
+    world.fail = {("VNFINLEAD", "5m")}
+    _, cards = await world.refresh()
+    assert world.fallback_calls == [("VNFINLEAD", "5m")]
+    assert cards["VNFINLEAD"]["provenance"]["sparkline"]["source"] == "VNDIRECT_DCHART"
+    assert cards["VNFINLEAD"]["provenance"]["price"]["source"] == "VNSTOCK_VCI"
+
+
+@pytest.mark.asyncio
+async def test_with_both_sources_down_the_session_is_still_carried(monkeypatch):
+    world = _OverviewWorld(monkeypatch, fallback=True)
+    await world.refresh()
+    world.fail, world.fallback_fails = set(ALL_VCI_INDEX_CALLS), True
+    _, cards = await world.refresh()
+    card = cards["VNFINLEAD"]
+    assert (card["value"], card["reference"]) == (1010, 1000)
+    assert {"DAILY_CARRIED_FORWARD", "INTRADAY_CARRIED_FORWARD"} <= set(card["partial_reasons"])
+    assert card["provenance"]["price"]["source"] == "VNSTOCK_VCI", "carried from what answered then"
+
+
+def test_dchart_bars_arrive_in_the_row_shape_vci_history_has(monkeypatch):
+    import requests
+
+    asked = {}
+
+    class _Response:
+        def __init__(self, body):
+            self.body = body
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.body
+
+    def fake_get(url, params=None, **_):
+        asked.update(params)
+        if params["resolution"] == "D":
+            # 2026-09-29 and 2026-09-30, stamped 00:00 UTC as the feed stamps its days.
+            return _Response({"s": "ok", "t": [1790640000, 1790726400], "o": [1, 2], "h": [3, 4],
+                              "l": [0, 1], "c": [2776.98, 2778.42], "v": [58_000_000, 62_084_516]})
+        # 09:15 and 11:25 ICT on 2026-09-30.
+        return _Response({"s": "ok", "t": [1790734500, 1790742300], "o": [1, 2], "h": [3, 4],
+                          "l": [0, 1], "c": [2788.23, 2778.52], "v": [5_639_436, 4_520_559]})
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    daily = VnstockProvider._fetch_index_dchart_sync("VNFINLEAD", "2026-09-23", "2026-09-30", "1D")
+    assert asked["symbol"] == "VNFINLEAD" and asked["resolution"] == "D"
+    assert asked["from"] == int(datetime(2026, 9, 23, tzinfo=VN_TZ).timestamp())
+    assert [(r["time"], r["close"], r["volume"]) for r in daily] == [
+        ("2026-09-29", 2776.98, None), ("2026-09-30", 2778.42, None),
+    ]
+    bars = VnstockProvider._fetch_index_dchart_sync("VNFINLEAD", "2026-09-30", "2026-09-30", "5m")
+    assert asked["resolution"] == "5"
+    assert [(r["time"], r["volume"]) for r in bars] == [
+        ("2026-09-30 09:15:00", 5_639_436), ("2026-09-30 11:25:00", 4_520_559),
+    ]
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _Response({"s": "no_data"}))
+    assert VnstockProvider._fetch_index_dchart_sync("VNFINLEAD", "2026-09-30", "2026-09-30", "5m") == []
+
+
+def test_the_listing_falls_back_to_kbs_in_vcis_vocabulary(monkeypatch):
+    """The overview reads VNINDEX's members from this listing; a refused container lost TOP
+    STOCK and VNINDEX breadth with it. KBS lists the same 405 HOSE stocks as "HOSE"."""
+    import pandas as pd
+    import vnstock.explorer.kbs.listing as kbs
+    import vnstock.explorer.vci.listing as vci
+
+    class Refused:
+        def __init__(self, **_):
+            pass
+
+        def symbols_by_exchange(self, **_):
+            raise ConnectionError("Failed to fetch data: 400 - Bad Request")
+
+    class Kbs:
+        def __init__(self, **_):
+            pass
+
+        def symbols_by_exchange(self, **_):
+            return pd.DataFrame([
+                {"symbol": "HPG", "organ_name": "Hoa Phat", "exchange": "HOSE", "type": "stock"},
+                {"symbol": "CHPG2618", "organ_name": None, "exchange": "HOSE", "type": "cw"},
+                {"symbol": "SHS", "organ_name": "SHS", "exchange": "HNX", "type": "stock"},
+            ])
+
+    monkeypatch.setattr(vci, "Listing", Refused)
+    monkeypatch.setattr(kbs, "Listing", Kbs)
+    rows = VnstockProvider._fetch_listing_sync().to_dict(orient="records")
+    assert [(r["symbol"], r["exchange"], r["type"], r["source"]) for r in rows] == [
+        ("HPG", "HSX", "STOCK", "VNSTOCK_KBS"),
+        ("CHPG2618", "HSX", "CW", "VNSTOCK_KBS"),
+        ("SHS", "HNX", "STOCK", "VNSTOCK_KBS"),
+    ]
+
+    class Answered(Refused):
+        def symbols_by_exchange(self, **_):
+            return pd.DataFrame([{"symbol": "HPG", "exchange": "HSX", "type": "STOCK", "organ_short_name": "Hoa Phat"}])
+
+    monkeypatch.setattr(vci, "Listing", Answered)
+    assert "source" not in VnstockProvider._fetch_listing_sync().columns
+
+
+@pytest.mark.asyncio
+async def test_a_card_from_the_second_source_keeps_the_service_retrying(monkeypatch):
+    """Off-session, a card served from VNDirect is not settled: the service keeps asking,
+    so the volume Vietcap reports comes back once Vietcap does."""
+    from app.market_data.market_overview_service import _cards_settled
+
+    world = _OverviewWorld(monkeypatch, fallback=True)
+    world.fail = set(ALL_VCI_INDEX_CALLS)
+    result, _ = await world.refresh()
+    assert _cards_settled(result) is False
 
 
 @pytest.mark.asyncio

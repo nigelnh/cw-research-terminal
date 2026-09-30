@@ -124,7 +124,9 @@ def _cards_settled(cache: dict[str, Any]) -> bool:
     """
     for item in cache.get("indices", []):
         reasons = set(item.get("partial_reasons") or [])
-        if reasons & _CARRIED_REASONS:
+        # A card from the second index source is right but has no volume: keep asking, so
+        # Vietcap's figures come back once it answers again.
+        if reasons & _CARRIED_REASONS or "INDEX_FALLBACK_SOURCE" in reasons:
             return False
         missing = {"REFERENCE_UNAVAILABLE"} if "PRE_OPEN_REFERENCE_ONLY" in reasons else {
             "PRICE_UNAVAILABLE", "REFERENCE_UNAVAILABLE",

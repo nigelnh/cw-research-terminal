@@ -89,6 +89,10 @@ def _integer(value: Any) -> int | None:
     return None if number is None else int(number)
 
 
+#: VNDirect's public TradingView-style chart feed (t/o/h/l/c/v arrays).
+_DCHART_HISTORY_URL = "https://dchart-api.vndirect.com.vn/dchart/history"
+
+
 def _records(value: Any) -> list[dict[str, Any]]:
     if value is None:
         return []
@@ -185,6 +189,7 @@ class VnstockProvider(MarketDataProvider):
         group_fetcher: Callable[[str], Any] | None = None,
         fundamentals_fetcher: Callable[[str], Any] | None = None,
         income_statement_fetcher: Callable[[str], Any] | None = None,
+        index_fallback_fetcher: Callable[..., Any] | None = None,
     ) -> None:
         self.max_symbols = int(max_symbols or settings.MARKET_DATA_MAX_SYMBOLS)
         self._enabled = bool(settings.VNSTOCK_ENABLED)
@@ -214,6 +219,11 @@ class VnstockProvider(MarketDataProvider):
         self._fundamentals_fetcher = fundamentals_fetcher or self._fetch_fundamentals_sync
         self._income_statement_fetcher = (
             income_statement_fetcher or self._fetch_income_statement_sync
+        )
+        # A second source for the overview's index series, asked only when Vietcap does not
+        # answer. An injected history source (tests) gets no network fallback of its own.
+        self._index_fallback_fetcher = index_fallback_fetcher or (
+            self._fetch_index_dchart_sync if history_fetcher is None else None
         )
 
         self._callback: EventCallback | None = None
@@ -281,7 +291,7 @@ class VnstockProvider(MarketDataProvider):
         # The overview's last good inputs, each tagged with the session it describes and
         # the wall-clock time it was fetched. See `_safe_index_history`.
         self._index_history_last_good: dict[
-            tuple[str, str], tuple[str, float, list[dict[str, Any]]]
+            tuple[str, str], tuple[str, float, list[dict[str, Any]], str]
         ] = {}
         self._overview_board_last_good: tuple[str, float, dict[str, dict[str, Any]]] | None = None
 
@@ -691,9 +701,65 @@ class VnstockProvider(MarketDataProvider):
 
     @staticmethod
     def _fetch_listing_sync() -> Any:
-        from vnstock.explorer.vci.listing import Listing
+        # VCI first for its short names; KBS when Vietcap does not answer - its CDN refuses
+        # some Railway egress IPs outright (400 with an empty body, 3 of 4 containers on
+        # 2026-09-30), and this listing is where the overview gets VNINDEX's members, so a
+        # refused container lost TOP STOCK and VNINDEX breadth with it. KBS lists the same
+        # 405 HOSE stocks (checked that day) under "HOSE" where VCI says "HSX".
+        from vnstock.explorer.vci.listing import Listing as VciListing
 
-        return Listing(show_log=False).symbols_by_exchange(show_log=False)
+        try:
+            return VciListing(show_log=False).symbols_by_exchange(show_log=False)
+        except Exception:
+            from vnstock.explorer.kbs.listing import Listing as KbsListing
+
+            rows = KbsListing(show_log=False).symbols_by_exchange(show_log=False)
+            return rows.assign(
+                exchange=rows["exchange"].replace({"HOSE": "HSX"}),
+                type=rows["type"].str.upper(),
+                source="VNSTOCK_KBS",
+            )
+
+    @staticmethod
+    def _fetch_index_dchart_sync(symbol: str, start: str, end: str, interval: str) -> list[dict[str, Any]]:
+        """Index bars from VNDirect's public chart feed, in the row shape VCI's history has.
+
+        Reachable from Railway egress that Vietcap's CDN refuses, and it carries all four
+        overview indices - KBS has VN30 and VNINDEX but not VNFINLEAD or VNDIAMOND. Prices
+        matched Vietcap's to the cent on 2026-09-30 (VNFINLEAD 2778.42, VN30 1917.86); daily
+        volume did not (VN30 67.2M against 96.0M, matched orders only), so daily bars carry
+        no volume rather than a figure on a different basis.
+        """
+        import requests
+
+        resolution = {"1D": "D", "5m": "5"}[interval]
+        begin = datetime.combine(date.fromisoformat(start), datetime.min.time(), VN_TZ)
+        finish = datetime.combine(date.fromisoformat(end), datetime.max.time(), VN_TZ)
+        response = requests.get(
+            _DCHART_HISTORY_URL,
+            params={
+                "resolution": resolution, "symbol": symbol,
+                "from": int(begin.timestamp()), "to": int(finish.timestamp()),
+            },
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("s") != "ok":
+            return []
+        rows = []
+        for stamp, open_, high, low, close, volume in zip(
+            data.get("t") or [], data.get("o") or [], data.get("h") or [],
+            data.get("l") or [], data.get("c") or [], data.get("v") or [],
+        ):
+            moment = datetime.fromtimestamp(int(stamp), VN_TZ)
+            rows.append({
+                "time": moment.date().isoformat() if interval == "1D" else moment.strftime("%Y-%m-%d %H:%M:%S"),
+                "open": open_, "high": high, "low": low, "close": close,
+                "volume": None if interval == "1D" else volume,
+            })
+        return rows
 
     @staticmethod
     def _fetch_group_sync(group: str) -> Any:
@@ -1182,7 +1248,7 @@ class VnstockProvider(MarketDataProvider):
                 "name": row.get("organ_name"),
                 "short_name": row.get("organ_short_name"),
                 "exchange": "HOSE" if exchange == "HSX" else exchange or None,
-                "source": "VNSTOCK_VCI",
+                "source": row.get("source") or "VNSTOCK_VCI",
             })
         return result
 
@@ -1512,10 +1578,14 @@ class VnstockProvider(MarketDataProvider):
 
     async def _safe_index_history(
         self, symbol: str, start: str, end: str, interval: str
-    ) -> tuple[list[dict[str, Any]], float | None]:
-        """Index OHLCV from VCI and, when that call fails or comes back empty, this
-        session's last good answer - with the wall-clock time it was fetched, so the card
-        can say it was carried. The time is None for a fresh answer.
+    ) -> tuple[list[dict[str, Any]], float | None, str | None]:
+        """Index OHLCV for the overview: Vietcap, else VNDirect's chart feed, else this
+        session's last good answer. Returns the rows, the wall-clock time they were fetched
+        when they were carried (None when fresh), and the source that answered.
+
+        Vietcap's CDN refuses some Railway egress IPs outright; on such a container every
+        call here failed for the container's whole life (2026-09-30: 3 of 4 deploys), and a
+        redeploy was the only cure. The second source keeps the cards live meanwhile.
 
         One VCI read timeout used to cost a card everything that call carried until the
         next refresh. There were four such timeouts on the morning of 2026-09-30; the one at
@@ -1526,22 +1596,29 @@ class VnstockProvider(MarketDataProvider):
         right, merely not the newest. Another session's rows are never carried: `end` is
         the session, and it is part of what is remembered.
         """
-        scope = f"overview_index_{symbol.lower()}_{interval.lower()}"
         key = (symbol, interval)
-        try:
-            rows = _records(await self._call(
-                scope, self._history_fetcher, symbol, "vci", start, end, interval
+        attempts: list[tuple[str, str, Callable[..., Any], tuple[Any, ...]]] = [(
+            "VNSTOCK_VCI", f"overview_index_{symbol.lower()}_{interval.lower()}",
+            self._history_fetcher, (symbol, "vci", start, end, interval),
+        )]
+        if self._index_fallback_fetcher is not None:
+            attempts.append((
+                "VNDIRECT_DCHART", f"overview_index_fallback_{symbol.lower()}_{interval.lower()}",
+                self._index_fallback_fetcher, (symbol, start, end, interval),
             ))
-        except Exception as exc:  # noqa: BLE001 - one index cannot erase its peers
-            logger.debug("Vnstock overview %s %s unavailable: %s", symbol, interval, type(exc).__name__)
-            rows = []
-        if rows:
-            self._index_history_last_good[key] = (end, time.time(), rows)
-            return rows, None
+        for source, scope, fetcher, args in attempts:
+            try:
+                rows = _records(await self._call(scope, fetcher, *args))
+            except Exception as exc:  # noqa: BLE001 - one index cannot erase its peers
+                logger.debug("Overview %s %s from %s unavailable: %s", symbol, interval, source, type(exc).__name__)
+                continue
+            if rows:
+                self._index_history_last_good[key] = (end, time.time(), rows, source)
+                return rows, None, source
         last = self._index_history_last_good.get(key)
         if last is not None and last[0] == end:
-            return list(last[2]), last[1]
-        return [], None
+            return list(last[2]), last[1], last[3]
+        return [], None, None
 
     @staticmethod
     def _market_state(price: float | None, reference: float | None, ceiling: float | None, floor: float | None) -> str:
@@ -1663,8 +1740,10 @@ class VnstockProvider(MarketDataProvider):
         indices = []
         start = (date.fromisoformat(session) - timedelta(days=7)).isoformat()
         for symbol in index_symbols:
-            daily_rows, daily_carried = await self._safe_index_history(symbol, start, session, "1D")
-            intraday_rows, intraday_carried = await self._safe_index_history(
+            daily_rows, daily_carried, daily_source = await self._safe_index_history(
+                symbol, start, session, "1D"
+            )
+            intraday_rows, intraday_carried, intraday_source = await self._safe_index_history(
                 symbol, session, session, "5m"
             )
             daily: list[tuple[dict[str, Any], str]] = []
@@ -1706,13 +1785,13 @@ class VnstockProvider(MarketDataProvider):
                 point_value = _finite(row.get("close"))
                 if point_stamp and point_value is not None:
                     sparkline.append({"timestamp": point_stamp, "value": point_value, "reference": reference, "volume": _finite(row.get("volume"))})
-            price_carried = daily_carried
+            price_carried, price_source = daily_carried, daily_source
             if daily_carried is not None and intraday_carried is None and sparkline:
                 # The daily answer is an earlier refresh's; the bar just fetched is the
                 # index now. The reference it carried cannot have moved.
                 price = sparkline[-1]["value"]
                 change = price - reference if reference is not None else None
-                price_carried = None
+                price_carried, price_source = None, intraday_source
             as_of = sparkline[-1]["timestamp"] if sparkline else (
                 None if reference_only else _iso_timestamp((current or {}).get("time"))
             )
@@ -1759,9 +1838,11 @@ class VnstockProvider(MarketDataProvider):
                 "INTRADAY_CARRIED_FORWARD": None if reference_only else intraday_carried,
                 "BOARD_CARRIED_FORWARD": board_carried if has_breadth else None,
             }
+            used = {daily_source} | (set() if reference_only else {intraday_source})
+            from_fallback = "VNDIRECT_DCHART" in used
             availability = (
                 "AVAILABLE" if price is not None and sparkline and complete_breadth
-                and not any(stamp is not None for stamp in carried.values())
+                and not any(stamp is not None for stamp in carried.values()) and not from_fallback
                 else "PARTIAL" if price is not None or reference is not None or has_breadth else "UNAVAILABLE"
             )
             # No constituent rows is unknown breadth, not a market where nothing moved: these
@@ -1790,11 +1871,12 @@ class VnstockProvider(MarketDataProvider):
                     ("BREADTH_UNAVAILABLE", not has_breadth),
                     ("BREADTH_PARTIAL", has_breadth and not complete_breadth),
                     ("TRADING_VALUE_UNAVAILABLE", not reference_only and trading_value is None),
-                ) if missing] + [reason for reason, stamp in carried.items() if stamp is not None],
+                ) if missing] + [reason for reason, stamp in carried.items() if stamp is not None]
+                + (["INDEX_FALLBACK_SOURCE"] if from_fallback else []),
                 "provenance": {
-                    "price": {"source": "VNSTOCK_VCI", "as_of": as_of, "session_date": session,
+                    "price": {"source": price_source or "VNSTOCK_VCI", "as_of": as_of, "session_date": session,
                               "carried_from": _iso_timestamp(None if price is None else price_carried)},
-                    "reference": {"source": "VNSTOCK_VCI_PRIOR_CLOSE", "as_of": None,
+                    "reference": {"source": f"{daily_source or 'VNSTOCK_VCI'}_PRIOR_CLOSE", "as_of": None,
                                   "session_date": session,
                                   "observed_session_date": max((day for _, day in daily if day < session), default=None),
                                   "carried_from": _iso_timestamp(daily_carried)},
@@ -1804,7 +1886,7 @@ class VnstockProvider(MarketDataProvider):
                         "as_of": as_of, "session_date": session,
                         "availability": totals_availability,
                         "volume": {
-                            "source": "VNSTOCK_VCI", "as_of": as_of,
+                            "source": daily_source or "VNSTOCK_VCI", "as_of": as_of,
                             "availability": "AVAILABLE" if index_volume is not None else "UNAVAILABLE",
                             "carried_from": _iso_timestamp(
                                 None if index_volume is None else daily_carried
@@ -1829,7 +1911,7 @@ class VnstockProvider(MarketDataProvider):
                                 "observed": len(members), "expected": expected_members,
                                 "constituents": self._group_provenance.get(symbol),
                                 "carried_from": _iso_timestamp(carried["BOARD_CARRIED_FORWARD"])},
-                    "sparkline": {"source": "VNSTOCK_VCI", "as_of": as_of, "session_date": session,
+                    "sparkline": {"source": intraday_source or "VNSTOCK_VCI", "as_of": as_of, "session_date": session,
                                   "timeframe": "5m", "availability": "AVAILABLE" if sparkline else "UNAVAILABLE",
                                   "carried_from": _iso_timestamp(carried["INTRADAY_CARRIED_FORWARD"])},
                 },
