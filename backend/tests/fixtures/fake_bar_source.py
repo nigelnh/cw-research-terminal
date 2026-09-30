@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from typing import Dict, List, Optional
 
 from app.market_data.market_schemas import HistoricalBar
+from app.market_data.trading_calendar import latest_completed_trading_session
 
 
 def synthetic_closes(n: int = 40, base: float = 22000.0) -> List[float]:
@@ -23,8 +24,17 @@ def synthetic_closes(n: int = 40, base: float = 22000.0) -> List[float]:
 
 
 def make_daily_bars(closes: List[float], start: str | None = None) -> List[HistoricalBar]:
-    """Build a list of daily `HistoricalBar` from a close series (adjusted)."""
-    d = date.fromisoformat(start) if start else date.today() - timedelta(days=len(closes) - 1)
+    """Build a list of daily `HistoricalBar` from a close series (adjusted).
+
+    Without `start` the last bar lands on the latest completed Vietnam session - the same
+    cutoff `HistoricalVolatilityService` applies. It used to land on the host's
+    `date.today()`, which is later than that cutoff whenever a weekday session has not
+    closed yet, all weekend, and on holidays; the service then dropped the newest close,
+    the HV window slid by a day, and a dozen HV and quant tests failed by clock alone
+    (0.1997 against the expected 0.1944 on the morning of 2026-09-30).
+    """
+    last = latest_completed_trading_session()
+    d = date.fromisoformat(start) if start else last - timedelta(days=len(closes) - 1)
     bars: List[HistoricalBar] = []
     for c in closes:
         c = float(c)

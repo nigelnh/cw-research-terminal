@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.instruments.instrument_registry import InstrumentRegistry
 from app.me.instrument_resolver import InstrumentResolver
 
 pytestmark = pytest.mark.asyncio
@@ -15,7 +16,9 @@ pytestmark = pytest.mark.asyncio
 
 @pytest.fixture
 def resolver() -> InstrumentResolver:
-    return InstrumentResolver(session=None)
+    # Its own registry, loaded from the curated dataset: the app's singleton is overlaid
+    # with live terms by whichever tests ran first, which made these order-dependent.
+    return InstrumentResolver(session=None, registry=InstrumentRegistry())
 
 
 async def test_covered_warrant_resolves_to_canonical_terms(resolver):
