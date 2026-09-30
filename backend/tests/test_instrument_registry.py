@@ -26,6 +26,37 @@ from app.instruments.instrument_refresh import merge_records, atomic_write_snaps
 
 client = TestClient(app)
 
+#: The date `test_lifecycle_truth_active_vs_expired_vs_unknown` pins. The REST assertions
+#: below describe the curated dataset as it stood then - CHPG2602 active (it matured on
+#: 2026-09-21), 29 active, 3 expired.
+CURATED_AS_OF = "2026-08-25"
+
+
+@pytest.fixture
+def registry_as_of_curated_date():
+    """Load the app's registry as of CURATED_AS_OF, and put back whatever was there.
+
+    Read against the wall clock these tests began failing on 2026-09-22, the day after
+    CHPG2602 matured; the registry is also a process-wide singleton that other tests
+    overlay with the live CW universe.
+    """
+    import asyncio
+
+    from app.instruments.instrument_registry import instrument_registry as registry
+
+    saved = (
+        dict(registry._instruments),
+        {key: set(value) for key, value in registry._underlying_index.items()},
+        {key: set(value) for key, value in registry._issuer_index.items()},
+        registry._is_initialized,
+    )
+    asyncio.run(registry.initialize(current_date=CURATED_AS_OF))
+    try:
+        yield registry
+    finally:
+        (registry._instruments, registry._underlying_index,
+         registry._issuer_index, registry._is_initialized) = saved
+
 
 @pytest.mark.asyncio
 async def test_lifecycle_truth_active_vs_expired_vs_unknown():
@@ -228,6 +259,7 @@ def test_exercise_ratio_canonical_convention():
     assert share_equivalent_price == intrinsic_share
 
 
+@pytest.mark.usefixtures("registry_as_of_curated_date")
 def test_rest_api_coverage_and_reconciliation_endpoints():
     # 1. Coverage metrics
     cov_resp = client.get("/api/instruments/metrics/coverage")
@@ -265,6 +297,7 @@ def test_rest_api_coverage_and_reconciliation_endpoints():
     assert rec["common_count"] >= 2
 
 
+@pytest.mark.usefixtures("registry_as_of_curated_date")
 def test_rest_api_list_instruments_active_default():
     resp = client.get("/api/instruments")
     assert resp.status_code == 200
@@ -280,6 +313,7 @@ def test_rest_api_list_instruments_active_default():
     assert not any(x["status"] == "UNKNOWN" for x in data["items"])
 
 
+@pytest.mark.usefixtures("registry_as_of_curated_date")
 def test_rest_api_get_instrument_specification():
     # Valid active CW with reconciled effective terms
     resp = client.get("/api/instruments/CHPG2602")
