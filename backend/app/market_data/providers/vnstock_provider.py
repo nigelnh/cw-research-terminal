@@ -278,6 +278,12 @@ class VnstockProvider(MarketDataProvider):
         self._board_cache_at = 0.0
         self._board_cache_requested: set[str] = set()
         self._board_cache: dict[str, dict[str, Any]] = {}
+        # The overview's last good inputs, each tagged with the session it describes and
+        # the wall-clock time it was fetched. See `_safe_index_history`.
+        self._index_history_last_good: dict[
+            tuple[str, str], tuple[str, float, list[dict[str, Any]]]
+        ] = {}
+        self._overview_board_last_good: tuple[str, float, dict[str, dict[str, Any]]] | None = None
 
     # ------------------------------- lifecycle -------------------------------
     def set_event_callback(self, callback: EventCallback) -> None:
@@ -1506,15 +1512,36 @@ class VnstockProvider(MarketDataProvider):
 
     async def _safe_index_history(
         self, symbol: str, start: str, end: str, interval: str
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], float | None]:
+        """Index OHLCV from VCI and, when that call fails or comes back empty, this
+        session's last good answer - with the wall-clock time it was fetched, so the card
+        can say it was carried. The time is None for a fresh answer.
+
+        One VCI read timeout used to cost a card everything that call carried until the
+        next refresh. There were four such timeouts on the morning of 2026-09-30; the one at
+        11:03 ICT hit the VNFINLEAD daily call, and the card lost its price, change, volume
+        and reference. Without the reference its sparkline fell back to a bare min/max fit
+        with no baseline, a grey zigzag. The prior close cannot change within a session and
+        the intraday bars only ever grow, so the last answer for the same session is still
+        right, merely not the newest. Another session's rows are never carried: `end` is
+        the session, and it is part of what is remembered.
+        """
         scope = f"overview_index_{symbol.lower()}_{interval.lower()}"
+        key = (symbol, interval)
         try:
-            return _records(await self._call(
+            rows = _records(await self._call(
                 scope, self._history_fetcher, symbol, "vci", start, end, interval
             ))
         except Exception as exc:  # noqa: BLE001 - one index cannot erase its peers
             logger.debug("Vnstock overview %s %s unavailable: %s", symbol, interval, type(exc).__name__)
-            return []
+            rows = []
+        if rows:
+            self._index_history_last_good[key] = (end, time.time(), rows)
+            return rows, None
+        last = self._index_history_last_good.get(key)
+        if last is not None and last[0] == end:
+            return list(last[2]), last[1]
+        return [], None
 
     @staticmethod
     def _market_state(price: float | None, reference: float | None, ceiling: float | None, floor: float | None) -> str:
@@ -1565,11 +1592,19 @@ class VnstockProvider(MarketDataProvider):
             "VNDIAMOND": await self._safe_group_symbols("VNDIAMOND", session),
         }
         board_symbols = sorted(set(groups["VNINDEX"]) | {s.upper() for s in cw_symbols})
+        board_carried: float | None = None
         try:
             board = await self._board_rows(board_symbols, "overview_board")
         except Exception as exc:  # noqa: BLE001 - index cards can still be returned
             logger.debug("Vnstock overview board unavailable: %s", type(exc).__name__)
             board = {}
+        if board:
+            self._overview_board_last_good = (session, time.time(), board)
+        elif (last_board := self._overview_board_last_good) is not None and last_board[0] == session:
+            # Same reasoning as the index series: this session's last good board, marked
+            # carried, rather than a refresh with no breadth, leaders or turnover at all.
+            # valid_row() below still rejects any row stamped for another session.
+            board, board_carried = last_board[2], last_board[1]
 
         def valid_row(symbol: str) -> dict[str, Any] | None:
             row = board.get(symbol)
@@ -1628,8 +1663,10 @@ class VnstockProvider(MarketDataProvider):
         indices = []
         start = (date.fromisoformat(session) - timedelta(days=7)).isoformat()
         for symbol in index_symbols:
-            daily_rows = await self._safe_index_history(symbol, start, session, "1D")
-            intraday_rows = await self._safe_index_history(symbol, session, session, "5m")
+            daily_rows, daily_carried = await self._safe_index_history(symbol, start, session, "1D")
+            intraday_rows, intraday_carried = await self._safe_index_history(
+                symbol, session, session, "5m"
+            )
             daily: list[tuple[dict[str, Any], str]] = []
             for row in daily_rows:
                 day = _date_text(row.get("time"))
@@ -1669,6 +1706,13 @@ class VnstockProvider(MarketDataProvider):
                 point_value = _finite(row.get("close"))
                 if point_stamp and point_value is not None:
                     sparkline.append({"timestamp": point_stamp, "value": point_value, "reference": reference, "volume": _finite(row.get("volume"))})
+            price_carried = daily_carried
+            if daily_carried is not None and intraday_carried is None and sparkline:
+                # The daily answer is an earlier refresh's; the bar just fetched is the
+                # index now. The reference it carried cannot have moved.
+                price = sparkline[-1]["value"]
+                change = price - reference if reference is not None else None
+                price_carried = None
             as_of = sparkline[-1]["timestamp"] if sparkline else (
                 None if reference_only else _iso_timestamp((current or {}).get("time"))
             )
@@ -1710,15 +1754,24 @@ class VnstockProvider(MarketDataProvider):
                 totals_availability = "PARTIAL"
             else:
                 totals_availability = "UNAVAILABLE"
+            carried = {
+                "DAILY_CARRIED_FORWARD": daily_carried,
+                "INTRADAY_CARRIED_FORWARD": None if reference_only else intraday_carried,
+                "BOARD_CARRIED_FORWARD": board_carried if has_breadth else None,
+            }
             availability = (
                 "AVAILABLE" if price is not None and sparkline and complete_breadth
+                and not any(stamp is not None for stamp in carried.values())
                 else "PARTIAL" if price is not None or reference is not None or has_breadth else "UNAVAILABLE"
             )
-            advancing = None if reference_only else states.count("UP")
-            ceiling_count = None if reference_only else states.count("CEILING")
-            unchanged = None if reference_only else states.count("REFERENCE")
-            declining = None if reference_only else states.count("DOWN")
-            floor_count = None if reference_only else states.count("FLOOR")
+            # No constituent rows is unknown breadth, not a market where nothing moved: these
+            # were 0s, which rendered as "0 (0) - 0 - 0 (0)" whenever the board call failed.
+            no_breadth = reference_only or not has_breadth
+            advancing = None if no_breadth else states.count("UP")
+            ceiling_count = None if no_breadth else states.count("CEILING")
+            unchanged = None if no_breadth else states.count("REFERENCE")
+            declining = None if no_breadth else states.count("DOWN")
+            floor_count = None if no_breadth else states.count("FLOOR")
             indices.append({
                 "symbol": symbol, "value": price, "change": change,
                 "change_percent": change / reference * 100 if change is not None and reference else None,
@@ -1737,12 +1790,14 @@ class VnstockProvider(MarketDataProvider):
                     ("BREADTH_UNAVAILABLE", not has_breadth),
                     ("BREADTH_PARTIAL", has_breadth and not complete_breadth),
                     ("TRADING_VALUE_UNAVAILABLE", not reference_only and trading_value is None),
-                ) if missing],
+                ) if missing] + [reason for reason, stamp in carried.items() if stamp is not None],
                 "provenance": {
-                    "price": {"source": "VNSTOCK_VCI", "as_of": as_of, "session_date": session},
+                    "price": {"source": "VNSTOCK_VCI", "as_of": as_of, "session_date": session,
+                              "carried_from": _iso_timestamp(None if price is None else price_carried)},
                     "reference": {"source": "VNSTOCK_VCI_PRIOR_CLOSE", "as_of": None,
                                   "session_date": session,
-                                  "observed_session_date": max((day for _, day in daily if day < session), default=None)},
+                                  "observed_session_date": max((day for _, day in daily if day < session), default=None),
+                                  "carried_from": _iso_timestamp(daily_carried)},
                     "totals": {
                         "source": "VNSTOCK_VCI" if direct_trading_value is not None
                         else "MIXED_VNSTOCK_VCI_KBS_CONSTITUENTS",
@@ -1751,6 +1806,9 @@ class VnstockProvider(MarketDataProvider):
                         "volume": {
                             "source": "VNSTOCK_VCI", "as_of": as_of,
                             "availability": "AVAILABLE" if index_volume is not None else "UNAVAILABLE",
+                            "carried_from": _iso_timestamp(
+                                None if index_volume is None else daily_carried
+                            ),
                         },
                         "trading_value": {
                             "source": trading_value_source, "as_of": trading_value_as_of,
@@ -1758,15 +1816,22 @@ class VnstockProvider(MarketDataProvider):
                             "observed": len(constituent_trading_values)
                             if direct_trading_value is None else None,
                             "expected": expected_members if direct_trading_value is None else None,
+                            "carried_from": _iso_timestamp(
+                                None if trading_value is None
+                                else daily_carried if direct_trading_value is not None
+                                else board_carried
+                            ),
                         },
                     },
                     "breadth": {"source": "DERIVED_VNSTOCK_KBS_CONSTITUENTS", "as_of": as_of,
                                 "session_date": session,
                                 "availability": "AVAILABLE" if complete_breadth else "PARTIAL" if has_breadth else "UNAVAILABLE",
                                 "observed": len(members), "expected": expected_members,
-                                "constituents": self._group_provenance.get(symbol)},
+                                "constituents": self._group_provenance.get(symbol),
+                                "carried_from": _iso_timestamp(carried["BOARD_CARRIED_FORWARD"])},
                     "sparkline": {"source": "VNSTOCK_VCI", "as_of": as_of, "session_date": session,
-                                  "timeframe": "5m", "availability": "AVAILABLE" if sparkline else "UNAVAILABLE"},
+                                  "timeframe": "5m", "availability": "AVAILABLE" if sparkline else "UNAVAILABLE",
+                                  "carried_from": _iso_timestamp(carried["INTRADAY_CARRIED_FORWARD"])},
                 },
             })
         stock_leaders = leaders(groups["VNINDEX"])

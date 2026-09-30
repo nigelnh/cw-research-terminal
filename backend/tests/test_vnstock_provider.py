@@ -665,6 +665,204 @@ async def test_overview_keeps_other_indices_when_one_dataset_fails(monkeypatch):
     assert result["top_stock_volume"]
 
 
+class _OverviewWorld:
+    """One provider refreshed twice, the way production refreshes it every minute: the
+    first refresh answers everything, the second loses whatever `fail` names."""
+
+    def __init__(self, monkeypatch):
+        self.monkeypatch = monkeypatch
+        self.fail: set[tuple[str, str]] = set()
+        self.board_fails = False
+        self.close, self.volume = 1010, 2
+        self.bar_time, self.bar = "09:20:00", 1005
+        self.set_session(date(2026, 9, 8))
+        monkeypatch.setattr(
+            "app.market_data.providers.vnstock_provider.market_session.get_market_phase",
+            lambda *args, **kwargs: MarketPhase.CONTINUOUS_AM,
+        )
+        monkeypatch.setattr(
+            "app.market_data.providers.vnstock_provider.market_session.is_trading_active",
+            lambda *args, **kwargs: True,
+        )
+
+        def history(symbol, source, start, end, interval):
+            if (symbol, interval) in self.fail:
+                # What vnstock raises for the 30s read timeouts seen on 2026-09-30.
+                raise ConnectionError("API request failed: Read timed out. (read timeout=30)")
+            if interval == "1D":
+                return [
+                    {"time": "2026-09-07 00:00:00", "close": 1000, "volume": 1},
+                    {"time": f"{end} 00:00:00", "close": self.close, "volume": self.volume},
+                ]
+            return [
+                {"time": f"{end} 09:15:00", "close": 1003, "volume": 5},
+                {"time": f"{end} {self.bar_time}", "close": self.bar, "volume": 7},
+            ]
+
+        def board(symbols):
+            if self.board_fails:
+                raise ConnectionError("board unavailable")
+            return [
+                {**board_row(symbol=symbol), "close_price": 22000, "reference_price": 21500}
+                for symbol in symbols
+            ]
+
+        self.provider = provider(
+            board_fetcher=board,
+            history_fetcher=history,
+            listing_fetcher=lambda: [{"symbol": "HPG", "exchange": "HSX", "type": "STOCK"}],
+            group_fetcher=lambda name: ["HPG"],
+        )
+
+    def set_session(self, day):
+        self.monkeypatch.setattr(
+            "app.market_data.providers.vnstock_provider.reference_session_date",
+            lambda *args, **kwargs: day,
+        )
+
+    async def refresh(self):
+        # The provider keeps its own 60s overview and board caches; production's next
+        # refresh is a minute later, past both.
+        self.provider._overview_cache = (0.0, None)
+        self.provider._board_cache_at = 0.0
+        result = await self.provider.get_market_overview(["CHPG2625"])
+        return result, {item["symbol"]: item for item in result["indices"]}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_daily_call_keeps_the_sessions_reference_and_prices_from_the_fresh_bar(monkeypatch):
+    """2026-09-30 11:03 ICT: VCI timed out on the VNFINLEAD daily call and the card lost its
+    price, change, volume and reference until the next refresh."""
+    world = _OverviewWorld(monkeypatch)
+    _, before = await world.refresh()
+    assert before["VNFINLEAD"]["availability"] == "AVAILABLE"
+    assert before["VNFINLEAD"]["partial_reasons"] == []
+
+    world.fail = {("VNFINLEAD", "1D")}
+    world.close, world.volume = 1020, 9  # the daily answer this refresh never got
+    world.bar_time, world.bar = "09:25:00", 1012
+    _, after = await world.refresh()
+    card = after["VNFINLEAD"]
+
+    assert card["reference"] == 1000, "the prior close cannot change within a session"
+    assert card["value"] == 1012, "the bar just fetched is the index now"
+    assert card["change"] == 12
+    assert card["volume"] == 2, "the last good daily volume, marked carried"
+    assert card["sparkline"][-1]["value"] == 1012
+    assert card["as_of"] == "2026-09-08T09:25:00+07:00"
+    assert "DAILY_CARRIED_FORWARD" in card["partial_reasons"]
+    assert "PRICE_UNAVAILABLE" not in card["partial_reasons"]
+    assert card["availability"] == "PARTIAL"
+    prov = card["provenance"]
+    assert prov["reference"]["carried_from"] is not None
+    assert prov["totals"]["volume"]["carried_from"] is not None
+    assert prov["price"]["carried_from"] is None
+    assert prov["sparkline"]["carried_from"] is None
+    # Its peers answered and are exactly as fresh as before.
+    assert after["VN30"]["value"] == 1020
+    assert after["VN30"]["partial_reasons"] == []
+
+
+@pytest.mark.asyncio
+async def test_losing_both_series_carries_the_whole_card_with_its_own_older_as_of(monkeypatch):
+    world = _OverviewWorld(monkeypatch)
+    await world.refresh()
+    world.fail = {("VNFINLEAD", "1D"), ("VNFINLEAD", "5m")}
+    world.close, world.bar_time, world.bar = 1020, "09:25:00", 1012
+    _, after = await world.refresh()
+    card = after["VNFINLEAD"]
+
+    assert (card["value"], card["reference"], card["volume"]) == (1010, 1000, 2)
+    assert [p["value"] for p in card["sparkline"]] == [1003, 1005]
+    # The card's time is the last bar it actually has, so it reads as older than its peers.
+    assert card["as_of"] == "2026-09-08T09:20:00+07:00"
+    assert after["VN30"]["as_of"] == "2026-09-08T09:25:00+07:00"
+    assert {"DAILY_CARRIED_FORWARD", "INTRADAY_CARRIED_FORWARD"} <= set(card["partial_reasons"])
+    assert card["provenance"]["price"]["carried_from"] is not None
+    assert card["provenance"]["sparkline"]["carried_from"] is not None
+
+
+@pytest.mark.asyncio
+async def test_an_empty_answer_is_carried_like_a_failed_one(monkeypatch):
+    world = _OverviewWorld(monkeypatch)
+    await world.refresh()
+    original = world.provider._history_fetcher
+
+    def empty_for_finlead(symbol, *args):
+        return [] if symbol == "VNFINLEAD" else original(symbol, *args)
+
+    world.provider._history_fetcher = empty_for_finlead
+    _, after = await world.refresh()
+    assert after["VNFINLEAD"]["reference"] == 1000
+    assert after["VNFINLEAD"]["sparkline"]
+
+
+@pytest.mark.asyncio
+async def test_another_sessions_rows_are_never_carried(monkeypatch):
+    world = _OverviewWorld(monkeypatch)
+    await world.refresh()
+    world.set_session(date(2026, 9, 9))
+    world.fail = {("VNFINLEAD", "1D"), ("VNFINLEAD", "5m")}
+    _, after = await world.refresh()
+    card = after["VNFINLEAD"]
+
+    assert card["value"] is None and card["reference"] is None and card["volume"] is None
+    assert card["sparkline"] == []
+    assert card["availability"] == "UNAVAILABLE"
+    assert not {"DAILY_CARRIED_FORWARD", "INTRADAY_CARRIED_FORWARD"} & set(card["partial_reasons"])
+    # ...while the peers that answered describe the new session.
+    assert after["VN30"]["value"] == 1010
+    assert after["VN30"]["as_of"] == "2026-09-09T09:20:00+07:00"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_board_keeps_the_sessions_breadth_leaders_and_turnover(monkeypatch):
+    world = _OverviewWorld(monkeypatch)
+    before, cards = await world.refresh()
+    assert cards["VN30"]["advancing"] == 1
+    assert before["top_stock_volume"]
+
+    world.board_fails = True
+    after, cards = await world.refresh()
+    card = cards["VN30"]
+    assert card["advancing"] == 1
+    assert card["breadth_observed"] == card["breadth_expected"] == 1
+    assert "BOARD_CARRIED_FORWARD" in card["partial_reasons"]
+    assert card["provenance"]["breadth"]["carried_from"] is not None
+    assert card["availability"] == "PARTIAL"
+    assert after["top_stock_volume"] == before["top_stock_volume"]
+
+
+@pytest.mark.asyncio
+async def test_the_overview_service_keeps_retrying_while_a_card_is_carried(monkeypatch):
+    """The join: the reason codes this provider writes are the ones the service reads to
+    keep a carried card off the stretched off-session TTL."""
+    from app.market_data.market_overview_service import _cards_settled
+
+    world = _OverviewWorld(monkeypatch)
+    clean, _ = await world.refresh()
+    assert _cards_settled(clean) is True
+    for fail in ({("VNFINLEAD", "1D")}, {("VNFINLEAD", "5m")}):
+        world.fail = fail
+        carried, _ = await world.refresh()
+        assert _cards_settled(carried) is False, fail
+    world.fail, world.board_fails = set(), True
+    carried, _ = await world.refresh()
+    assert _cards_settled(carried) is False
+
+
+@pytest.mark.asyncio
+async def test_no_board_at_all_is_unknown_breadth_not_a_market_where_nothing_moved(monkeypatch):
+    world = _OverviewWorld(monkeypatch)
+    world.board_fails = True
+    _, cards = await world.refresh()
+    for card in cards.values():
+        assert card["breadth_observed"] == 0
+        assert [card[k] for k in ("advancing", "ceiling", "unchanged", "declining", "floor")] == [None] * 5
+        assert "BREADTH_UNAVAILABLE" in card["partial_reasons"]
+        assert "BOARD_CARRIED_FORWARD" not in card["partial_reasons"]
+
+
 @pytest.mark.asyncio
 async def test_current_finlead_and_diamond_constituents_fallback_when_vci_group_is_empty():
     def empty_group(_name):
@@ -752,6 +950,7 @@ async def test_overview_exposes_session_scoped_liquidity_and_foreign_flow(monkey
             "availability": "AVAILABLE",
             "observed": 2,
             "expected": 2,
+            "carried_from": None,
         }
         assert "TRADING_VALUE_UNAVAILABLE" not in item["partial_reasons"]
 

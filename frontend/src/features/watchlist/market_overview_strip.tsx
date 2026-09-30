@@ -207,6 +207,9 @@ function IndexCard({ item, referenceOnly = false }: { item: IndexOverview; refer
     INTRADAY_UNAVAILABLE: "No intraday observations for this session",
     PRICE_UNAVAILABLE: "Index price unavailable", REFERENCE_UNAVAILABLE: "Session reference unavailable",
     PRE_OPEN_REFERENCE_ONLY: "Pre-open: only today's session reference is available",
+    DAILY_CARRIED_FORWARD: "Daily figures from this session's last good fetch",
+    INTRADAY_CARRIED_FORWARD: "Intraday path from this session's last good fetch",
+    BOARD_CARRIED_FORWARD: "Breadth and value from this session's last good board",
   }[reason] ?? reason)).join("; ");
   const asOf = item.as_of
     ? new Date(item.as_of).toLocaleTimeString("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" })

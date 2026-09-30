@@ -19,7 +19,8 @@ def fixed_session(monkeypatch):
 
 
 
-def overview(*, settled: bool = True, sparkline_start: str | None = None):
+def overview(*, settled: bool = True, sparkline_start: str | None = None,
+             partial_reasons: list[str] | None = None):
     """A settled payload (the default) mirrors a provider result where the background
     breadth/stock-leaders sweep has already completed - the normal, common case, and what
     every off-session-TTL test other than the one dedicated to the unsettled case wants.
@@ -33,6 +34,8 @@ def overview(*, settled: bool = True, sparkline_start: str | None = None):
              "provenance": {"price": {"session_date": "2026-09-03"}}}
     if sparkline_start is not None:
         index["sparkline"] = [{"timestamp": sparkline_start, "value": 1200, "reference": 1190}]
+    if partial_reasons is not None:
+        index["partial_reasons"] = list(partial_reasons)
     return {
         "indices": [index],
         "top_stock_volume": [], "top_cw_volume": [], "source": "FIINQUANT",
@@ -291,6 +294,65 @@ async def test_ttl_stays_short_until_the_chart_covers_the_open(monkeypatch):
         await _settle(service)
         assert service._refresh_task is task_before
         assert provider.get_market_overview.await_count == 2
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize("reasons", [
+    ["DAILY_CARRIED_FORWARD"],
+    ["INTRADAY_CARRIED_FORWARD"],
+    ["BOARD_CARRIED_FORWARD", "BREADTH_PARTIAL"],
+    ["PRICE_UNAVAILABLE", "INTRADAY_UNAVAILABLE"],
+    ["REFERENCE_UNAVAILABLE"],
+    ["PRE_OPEN_REFERENCE_ONLY", "PRICE_UNAVAILABLE", "REFERENCE_UNAVAILABLE"],
+])
+async def test_ttl_stays_short_while_a_card_is_carried_or_blank(monkeypatch, reasons):
+    """The provider carries a session's last good index rows over a failed call. If the one
+    refresh after the close lost a call, the stretched off-session TTL would have frozen the
+    carried card - or, before carrying, a blank one - until the next morning."""
+    from app.market_data.market_session import market_session
+    monkeypatch.setattr(market_session, "is_trading_active", lambda: False)
+
+    provider = SimpleNamespace(get_market_overview=AsyncMock(side_effect=[
+        overview(partial_reasons=reasons), overview(partial_reasons=[]),
+    ]))
+    service = MarketOverviewService()
+    service.configure(provider, store())
+    service._seconds_to_next_session = lambda: 6 * 3600  # e.g. overnight
+    try:
+        await service.get([])
+        await _settle(service)
+        service._cached_at -= 65
+        await service.get([])
+        await _settle(service)
+        assert provider.get_market_overview.await_count == 2, "retried on the short TTL"
+
+        service._cached_at -= 3600
+        await service.get([])
+        await _settle(service)
+        assert provider.get_market_overview.await_count == 2, "a clean card settles"
+    finally:
+        await service.close()
+
+
+async def test_a_reference_only_preopen_card_still_gets_the_long_ttl(monkeypatch):
+    """Pre-open cards have no price by design; that alone is not a reason to refetch."""
+    from app.market_data.market_session import market_session
+    monkeypatch.setattr(market_session, "is_trading_active", lambda: False)
+
+    provider = SimpleNamespace(get_market_overview=AsyncMock(return_value=overview(
+        partial_reasons=["PRE_OPEN_REFERENCE_ONLY", "PRICE_UNAVAILABLE", "INTRADAY_UNAVAILABLE"],
+    )))
+    service = MarketOverviewService()
+    service.configure(provider, store())
+    service._seconds_to_next_session = lambda: 3000
+    try:
+        await service.get([])
+        await _settle(service)
+        service._cached_at -= 600
+        await service.get([])
+        await _settle(service)
+        assert provider.get_market_overview.await_count == 1
     finally:
         await service.close()
 

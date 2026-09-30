@@ -48,6 +48,33 @@ def _sparkline_settled(cache: dict[str, Any]) -> bool:
     return True
 
 
+_CARRIED_REASONS = frozenset({
+    "DAILY_CARRIED_FORWARD", "INTRADAY_CARRIED_FORWARD", "BOARD_CARRIED_FORWARD",
+})
+
+
+def _cards_settled(cache: dict[str, Any]) -> bool:
+    """False while any index card holds figures carried from an earlier refresh, or has no
+    price or reference at all (outside the reference-only pre-open card, which has no price
+    by design).
+
+    The provider carries a session's last good index rows over a failed call instead of
+    blanking the card. That is right for the next minute and wrong for the whole closed
+    stretch: if the one refresh after the close lost a call, the stretched TTL would have
+    kept the carried card - or, before carrying, a blank one - until the next morning.
+    """
+    for item in cache.get("indices", []):
+        reasons = set(item.get("partial_reasons") or [])
+        if reasons & _CARRIED_REASONS:
+            return False
+        missing = {"REFERENCE_UNAVAILABLE"} if "PRE_OPEN_REFERENCE_ONLY" in reasons else {
+            "PRICE_UNAVAILABLE", "REFERENCE_UNAVAILABLE",
+        }
+        if reasons & missing:
+            return False
+    return True
+
+
 def _live_cw_quotes(symbols: list[str], session: str) -> dict[str, dict[str, Any]]:
     """Live covered-warrant values from this server's canonical state.
 
@@ -108,7 +135,8 @@ class MarketOverviewService:
 
         Except: if the cached payload still lacks stock leaders, or an index chart is
         missing its early bars (the provider's background sweep hadn't finished, or an
-        intraday fetch hiccuped, when it was built), stay on the short TTL instead - a
+        intraday fetch hiccuped, when it was built), or an index card is carried or blank
+        (`_cards_settled`), stay on the short TTL instead - a
         multi-day-stale panel for the rest of a closed weekend would otherwise never
         self-correct, since nothing re-asks the provider for it.
         """
@@ -116,7 +144,7 @@ class MarketOverviewService:
             return 60.0
         settled = bool(self._cache) and (
             self._cache.get("components", {}).get("top_stock_volume") == "AVAILABLE"
-        ) and _sparkline_settled(self._cache)
+        ) and _sparkline_settled(self._cache) and _cards_settled(self._cache)
         if not settled:
             return 60.0
         try:
