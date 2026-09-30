@@ -113,6 +113,9 @@ interface Props {
   overlays?: Set<TechnicalOverlay>;
   referencePrice?: number | null;
   height?: number;
+  /** Fill the parent's remaining height instead of a fixed `height`; the canvas follows
+   * its container as it resizes. For a chart laid out in a flex column with siblings. */
+  fill?: boolean;
   onFitContent?: () => void;
 }
 
@@ -129,6 +132,7 @@ export function TradingChart({
   overlays,
   referencePrice,
   height = 360,
+  fill = false,
 }: Props) {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartInstanceRef = useRef<IChartApi | null>(null);
@@ -279,7 +283,7 @@ export function TradingChart({
       interval === "1m" || interval === "5m" || interval === "15m" || interval === "30m" || interval === "1h";
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth || 640,
-      height,
+      height: fill ? chartContainerRef.current.clientHeight || height : height,
       layout: {
         background: { type: ColorType.Solid, color: "#111418" },
         textColor: "#94a3b8",
@@ -447,7 +451,11 @@ export function TradingChart({
 
     const resizeObserver = new ResizeObserver((entries) => {
       if (entries.length > 0 && chartInstanceRef.current) {
-        chartInstanceRef.current.applyOptions({ width: entries[0].contentRect.width, height });
+        const box = entries[0].contentRect;
+        chartInstanceRef.current.applyOptions({
+          width: box.width,
+          height: fill ? Math.max(1, Math.floor(box.height)) : height,
+        });
       }
     });
     resizeObserver.observe(chartContainerRef.current);
@@ -460,7 +468,7 @@ export function TradingChart({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildSig, height, interval, referencePrice, overlayKey, toChartTime]);
+  }, [buildSig, height, fill, interval, referencePrice, overlayKey, toChartTime]);
 
   // ------------------------------------------------------------------ Live-tick effect
   // Apply a within-bucket live update to the last bar only. No rebuild, no viewport
@@ -487,12 +495,21 @@ export function TradingChart({
         (mode === "RELATIVE" && (effectiveCwBars.length > 0 || effectiveUndBars.length > 0));
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        width: "100%",
+        ...(fill ? { flex: 1, minHeight: 0 } : {}),
+      }}
+    >
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          flexShrink: 0,
           padding: "6px 10px",
           backgroundColor: "rgba(255, 255, 255, 0.02)",
           border: "1px solid var(--border)",
@@ -571,7 +588,7 @@ export function TradingChart({
         ref={chartContainerRef}
         style={{
           width: "100%",
-          height: `${height}px`,
+          ...(fill ? { flex: 1, minHeight: 160 } : { height: `${height}px` }),
           position: "relative",
           borderRadius: "4px",
           overflow: "hidden",
@@ -611,6 +628,7 @@ export function TradingChart({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            flexShrink: 0,
             padding: "4px 8px",
             fontSize: "10.5px",
             color: "var(--subtle-foreground)",
