@@ -211,6 +211,7 @@ function IndexCard({ item, referenceOnly = false }: { item: IndexOverview; refer
     INTRADAY_CARRIED_FORWARD: "Intraday path from this session's last good fetch",
     BOARD_CARRIED_FORWARD: "Breadth and value from this session's last good board",
     CARD_CARRIED_FORWARD: "Whole card from this session's last good refresh",
+    INDEX_FALLBACK_SOURCE: "Vietcap unavailable - index from VNDirect; volume hidden (different basis)",
   }[reason] ?? reason)).join("; ");
   const asOf = item.as_of
     ? new Date(item.as_of).toLocaleTimeString("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" })
