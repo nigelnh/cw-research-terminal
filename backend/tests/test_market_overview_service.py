@@ -357,6 +357,151 @@ async def test_a_reference_only_preopen_card_still_gets_the_long_ttl(monkeypatch
         await service.close()
 
 
+def _blank_card(symbol="VNINDEX", session="2026-09-03"):
+    """What the provider returns for an index when every Vietcap call fails."""
+    return {"symbol": symbol, "value": None, "change": None, "reference": None, "volume": None,
+            "as_of": None, "session_date": session, "sparkline": [], "availability": "UNAVAILABLE",
+            "partial_reasons": ["PRICE_UNAVAILABLE", "REFERENCE_UNAVAILABLE", "INTRADAY_UNAVAILABLE"],
+            "provenance": {"price": {"session_date": session}}}
+
+
+def _leader(symbol="HPG", session="2026-09-03"):
+    return {"symbol": symbol, "volume": 5_800_000, "price": 20350, "session_date": session,
+            "provenance": {"price": {"session_date": session}}}
+
+
+def _refused_refresh(session="2026-09-03"):
+    """2026-09-30 11:38 ICT: a restart onto an egress Vietcap refuses. Every index card and
+    the stock leaders are empty; the CW leaders still arrive from the realtime feed."""
+    payload = overview()
+    payload.update({
+        "display_session": session, "indices": [_blank_card(session=session)],
+        "top_stock_volume": [], "top_cw_volume": [_leader("CVPB2615", session)],
+        "components": {"top_stock_volume": "UNAVAILABLE"},
+    })
+    return payload
+
+
+async def _restart_then_refresh(saved_payload, refreshed_payload):
+    provider = SimpleNamespace(get_market_overview=AsyncMock(return_value=refreshed_payload))
+    service = MarketOverviewService()
+    service.configure(provider, store({"payload": saved_payload, "cached_at": time.time() - 3600}))
+    service._seconds_to_next_session = lambda: 1.0  # the restored snapshot is due a refresh
+    await service.get([])
+    await _settle(service)
+    assert provider.get_market_overview.await_count == 1
+    return service
+
+
+async def test_a_restart_onto_a_refused_upstream_keeps_the_restored_cards(monkeypatch):
+    from app.market_data.market_session import market_session
+    monkeypatch.setattr(market_session, "is_trading_active", lambda: False)
+    saved = overview()
+    saved["top_stock_volume"] = [_leader()]
+    service = await _restart_then_refresh(saved, _refused_refresh())
+    try:
+        result = service._payload()
+        card = result["indices"][0]
+        assert card["value"] == 1200, "the restored card, not the blank refresh"
+        assert "CARD_CARRIED_FORWARD" in card["partial_reasons"]
+        assert card["availability"] == "PARTIAL"
+        assert card["carried_from"].startswith("2026-")
+        assert [row["symbol"] for row in result["top_stock_volume"]] == ["HPG"]
+        assert [row["symbol"] for row in result["top_cw_volume"]] == ["CVPB2615"], "fresh parts stay fresh"
+        service._seconds_to_next_session = lambda: 6 * 3600
+        assert service._ttl_seconds() == 60.0, "carried data keeps retrying off-session"
+    finally:
+        await service.close()
+
+
+async def test_carried_stock_leaders_alone_keep_the_short_ttl(monkeypatch):
+    from app.market_data.market_session import market_session
+    monkeypatch.setattr(market_session, "is_trading_active", lambda: False)
+    saved = overview()
+    saved["top_stock_volume"] = [_leader()]
+    refreshed = overview()  # the index card answered; only the leaders came back empty
+    refreshed.update({"top_stock_volume": [], "components": {"top_stock_volume": "UNAVAILABLE"}})
+    service = await _restart_then_refresh(saved, refreshed)
+    try:
+        assert [row["symbol"] for row in service._cache["top_stock_volume"]] == ["HPG"]
+        service._seconds_to_next_session = lambda: 6 * 3600
+        assert service._ttl_seconds() == 60.0
+    finally:
+        await service.close()
+
+
+async def test_a_card_keeps_its_first_carried_time_over_repeated_failures():
+    saved = overview()
+    service = await _restart_then_refresh(saved, _refused_refresh())
+    try:
+        first = service._cache["indices"][0]["carried_from"]
+        service._provider.get_market_overview.return_value = _refused_refresh()
+        service._cached_at -= 3600
+        await service._refresh()
+        again = service._cache["indices"][0]
+        assert again["carried_from"] == first
+        assert again["partial_reasons"].count("CARD_CARRIED_FORWARD") == 1
+    finally:
+        await service.close()
+
+
+async def test_a_card_from_another_session_is_never_carried(monkeypatch):
+    monkeypatch.setattr(
+        "app.market_data.market_overview_service.reference_session_date",
+        lambda *a: __import__("datetime").date(2026, 9, 4),
+    )
+    saved = overview()  # 2026-09-03
+    saved["top_stock_volume"] = [_leader()]
+    service = await _restart_then_refresh(saved, _refused_refresh(session="2026-09-04"))
+    try:
+        assert service._cache["indices"][0]["value"] is None
+        assert "CARD_CARRIED_FORWARD" not in service._cache["indices"][0]["partial_reasons"]
+        assert service._cache["top_stock_volume"] == []
+    finally:
+        await service.close()
+
+
+async def test_carrying_never_edits_the_providers_own_payload():
+    refused = _refused_refresh()
+    before = copy.deepcopy(refused)
+    service = await _restart_then_refresh(overview(), refused)
+    try:
+        assert service._cache["indices"][0]["value"] == 1200
+        assert refused == before, "the provider caches this object for 60s"
+    finally:
+        await service.close()
+
+
+async def test_an_undated_blank_card_is_not_matched_to_an_undated_old_one():
+    undated = overview()
+    undated["indices"][0].pop("provenance")
+    undated["indices"][0].update(session_date=None, as_of=None)
+    refused = _refused_refresh()
+    refused["indices"][0]["provenance"] = {}
+    refused["indices"][0]["session_date"] = None
+    service = await _restart_then_refresh(undated, refused)
+    try:
+        assert service._cache["indices"][0]["value"] is None
+    finally:
+        await service.close()
+
+
+async def test_a_fresh_card_replaces_a_carried_one():
+    service = await _restart_then_refresh(overview(), _refused_refresh())
+    try:
+        fresh = overview()
+        fresh["indices"][0]["value"] = 1210
+        service._provider.get_market_overview.return_value = fresh
+        service._cached_at -= 3600
+        await service._refresh()
+        card = service._cache["indices"][0]
+        assert card["value"] == 1210
+        assert "CARD_CARRIED_FORWARD" not in (card.get("partial_reasons") or [])
+        assert "carried_from" not in card
+    finally:
+        await service.close()
+
+
 async def test_failed_refresh_is_bounded_and_backed_off():
     provider = SimpleNamespace(get_market_overview=AsyncMock(side_effect=RuntimeError("offline")))
     service = MarketOverviewService()

@@ -14,7 +14,7 @@ from typing import Any
 from app.market_data.market_session import market_session
 from app.market_data.market_state import market_state
 from app.market_data.session_reference import reference_session_date
-from app.market_data.trading_calendar import session_context
+from app.market_data.trading_calendar import VN_TZ, session_context
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,66 @@ def _sparkline_settled(cache: dict[str, Any]) -> bool:
 
 _CARRIED_REASONS = frozenset({
     "DAILY_CARRIED_FORWARD", "INTRADAY_CARRIED_FORWARD", "BOARD_CARRIED_FORWARD",
+    "CARD_CARRIED_FORWARD",
 })
+
+
+def _item_session(item: dict[str, Any]) -> str | None:
+    """The session a card or leaderboard row describes, from its own provenance."""
+    price = (item.get("provenance") or {}).get("price") or {}
+    return price.get("session_date") or item.get("session_date") or (item.get("as_of") or "")[:10] or None
+
+
+def _keep_what_the_refresh_lost(
+    previous: dict[str, Any] | None, result: dict[str, Any], previous_at: float
+) -> dict[str, Any]:
+    """Keep, marked carried, any index card or stock leaderboard the previous payload held
+    for this same session and this refresh came back without.
+
+    The provider carries its own last good rows over a failed call, but only rows it has
+    fetched since it started. A restart onto a Railway egress that Vietcap refuses
+    (2026-09-30 11:38 ICT: every VCI call "400 - Bad Request") leaves it nothing to carry.
+    The first refresh blanked all four index cards and the stock leaders. The covered-
+    warrant leaders come from the realtime feed, so that payload still counted as usable
+    and replaced the good one just restored from the store.
+    """
+    if not previous:
+        return result
+    # A copy: the provider keeps this same object as its own 60s cache.
+    result = {**result, "components": dict(result.get("components") or {})}
+    carried_from = datetime.fromtimestamp(previous_at, VN_TZ).isoformat() if previous_at else None
+    had = {
+        item.get("symbol"): item for item in previous.get("indices", [])
+        if item.get("value") is not None or item.get("reference") is not None
+    }
+    indices = []
+    for item in result.get("indices", []):
+        old = had.get(item.get("symbol"))
+        if (
+            item.get("value") is None and item.get("reference") is None
+            and old is not None and _item_session(item) is not None
+            and _item_session(old) == _item_session(item)
+        ):
+            item = copy.deepcopy(old)
+            reasons = [r for r in item.get("partial_reasons") or [] if r != "CARD_CARRIED_FORWARD"]
+            item["partial_reasons"] = reasons + ["CARD_CARRIED_FORWARD"]
+            item["availability"] = "PARTIAL"
+            item["carried_from"] = item.get("carried_from") or carried_from
+        indices.append(item)
+    result["indices"] = indices
+
+    session = result.get("display_session") or next(
+        (d for d in map(_item_session, indices) if d), None
+    )
+    leaders = previous.get("top_stock_volume") or []
+    if (
+        not result.get("top_stock_volume") and leaders and session
+        and all(_item_session(row) == session for row in leaders)
+    ):
+        result["top_stock_volume"] = copy.deepcopy(leaders)
+        # Not "AVAILABLE": the off-session TTL only stretches for a settled payload.
+        result["components"]["top_stock_volume"] = "CARRIED"
+    return result
 
 
 def _cards_settled(cache: dict[str, Any]) -> bool:
@@ -242,6 +301,7 @@ class MarketOverviewService:
             )
             if generation == self._symbols_generation:
                 break
+        result = _keep_what_the_refresh_lost(self._cache, result, self._cached_at)
         # At the 08:00 display rollover Vnstock can confirm today's official index
         # references before the first index bar exists.  A reference-only overview is a
         # valid pre-open payload and must replace yesterday's completed-session cache.
@@ -296,11 +356,8 @@ class MarketOverviewService:
         display_session = reference_session_date().isoformat()
         # Validate every card and every leaderboard independently, including future or
         # undated legacy payloads. One fresh index cannot legitimize yesterday's peers.
-        def day(item):
-            price = (item.get("provenance") or {}).get("price") or {}
-            return price.get("session_date") or item.get("session_date") or (item.get("as_of") or "")[:10]
         for key in ("indices", "top_stock_volume", "top_cw_volume"):
-            result[key] = [item for item in result.get(key, []) if day(item) == display_session]
+            result[key] = [item for item in result.get(key, []) if _item_session(item) == display_session]
         metrics = result.get("market_metrics")
         if not isinstance(metrics, dict) or metrics.get("session_date") != display_session:
             result["market_metrics"] = {
