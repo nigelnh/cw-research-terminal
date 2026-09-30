@@ -36,10 +36,11 @@ vi.mock("@/data/query/use_traded_log", () => ({
   useTradedLog: () => ({ items: [], sessionDate: null, sideBasis: null, isLoading: false, isError: false }),
 }));
 vi.mock("@/components/common/trading_chart", () => ({
-  TradingChart: (props: { interval: string; bars: HistoricalBar[] }) => (
+  TradingChart: (props: { interval: string; bars: HistoricalBar[]; fill?: boolean; height?: number }) => (
     <div
       data-testid="chart" data-interval={props.interval} data-bars={props.bars.length}
       data-first={props.bars[0]?.date} data-last-close={props.bars[props.bars.length - 1]?.close}
+      data-fill={String(Boolean(props.fill))} data-height={String(props.height ?? "")}
     />
   ),
 }));
@@ -91,6 +92,13 @@ describe("instrument chart intervals", () => {
     expect(chart(page).dataset.interval).toBe("1D");
     expect(chart(page).dataset.bars).toBe(String(DAILY.length));
     expect(last()).toMatchObject({ timeframe: "MAX", interval: "1D", adjusted: true });
+  });
+
+  it("fills the height left under the interval picker instead of a fixed one", () => {
+    // A fixed 300px under the picker pushed the time axis ~24px out of the panel.
+    const page = render(<InstrumentPanel instrument={stock} marketSessionActive={false} onClose={vi.fn()} />);
+    expect(chart(page).dataset.fill).toBe("true");
+    expect(chart(page).dataset.height).toBe("");
   });
 
   it("builds weekly candles from the same series without a new request", () => {

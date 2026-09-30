@@ -710,7 +710,9 @@ export function InstrumentPanel({
                   liveQuote={q ?? null}
                   interval={chartInterval}
                   referencePrice={ref}
-                  height={300}
+                  // The interval picker sits above it in the same column; a fixed 300px pushed
+                  // the time axis ~24px out of the panel.
+                  fill
                 />
               )}
             </div>
