@@ -505,7 +505,11 @@ class HistoryReadService:
         of upstream budget.
         """
         to_d = last_completed_session_date()
-        from_d = to_d - timedelta(days=int(settings.INGEST_MAX_LOOKBACK_DAYS))
+        # Measured from the planner's own origin, the host date. Measured from the session,
+        # every weekend, holiday and pre-close hour asked for a day or more past the
+        # lookback, so the plan came back clamped - and a clamped stream is PARTIAL even
+        # when every chunk failed.
+        from_d = date.today() - timedelta(days=int(settings.INGEST_MAX_LOOKBACK_DAYS))
         restated = failed = written = 0
         for inst in stocks:
             try:
@@ -513,9 +517,17 @@ class HistoryReadService:
                     [inst.symbol], timeframe=tf, adjusted=True, from_date=from_d, to_date=to_d, force=True,
                 )
                 stream = result.streams[0] if result.streams else None
-                if stream is not None and stream.status in ("SUCCEEDED", "PARTIAL"):
-                    restated += 1
+                if stream is not None:
                     written += stream.inserted + stream.updated
+                # Restated means every chunk answered. PARTIAL alone is not enough: it is also
+                # what a clamped plan reports with nothing fetched (VPB, 0 bars, "restated"),
+                # and a series rewritten only in part sits on two adjustment bases - the step
+                # this pass exists to remove.
+                if (
+                    stream is not None and stream.status in ("SUCCEEDED", "PARTIAL")
+                    and stream.chunks and all(chunk.status != "FAILED" for chunk in stream.chunks)
+                ):
+                    restated += 1
                 else:
                     failed += 1
                     logger.warning(

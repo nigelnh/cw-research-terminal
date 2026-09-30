@@ -147,7 +147,18 @@ async def test_restatement_overwrites_a_series_stored_on_an_old_basis(history_se
     assert all(stored[d] == restated[d] for d in stored if d in restated)
 
 
-async def test_a_refused_restatement_keeps_the_stored_series(history_service, fake_provider):
+@pytest.mark.parametrize("session_lag_days", [0, 3])
+async def test_a_refused_restatement_keeps_the_stored_series(
+    history_service, fake_provider, monkeypatch, session_lag_days
+):
+    """`session_lag_days` is how far the last completed session trails the host date: 0 after
+    a weekday close, 3 over a weekend. At 3 the plan used to come back clamped, a clamped
+    stream reports PARTIAL with nothing fetched, and the refusal was counted as restated -
+    which is also how this test began failing on a weekday morning, 2026-09-30."""
+    monkeypatch.setattr(
+        "app.market_data.history_read_service.last_completed_session_date",
+        lambda: date.today() - timedelta(days=session_lag_days),
+    )
     days = _weekdays(_CUTOFF - timedelta(days=30), _CUTOFF)
     iid = await _seed_instrument("VPB")
     await _insert_bars(iid, days, price_basis="ADJUSTED")
@@ -157,6 +168,30 @@ async def test_a_refused_restatement_keeps_the_stored_series(history_service, fa
     result = await history_service.warm_universe(["VPB"])
     assert result["stocks_adjusted"] == {"restated": 0, "failed": 1, "bars_written": 0}
     assert await _closes("VPB", "ADJUSTED") == before
+
+
+async def test_a_restatement_that_fails_partway_is_not_counted_as_restated(
+    history_service, fake_provider, monkeypatch
+):
+    """Part of the series rewritten on the new basis and the rest left on the old one is the
+    step the restatement exists to remove: a failure, whatever the stream status says."""
+    monkeypatch.setattr(settings, "INGEST_MAX_CHUNK_SPAN_DAYS", 1000)
+    await _seed_instrument("VPB")
+    lookback = timedelta(days=int(settings.INGEST_MAX_LOOKBACK_DAYS))
+    fake_provider.seed_daily("VPB", date.today() - lookback, _CUTOFF)
+    recent = _CUTOFF - timedelta(days=1500)
+    answer = fake_provider.get_historical_bars
+
+    async def only_older_chunks(symbol, timeframe="1D", from_date=None, to_date=None, adjusted=True):
+        if from_date and date.fromisoformat(from_date) > recent:
+            raise HistoricalTransportError("API request failed: Read timed out. (read timeout=30)")
+        return await answer(symbol, timeframe, from_date, to_date, adjusted)
+
+    monkeypatch.setattr(fake_provider, "get_historical_bars", only_older_chunks)
+    result = await history_service.warm_universe(["VPB"])
+    stocks = result["stocks_adjusted"]
+    assert (stocks["restated"], stocks["failed"]) == (0, 1)
+    assert stocks["bars_written"] > 0, "what the older chunks did rewrite is still reported"
 
 
 async def test_stocks_are_not_warmed_on_raw(history_service, fake_provider):
