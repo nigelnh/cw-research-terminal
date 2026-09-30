@@ -95,6 +95,7 @@ class HistoryReadService:
             "gap_fills_attempted": 0,
             "gap_fills_filled": 0,
             "gap_fills_failed": 0,
+            "gap_fills_no_data": 0,
             "gap_fills_out_of_horizon": 0,
             "gap_fills_suppressed_cooldown": 0,
             "gap_fill_lock_timeouts": 0,
@@ -526,6 +527,7 @@ class HistoryReadService:
                 if (
                     stream is not None and stream.status in ("SUCCEEDED", "PARTIAL")
                     and stream.chunks and all(chunk.status != "FAILED" for chunk in stream.chunks)
+                    and any(chunk.status == "SUCCEEDED" for chunk in stream.chunks)
                 ):
                     restated += 1
                 else:
@@ -540,7 +542,7 @@ class HistoryReadService:
         return {"restated": restated, "failed": failed, "bars_written": written}
 
     async def _warm_basis(self, instruments, tf: str, price_basis: str, req_from: date, req_to: date) -> dict:
-        filled = covered = failed = 0
+        filled = covered = no_data = failed = 0
         for inst in instruments:
             try:
                 rows = await self._read_db(inst.id, tf, price_basis, req_from, req_to)
@@ -559,12 +561,16 @@ class HistoryReadService:
                     filled += 1
                 elif outcome.status == "ALREADY_COVERED":
                     covered += 1
+                elif outcome.status == "NO_DATA":
+                    # The provider holds nothing there - a warrant's day without a trade. An
+                    # answer, recorded in the cursor, never asked again; not a failure.
+                    no_data += 1
                 else:
                     failed += 1
             except Exception as err:  # noqa: BLE001 - one symbol must not end the pass
                 failed += 1
                 logger.warning("history warm: %s %s skipped (%s)", inst.symbol, price_basis, type(err).__name__)
-        return {"filled": filled, "already_covered": covered, "failed": failed}
+        return {"filled": filled, "already_covered": covered, "no_data": no_data, "failed": failed}
 
     async def _register_missing(self, symbols: list[str]) -> list[str]:
         """Give every universe symbol that has no ``instruments`` row one, and return them.
@@ -707,19 +713,14 @@ class HistoryReadService:
         cur_hi = state.last_bar_ts.astimezone(VN_TZ).date() if state and state.last_bar_ts else None
 
         horizon_floor = date.today() - timedelta(days=settings.INGEST_MAX_LOOKBACK_DAYS)
-        # A day this recent is always retried regardless of the cursor - see the docstring
-        # on HISTORY_RECENT_RETRY_DAYS for why "the cursor already spans it" is not reliable
-        # evidence of a confirmed gap this close to today (confirmed live: an EOD-analytics
-        # gap-fill for VPB/FPT's ADJUSTED series kept reporting "FILLED" with zero rows
-        # inserted for the current session's close, after the provider actually published
-        # it, because an earlier fill's `requested_ceiling` had already stamped the cursor
-        # past that date the moment it was first (unsuccessfully) asked for).
-        recent_floor = date.today() - timedelta(days=settings.HISTORY_RECENT_RETRY_DAYS)
 
         def _probed(d: date) -> bool:
-            if d >= recent_floor:
-                return False
-            # The provider has already been asked for this date at least once (cursor spans it).
+            # The cursor spans a day only once the provider has answered for it after the
+            # day settled (ingestion `_run_chunks`), so spanning is proof, recent or not.
+            # Every missing day of the last five used to be re-asked regardless - a guard
+            # against a probe racing the provider's publication, which is now kept out of
+            # the cursor instead - and a thin warrant's non-trading days were re-asked
+            # every night and on every chart load.
             return cur_lo is not None and cur_hi is not None and cur_lo <= d <= cur_hi
 
         # A chart read fills a missing day only when ALL of:
@@ -763,6 +764,13 @@ class HistoryReadService:
             live_quant_engine.invalidate_eod()
             self._counters["gap_fills_filled"] += 1
             self._fill_failure_until.pop(stream_key, None)
+        elif outcome.status == "NO_DATA":
+            # Confirmed empty and recorded - but a day that has not settled yet stays out of
+            # the cursor, so keep chart loads from re-asking it until the cooldown passes.
+            self._counters["gap_fills_no_data"] += 1
+            self._fill_failure_until[stream_key] = (
+                time.monotonic() + float(settings.HISTORY_GAPFILL_FAILURE_COOLDOWN_SECONDS)
+            )
         elif outcome.status == "OUT_OF_HORIZON":
             self._counters["gap_fills_out_of_horizon"] += 1
         elif outcome.status == "LOCK_TIMEOUT":

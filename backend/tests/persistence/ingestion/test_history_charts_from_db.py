@@ -18,7 +18,8 @@ import pytest
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.market_data.market_schemas import HistoricalTransportError
+from app.market_data.market_schemas import HistoricalNoDataError, HistoricalTransportError
+from app.persistence.ingestion.trading_calendar import expected_trading_days
 from app.persistence.database import session_scope
 from app.persistence.models import Instrument, MarketBar
 from app.persistence.repositories.instrument_repository import InstrumentRepository
@@ -243,6 +244,61 @@ async def test_warrants_are_never_warmed_on_an_adjusted_basis(history_service, f
     assert result["stocks_adjusted"] == {"restated": 0, "failed": 0, "bars_written": 0}
     assert result["warrants_raw"]["filled"] == 1
     assert all(call[4] is False for call in fake_provider.calls)
+
+
+async def test_a_thin_warrant_is_asked_once_and_counted_as_no_data(history_service, fake_provider):
+    """2026-09-29/30: ~110 warrants a night reported "failed" - the provider answered "no
+    data" for days they did not trade, the answer was dropped, and the next night asked
+    again. Now it is counted for what it is and recorded, so the next pass asks nothing."""
+    lo = _CUTOFF - timedelta(days=120)
+    sessions = expected_trading_days(lo, _CUTOFF)
+    iid = await _seed_instrument("CHDB2603", "CW")
+    await _insert_bars(iid, sessions[:-3], price_basis="RAW")          # last traded three sessions ago
+    await _set_cursor(iid, _CUTOFF - timedelta(days=500), sessions[-4], price_basis="RAW")
+    fake_provider.fail_symbol["CHDB2603"] = HistoricalNoDataError("did not trade")
+
+    first = await history_service.warm_universe(["CHDB2603"])
+    assert first["warrants_raw"] == {"filled": 0, "already_covered": 0, "no_data": 1, "failed": 0}
+    assert len(fake_provider.calls) == 1
+
+    fake_provider.calls.clear()
+    second = await history_service.warm_universe(["CHDB2603"])
+    assert second["warrants_raw"] == {"filled": 0, "already_covered": 1, "no_data": 0, "failed": 0}
+    assert fake_provider.calls == []
+
+
+async def test_a_new_listing_is_not_asked_for_the_days_before_it_existed(history_service, fake_provider):
+    """CACB2621 on 2026-09-30: listed two sessions earlier, no first_trade_date on record
+    (none of the 328 warrants had one), its first fill had already asked from a year back.
+    The days before listing sat inside the cursor but inside the five-day re-ask window,
+    so they were asked again every night."""
+    sessions = expected_trading_days(_CUTOFF - timedelta(days=30), _CUTOFF)
+    iid = await _seed_instrument("CACB2621", "CW")
+    await _insert_bars(iid, sessions[-2:], price_basis="RAW")
+    await _set_cursor(iid, _CUTOFF - timedelta(days=400), _CUTOFF, price_basis="RAW")
+    fake_provider.fail_symbol["CACB2621"] = HistoricalNoDataError("before listing")
+    fills = []
+    real_fill = history_service._ingestion.fill_range  # noqa: SLF001
+
+    async def counted(*args, **kwargs):
+        fills.append(args)
+        return await real_fill(*args, **kwargs)
+
+    history_service._ingestion.fill_range = counted  # noqa: SLF001
+    try:
+        result = await history_service.warm_universe(["CACB2621"])
+    finally:
+        history_service._ingestion.fill_range = real_fill  # noqa: SLF001
+    assert result["warrants_raw"]["already_covered"] == 1
+    assert fills == [], "covered on the assessment alone, without a fill"
+    assert fake_provider.calls == []
+
+
+async def test_a_stock_the_provider_has_nothing_for_is_not_counted_as_restated(history_service, fake_provider):
+    await _seed_instrument("VPB")
+    fake_provider.fail_symbol["VPB"] = HistoricalNoDataError("no rows")
+    result = await history_service.warm_universe(["VPB"])
+    assert result["stocks_adjusted"] == {"restated": 0, "failed": 1, "bars_written": 0}
 
 
 async def test_a_full_ten_year_series_is_restated_in_one_go(history_service, fake_provider):

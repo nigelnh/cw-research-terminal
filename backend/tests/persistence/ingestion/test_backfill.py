@@ -13,6 +13,7 @@ from app.market_data.market_schemas import (
     HistoricalTransportError,
 )
 from app.persistence.database import session_scope
+from app.persistence.market_time import VN_TZ
 from app.persistence.ingestion.trading_calendar import last_completed_session_date
 from app.persistence.ingestion.service import InvalidRequestError
 from app.persistence.models import IngestionRun, IngestionState, Instrument, MarketBar
@@ -369,33 +370,14 @@ async def test_too_many_symbols_rejected(ingestion_service):
         )
 
 
-@pytest.mark.parametrize(
-    "exc,expected_level,expected_label",
-    [
-        (HistoricalNoDataError("empty window"), "INFO", "NO_DATA"),
-        (HistoricalEntitlementError("403 Forbidden"), "ERROR", "ENTITLEMENT"),
-    ],
-    ids=["no-data-is-informational", "a-real-fault-stays-an-error"],
-)
-async def test_an_empty_window_halts_without_filling_the_error_stream(
-    ingestion_service, fake_provider, caplog, exc, expected_level, expected_label
-):
-    """"The provider holds nothing for this window" is an answer, and must not be logged
-    like a fault.
-
-    It halts the stream exactly like a real non-retryable error - re-asking an empty window
-    is precisely what we do not want - but an illiquid warrant that did not trade on the
-    days asked for is expected, and at ERROR it put a routine outcome into the error stream
-    on every sweep. Driving the real backfill path rather than asserting on the branch
-    expression, because this is the third defect in this pipeline to have been reachable
-    only by running it.
-    """
+async def test_a_real_fault_halts_the_stream_at_error(ingestion_service, fake_provider, caplog):
+    """Auth, entitlement and range limits cannot go better on the next chunk."""
     import logging
 
     await _seed_stock("HPG")
     frm = _TODAY - timedelta(days=300)
     fake_provider.seed_daily("HPG", frm, _TODAY)
-    fake_provider.fail_symbol["HPG"] = exc
+    fake_provider.fail_symbol["HPG"] = HistoricalEntitlementError("403 Forbidden")
 
     with caplog.at_level(logging.INFO, logger="app.persistence.ingestion.service"):
         await ingestion_service.backfill(
@@ -404,8 +386,64 @@ async def test_an_empty_window_halts_without_filling_the_error_stream(
         )
 
     halted = [r for r in caplog.records if "non-retryable" in r.getMessage()]
-    assert halted, "the halt must still be recorded"
-    assert halted[0].levelname == expected_level
-    assert expected_label in halted[0].getMessage()
-    # Still exactly one provider call: classification changed, pacing did not.
+    assert halted and halted[0].levelname == "ERROR"
+    assert "ENTITLEMENT" in halted[0].getMessage()
     assert len(fake_provider.calls) == 1
+
+
+async def test_an_empty_window_is_an_answer_recorded_in_the_cursor(ingestion_service, fake_provider, caplog):
+    """"The provider holds nothing for this window" - a warrant before its listing, or on
+    days it did not trade - is a complete answer. It used to halt the stream and leave the
+    cursor where it was, so the same window was asked again every night: ~110 warrants a
+    night reported "failed" on 2026-09-29/30 with every bar they have already stored."""
+    import logging
+
+    await _seed_stock("HPG")
+    frm = _TODAY - timedelta(days=300)
+    to = last_completed_session_date()
+    fake_provider.fail_symbol["HPG"] = HistoricalNoDataError("empty window")
+
+    with caplog.at_level(logging.INFO, logger="app.persistence.ingestion.service"):
+        result = await ingestion_service.backfill(
+            ["HPG"], timeframe="1D", adjusted=True, from_date=frm, to_date=to, concurrency=1,
+        )
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    stream = result.streams[0]
+    assert [c.status for c in stream.chunks] == ["NO_DATA"]
+    state = await ingestion_service.get_stream_state(
+        instrument_id=stream.instrument_id, timeframe="1d", price_basis="ADJUSTED"
+    )
+    assert state.backfilled_from_ts.astimezone(VN_TZ).date() <= frm
+    assert state.last_bar_ts.astimezone(VN_TZ).date() == to
+
+    fake_provider.calls.clear()
+    await ingestion_service.backfill(
+        ["HPG"], timeframe="1D", adjusted=True, from_date=frm, to_date=to, concurrency=1,
+    )
+    assert fake_provider.calls == [], "an answered window is not asked again"
+
+
+async def test_an_empty_first_chunk_does_not_stop_the_listing_s_bars_after_it(
+    ingestion_service, fake_provider, monkeypatch
+):
+    """A new warrant: nothing before its listing, bars after. The later chunk still runs."""
+    monkeypatch.setattr(settings, "INGEST_MAX_CHUNK_SPAN_DAYS", 30)
+    await _seed_stock("HPG")
+    to = last_completed_session_date()
+    listed = to - timedelta(days=20)
+    fake_provider.seed_daily("HPG", listed, to)
+    answer = fake_provider.get_historical_bars
+
+    async def nothing_before_listing(symbol, timeframe="1D", from_date=None, to_date=None, adjusted=True):
+        if to_date and date.fromisoformat(to_date) < listed:
+            fake_provider.calls.append((symbol, timeframe, from_date, to_date, adjusted))
+            raise HistoricalNoDataError("before listing")
+        return await answer(symbol, timeframe, from_date, to_date, adjusted)
+
+    monkeypatch.setattr(fake_provider, "get_historical_bars", nothing_before_listing)
+    result = await ingestion_service.backfill(
+        ["HPG"], timeframe="1D", adjusted=True, from_date=to - timedelta(days=80), to_date=to, concurrency=1,
+    )
+    statuses = [c.status for c in result.streams[0].chunks]
+    assert statuses[0] == "NO_DATA" and statuses[-1] == "SUCCEEDED"
+    assert result.streams[0].inserted > 0

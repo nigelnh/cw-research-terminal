@@ -15,6 +15,7 @@ import pytest
 
 from app.core.config import settings
 from app.market_data.market_schemas import (
+    HistoricalNoDataError,
     HistoricalRateLimitError,
     HistoricalTransportError,
 )
@@ -186,7 +187,9 @@ async def test_B_missing_middle_gap_filled_without_touching_surrounding(history_
 
     bars = await history_service.get_history("HPG", timeframe="1D", from_date=lo.isoformat(), to_date=hi.isoformat(), adjusted=True)
     dates = {b.date for b in bars}
-    for d in _weekdays(gap_lo, gap_hi):
+    # Trading days, not weekdays: with the clock at 2026-09-30 the gap ended on 31 Aug, a
+    # National Day holiday - never a gap, never filled - and this failed by date alone.
+    for d in expected_trading_days(gap_lo, gap_hi):
         assert d.isoformat() in dates                                   # gap filled
     # surrounding rows preserved unchanged (still base 500, not overwritten with 777)
     async with session_scope() as s:
@@ -196,50 +199,51 @@ async def test_B_missing_middle_gap_filled_without_touching_surrounding(history_
             assert float(r.close) == surviving_closes[r.session_date]
 
 
-async def test_probed_but_missing_day_retries_only_within_the_recent_window(history_service, fake_provider):
-    """A prior fill's `requested_ceiling` (ingestion/service.py._run_chunks) stamps the
-    cursor through the day it asked for even when the provider had nothing for it yet -
-    FiinQuant routinely publishes a session's final daily bar hours after close (confirmed
-    live: the ADJUSTED series lagged RAW by more than a day for some tickers). Without an
-    age-based override, that day is "probed" forever and a chart/quant read never retries
-    it even once the provider actually has it. `HISTORY_RECENT_RETRY_DAYS` bounds the
-    override so it only applies close to today - an old gap this far back must stay a
-    zero-provider-call, cursor-trusted read, or every load would re-hammer a confirmed
-    historical hole forever."""
+async def test_a_recent_day_the_provider_already_answered_for_is_not_asked_again(
+    history_service, fake_provider
+):
+    """A thin warrant that did not trade two days ago. The cursor spans that day - the
+    ingestion layer stamps it only for a day the provider answered for after it settled -
+    so the day is a confirmed non-trading day. It used to be re-asked for five days
+    regardless: every thin warrant, every night, and on every chart load."""
     lo = _CUTOFF - timedelta(days=90)
-    all_days = _weekdays(lo, _CUTOFF)
-    recent_gap = all_days[-2]                                  # a few calendar days back, always inside the window
-    old_gap = _CUTOFF - timedelta(days=settings.HISTORY_RECENT_RETRY_DAYS + 20)
-    while old_gap.weekday() >= 5:                               # snap onto a real weekday
-        old_gap -= timedelta(days=1)
-
-    # --- Recent gap: cursor already claims full coverage through cutoff (as if an earlier
-    # fill's requested_ceiling raced the publish lag), but recent_gap's bar was never
-    # actually written. The provider has it NOW - must retry and pick it up.
-    recent_iid = await _seed_instrument("HPG")
-    await _insert_bars(recent_iid, [d for d in all_days if d != recent_gap])
-    await _set_cursor(recent_iid, lo, _CUTOFF)
-    fake_provider.seed_daily("HPG", lo - timedelta(days=5), _CUTOFF)
+    sessions = expected_trading_days(lo, _CUTOFF)
+    no_trade_day = sessions[-2]
+    iid = await _seed_instrument("CHDB2603", "CW")
+    await _insert_bars(iid, [d for d in sessions if d != no_trade_day], price_basis="RAW")
+    await _set_cursor(iid, lo, _CUTOFF, price_basis="RAW")
+    fake_provider.seed_daily("CHDB2603", lo, _CUTOFF, adjusted=False)
 
     bars = await history_service.get_history(
-        "HPG", timeframe="1D", from_date=lo.isoformat(), to_date=_CUTOFF.isoformat(), adjusted=True,
-    )
-    assert len(fake_provider.calls) == 1
-    assert recent_gap.isoformat() in [b.date for b in bars]
-
-    # --- Old gap, same shape, different symbol: this far back, the cursor is trusted -
-    # zero provider calls, the historical hole stays a hole (unchanged pre-fix behavior).
-    fake_provider.calls.clear()
-    old_iid = await _seed_instrument("FPT")
-    await _insert_bars(old_iid, [d for d in all_days if d != old_gap])
-    await _set_cursor(old_iid, lo, _CUTOFF)
-    fake_provider.seed_daily("FPT", lo - timedelta(days=5), _CUTOFF)
-
-    bars2 = await history_service.get_history(
-        "FPT", timeframe="1D", from_date=lo.isoformat(), to_date=_CUTOFF.isoformat(), adjusted=True,
+        "CHDB2603", timeframe="1D", from_date=lo.isoformat(), to_date=_CUTOFF.isoformat(), adjusted=False,
     )
     assert fake_provider.calls == []
-    assert old_gap.isoformat() not in [b.date for b in bars2]
+    assert history_service.health()["counters"]["gap_fills_attempted"] == 0, "not even a lock taken"
+    assert no_trade_day.isoformat() not in [b.date for b in bars]
+
+
+async def test_a_recent_day_beyond_the_cursor_is_asked_once_then_recorded(history_service, fake_provider):
+    """The same thin warrant, the day after: asked once, the empty answer lands in the
+    cursor, and the next read - cooldown or not - does not ask again."""
+    lo = _CUTOFF - timedelta(days=90)
+    sessions = expected_trading_days(lo, _CUTOFF)
+    iid = await _seed_instrument("CHDB2613", "CW")
+    await _insert_bars(iid, sessions[:-1], price_basis="RAW")
+    await _set_cursor(iid, lo, sessions[-2], price_basis="RAW")
+    fake_provider.fail_symbol["CHDB2613"] = HistoricalNoDataError("did not trade")
+
+    await history_service.get_history(
+        "CHDB2613", timeframe="1D", from_date=lo.isoformat(), to_date=_CUTOFF.isoformat(), adjusted=False,
+    )
+    assert len(fake_provider.calls) == 1
+    assert history_service.health()["counters"]["gap_fills_no_data"] == 1
+
+    fake_provider.calls.clear()
+    history_service._fill_failure_until.clear()  # noqa: SLF001 - prove it is the cursor, not the cooldown
+    await history_service.get_history(
+        "CHDB2613", timeframe="1D", from_date=lo.isoformat(), to_date=_CUTOFF.isoformat(), adjusted=False,
+    )
+    assert fake_provider.calls == []
 
 
 async def test_C_old_range_outside_entitlement_makes_zero_provider_calls(history_service, fake_provider, monkeypatch):

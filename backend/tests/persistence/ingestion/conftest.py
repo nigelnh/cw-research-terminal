@@ -112,6 +112,9 @@ async def ingestion_service(engine, sessionmaker_, fake_provider, monkeypatch) -
 
     # tests must not eat the 2s production inter-request throttle
     monkeypatch.setattr(settings, "INGEST_MIN_REQUEST_INTERVAL_SECONDS", 0.0)
+    # The cursor's settled-session cap moves at 16:00 ICT; the mechanics tests here assume
+    # the last completed session whatever the hour. test_settled_cursor.py pins the clock.
+    monkeypatch.setattr(settings, "HISTORY_BAR_SETTLE_MINUTES", 0)
     return IngestionService(
         engine=engine,
         sessionmaker=sessionmaker_,
