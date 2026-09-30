@@ -31,11 +31,28 @@ from app.persistence.ingestion.chunking import BackfillPlan, generate_chunks, pl
 from app.persistence.ingestion.locks import stream_lock
 from app.persistence.ingestion.mapping import map_history
 from app.persistence.ingestion.retry import RetryPolicy, call_with_retry, classify, is_retryable
-from app.persistence.ingestion.trading_calendar import expected_trading_days, last_completed_session_date
+from app.persistence.ingestion.trading_calendar import last_completed_session_date
 from app.persistence.market_time import VN_TZ, normalize_price_basis, normalize_timeframe
 from app.persistence.repositories.ingestion_repository import IngestionRepository
 from app.persistence.repositories.instrument_repository import InstrumentRepository, InstrumentUpsert
 from app.persistence.repositories.market_bar_repository import MarketBarRepository
+
+
+def _vn_now() -> datetime:
+    """The ingestion layer's clock (patched by tests)."""
+    return datetime.now(VN_TZ)
+
+
+def last_settled_session_date() -> date:
+    """The latest session whose daily bars a provider has certainly published.
+
+    A session closes at 15:00 ICT; its bar counts as settled HISTORY_BAR_SETTLE_MINUTES
+    later. A probe of a day before then proves nothing about it - the bar may simply not
+    be out yet - so only a probe after it may mark the day as answered.
+    """
+    return last_completed_session_date(
+        _vn_now() - timedelta(minutes=int(settings.HISTORY_BAR_SETTLE_MINUTES))
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +100,7 @@ class ChunkOutcome:
     seq: int
     start: str
     end: str
-    status: str                    # SUCCEEDED | SKIPPED_COVERED | FAILED | PLANNED
+    status: str                    # SUCCEEDED | NO_DATA | SKIPPED_COVERED | FAILED | PLANNED
     fetched: int = 0
     inserted: int = 0
     updated: int = 0
@@ -128,7 +145,7 @@ class GapFillOutcome:
     symbol: str
     timeframe: str
     price_basis: str
-    status: str            # FILLED | ALREADY_COVERED | OUT_OF_HORIZON | LOCK_TIMEOUT | PROVIDER_FAILED | NO_INSTRUMENT
+    status: str            # FILLED | NO_DATA | ALREADY_COVERED | OUT_OF_HORIZON | LOCK_TIMEOUT | PROVIDER_FAILED | NO_INSTRUMENT
     rows_inserted: int = 0
     rows_updated: int = 0
     provider_calls: int = 0
@@ -273,35 +290,15 @@ class IngestionService:
                 else date.max
             )
             covered_hi = state.last_bar_ts.astimezone(VN_TZ).date()
-            # But `covered_hi` alone is not trustworthy for the last few days: `last_bar_ts`
-            # gets stamped through `requested_ceiling` below even when the provider returned
-            # nothing for a trailing day - "covered" there can mean "confirmed no trading" OR
-            # "FiinQuant hasn't published this session's final bar yet" (routinely hours
-            # after close, worse for the ADJUSTED series - see HISTORY_RECENT_RETRY_DAYS),
-            # and cursor timestamps alone can't tell those apart. Recheck actual row presence
-            # for just the recent tail before trusting it there, so a chunk a concurrent
-            # holder just ACTUALLY filled still resume-skips (the single-flight guarantee -
-            # test_20_concurrent_cache_misses_produce_one_fill_lifecycle) while a day that's
-            # still genuinely missing keeps retrying instead of being skipped forever.
-            recent_floor = today - timedelta(days=settings.HISTORY_RECENT_RETRY_DAYS)
-            recent_gaps: set[date] = set()
-            if covered_hi >= recent_floor:
-                recheck_from = max(covered_lo, recent_floor)
-                async with self._sm() as session:
-                    recent_rows = await MarketBarRepository(session).get_bars(
-                        instrument_id=instrument_id, timeframe=tf, price_basis=price_basis,
-                        start=datetime(recheck_from.year, recheck_from.month, recheck_from.day, tzinfo=VN_TZ),
-                        end=datetime(covered_hi.year, covered_hi.month, covered_hi.day, tzinfo=VN_TZ) + timedelta(days=1),
-                    )
-                present = {r.session_date for r in recent_rows}
-                recent_gaps = {
-                    d for d in expected_trading_days(recheck_from, covered_hi) if d not in present
-                }
+            # The ceiling is trustworthy to the day: `_run_chunks` stamps it through a day
+            # only when that day holds a bar or was asked for after it settled (see
+            # `last_settled_session_date`). It used to be stamped through the last completed
+            # session even by a probe that raced the provider's publication, so this recheck
+            # re-fetched every missing day of the last five - and on a thin warrant, a day
+            # it did not trade is missing for good: the same windows, re-asked every night.
 
             def _covered(c) -> bool:
-                if not (c.start >= covered_lo and c.end <= covered_hi):
-                    return False
-                return not any(recent_floor <= d <= c.end for d in recent_gaps)
+                return c.start >= covered_lo and c.end <= covered_hi
 
             remaining = tuple(c for c in plan.chunks if not _covered(c))
             return _replace_chunks(plan, remaining)
@@ -463,13 +460,18 @@ class IngestionService:
 
             outcome.rows_inserted = stream.inserted
             outcome.rows_updated = stream.updated
-            outcome.provider_calls = sum(1 for c in stream.chunks if c.status in ("SUCCEEDED", "FAILED"))
+            outcome.provider_calls = sum(
+                1 for c in stream.chunks if c.status in ("SUCCEEDED", "NO_DATA", "FAILED")
+            )
             outcome.lookback_clamped = base_plan.lookback_clamped or stream.lookback_clamped
             failed = [c for c in stream.chunks if c.status == "FAILED"]
             if failed:
                 outcome.status = "PROVIDER_FAILED" if not stream.inserted and not stream.updated else "FILLED"
                 outcome.error = failed[0].error
                 outcome.error_class = (failed[0].error or ":").split(":", 1)[0] or None
+            elif stream.chunks and all(c.status == "NO_DATA" for c in stream.chunks):
+                # The provider holds nothing for the whole range, and the cursor now says so.
+                outcome.status = "NO_DATA"
             else:
                 outcome.status = "FILLED"
         return outcome
@@ -565,7 +567,7 @@ class IngestionService:
         instrument_id: int, plan: BackfillPlan, run_id: int | None, include_forming: bool,
     ) -> None:
         any_ok = any_fail = False
-        _ceil_cap = last_completed_session_date()
+        _ceil_cap = last_settled_session_date()
         for chunk in plan.chunks:
             # Per-chunk cursor bounds, persisted only when THIS chunk commits:
             #  * requested_floor  -> ingestion_state.backfilled_from_ts (LEAST): resume knows
@@ -573,9 +575,9 @@ class IngestionService:
             #    trading day (holiday/weekend).
             #  * requested_ceiling -> ingestion_state.last_bar_ts (GREATEST): records that we
             #    deliberately probed through the chunk end even if the provider returned
-            #    nothing for a trailing non-trading / not-yet-published date - so a chart
-            #    read does not re-probe that empty tail every load. Capped at the last
-            #    completed session, so the *next* day's request re-probes normally.
+            #    nothing for a trailing non-trading date - so a chart read does not re-probe
+            #    that empty tail every load. Capped at the last SETTLED session: a day asked
+            #    for before its bar could be out is not recorded as answered.
             requested_floor = datetime(chunk.start.year, chunk.start.month, chunk.start.day, tzinfo=timezone.utc)
             _ce = min(chunk.end, _ceil_cap)
             requested_ceiling = (
@@ -584,29 +586,21 @@ class IngestionService:
             )
             co = ChunkOutcome(chunk.seq, chunk.start.isoformat(), chunk.end.isoformat(), "FAILED")
             outcome.chunks.append(co)
-            try:
-                bars, attempts = await self._fetch_chunk(symbol, tf, *chunk.as_iso(), adjusted)
-                co.attempts, co.fetched = attempts, len(bars)
-                mapped = map_history(
-                    bars, instrument_id=instrument_id, timeframe=tf, price_basis=price_basis,
-                    source=self._source, include_forming=include_forming,
-                )
-                co.dropped_incomplete = mapped.dropped_incomplete
 
+            async def _commit(mapped=None) -> None:
+                """Persist the chunk's bars, if any, and advance the cursor over it."""
                 async with self._sm() as session, session.begin():
                     bar_repo = MarketBarRepository(session)
-                    if mapped.rows:
+                    if mapped is not None and mapped.rows:
                         res = await bar_repo.bulk_upsert_bars(mapped.rows, ingestion_run_id=run_id)
                         co.inserted, co.updated = res.inserted, res.updated
                     cov = await bar_repo.coverage(
                         instrument_id=instrument_id, timeframe=tf, price_basis=price_basis
                     )
-                    floor_candidates = [
-                        ts for ts in (cov.earliest_ts, mapped.min_ts, requested_floor) if ts is not None
-                    ]
-                    ceil_candidates = [
-                        ts for ts in (cov.latest_ts, mapped.max_ts, requested_ceiling) if ts is not None
-                    ]
+                    lows = (cov.earliest_ts, mapped.min_ts if mapped else None, requested_floor)
+                    highs = (cov.latest_ts, mapped.max_ts if mapped else None, requested_ceiling)
+                    floor_candidates = [ts for ts in lows if ts is not None]
+                    ceil_candidates = [ts for ts in highs if ts is not None]
                     ing_repo = IngestionRepository(session)
                     await ing_repo.upsert_state(
                         source=self._source, instrument_id=instrument_id, timeframe=tf, price_basis=price_basis,
@@ -619,26 +613,37 @@ class IngestionService:
                             run_id, rows_fetched=co.fetched, rows_inserted=co.inserted,
                             rows_updated=co.updated,
                         )
+
+            try:
+                bars, attempts = await self._fetch_chunk(symbol, tf, *chunk.as_iso(), adjusted)
+                co.attempts, co.fetched = attempts, len(bars)
+                mapped = map_history(
+                    bars, instrument_id=instrument_id, timeframe=tf, price_basis=price_basis,
+                    source=self._source, include_forming=include_forming,
+                )
+                co.dropped_incomplete = mapped.dropped_incomplete
+                await _commit(mapped)
                 co.status = "SUCCEEDED"
                 any_ok = True
+            except HistoricalNoDataError as exc:
+                # "Nothing in this window" is the provider's complete answer - a warrant
+                # before its listing, or on a day it did not trade. It used to fail the
+                # chunk, halt the stream and leave the cursor where it was, so the same
+                # empty window was asked again every night and on every chart load:
+                # ~110 warrants a night reported "failed" with every bar actually stored.
+                # Record it like an empty success and keep going - a later chunk of the
+                # same request can still hold the listing's first bars.
+                co.error = f"{classify(exc)}: {exc}"
+                await _commit()
+                co.status = "NO_DATA"
+                any_ok = True
+                logger.info("%s %s: no data for %s..%s", symbol, tf, *chunk.as_iso())
             except HistoricalDataError as exc:
                 co.error = f"{classify(exc)}: {exc}"
                 any_fail = True
                 if not is_retryable(exc):
-                    # NO_DATA is a complete answer, not a fault: the provider holds nothing
-                    # for this window and says so. Logging it at ERROR put an expected
-                    # outcome - an illiquid warrant that did not trade on the days asked
-                    # for - into the error stream on every sweep. The stream still halts
-                    # and still enters the read path's cooldown, because re-asking an empty
-                    # window is exactly what we do not want to do.
-                    level = (
-                        logging.INFO
-                        if isinstance(exc, HistoricalNoDataError)
-                        else logging.ERROR
-                    )
-                    logger.log(
-                        level, "%s %s: non-retryable %s - halting stream", symbol, tf, classify(exc)
-                    )
+                    # Auth, entitlement, range limits: asking the next chunk cannot go better.
+                    logger.error("%s %s: non-retryable %s - halting stream", symbol, tf, classify(exc))
                     outcome.error = co.error
                     break
             except Exception as exc:  # noqa: BLE001
