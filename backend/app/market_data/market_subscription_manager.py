@@ -121,7 +121,7 @@ class SubscriptionManager:
                 quote = self.state.get_quote(symbol)
                 printed = traded_log.record_provider_print(symbol, raw_data, quote=quote)
                 if printed is not None:
-                    asyncio.ensure_future(traded_log.persist(symbol, printed))
+                    traded_log.enqueue(symbol, printed)
                     message = {
                         "type": "trade_print", "symbol": symbol,
                         "print": printed, "ts": printed["ts"],
@@ -140,7 +140,7 @@ class SubscriptionManager:
                     try:
                         printed = traded_log.record(quote, diff, event=raw_data)
                         if printed is not None:
-                            asyncio.ensure_future(traded_log.persist(quote.symbol, printed))
+                            traded_log.enqueue(quote.symbol, printed)
                             # Publish this after the canonical quote patch below. The
                             # browser uses the accepted, deduplicated print as one shared
                             # flash trigger for TRD_PRC, TRD_AMT, +/-, and %CHG, including
@@ -824,6 +824,12 @@ class SubscriptionManager:
         if self._reference_refresh_task and not self._reference_refresh_task.done():
             self._reference_refresh_task.cancel()
             await asyncio.gather(self._reference_refresh_task, return_exceptions=True)
+        try:
+            # Prints still queued for the shared tape go out before the client they share
+            # with the store closes; a redeploy would otherwise drop the last few.
+            await asyncio.wait_for(traded_log.flush(), timeout=3.0)
+        except Exception as e:  # noqa: BLE001 - shutdown must finish
+            logger.warning("Traded-log flush on shutdown: %s", type(e).__name__)
         try:
             await self.store.close()
         except Exception as e:
