@@ -1370,6 +1370,48 @@ async def test_a_refused_vci_series_does_not_block_kbs_chart_bars():
 
 
 @pytest.mark.asyncio
+async def test_one_symbol_timing_out_does_not_take_other_symbols_offline():
+    """A genuine transient failure for one symbol blocked the whole history scope for 60s,
+    so every chart and every warm-pass symbol after it failed fast on someone else's block."""
+    asked = []
+
+    def fetch(symbol, source, start, end, interval):
+        asked.append(symbol)
+        if symbol == "CHPG2618":
+            raise ConnectionError("API request failed: Read timed out. (read timeout=30)")
+        return [{"time": "2026-09-08 07:00:00", "open": 22, "high": 23, "low": 21, "close": 22, "volume": 2}]
+
+    p = provider(history_fetcher=fetch)
+    with pytest.raises(Exception):
+        await p.get_historical_bars("CHPG2618", from_date="2026-09-07", to_date="2026-09-08", adjusted=False)
+    bars = await p.get_historical_bars("HPG", from_date="2026-09-07", to_date="2026-09-08", adjusted=True)
+    assert [bar.session_date for bar in bars] == ["2026-09-08"]
+
+    asked.clear()
+    with pytest.raises(Exception):
+        await p.get_historical_bars("CHPG2618", from_date="2026-09-07", to_date="2026-09-08", adjusted=False)
+    assert asked == [], "the failing symbol itself still backs off"
+
+
+@pytest.mark.asyncio
+async def test_symbols_failing_one_after_another_still_trip_the_whole_scope():
+    asked = []
+
+    def fetch(symbol, source, start, end, interval):
+        asked.append(symbol)
+        raise ConnectionError("API request failed: Read timed out. (read timeout=30)")
+
+    p = provider(history_fetcher=fetch)
+    for symbol in ("CHPG2618", "CVPB2615", "CMWG2625"):
+        with pytest.raises(Exception):
+            await p.get_historical_bars(symbol, from_date="2026-09-07", to_date="2026-09-08", adjusted=False)
+    asked.clear()
+    with pytest.raises(Exception):
+        await p.get_historical_bars("HPG", from_date="2026-09-07", to_date="2026-09-08", adjusted=True)
+    assert asked == [], "three symbols in a row is the upstream: stop asking it"
+
+
+@pytest.mark.asyncio
 async def test_an_empty_answer_does_not_take_other_symbols_offline():
     """The first warm-up on 2026-09-29: a warrant with an unknown listing date asked for a
     pre-listing range, vnstock answered ValueError("Dữ liệu trống ..."), and `_call` recorded

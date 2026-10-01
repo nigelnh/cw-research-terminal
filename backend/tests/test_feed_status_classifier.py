@@ -327,3 +327,83 @@ def test_several_dead_datasets_still_leave_the_stream_alone():
     assert access.blocked("stream") is None
     assert {d["scope"] for d in access.wire(
         fresh=False, active=True, last_data_at=None)["datasets"]} == {"profiles", "breadth", "valuation"}
+
+
+# --------------------------------------------------------------------------- #
+# Per-instrument blocking on shared scopes
+# --------------------------------------------------------------------------- #
+def test_one_instrument_s_timeout_blocks_only_that_instrument():
+    """One warrant's history timing out used to block every chart, the tape sweep and the
+    nightly warm pass for 60 seconds."""
+    access = FeedAccess()
+    access.record("history_kbs", "Read timed out. (read timeout=30)", key="CHPG2618")
+    assert access.blocked("history_kbs", "CHPG2618") == "UPSTREAM_UNAVAILABLE"
+    assert access.blocked("history_kbs", "HPG") is None
+    assert access.blocked("history_kbs") is None
+
+
+def test_distinct_instruments_failing_back_to_back_block_the_scope():
+    from app.market_data.feed_status import SCOPE_TRIP_DISTINCT_KEYS
+
+    access = FeedAccess()
+    for i in range(SCOPE_TRIP_DISTINCT_KEYS - 1):
+        access.record("tape", "connection error", key=f"S{i}")
+        assert access.blocked("tape", "UNTOUCHED") is None
+    access.record("tape", "connection error", key="LAST")
+    assert access.blocked("tape", "UNTOUCHED") == "UPSTREAM_UNAVAILABLE", "that is the upstream"
+
+
+def test_a_success_between_failures_resets_the_run():
+    access = FeedAccess()
+    access.record("history_kbs", "timeout", key="A")
+    access.record("history_kbs", "timeout", key="B")
+    access.success("history_kbs", "C")
+    access.record("history_kbs", "timeout", key="D")
+    assert access.blocked("history_kbs", "E") is None
+    assert access.blocked("history_kbs", "A") == "UPSTREAM_UNAVAILABLE", "A's own block stands"
+
+
+def test_the_same_instrument_failing_again_is_not_a_run():
+    access = FeedAccess()
+    for _ in range(10):
+        access.record("history_kbs", "503 Service Unavailable error", key="CHPG2618")
+    assert access.blocked("history_kbs", "HPG") is None
+
+
+@pytest.mark.parametrize("error,code", [
+    ("429 Too Many Requests error", "RATE_LIMITED"),
+    ("401 Unauthorized error", "AUTH_REQUIRED"),
+    ("403 Forbidden error", "DATASET_FORBIDDEN"),
+])
+def test_account_wide_codes_block_the_scope_even_on_a_per_symbol_call(error, code):
+    access = FeedAccess()
+    access.record("history_kbs", error, key="HPG")
+    assert access.blocked("history_kbs", "FPT") == code
+
+
+def test_a_keyless_failure_still_blocks_its_scope_at_once():
+    access = FeedAccess()
+    access.record("overview_board", "API request failed: Read timed out. (read timeout=30)")
+    assert access.blocked("overview_board") == "UPSTREAM_UNAVAILABLE"
+
+
+def test_an_instrument_block_expires(monkeypatch):
+    import app.market_data.feed_status as feed_status
+
+    clock = [1000.0]
+    monkeypatch.setattr(feed_status.time, "monotonic", lambda: clock[0])
+    access = FeedAccess()
+    access.record("history_kbs", "timeout", key="CHPG2618")
+    clock[0] += 61
+    assert access.blocked("history_kbs", "CHPG2618") is None
+    assert access.wire(fresh=True, active=True, last_data_at=None)["datasets"] == []
+
+
+def test_instrument_blocks_are_listed_but_never_headline_the_feed():
+    access = FeedAccess()
+    access.record("history_kbs", "timeout", key="CHPG2618")
+    access.record("tape", "timeout", key="CVPB2615")
+    wire = access.wire(fresh=False, active=True, last_data_at=None)
+    assert wire["code"] != "UPSTREAM_UNAVAILABLE"
+    assert sorted(d["key"] for d in wire["datasets"]) == ["CHPG2618", "CVPB2615"]
+    assert all("retryAt" not in d for d in wire["datasets"])
