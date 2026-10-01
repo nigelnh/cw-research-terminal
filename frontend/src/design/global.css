@@ -235,12 +235,16 @@ textarea::placeholder {
 .text-flat { color: var(--flat); }
 .text-destructive { color: var(--down); }
 
-/* Incremental market updates. Foreground continues to encode price-vs-reference. */
+/* Incremental market updates. Foreground continues to encode price-vs-reference.
+   A flash is on or off: full colour the moment the value changes, gone 300ms later
+   (REALTIME_FLASH_DURATION_MS). step-end holds the first keyframe for the whole duration
+   and drops to the last at the end - no fade in either direction. It used to hold for
+   420ms and then fade out over 780ms, a 1.2s wash that read as a slow fade. */
 .realtime-flash {
   display: inline-block;
   border-radius: 1px;
-  animation-duration: 1200ms;
-  animation-timing-function: ease-out;
+  animation-duration: 300ms;
+  animation-timing-function: step-end;
   animation-fill-mode: both;
 }
 td.realtime-flash { display: table-cell; border-radius: 0; }
@@ -254,29 +258,29 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
 .realtime-flash-floor { animation-name: realtime-flash-floor; }
 .realtime-flash-neutral { animation-name: realtime-flash-neutral; }
 @keyframes realtime-flash-up {
-  0%, 35% { background-color: color-mix(in srgb, var(--up) 42%, transparent); }
+  from { background-color: color-mix(in srgb, var(--up) 42%, transparent); }
   to { background-color: transparent; }
 }
 @keyframes realtime-flash-down {
-  0%, 35% { background-color: color-mix(in srgb, var(--down) 42%, transparent); }
+  from { background-color: color-mix(in srgb, var(--down) 42%, transparent); }
   to { background-color: transparent; }
 }
 @keyframes realtime-flash-flat {
-  0%, 35% { background-color: color-mix(in srgb, var(--flat) 42%, transparent); }
+  from { background-color: color-mix(in srgb, var(--flat) 42%, transparent); }
   to { background-color: transparent; }
 }
 @keyframes realtime-flash-ceiling {
-  0%, 35% { background-color: color-mix(in srgb, var(--price-ceiling) 42%, transparent); }
+  from { background-color: color-mix(in srgb, var(--price-ceiling) 42%, transparent); }
   to { background-color: transparent; }
 }
 @keyframes realtime-flash-floor {
-  0%, 35% { background-color: color-mix(in srgb, var(--price-floor) 42%, transparent); }
+  from { background-color: color-mix(in srgb, var(--price-floor) 42%, transparent); }
   to { background-color: transparent; }
 }
 /* White-text columns (IV, VOLUME): the value moved, but not in a direction worth
    colouring. A pale grey wash marks the change without implying up or down. */
 @keyframes realtime-flash-neutral {
-  0%, 35% { background-color: color-mix(in srgb, var(--t-92) 16%, transparent); }
+  from { background-color: color-mix(in srgb, var(--t-92) 16%, transparent); }
   to { background-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {

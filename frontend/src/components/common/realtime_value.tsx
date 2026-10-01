@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { RealtimePulse } from "@/domain/models";
 
-export const REALTIME_FLASH_DURATION_MS = 1200;
+/** How long a changed value flashes: on at once, off after this, no fade. Kept equal to
+ * `.realtime-flash`'s animation-duration in global.css (a test holds them together). */
+export const REALTIME_FLASH_DURATION_MS = 300;
 
 /**
  * Re-renders every flashing cell when the tab is shown again.

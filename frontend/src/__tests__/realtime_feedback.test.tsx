@@ -24,7 +24,7 @@ const snapshot = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("incremental realtime feedback", () => {
-  it("flashes the table cell itself for 1200ms and cleans up after expiry", () => {
+  it("flashes the table cell itself for 300ms and cleans up after expiry", () => {
     vi.useFakeTimers();
     try {
       const { container, unmount } = render(<table><tbody><tr>
@@ -35,12 +35,12 @@ describe("incremental realtime feedback", () => {
       expect(flashingCell?.textContent).toBe("21,700");
       expect(flashingCell.style.color).toBe("#fff");
       expect(container.querySelector("td span")).toBeNull();
-      act(() => vi.advanceTimersByTime(1000));
+      act(() => vi.advanceTimersByTime(250));
       expect(container.querySelector("td.realtime-flash-up")).not.toBeNull();
-      act(() => vi.advanceTimersByTime(201));
+      act(() => vi.advanceTimersByTime(51));
       expect(container.querySelector(".realtime-flash")).toBeNull();
       expect((container.querySelector("td") as HTMLElement).style.color).toBe("var(--down)");
-      expect(REALTIME_FLASH_DURATION_MS).toBe(1200);
+      expect(REALTIME_FLASH_DURATION_MS).toBe(300);
       unmount();
     } finally { vi.useRealTimers(); }
   });
