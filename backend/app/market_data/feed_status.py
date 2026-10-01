@@ -27,6 +27,14 @@ MESSAGES = {
     "SESSION_PAUSED": "Matching is paused or the market is closed.",
 }
 
+#: Codes that describe the account or the endpoint, never one instrument. They block the
+#: whole scope at once even when they arrive on a per-symbol call.
+_SCOPE_WIDE_CODES = frozenset({"ENTITLEMENT_EXPIRED", "AUTH_REQUIRED", "DATASET_FORBIDDEN", "RATE_LIMITED"})
+
+#: Distinct instruments that must fail back to back, with no success between, before a
+#: transient failure on a shared scope blocks every instrument on it.
+SCOPE_TRIP_DISTINCT_KEYS = 3
+
 # Failures below these prefixes describe optional components of one composite
 # response. Several index groups or intraday series failing together are not
 # independent observations that the whole market-data provider is down.
@@ -78,10 +86,27 @@ class FeedAccess:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._errors: dict[str, dict] = {}
+        # Per-instrument blocks on a shared scope, and the distinct instruments that have
+        # failed on each scope since its last success.
+        self._key_errors: dict[tuple[str, str], dict] = {}
+        self._failing_keys: dict[str, set[str]] = {}
         #: Diagnostic only. Explains a real rejection; never causes one.
         self._entitlement_note: str | None = None
 
-    def record(self, scope: str, error: Any, *, detail: str | None = None) -> str | None:
+    def record(
+        self, scope: str, error: Any, *, key: str | None = None, detail: str | None = None
+    ) -> str | None:
+        """Record a rejected call and block what it speaks for.
+
+        ``key`` names the instrument a per-symbol call was for. A transient failure there
+        (timeout, 5xx, connection) used to block the whole scope for 60s: one warrant's
+        history timing out took every chart, the tape sweep and the nightly warm pass with
+        it, symbol after symbol failing fast on a block none of them caused. Now it blocks
+        that instrument, and the scope only once SCOPE_TRIP_DISTINCT_KEYS distinct
+        instruments have failed with no success between - which is the upstream, not a
+        symbol. Account- and endpoint-wide codes, and calls with no key, block the scope at
+        once, as before.
+        """
         code = classify_provider_error(error)
         if code is None:
             return None
@@ -100,11 +125,22 @@ class FeedAccess:
             note = detail or (self._entitlement_note if code == "ENTITLEMENT_EXPIRED" else None)
             if note:
                 message = f"{message} {note}"
-            self._errors[scope] = {
+            entry = {
                 "code": code, "scope": scope, "message": message,
                 "checkedAt": datetime.now(timezone.utc).isoformat(),
                 "retryAt": time.monotonic() + (900 if code in ("ENTITLEMENT_EXPIRED", "DATASET_FORBIDDEN") else 60),
             }
+            if key is None or code in _SCOPE_WIDE_CODES:
+                self._errors[scope] = entry
+                return code
+            self._key_errors[(scope, key)] = {**entry, "key": key}
+            failing = self._failing_keys.setdefault(scope, set())
+            failing.add(key)
+            if len(failing) >= SCOPE_TRIP_DISTINCT_KEYS:
+                self._errors[scope] = {
+                    **entry,
+                    "message": f"{message} {len(failing)} instruments failed in a row.",
+                }
         return code
 
     def inspect_session(self, session: Any) -> None:
@@ -137,29 +173,46 @@ class FeedAccess:
         except (ValueError, KeyError, IndexError, TypeError):
             pass
 
-    def retry_after(self, scope: str) -> float:
-        with self._lock:
-            return max([0.0] + [self._errors[k]["retryAt"] - time.monotonic()
-                              for k in ("market_data", "authentication", scope) if k in self._errors])
+    def _blocking(self, scope: str, key: str | None) -> list[dict]:
+        found = [self._errors[k] for k in ("market_data", "authentication", scope) if k in self._errors]
+        if key is not None and (scope, key) in self._key_errors:
+            found.append(self._key_errors[(scope, key)])
+        return found
 
-    def blocked(self, scope: str) -> str | None:
+    def retry_after(self, scope: str, key: str | None = None) -> float:
         with self._lock:
-            for key in ("market_data", "authentication", scope):
-                err = self._errors.get(key)
-                if err and err["retryAt"] > time.monotonic():
+            return max([0.0] + [err["retryAt"] - time.monotonic() for err in self._blocking(scope, key)])
+
+    def blocked(self, scope: str, key: str | None = None) -> str | None:
+        with self._lock:
+            now = time.monotonic()
+            for err in self._blocking(scope, key):
+                if err["retryAt"] > now:
                     return err["code"]
         return None
 
-    def success(self, scope: str) -> None:
+    def success(self, scope: str, key: str | None = None) -> None:
         with self._lock:
             self._errors.pop(scope, None)
+            # The upstream answered: earlier failures on this scope were not a run.
+            self._failing_keys.pop(scope, None)
+            if key is not None:
+                self._key_errors.pop((scope, key), None)
             if scope in ("history", "overview", "session_snapshot", "stream") or scope.startswith("history_"):
                 self._errors.pop("market_data", None)
                 self._errors.pop("authentication", None)
 
     def wire(self, *, fresh: bool, active: bool, last_data_at: str | None) -> dict:
         with self._lock:
+            now = time.monotonic()
+            for stale in [k for k, err in self._key_errors.items() if err["retryAt"] <= now]:
+                del self._key_errors[stale]
             errors = [{k: v for k, v in err.items() if k != "retryAt"} for err in self._errors.values()]
+            # One instrument's block speaks for that instrument: listed for diagnosis, never
+            # counted towards the feed-wide banner below.
+            instrument_errors = [
+                {k: v for k, v in err.items() if k != "retryAt"} for err in self._key_errors.values()
+            ]
         global_error = next((e for e in errors if e["scope"] in ("market_data", "authentication")), None)
         promotion_errors = [
             error for error in errors
@@ -185,5 +238,5 @@ class FeedAccess:
             **(global_error or {"code": code, "scope": "market_data", "message": MESSAGES[code],
                                "checkedAt": datetime.now(timezone.utc).isoformat()}),
             "lastDataAt": last_data_at,
-            "datasets": errors,
+            "datasets": errors + instrument_errors,
         }

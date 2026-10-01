@@ -636,8 +636,11 @@ class VnstockProvider(MarketDataProvider):
         with cls._vendor_output_lock, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return func(*args)
 
-    async def _call(self, scope: str, func: Callable, *args: Any) -> Any:
-        blocked = self._access.blocked(scope)
+    async def _call(self, scope: str, func: Callable, *args: Any, key: str | None = None) -> Any:
+        """One upstream call under `scope`. `key` names the instrument of a per-symbol call,
+        so its transient failure blocks that instrument rather than the whole scope (see
+        FeedAccess.record)."""
+        blocked = self._access.blocked(scope, key)
         if blocked:
             raise RuntimeError(blocked)
         await self._wait_for_rate_slot()
@@ -656,16 +659,16 @@ class VnstockProvider(MarketDataProvider):
                 # KBS history offline for a minute. The first warm-up on 2026-09-29 lost 13 of
                 # 31 stock restatements and 33 warrants to that cascade. Callers still see the
                 # ValueError and classify it (NO_DATA for history).
-                self._access.success(scope)
+                self._access.success(scope, key)
                 raise
             except Exception as exc:
                 self._request_failures += 1
-                self._last_error_code = self._access.record(scope, exc)
+                self._last_error_code = self._access.record(scope, exc, key=key)
                 if self._last_error_code is None:
-                    self._last_error_code = self._access.record(scope, "upstream_unavailable")
+                    self._last_error_code = self._access.record(scope, "upstream_unavailable", key=key)
                 self._notify_status()
                 raise
-        self._access.success(scope)
+        self._access.success(scope, key)
         self._last_error_code = None
         return result
 
@@ -967,7 +970,9 @@ class VnstockProvider(MarketDataProvider):
             symbol = symbols[cursor % len(symbols)]
             cursor += 1
             try:
-                rows = _records(await self._call("tape", self._tape_fetcher, symbol, self._tape_page_size))
+                rows = _records(await self._call(
+                    "tape", self._tape_fetcher, symbol, self._tape_page_size, key=symbol
+                ))
                 if generation == self._generation:
                     self._emit_confirmed_prints(symbol, rows)
             except asyncio.CancelledError:
@@ -1032,7 +1037,7 @@ class VnstockProvider(MarketDataProvider):
     ) -> list[dict[str, Any]]:
         sym = symbol.strip().upper()
         page_size = max(1, min(self._tape_page_size, int(limit)))
-        rows = _records(await self._call("tape", self._tape_fetcher, sym, page_size))
+        rows = _records(await self._call("tape", self._tape_fetcher, sym, page_size, key=sym))
         return self._normalize_confirmed_prints(sym, rows)
 
     # ----------------------------- snapshots/history -------------------------
@@ -1154,7 +1159,8 @@ class VnstockProvider(MarketDataProvider):
             # some Railway egress outright; under one shared "history" scope each refusal
             # blocked every KBS chart fill for the next 60 seconds as well.
             rows = _records(await self._call(
-                f"history_{source_name}", self._history_fetcher, sym, source_name, start, end, interval
+                f"history_{source_name}", self._history_fetcher, sym, source_name, start, end, interval,
+                key=sym,
             ))
         except Exception as exc:
             code = classify_provider_error(exc)
@@ -1257,7 +1263,7 @@ class VnstockProvider(MarketDataProvider):
         cached = self._fundamental_cache.get(sym)
         if cached and time.monotonic() - cached[0] < self._FUNDAMENTAL_TTL:
             return cached[1]
-        rows = _records(await self._call("fundamentals", self._fundamentals_fetcher, sym))
+        rows = _records(await self._call("fundamentals", self._fundamentals_fetcher, sym, key=sym))
         rows.sort(key=lambda row: (_integer(row.get("year") or row.get("year_report")) or 0, _integer(row.get("quarter")) or 0))
         self._fundamental_cache[sym] = (time.monotonic(), rows)
         return rows
@@ -1268,7 +1274,7 @@ class VnstockProvider(MarketDataProvider):
         if cached and time.monotonic() - cached[0] < self._FUNDAMENTAL_TTL:
             return cached[1]
         rows = _records(await self._call(
-            "income_statement", self._income_statement_fetcher, sym
+            "income_statement", self._income_statement_fetcher, sym, key=sym
         ))
         self._income_statement_cache[sym] = (time.monotonic(), rows)
         return rows
