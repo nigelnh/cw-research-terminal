@@ -35,4 +35,14 @@ describe("value flash timing", () => {
       expect(frames, tone).toMatch(/to \{ background-color: transparent; \}/);
     }
   });
+
+  it("washes a white-text cell (IV, volume) strongly enough to see in 300 ms", () => {
+    // 16% was all but invisible beside the 42% coloured washes: a CW's IV re-priced on
+    // every underlying trade and the board still looked frozen (2026-10-12).
+    const wash = (text: string) => Number(/var\(--t-92\) (\d+)%/.exec(text)?.[1]);
+    expect(wash(keyframes("realtime-flash-neutral"))).toBeGreaterThanOrEqual(30);
+    // Reduced motion: the same wash, held still.
+    const still = /\.realtime-flash-neutral \{ background-color: [^}]*\}/.exec(css)?.[0] ?? "";
+    expect(wash(still)).toBeGreaterThanOrEqual(30);
+  });
 });

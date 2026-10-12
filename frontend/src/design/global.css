@@ -278,9 +278,11 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
   to { background-color: transparent; }
 }
 /* White-text columns (IV, VOLUME): the value moved, but not in a direction worth
-   colouring. A pale grey wash marks the change without implying up or down. */
+   colouring. A grey wash marks the change without implying up or down. At 16% it was
+   all but invisible for 300 ms beside the 42% coloured washes: a CW's IV re-priced on
+   every underlying trade and the board looked frozen (2026-10-12). */
 @keyframes realtime-flash-neutral {
-  from { background-color: color-mix(in srgb, var(--t-92) 16%, transparent); }
+  from { background-color: color-mix(in srgb, var(--t-92) 35%, transparent); }
   to { background-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -290,7 +292,7 @@ td.realtime-flash { display: table-cell; border-radius: 0; }
   .realtime-flash-flat { background-color: color-mix(in srgb, var(--flat) 38%, transparent); }
   .realtime-flash-ceiling { background-color: color-mix(in srgb, var(--price-ceiling) 38%, transparent); }
   .realtime-flash-floor { background-color: color-mix(in srgb, var(--price-floor) 38%, transparent); }
-  .realtime-flash-neutral { background-color: color-mix(in srgb, var(--t-92) 14%, transparent); }
+  .realtime-flash-neutral { background-color: color-mix(in srgb, var(--t-92) 32%, transparent); }
 }
 
 .bg-background { background-color: var(--bg); }
