@@ -31,6 +31,7 @@ class DataSource(str, Enum):
     EOD_BARS = "EOD_BARS"                    # market_bars daily close/OHLC/volume
     PRIOR_CLOSE = "PRIOR_CLOSE"              # previous trading session's close (used as reference)
     SESSION_REFERENCE = "SESSION_REFERENCE"  # provider snapshot: prior close + session bands
+    PRICE_BOARD = "PRICE_BOARD"              # polled price board: a symbol off the realtime stream
     QUANT_LIVE = "QUANT_LIVE"               # LiveQuantEngine, current session
     QUANT_EOD = "QUANT_EOD"                 # LiveQuantEngine recomputed for a completed session
     NONE = "NONE"                            # no source

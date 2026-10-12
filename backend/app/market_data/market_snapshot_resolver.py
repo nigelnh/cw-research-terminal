@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_FLOOR, ROUND_CEILING
 from time import monotonic
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 from weakref import WeakValueDictionary
 
 from app.core.config import settings
@@ -59,6 +59,9 @@ _AUCTION_FIELDS = (
     "auction_price", "auction_quantity", "auction_change",
     "auction_change_percent", "auction_timestamp", "auction_received_timestamp",
 )
+# A dashboard or AI read waits at most this long for the price board.
+_BOARD_TIMEOUT_SECONDS = 6.0
+_OFF_STREAM = "not on the realtime stream"
 
 
 @dataclass
@@ -83,6 +86,8 @@ class ResolvedRow:
     )
     analytics_prov: Optional[FieldProvenance] = None
     is_realtime_eligible: bool = False
+    # Whether the realtime stream carries this symbol; None when the resolver was not told.
+    tracked_realtime: Optional[bool] = None
     diag: dict[str, Any] = field(default_factory=dict)
 
     # -- wire --------------------------------------------------------- #
@@ -172,12 +177,33 @@ class MarketSnapshotResolver:
         self._store = None
         self._history_cache: dict[tuple[str, str, str], tuple[float, list[HistoricalBar]]] = {}
         self._history_locks: WeakValueDictionary[tuple[str, str, str], asyncio.Lock] = WeakValueDictionary()
+        self._board_fetch: Optional[Callable[[list[str], date], Awaitable[dict[str, dict[str, Any]]]]] = None
+        self._tracked: Optional[Callable[[str], bool]] = None
 
     def configure(self, sessionmaker, *, store=None) -> None:
         self._sm = sessionmaker
         self._store = store
         self._history_cache.clear()
         self._history_locks.clear()
+
+    def set_board_source(
+        self,
+        fetch: Callable[[list[str], date], Awaitable[dict[str, dict[str, Any]]]],
+        tracked: Callable[[str], bool],
+    ) -> None:
+        """Where a symbol the realtime stream does not carry gets its current-session quote.
+
+        `tracked(symbol)` says whether the stream carries a symbol; `fetch(symbols,
+        session_date)` returns the polled price board's quotes for the others. Unset - in
+        tests, or with a provider that has no board - such a symbol has no current quote
+        during a session and says it is waiting for one.
+        """
+        self._board_fetch = fetch
+        self._tracked = tracked
+
+    def clear_board_source(self) -> None:
+        self._board_fetch = None
+        self._tracked = None
 
     async def resolve_rows(
         self,
@@ -191,6 +217,22 @@ class MarketSnapshotResolver:
         clean = list(dict.fromkeys(s.strip().upper() for s in symbols if s and s.strip()))
         latest_session = cal.latest_completed_trading_session(now)
         session_active = cal.is_trading_active(now)
+        display_session = reference_session_date(now)
+
+        # A symbol the realtime stream does not carry has no live quote, so from the 08:00
+        # rollover until the session completes the polled price board is its only current
+        # source. One board read covers every such symbol in the request.
+        untracked: set[str] = set()
+        board: dict[str, dict[str, Any]] = {}
+        board_issue: Optional[str] = None
+        if self._tracked is not None and display_session > latest_session:
+            # An index is not on the price board; asking for one can fail the whole read.
+            untracked = {
+                sym for sym in clean
+                if not self._tracked(sym) and market_state.determine_instrument_type(sym) != "INDEX"
+            }
+            if untracked:
+                board, board_issue = await self._board_quotes(sorted(untracked), display_session)
 
         # Batch-load snapshots + registry underlyings once.
         snapshots = await self._load_snapshots(clean)
@@ -203,11 +245,15 @@ class MarketSnapshotResolver:
                     sym, now=now, latest_session=latest_session,
                     session_active=session_active, snapshot=snapshots.get(sym), diag=diag,
                     enrich_snapshot_history=enrich_snapshot_history,
+                    untracked=sym in untracked, board_quote=board.get(sym),
+                    board_issue=board_issue,
                 )
                 for sym in clean
             )
         )
         for row in rows:
+            if self._tracked is not None:
+                row.tracked_realtime = self._tracked(row.symbol)
             display = reference_session_date(now).isoformat()
             for attr, fields in (("quote_prov", _QUOTE_FIELDS[3:]), ("book_prov", _BOOK_FIELDS),
                                  ("reference_prov", _QUOTE_FIELDS[:3])):
@@ -384,9 +430,25 @@ class MarketSnapshotResolver:
             logger.warning("snapshot batch load failed: %s", e)
             return {}
 
+    async def _board_quotes(
+        self, symbols: list[str], session: date
+    ) -> tuple[dict[str, dict[str, Any]], Optional[str]]:
+        """The price board's quotes for `symbols`, and the reason when it could not be read."""
+        assert self._board_fetch is not None
+        try:
+            quotes = await asyncio.wait_for(
+                self._board_fetch(symbols, session), timeout=_BOARD_TIMEOUT_SECONDS
+            )
+        except Exception as exc:  # noqa: BLE001 - an unread board leaves those rows unavailable
+            logger.info("Price board unavailable for %d symbols: %s", len(symbols), type(exc).__name__)
+            return {}, "the price board could not be read"
+        return quotes, None
+
     async def _resolve_one(
         self, sym: str, *, now: datetime, latest_session: date, session_active: bool,
         snapshot, diag: bool, enrich_snapshot_history: bool,
+        untracked: bool = False, board_quote: Optional[dict[str, Any]] = None,
+        board_issue: Optional[str] = None,
     ) -> ResolvedRow:
         inst_type = market_state._determine_instrument_type(sym)
         row = ResolvedRow(symbol=sym, instrument_type=inst_type)
@@ -484,6 +546,24 @@ class MarketSnapshotResolver:
         # checkpoint may still hydrate the new session after a restart; otherwise wait
         # for real observations (including book-only ATO), with independently dated bands.
         if new_session_pending and (snapshot is None or snapshot.session_date < display_session):
+            if untracked:
+                # Off the realtime stream nothing is on its way, so "awaiting a trade" would
+                # be false - and the AI read it as "has not traded" (NVL, 2026-10-12). The
+                # board, or the plain reason there is no current quote.
+                if board_quote is not None:
+                    self._apply_board_quote(row, board_quote, trace=trace)
+                    if diag:
+                        row.diag = {"chosen": "PRICE_BOARD", "trace": trace}
+                    return row
+                note = f"{_OFF_STREAM}; {board_issue or 'no price-board row for this session'}"
+                row.quote_prov = FieldProvenance(
+                    DataTemporalState.UNAVAILABLE, DataSource.NONE,
+                    session_date=display_session.isoformat(), note=note)
+                row.book_prov = row.quote_prov
+                trace.append("A:OFF_STREAM_UNAVAILABLE")
+                if diag:
+                    row.diag = {"chosen": "UNAVAILABLE", "trace": trace}
+                return row
             self._overlay_current_reference(row, live, now=now, trace=trace)
             row.quote_prov = FieldProvenance(
                 DataTemporalState.UNAVAILABLE, DataSource.NONE, session_date=display_session.isoformat(),
@@ -639,6 +719,41 @@ class MarketSnapshotResolver:
         if diag:
             row.diag = {"chosen": "UNAVAILABLE", "trace": trace}
         return row
+
+    @staticmethod
+    def _apply_board_quote(row: ResolvedRow, quote: dict[str, Any], *, trace: list[str]) -> None:
+        """A price-board quote for a symbol off the realtime stream. It is this session's,
+        but polled, not streamed: SESSION_SNAPSHOT, never LIVE, with its own source."""
+        sd = quote["session_date"]
+        as_of = quote.get("as_of")
+        for f in (*_QUOTE_FIELDS, *_BOOK_FIELDS):
+            if f in quote:
+                row.values[f] = quote[f]
+
+        def group(observed: bool, missing: str) -> FieldProvenance:
+            if observed:
+                return FieldProvenance(
+                    DataTemporalState.SESSION_SNAPSHOT, DataSource.PRICE_BOARD, as_of, sd,
+                    note=f"polled price board; {_OFF_STREAM}",
+                )
+            # The board has this session's row: an empty field is the board's answer.
+            return FieldProvenance(
+                DataTemporalState.UNAVAILABLE, DataSource.PRICE_BOARD, as_of, sd,
+                note=f"{missing} (price board; {_OFF_STREAM})",
+            )
+
+        row.quote_prov = group(
+            row.values.get("last_price") is not None, "no matched trade yet this session"
+        )
+        row.book_prov = group(
+            row.values.get("bid1_price") is not None or row.values.get("ask1_price") is not None,
+            "no order book on the board",
+        )
+        if any(row.values.get(f) is not None for f in ("reference_price", "ceiling_price", "floor_price")):
+            row.reference_prov = FieldProvenance(
+                DataTemporalState.DERIVED, DataSource.SESSION_REFERENCE, as_of, sd,
+            )
+        trace.append("A:PRICE_BOARD")
 
     @staticmethod
     def _overlay_current_reference(
