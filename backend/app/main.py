@@ -335,6 +335,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Dashboard warm-up incomplete (non-fatal): %s", type(exc).__name__)
 
     market_overview_service.configure(subscription_manager.provider, subscription_manager.store)
+    subscription_manager.register_phase_listener(market_overview_service.on_market_phase_change)
     overview_cws = await instrument_registry.search(active_only=True)
     market_overview_service.start_refresh([item.symbol for item in overview_cws])
 

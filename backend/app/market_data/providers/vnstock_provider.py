@@ -216,7 +216,9 @@ class VnstockProvider(MarketDataProvider):
 
     _PROFILE_TTL = 6 * 3600.0
     _FUNDAMENTAL_TTL = 6 * 3600.0
-    _OVERVIEW_TTL = 60.0
+    # Coalesces bursts only. MarketOverviewService owns the cadence (60 s, or 15 s just
+    # after a phase change); a longer cache here would hand its refresh the old payload.
+    _OVERVIEW_TTL = 10.0
     _BOARD_QUOTE_TTL = 15.0
     _vendor_output_lock = threading.Lock()
 
@@ -327,6 +329,9 @@ class VnstockProvider(MarketDataProvider):
         self._fundamental_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._income_statement_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._overview_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
+        # The market phase the cached overview was built in: one from ATO has no matched
+        # value and no leaders, and must not answer for the continuous session.
+        self._overview_cache_phase: str | None = None
         self._board_cache_at = 0.0
         self._board_cache_requested: set[str] = set()
         self._board_cache: dict[str, dict[str, Any]] = {}
@@ -1745,10 +1750,13 @@ class VnstockProvider(MarketDataProvider):
         the board path still applies, which keeps every other caller working.
         """
         cached_at, cached = self._overview_cache
-        if cached and time.monotonic() - cached_at < self._OVERVIEW_TTL:
+        phase = market_session.get_market_phase().value
+        if (
+            cached and time.monotonic() - cached_at < self._OVERVIEW_TTL
+            and self._overview_cache_phase == phase
+        ):
             return cached
         session = reference_session_date().isoformat()
-        phase = market_session.get_market_phase().value
         reference_only = phase == "PRE_OPEN"
         index_symbols = ["VN30", "VNINDEX", "VNFINLEAD", "VNDIAMOND"]
         groups = {
@@ -2095,6 +2103,7 @@ class VnstockProvider(MarketDataProvider):
             },
         }
         self._overview_cache = (time.monotonic(), result)
+        self._overview_cache_phase = phase
         return result
 
     # -------------------------------- health ---------------------------------

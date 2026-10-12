@@ -78,6 +78,8 @@ class SubscriptionManager:
         self._reference_retry_at = 0.0
         self._patch_listeners: List[Callable[[Dict[str, Any]], None]] = []
         self._status_listeners: List[Callable[[], None]] = []
+        # Told when the market phase or the display session changes (_session_clock_tick).
+        self._phase_listeners: List[Callable[[], None]] = []
         self._update_listeners: List[Callable[[str, CanonicalQuote], None]] = []
 
         # Register provider event callback
@@ -326,8 +328,16 @@ class SubscriptionManager:
                         listener(message)
                     except Exception:
                         logger.exception("Auction phase patch listener failed")
+            known = self._last_clock_phase is not None
             self._last_clock_phase = phase
             self._notify_status_change()
+            # The first tick after startup only learns the phase; it is not a change.
+            if known:
+                for listener in self._phase_listeners:
+                    try:
+                        listener()
+                    except Exception:
+                        logger.exception("Market phase listener failed")
 
     async def _run_session_clock(self) -> None:
         while True:
@@ -718,6 +728,10 @@ class SubscriptionManager:
         if new_set != self._desired_symbols:
             self._desired_symbols = new_set
             self._schedule_debounced_restart()
+
+    def register_phase_listener(self, listener: Callable[[], None]) -> None:
+        if listener not in self._phase_listeners:
+            self._phase_listeners.append(listener)
 
     def register_status_listener(self, listener: Callable[[], None]) -> None:
         if listener not in self._status_listeners:
