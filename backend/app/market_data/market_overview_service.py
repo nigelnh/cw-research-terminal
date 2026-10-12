@@ -167,6 +167,14 @@ def _live_cw_quotes(symbols: list[str], session: str) -> dict[str, dict[str, Any
 
 
 class MarketOverviewService:
+    # A payload built in another market phase is stale whatever its age: the one built
+    # during ATO has no matched value and no leaders, and at 09:16 on 2026-10-12 it was
+    # still on screen. The first refresh in a new phase can land before the exchange has
+    # published the auction or the first prints, so for a while after a phase change the
+    # in-session TTL is short.
+    _PHASE_SETTLE_SECONDS = 60.0
+    _SETTLING_TTL_SECONDS = 15.0
+
     def __init__(self, cold_read_timeout: float = 2.0) -> None:
         self._cold_read_timeout = cold_read_timeout
         self._provider = None
@@ -179,6 +187,11 @@ class MarketOverviewService:
         self._retry_at = 0.0
         self._symbols: tuple[str, ...] = ()
         self._symbols_generation = 0
+        # The market phase the cached payload was built in - None when unknown, as for a
+        # stored payload saved before phases were - the phase last seen, and when it changed.
+        self._cached_phase: str | None = None
+        self._seen_phase: str | None = None
+        self._phase_changed_at = float("-inf")
         # Injectable for deterministic tests, mirrors the provider's own off-session TTL.
         self._seconds_to_next_session: Callable[[], float] = (
             market_session.seconds_until_next_trading_session
@@ -202,6 +215,8 @@ class MarketOverviewService:
         self-correct, since nothing re-asks the provider for it.
         """
         if market_session.is_trading_active():
+            if time.monotonic() - self._phase_changed_at < self._PHASE_SETTLE_SECONDS:
+                return self._SETTLING_TTL_SECONDS
             return 60.0
         settled = bool(self._cache) and (
             self._cache.get("components", {}).get("top_stock_volume") == "AVAILABLE"
@@ -224,10 +239,27 @@ class MarketOverviewService:
         self._provider, self._store = provider, store
         self._cache = None
         self._cached_at = 0.0
+        self._cached_phase = None
         self._loaded = False
         self._retry_at = 0.0
         self._symbols = ()
         self._symbols_generation = 0
+
+    def _current_phase(self) -> str:
+        """The market phase now, noting the moment it changed (see _ttl_seconds)."""
+        phase = market_session.get_market_phase().value
+        if self._seen_phase is not None and phase != self._seen_phase:
+            self._phase_changed_at = time.monotonic()
+        self._seen_phase = phase
+        return phase
+
+    def on_market_phase_change(self) -> None:
+        """Refresh as the phase changes - 09:15, 11:30, 13:00, 14:30, 14:45 - rather than
+        at the next read after it."""
+        self._seen_phase = market_session.get_market_phase().value
+        self._phase_changed_at = time.monotonic()
+        if self._provider is not None:
+            self.start_refresh(list(self._symbols))
 
     def _set_symbols(self, symbols: list[str]) -> None:
         normalized = tuple(sorted({
@@ -283,6 +315,8 @@ class MarketOverviewService:
                         ):
                             self._cache = payload
                             self._cached_at = cached_at
+                            phase = saved.get("phase")
+                            self._cached_phase = phase if isinstance(phase, str) else None
                 except Exception as exc:
                     logger.warning("Market overview restore unavailable: %s", type(exc).__name__)
             self._loaded = True
@@ -297,6 +331,7 @@ class MarketOverviewService:
         while True:
             generation = self._symbols_generation
             symbols = list(self._symbols)
+            phase = market_session.get_market_phase().value
             result = await provider.get_market_overview(
                 symbols,
                 cw_quotes=_live_cw_quotes(symbols, reference_session_date().isoformat()),
@@ -316,9 +351,10 @@ class MarketOverviewService:
             return
         self._cache = result
         self._cached_at = time.time()
+        self._cached_phase = phase
         if usable and self._store is not None:
             await self._store.save_market_overview({
-                "payload": result, "cached_at": self._cached_at,
+                "payload": result, "cached_at": self._cached_at, "phase": phase,
             })
 
     @staticmethod
@@ -424,8 +460,13 @@ class MarketOverviewService:
             from app.market_data.market_subscription_manager import subscription_manager
             self.configure(subscription_manager.provider, subscription_manager.store)
         await self._load()
+        phase = self._current_phase()
         ttl = self._ttl_seconds()
-        if self._cache is None or time.time() - self._cached_at >= ttl or self._payload_session(self._cache) != reference_session_date().isoformat():
+        if (
+            self._cache is None or time.time() - self._cached_at >= ttl
+            or self._payload_session(self._cache) != reference_session_date().isoformat()
+            or (self._cached_phase is not None and self._cached_phase != phase)
+        ):
             self.start_refresh(symbols)
         if self._cache is None and self._refresh_task is not None:
             try:
