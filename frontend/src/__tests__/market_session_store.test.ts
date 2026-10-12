@@ -129,3 +129,66 @@ describe("marketSessionStore", () => {
     expect(seen).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("publishing only what changed", () => {
+  // A status frame arrived 40-70 times a second in a busy session (2026-10-12), differing
+  // only in its clocks. Each one re-rendered every session consumer.
+  const feed = (over: Record<string, unknown> = {}) => ({
+    code: "AVAILABLE", scope: "market_data", message: "Live.",
+    checkedAt: "2026-09-08T02:04:00Z", lastDataAt: "2026-09-08T09:03:59+07:00", datasets: [],
+    ...over,
+  });
+
+  it("a frame that only moves the clock is not published, but the clock follows it", () => {
+    let elapsed = 1_000;
+    const now = vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+    acceptMarketContext({ sessionContext: ctx(), feedStatus: feed() });
+    const published = marketSessionStore.getSnapshot();
+    const seen = vi.fn();
+    const off = marketSessionStore.subscribe(seen);
+
+    expect(acceptMarketContext({
+      sessionContext: ctx({ serverTime: "2026-09-08T09:04:30+07:00" }),
+      feedStatus: feed({ checkedAt: "2026-09-08T02:04:30Z", lastDataAt: "2026-09-08T09:04:30+07:00" }),
+    })).toBe(false);
+
+    expect(seen).not.toHaveBeenCalled();
+    expect(marketSessionStore.getSnapshot()).toBe(published);
+    expect(marketNow()).toBe(Date.parse("2026-09-08T09:04:30+07:00"));
+    off();
+    now.mockRestore();
+  });
+
+  it("a phase change is published at once", () => {
+    acceptMarketContext({ sessionContext: ctx() });
+    const seen = vi.fn();
+    const off = marketSessionStore.subscribe(seen);
+    expect(acceptMarketContext({ sessionContext: ctx({
+      serverTime: "2026-09-08T09:15:00+07:00", marketPhase: "MORNING_SESSION" }) })).toBe(true);
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(marketSessionStore.getSnapshot().sessionContext?.marketPhase).toBe("MORNING_SESSION");
+    off();
+  });
+
+  it("a feed outage is published at once", () => {
+    acceptMarketContext({ sessionContext: ctx(), feedStatus: feed() });
+    const seen = vi.fn();
+    const off = marketSessionStore.subscribe(seen);
+    acceptMarketContext({
+      sessionContext: ctx({ serverTime: "2026-09-08T09:04:01+07:00" }),
+      feedStatus: feed({ code: "STALE", message: "Stale." }),
+    });
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(marketSessionStore.getSnapshot().feedStatus?.code).toBe("STALE");
+    off();
+  });
+
+  it("still refuses a payload older than an unpublished newer frame", () => {
+    acceptMarketContext({ sessionContext: ctx() });
+    acceptMarketContext({ sessionContext: ctx({ serverTime: "2026-09-08T09:04:30+07:00" }) });
+    // Newer than the last PUBLISHED frame, older than the last one received.
+    acceptMarketContext({ sessionContext: ctx({
+      serverTime: "2026-09-08T09:04:10+07:00", marketPhase: "PRE_OPEN" }) });
+    expect(marketSessionStore.getSnapshot().sessionContext?.marketPhase).toBe("ATO");
+  });
+});

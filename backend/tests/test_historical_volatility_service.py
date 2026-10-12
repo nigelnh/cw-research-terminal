@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.core.config import settings
+from app.market_data.trading_calendar import latest_completed_trading_session
 from app.quant.black_scholes import bs_call_price_share
 from app.quant.dividend_convention import CW_DIVIDEND_YIELD_CONVENTION
 from app.quant.historical_volatility import calculate_historical_volatility
@@ -127,7 +128,9 @@ async def test_successful_warm_populates_cache_with_provenance():
     assert est.value == EXPECTED_HV
     assert est.window == settings.QUANT_HV_WINDOW_SESSIONS == 22
     assert est.source_label == "HV_22"
-    assert est.as_of == date.today() or (date.today() - est.as_of).days <= 1  # VN date may differ by <1d
+    # The newest close the service keeps is the last COMPLETED session: on a weekend or a
+    # Monday morning that is Friday, two or three days before the host's date.
+    assert est.as_of == latest_completed_trading_session()
     assert svc.get_value("HPG") == EXPECTED_HV
     assert result["HPG"] is est
     # adjusted=True + daily bars requested

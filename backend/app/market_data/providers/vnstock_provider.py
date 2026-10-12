@@ -89,6 +89,47 @@ def _integer(value: Any) -> int | None:
     return None if number is None else int(number)
 
 
+def _positive(value: Any) -> float | None:
+    number = _finite(value)
+    return number if number is not None and number > 0 else None
+
+
+def _board_quote(row: dict[str, Any], session: str) -> dict[str, Any]:
+    """One KBS price-board row as resolver values: raw VND, change as a fraction.
+
+    KBS writes 0 for what it does not have - every covered warrant's close and volume, and
+    every price before the first match - so 0 reads as missing, and a row with no matched
+    volume has no trade: its close is a placeholder, not a print.
+    """
+    volume = _integer(row.get("volume_accumulated")) or None
+    traded = volume is not None and _positive(row.get("close_price")) is not None
+    percent = _finite(row.get("percent_change"))
+    quote: dict[str, Any] = {
+        "reference_price": _positive(row.get("reference_price")),
+        "ceiling_price": _positive(row.get("ceiling_price")),
+        "floor_price": _positive(row.get("floor_price")),
+        "last_price": _positive(row.get("close_price")) if traded else None,
+        "open_price": _positive(row.get("open_price")) if traded else None,
+        "high_price": _positive(row.get("high_price")) if traded else None,
+        "low_price": _positive(row.get("low_price")) if traded else None,
+        "average_price": _positive(row.get("average_price")) if traded else None,
+        "price_change": _finite(row.get("price_change")) if traded else None,
+        "price_change_percent": percent / 100.0 if traded and percent is not None else None,
+        "total_volume": volume if traded else None,
+        "trading_value": _positive(row.get("total_value")) if traded else None,
+    }
+    for level in (1, 2, 3):
+        for side in ("bid", "ask"):
+            price = _positive(row.get(f"{side}_price_{level}"))
+            quote[f"{side}{level}_price"] = price
+            quote[f"{side}{level}_quantity"] = (
+                _integer(row.get(f"{side}_vol_{level}")) if price is not None else None
+            )
+    quote["as_of"] = _iso_timestamp(row.get("time"), session_date=session)
+    quote["session_date"] = session
+    return quote
+
+
 #: VNDirect's public TradingView-style chart feed (t/o/h/l/c/v arrays).
 _DCHART_HISTORY_URL = "https://dchart-api.vndirect.com.vn/dchart/history"
 
@@ -178,6 +219,7 @@ class VnstockProvider(MarketDataProvider):
     # Coalesces bursts only. MarketOverviewService owns the cadence (60 s, or 15 s just
     # after a phase change); a longer cache here would hand its refresh the old payload.
     _OVERVIEW_TTL = 10.0
+    _BOARD_QUOTE_TTL = 15.0
     _vendor_output_lock = threading.Lock()
 
     def __init__(
@@ -293,6 +335,8 @@ class VnstockProvider(MarketDataProvider):
         self._board_cache_at = 0.0
         self._board_cache_requested: set[str] = set()
         self._board_cache: dict[str, dict[str, Any]] = {}
+        # get_board_quotes: symbol -> (monotonic fetch time, board row or None).
+        self._board_quote_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
         # The overview's last good inputs, each tagged with the session it describes and
         # the wall-clock time it was fetched. See `_safe_index_history`.
         self._index_history_last_good: dict[
@@ -1069,21 +1113,61 @@ class VnstockProvider(MarketDataProvider):
             hit = cached()
             if hit is not None:
                 return hit
-            records: list[dict[str, Any]] = []
-            # Keep request payloads bounded. The Vnstock API exposes a symbol-list
-            # argument but does not document an unlimited list size.
-            for offset in range(0, len(clean), 100):
-                records.extend(_records(await self._call(
-                    scope, self._board_fetcher, clean[offset:offset + 100]
-                )))
-            mapped = {
-                str(row.get("symbol") or row.get("SB") or "").strip().upper(): row
-                for row in records if str(row.get("symbol") or row.get("SB") or "").strip()
-            }
+            mapped = await self._fetch_board(clean, scope)
             self._board_cache_at = time.monotonic()
             self._board_cache_requested = set(clean)
             self._board_cache = mapped
             return mapped
+
+    async def _fetch_board(self, symbols: list[str], scope: str) -> dict[str, dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        # Keep request payloads bounded. The Vnstock API exposes a symbol-list
+        # argument but does not document an unlimited list size.
+        for offset in range(0, len(symbols), 100):
+            records.extend(_records(await self._call(
+                scope, self._board_fetcher, symbols[offset:offset + 100]
+            )))
+        return {
+            str(row.get("symbol") or row.get("SB") or "").strip().upper(): row
+            for row in records if str(row.get("symbol") or row.get("SB") or "").strip()
+        }
+
+    async def get_board_quotes(
+        self, symbols: list[str], session_date: date
+    ) -> dict[str, dict[str, Any]]:
+        """This session's price-board quote for symbols outside the realtime stream.
+
+        The stream carries the configured universe - VN30, the warrant underlyings and the
+        warrants. Any other stock, NVL say, had nothing at all during a session, and the AI
+        read the empty quote as "NVL has not traded yet" (2026-10-12). The KBS board lists
+        every symbol. Each symbol's answer, a missing row included, is kept for
+        `_BOARD_QUOTE_TTL` seconds: a watchlist re-reads every 30 s and the AI may ask
+        several times in one answer. Rows stamped for another session are dropped.
+        """
+        clean = sorted({str(s).strip().upper() for s in symbols if str(s).strip()})
+        now = time.monotonic()
+        rows: dict[str, dict[str, Any] | None] = {}
+        missing: list[str] = []
+        for symbol in clean:
+            hit = self._board_quote_cache.get(symbol)
+            if hit is not None and now - hit[0] <= self._BOARD_QUOTE_TTL:
+                rows[symbol] = hit[1]
+            else:
+                missing.append(symbol)
+        if missing:
+            # Its own scope, outside `_board_rows`: the stream's board poll neither waits
+            # behind this nor loses its cache to it, and a failure here blocks only this.
+            fetched = await self._fetch_board(missing, "board_quote")
+            stamp = time.monotonic()
+            for symbol in missing:
+                rows[symbol] = fetched.get(symbol)
+                self._board_quote_cache[symbol] = (stamp, rows[symbol])
+        wanted = session_date.isoformat()
+        return {
+            symbol: _board_quote(row, wanted)
+            for symbol, row in rows.items()
+            if row is not None and _date_text(row.get("TD") or row.get("trading_date")) == wanted
+        }
 
     async def get_session_reference_data(self, symbols: list[str], session_date: date) -> dict[str, dict[str, Any]]:
         rows = await self._board_rows(symbols, "session_reference")

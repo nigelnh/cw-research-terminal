@@ -201,6 +201,16 @@ async def lifespan(app: FastAPI):
     # ---- Historical read path (Step 7) ----
     # The direct provider is always available for provider-direct mode / non-daily / unseeded.
     history_read_service.set_provider(subscription_manager.provider)
+    # During a session, a symbol off the realtime stream reads the polled price board.
+    board_quotes = getattr(subscription_manager.provider, "get_board_quotes", None)
+    if callable(board_quotes):
+        from app.market_data.market_snapshot_resolver import (
+            market_snapshot_resolver as board_aware_resolver,
+        )
+
+        board_aware_resolver.set_board_source(
+            board_quotes, subscription_manager.is_in_server_universe
+        )
     _snapshot_checkpointer = None
     market_snapshot_resolver = None
     if _persistence_ready:
@@ -405,6 +415,9 @@ async def lifespan(app: FastAPI):
         await subscription_manager.shutdown()
     except Exception as e:
         logger.warning(f"Market provider shutdown warning: {e}")
+    if callable(board_quotes):
+        # The provider is shut down; the process-wide resolver must stop reading its board.
+        board_aware_resolver.clear_board_source()
     try:
         await historical_volatility_service.stop_periodic_refresh()
     except Exception as e:
