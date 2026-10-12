@@ -50,7 +50,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_quote",
-            "description": "Returns real-time canonical market quote for a stock or Covered Warrant (last price, reference, bid1, ask1, spread, change %, volume).",
+            "description": "Returns the canonical market quote for a stock or Covered Warrant (last price, reference, bid1, ask1, spread, change %, volume). Symbols on the realtime stream are live; during a session any other symbol is read from the polled price board (data_source PRICE_BOARD).",
             "parameters": {
                 "type": "object",
                 "properties": {

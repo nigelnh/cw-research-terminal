@@ -110,8 +110,12 @@ def _row_payload(row) -> Dict[str, Any]:
         "status": "AVAILABLE" if any(values.get(k) is not None for k in ("last_price", "bid1_price", "ask1_price")) else "UNAVAILABLE",
         "session_date": row.quote_prov.session_date,
         "quote_display_eligible": row.is_realtime_eligible,
+        "tracked_realtime": row.tracked_realtime,
         "data_source": row.quote_prov.source.value,
         "cache_state": row.quote_prov.state.value,
+        # Why the quote is what it is - e.g. "not on the realtime stream; ..." - so an
+        # empty quote is never read as "has not traded".
+        "quote_note": row.quote_prov.note,
         "provenance": row.to_wire()["provenance"],
     }
 
