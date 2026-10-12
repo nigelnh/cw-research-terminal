@@ -23,6 +23,8 @@ let state: { sessionContext: SessionContext | null; feedStatus: FeedStatus | nul
 };
 let receivedAt = 0;
 let clockBaseMs = 0;
+// The newest serverTime accepted, published or not: the guard against older payloads.
+let latestServerMs = Number.NEGATIVE_INFINITY;
 let timer: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach(fn => fn());
@@ -33,12 +35,25 @@ export function marketNow(): number {
     ? clockBaseMs + elapsedNow() - receivedAt : Date.now();
 }
 
-export function acceptMarketContext(payload: { sessionContext?: SessionContext; feedStatus?: FeedStatus | null }): void {
+// What a payload says once its clocks are set aside: serverTime, and the feed's check and
+// last-data stamps, move on every frame, and marketNow() runs the clock between frames.
+const contextKey = (ctx: SessionContext | null): string => {
+  if (!ctx) return "";
+  const { serverTime: _clock, ...rest } = ctx;
+  return JSON.stringify(rest);
+};
+const feedKey = (feed: FeedStatus | null): string =>
+  JSON.stringify(feed, (key, value) => (key === "checkedAt" || key === "lastDataAt" ? undefined : value));
+
+/** Take a server payload's session context. Returns whether anything a consumer reads
+ *  changed - only then does the store publish. Publishing every frame re-rendered every
+ *  session consumer 40-70 times a second during a busy session (2026-10-12). */
+export function acceptMarketContext(payload: { sessionContext?: SessionContext; feedStatus?: FeedStatus | null }): boolean {
   const next = payload.sessionContext;
   const previous = state.sessionContext;
   const nextServerMs = next ? Date.parse(next.serverTime) : Number.NaN;
   if (!next || !Number.isFinite(nextServerMs) ||
-      (previous && (next.displaySessionDate < previous.displaySessionDate || nextServerMs < Date.parse(previous.serverTime)))) return;
+      (previous && (next.displaySessionDate < previous.displaySessionDate || nextServerMs < latestServerMs))) return false;
   // A REST response or status frame can be newer than the previous payload while still
   // being older than the extrapolated clock at the instant it arrives. Resetting the
   // anchor to that payload made the header freeze or move backwards under load. Preserve
@@ -46,7 +61,10 @@ export function acceptMarketContext(payload: { sessionContext?: SessionContext; 
   const currentClock = previous ? marketNow() : nextServerMs;
   clockBaseMs = Math.max(nextServerMs, currentClock);
   receivedAt = elapsedNow();
-  state = { sessionContext: next, feedStatus: payload.feedStatus ?? state.feedStatus };
+  latestServerMs = nextServerMs;
+  const feedStatus = payload.feedStatus ?? state.feedStatus;
+  if (previous && contextKey(previous) === contextKey(next) && feedKey(state.feedStatus) === feedKey(feedStatus)) return false;
+  state = { sessionContext: next, feedStatus };
   if (timer) clearTimeout(timer);
   if (previous && previous.displaySessionDate !== next.displaySessionDate) void appQueryClient.invalidateQueries();
   const delay = next.nextRolloverAt ? Date.parse(next.nextRolloverAt) - clockBaseMs : 0;
@@ -59,6 +77,7 @@ export function acceptMarketContext(payload: { sessionContext?: SessionContext; 
       nextRolloverAt: null, marketPhase: "PRE_OPEN", marketSessionActive: false } });
   }, Math.min(delay, 2147483647));
   notify();
+  return true;
 }
 
 export const marketSessionStore = {

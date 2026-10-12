@@ -582,16 +582,18 @@ export class BackendWebSocketClient {
     if (!msg || typeof msg !== "object" || !msg.type) {
       return; // Unknown or invalid message format
     }
-    this.routeIncomingMessage(msg);
+    // A status frame that changed nothing this store exposes needs no render.
+    if (this.routeIncomingMessage(msg) === false) return;
     // State mutation is immediate; React delivery is coalesced so a market-wide burst does
     // not synchronously render the entire watchlist once per symbol frame.
     this.scheduleMarketRevision();
   }
 
-  private routeIncomingMessage(msg: any): void {
+  private routeIncomingMessage(msg: any): boolean | void {
     switch (msg.type) {
       case "status": {
         acceptMarketContext(msg);
+        let changed = false;
         const nextSessionKey = String(
           msg.market_session_date ?? msg.session_date ?? msg.market_session ?? "",
         );
@@ -604,31 +606,41 @@ export class BackendWebSocketClient {
         }
         if (nextSessionKey) this.sessionBaselineKey = nextSessionKey;
 
+        // The server sends the list on connect and when it changes; a frame without it
+        // leaves this copy as it was.
         const rawUniverse =
           msg.realtime_universe_symbols ??
           msg.universe_symbols ??
           msg.allowed_symbols;
         if (Array.isArray(rawUniverse)) {
-          this.realtimeUniverse = new Set(
+          const universe = new Set<string>(
             rawUniverse.map((value: unknown) => String(value).toUpperCase()),
           );
-          this.untrackedSymbols = new Set(
-            [...this.subscribedSymbols].filter(
-              (symbol) => !this.realtimeUniverse!.has(symbol),
-            ),
-          );
+          const current = this.realtimeUniverse;
+          if (!current || current.size !== universe.size || [...universe].some((symbol) => !current.has(symbol))) {
+            this.realtimeUniverse = universe;
+            this.untrackedSymbols = new Set(
+              [...this.subscribedSymbols].filter((symbol) => !universe.has(symbol)),
+            );
+            changed = true;
+          }
         }
 
         if (msg.market_session) {
-          this.marketSession = String(msg.market_session);
-          this.marketPhase = String(msg.market_phase ?? "UNKNOWN");
-          this.marketSessionActive = Boolean(msg.market_session_active);
-          this.sessionListeners.forEach((fn) =>
-            fn({
-              status: this.marketSession,
-              active: this.marketSessionActive,
-            }),
-          );
+          const status = String(msg.market_session);
+          const phase = String(msg.market_phase ?? "UNKNOWN");
+          const active = Boolean(msg.market_session_active);
+          if (
+            status !== this.marketSession ||
+            phase !== this.marketPhase ||
+            active !== this.marketSessionActive
+          ) {
+            this.marketSession = status;
+            this.marketPhase = phase;
+            this.marketSessionActive = active;
+            this.sessionListeners.forEach((fn) => fn({ status, active }));
+            changed = true;
+          }
         }
 
         // Explicit upstream market feed status from backend gateway
@@ -656,7 +668,8 @@ export class BackendWebSocketClient {
         } else if (msg.connected === false && !msg.gateway_connected) {
           this.setUpstreamFeedState("DISCONNECTED");
         }
-        break;
+        // setUpstreamFeedState publishes its own change.
+        return changed;
       }
 
       case "snapshots": {
