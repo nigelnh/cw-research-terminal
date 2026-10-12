@@ -4,7 +4,7 @@ import logging
 import re
 import time
 from collections import defaultdict, deque
-from typing import Set, Dict, Any, Iterable
+from typing import Set, Dict, Any, Callable, Iterable
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.config import settings
@@ -25,16 +25,47 @@ _CLOSE_GOING_AWAY = 1001    # idle timeout
 _CLOSE_TRY_LATER = 1013     # feature disabled / try again later
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9]{1,11}$")
 
+# With nothing material changed, a status frame goes out at most this often (see
+# broadcast_status). A real change goes out at once.
+STATUS_HEARTBEAT_SECONDS = 5.0
+# Fields that move on every provider report without changing anything a client acts on:
+# clocks (the browser runs its own from the last serverTime), tick stamps, diagnostic
+# counters, and the per-client fields. They ride along with the next frame that goes out.
+_STATUS_VOLATILE_FIELDS = frozenset({
+    "serverTime", "checkedAt", "lastDataAt",
+    "last_trade_tick_at", "last_book_tick_at", "last_tick_at",
+    "signalr_decode_error_count", "signalr_reconnect_count",
+    "client_subscription_count", "realtime_universe_symbols",
+})
+
+
+def _material(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _material(v) for k, v in value.items() if k not in _STATUS_VOLATILE_FIELDS}
+    if isinstance(value, list):
+        return [_material(v) for v in value]
+    return value
+
+
+def status_signature(message: Dict[str, Any]) -> str:
+    """What a status frame says once its clocks, tick stamps and counters are set aside."""
+    return json.dumps(_material(message), sort_keys=True, default=str)
+
 
 class MarketConnectionManager:
     """
     Manages active frontend WebSocket client connections, delivers immediate
     in-memory snapshots on subscription, and broadcasts live incremental patches.
     """
-    def __init__(self):
+    def __init__(self, clock: Callable[[], float] = time.monotonic):
         self._active_connections: Set[WebSocket] = set()
         self._conn_by_ip: Dict[str, int] = defaultdict(int)
         self._client_subscriptions: Dict[WebSocket, Set[str]] = {}
+        # The realtime universe list each client was last sent (see _status_for).
+        self._client_universe: Dict[WebSocket, list[str]] = {}
+        self._clock = clock
+        self._sent_status_signature: str | None = None
+        self._sent_status_at = float("-inf")
         subscription_manager.register_patch_listener(self.broadcast_patch_threadsafe)
         subscription_manager.register_status_listener(self.broadcast_status)
 
@@ -73,7 +104,29 @@ class MarketConnectionManager:
         self._client_subscriptions[websocket] = current
         return sorted(current)
 
-    def _status_message(self, websocket: WebSocket | None = None) -> Dict[str, Any]:
+    def _status_message(self, websocket: WebSocket) -> Dict[str, Any]:
+        """One client's status frame, as of now."""
+        return self._status_for(
+            websocket, self._status_base(), subscription_manager.get_server_universe_symbols()
+        )
+
+    def _status_for(
+        self, websocket: WebSocket, base: Dict[str, Any], universe: list[str]
+    ) -> Dict[str, Any]:
+        """`base` for one client. The universe list is most of the frame (370 symbols), so
+        a client gets it only when it does not have this one yet: on connect and after the
+        universe changes. A frame without it leaves the client's copy as it was."""
+        message = {
+            **base,
+            "client_subscription_count": len(self._client_subscriptions.get(websocket, set())),
+        }
+        if self._client_universe.get(websocket) != universe:
+            message["realtime_universe_symbols"] = universe
+            self._client_universe[websocket] = universe
+        return message
+
+    def _status_base(self) -> Dict[str, Any]:
+        """The part of the status frame every client shares."""
         health = subscription_manager.provider.get_health()
         up_status = health.get("upstream_status", "UNKNOWN")
         feed_fresh = health.get("feed_fresh")
@@ -105,10 +158,6 @@ class MarketConnectionManager:
             "quote_display_eligible": sess_active,
             "subscription_count": len(subscription_manager.get_active_symbols()),
             "realtime_universe": universe_health,
-            "realtime_universe_symbols": subscription_manager.get_server_universe_symbols(),
-            "client_subscription_count": (
-                len(self._client_subscriptions.get(websocket, set())) if websocket is not None else None
-            ),
             "message": f"Connected to CW Research Gateway ({up_status}, Session: {sess_status})",
         }
 
@@ -156,19 +205,41 @@ class MarketConnectionManager:
             self.disconnect(ws)
 
     def broadcast_status(self) -> None:
-        """Broadcasts updated upstream status frame to all connected WebSocket clients."""
+        """Send the status frame when something a client acts on changed, else a heartbeat.
+
+        The provider reports its health after every realtime frame - 40 to 70 a second in
+        a busy session - and each report used to reach every browser as a full status
+        frame. Every one re-rendered the session-context consumers: on 2026-10-12 that was
+        half of the browser's main thread, in stalls of up to 210 ms that swallowed the
+        300 ms value flashes. The frames differed only in their clocks and tick stamps.
+        """
         if not self._active_connections:
             return
-
-        for ws in list(self._active_connections):
+        base = self._status_base()
+        universe = subscription_manager.get_server_universe_symbols()
+        signature = status_signature(base)
+        now = self._clock()
+        clients = list(self._active_connections)
+        if (
+            signature == self._sent_status_signature
+            and now - self._sent_status_at < STATUS_HEARTBEAT_SECONDS
+            and all(self._client_universe.get(ws) == universe for ws in clients)
+        ):
+            return
+        self._sent_status_signature = signature
+        self._sent_status_at = now
+        for ws in clients:
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._safe_send(ws, json.dumps(self._status_message(ws))))
+                loop.create_task(
+                    self._safe_send(ws, json.dumps(self._status_for(ws, base, universe)))
+                )
             except Exception:
                 self.disconnect(ws)
 
     def disconnect(self, websocket: WebSocket) -> None:
         self._client_subscriptions.pop(websocket, None)
+        self._client_universe.pop(websocket, None)
         if websocket in self._active_connections:
             self._active_connections.remove(websocket)
             ip = websocket.scope.get("_cw_client_ip") if hasattr(websocket, "scope") else None
