@@ -91,3 +91,26 @@ async def test_a_zero_or_missing_price_still_produces_nothing():
     b = LiveBarBuilder()
     assert b.on_trade("HPG", _tick(Close=0)) == []
     assert b.on_trade("HPG", {"Ticker": "HPG", "TradingDate": "2026-09-07T09:20:00+07:00"}) == []
+
+
+async def test_bars_from_earlier_sessions_are_dropped_when_a_new_session_trades():
+    """Bars were never evicted, so memory grew every trading day for the life of the
+    process (0.38 GB -> 1.44 GB in prod over 18 days)."""
+    b = LiveBarBuilder()
+    b.on_trade("HPG", _tick())
+    b.on_trade("FPT", _tick(Ticker="FPT", TradingDate="2026-09-07T10:00:00+07:00"))
+    assert {k[2][:10] for k in b._bars} == {"2026-09-07"}
+
+    b.on_trade("HPG", _tick(TradingDate="2026-09-08T09:15:00+07:00"))
+    assert {k[2][:10] for k in b._bars} == {"2026-09-08"}
+    assert len(b._bars) == 6  # one bucket per timeframe, the new session only
+
+
+async def test_rolling_the_session_keeps_todays_forming_bars():
+    b = LiveBarBuilder()
+    b.on_trade("HPG", _tick(TradingDate="2026-09-08T09:15:00+07:00"))
+    bar = _daily(b.on_trade("HPG", _tick(
+        TradingDate="2026-09-08T09:16:00+07:00", Close=22_000, High=None,
+    )))
+    assert bar["date"] == "2026-09-08"
+    assert bar["close"] == 22_000

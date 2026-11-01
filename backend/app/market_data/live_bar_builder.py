@@ -17,6 +17,20 @@ class LiveBarBuilder:
         self._bars: dict[tuple[str, str, str], dict[str, Any]] = {}
         self._seen: set[tuple] = set()
         self._latest_ms: dict[str, int] = {}
+        self._session: str | None = None
+
+    def _roll_session(self, session: str) -> None:
+        """Drop every bar from an earlier session once a newer one starts trading.
+
+        Nothing else ever removed a bar, so each session added ~360 buckets per traded
+        symbol for the life of the process: production grew 0.38 GB -> 1.44 GB over 18
+        days, only on trading days, until memory billing tripped the usage limit. A bar
+        is only ever patched into the current session's chart, so older ones are dead.
+        """
+        if self._session is not None and session <= self._session:
+            return
+        self._session = session
+        self._bars = {k: v for k, v in self._bars.items() if v["session_date"] >= session}
 
     @staticmethod
     def _instant(raw: dict) -> datetime | None:
@@ -49,6 +63,7 @@ class LiveBarBuilder:
         if len(self._seen) > 20_000:
             self._seen.clear()
             self._seen.add(identity)
+        self._roll_session(dt.astimezone(VN_TZ).date().isoformat())
 
         patches: list[dict[str, Any]] = []
         for timeframe, minutes in _MINUTES.items():
