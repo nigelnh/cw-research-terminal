@@ -22,10 +22,17 @@ pytest-asyncio>=0.23.0,<1.0.0
 # this project has always installed, recovered intact from the pip cache:
 #   vnstock 4.0.7  sha256 5b73bcaacb9edc93ef7fc4f5c91924a2801929bf501c57faa5656ce1aa5257bb
 #   vnai    2.5.9  sha256 923270b10a354e988493969c939bf8ca70cfaea6e999ec83641b30adb20500fe
-# Every other dependency, vnstock's own included, still resolves from PyPI as before.
+#
+# vnstock_ezchart, which vnstock 4.0.7 requires, went the same way between 2026-10-31 and
+# 2026-11-11 and failed the Railway build. No wheel survived anywhere, and the upstream repo
+# only tags 1.0.1, so this one was repacked (`wheel pack`) from the 1.0.2 install the test
+# suite runs against, after every file matched the sha256 in that install's RECORD:
+#   vnstock_ezchart 1.0.2  sha256 ab59bac6874446292c3feace86bd8240da6a6024ac61f5b58099736ef65ab442
+# Every other dependency still resolves from PyPI as before.
 --find-links ./vendor
 vnstock==4.0.7
 vnai==2.5.9
+vnstock_ezchart==1.0.2
 
 # Cache & State Persistence
 redis>=5.0.0
