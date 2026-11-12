@@ -1,0 +1,68 @@
+name: Uptime check — production backend
+
+# On 2026-10-30 Railway's usage limit stopped every service and production stayed down for
+# twelve days. Nothing noticed until an unrelated workflow failed on its ingest POST. This
+# job fails within about half an hour of the backend going unreachable or losing its
+# database, and a failed scheduled run makes GitHub email whoever last edited the schedule.
+#
+# Railway answers `404 {"message":"Application not found"}` for a stopped service, so the
+# usage-limit case shows up here as a 404 rather than as a timeout.
+#
+# GitHub turns schedules off in a public repository after 60 days with no commits. It emails
+# a warning first, and one click on the Actions tab turns the schedule back on.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7,37 * * * *"   # every 30 min, clear of the top-of-hour queue
+
+concurrency:
+  group: uptime-check
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      BACKEND: https://backend-production-626f.up.railway.app
+    steps:
+      - name: Liveness — /healthz answers 200
+        run: |
+          # Three tries a minute apart, so one dropped connection doesn't raise an alert and a
+          # real outage still fails all three.
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$BACKEND/healthz" || true)
+            if [ "$code" = "200" ]; then echo "healthz 200 (attempt $attempt)"; exit 0; fi
+            echo "::warning::healthz answered '$code' (attempt $attempt)"
+            if [ "$attempt" -lt 3 ]; then sleep 60; fi
+          done
+          echo "::error::Backend unreachable — $BACKEND/healthz answered '$code'. A 404 means Railway stopped the service (usage limit or a removed deployment)."
+          exit 1
+
+      - name: Readiness — /health reports the database connected
+        run: |
+          for attempt in 1 2 3; do
+            body=$(curl -sf -m 20 "$BACKEND/health" || true)
+            db=$(printf '%s' "$body" | jq -r '.database.connected | tostring' 2>/dev/null || echo unparsable)
+            db=${db:-"no /health response"}
+            if [ "$db" = "true" ]; then break; fi
+            echo "::warning::database.connected=$db (attempt $attempt)"
+            if [ "$attempt" -lt 3 ]; then sleep 30; fi
+          done
+          # Feed and Redis are reported, not enforced: the upstream feed drops out on its own
+          # schedule, and alerting on it would train everyone to ignore this job.
+          printf '%s' "$body" | jq -r '"| check | value |\n|---|---|",
+            "| database.connected | \(.database.connected) |",
+            "| redis_connected | \(.redis_connected) |",
+            "| market_phase | \(.market_phase) |",
+            "| market_upstream_status | \(.market_upstream_status) |",
+            "| feed_fresh | \(.feed_fresh) |",
+            "| last_tick_at | \(.last_tick_at) |"' >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          if [ "$db" != "true" ]; then
+            echo "::error::Backend is up but its database is not: database.connected=$db. Check the Postgres service and its volume (it filled once, on 2026-08-31)."
+            exit 1
+          fi
+          echo "database connected"
