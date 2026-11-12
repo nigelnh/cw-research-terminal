@@ -71,6 +71,13 @@ class Settings(BaseSettings):
         default=5.0,
         description="Seconds between batched KBS price-board observations while the provider is active",
     )
+    VNSTOCK_QUOTE_IDLE_POLL_SECONDS: float = Field(
+        default=300.0,
+        description=(
+            "Seconds between price-board observations outside 08:00-15:30 ICT on a trading "
+            "day (overnight, weekends, holidays), when the board cannot change"
+        ),
+    )
     VNSTOCK_TAPE_SWEEP_SECONDS: float = Field(
         default=120.0,
         description="Seconds to sweep the subscribed universe once for confirmed trade prints",
