@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -1462,3 +1462,118 @@ def test_index_groups_come_from_kbs_and_fall_back_to_vci(monkeypatch):
     assert VnstockProvider._fetch_group_sync("VN30") == ["S1", "S2"]
     assert VnstockProvider._fetch_group_sync("VNFINLEAD") == ["V1"]
     assert asked == [("kbs", "VN30"), ("kbs", "VNFINLEAD"), ("vci", "VNFINLEAD")]
+
+
+# --------------------------------------------------------------------------- #
+# Board poll cadence: close watch around a session, a slow read the rest of the time
+# --------------------------------------------------------------------------- #
+THURSDAY = (2026, 11, 12)  # a trading day
+SATURDAY = (2026, 11, 14)
+HOLIDAY = (2026, 9, 1)     # a weekday exchange holiday (National Day break)
+
+
+def _vn(day, hour, minute, second=0):
+    return datetime(*day, hour, minute, second, tzinfo=VN_TZ)
+
+
+class _SimClock:
+    """Simulated time for the poll loop: every asyncio.sleep advances it instantly."""
+
+    def __init__(self, start: datetime):
+        self.start, self.t = start, 0.0
+
+    def monotonic(self) -> float:
+        return self.t
+
+    def time(self) -> float:
+        return self.start.timestamp() + self.t
+
+    def now(self) -> datetime:
+        return self.start + timedelta(seconds=self.t)
+
+
+async def _board_reads(monkeypatch, start: datetime, seconds: float) -> list[datetime]:
+    """Run the real _run_quote_poll for `seconds` of simulated time and return the
+    moment of every board fetch it made."""
+    import asyncio as aio
+    import types
+
+    from app.market_data.providers import vnstock_provider as vp
+
+    clock = _SimClock(start)
+    reads: list[datetime] = []
+
+    def board(symbols):
+        reads.append(clock.now())
+        return [board_row()]
+
+    p = provider(board_fetcher=board)
+    p._connected, p._active_symbols, p._generation = True, ["CHPG2625"], 1
+    real_sleep = aio.sleep
+
+    async def sim_sleep(delay, *args, **kwargs):
+        clock.t += max(0.0, float(delay))
+        if clock.t >= seconds:
+            p._connected = False
+        await real_sleep(0)
+
+    monkeypatch.setattr(vp, "time", types.SimpleNamespace(monotonic=clock.monotonic, time=clock.time))
+    monkeypatch.setattr(vp.asyncio, "sleep", sim_sleep)
+    monkeypatch.setattr(vp.market_session, "get_vn_now", clock.now)
+    await p._run_quote_poll(1)
+    return reads
+
+
+def _gaps(reads: list[datetime]) -> list[float]:
+    return [round((b - a).total_seconds(), 1) for a, b in zip(reads, reads[1:])]
+
+
+def test_the_board_is_watched_closely_only_from_0800_to_1530_on_a_trading_day():
+    p = provider()
+    active, idle = p._quote_interval, p._idle_quote_interval
+    assert idle > active * 10
+
+    assert p._quote_poll_interval(_vn(THURSDAY, 7, 59, 59)) == idle
+    assert p._quote_poll_interval(_vn(THURSDAY, 8, 0)) == active      # rollover: new REF
+    assert p._quote_poll_interval(_vn(THURSDAY, 12, 0)) == active     # lunch stays watched
+    assert p._quote_poll_interval(_vn(THURSDAY, 15, 29, 59)) == active
+    assert p._quote_poll_interval(_vn(THURSDAY, 15, 30)) == idle
+    assert p._quote_poll_interval(_vn(THURSDAY, 21, 0)) == idle
+    assert p._quote_poll_interval(_vn(SATURDAY, 10, 0)) == idle
+    assert p._quote_poll_interval(_vn(HOLIDAY, 10, 0)) == idle
+
+
+@pytest.mark.asyncio
+async def test_overnight_the_board_is_read_every_few_minutes_not_back_to_back(monkeypatch):
+    reads = await _board_reads(monkeypatch, _vn(THURSDAY, 20, 0), 3600)
+
+    # Back to back at 5 s this hour was 720 reads of five requests each.
+    assert len(reads) == 12
+    assert set(_gaps(reads)) == {provider()._idle_quote_interval}
+
+
+@pytest.mark.asyncio
+async def test_a_weekend_restart_still_reads_the_board_at_once(monkeypatch):
+    reads = await _board_reads(monkeypatch, _vn(SATURDAY, 10, 0), 60)
+
+    assert reads == [_vn(SATURDAY, 10, 0)]
+
+
+@pytest.mark.asyncio
+async def test_the_0800_rollover_cuts_an_idle_wait_short(monkeypatch):
+    reads = await _board_reads(monkeypatch, _vn(THURSDAY, 7, 58), 150)
+
+    assert reads[0] == _vn(THURSDAY, 7, 58)
+    # Not 08:03, where the idle cadence alone would put it, and nothing in between.
+    assert _vn(THURSDAY, 8, 0) <= reads[1] <= _vn(THURSDAY, 8, 0, 16)
+    assert set(_gaps(reads[1:])) == {provider()._quote_interval}
+
+
+@pytest.mark.asyncio
+async def test_the_board_keeps_its_session_cadence_until_1530(monkeypatch):
+    reads = await _board_reads(monkeypatch, _vn(THURSDAY, 15, 29), 11 * 60)
+
+    before = [r for r in reads if r < _vn(THURSDAY, 15, 30)]
+    after = [r for r in reads if r >= _vn(THURSDAY, 15, 30)]
+    assert len(before) == 12 and set(_gaps(before)) == {provider()._quote_interval}
+    assert len(after) == 2 and set(_gaps(after)) == {provider()._idle_quote_interval}
