@@ -470,6 +470,15 @@ select:focus-visible,
 .watchlist-table .is-drop-target { outline: 1px solid var(--accent); outline-offset: -1px; }
 .watchlist-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .watchlist-table th, .watchlist-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ALL / STOCK / CW toggle, just left of FILTER ▾. The wrapper takes the row's spare space
+   (margin-left: auto), so the filter anchor's own auto margin resolves to 0 inside it. Same
+   24px box, border and type as .filter-trigger; the pressed segment uses its active fill. */
+.watchlist-view-controls { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.kind-toggle { height: 24px; display: inline-flex; border: 1px solid var(--border-30); border-radius: 2px; }
+.kind-toggle button { height: 100%; padding: 0 9px; border: 0; background: transparent; color: var(--t-60); cursor: pointer; font: inherit; font-size: 10.5px; white-space: nowrap; }
+.kind-toggle button + button { border-left: 1px solid var(--border-30); }
+.kind-toggle button:hover { color: var(--t-92); }
+.kind-toggle button[aria-pressed="true"] { background: var(--panel-active); color: var(--t-92); }
 .watchlist-search { position: relative; width: 236px; flex: none; z-index: 46; }
 .watchlist-search-control { height: 24px; display: flex; align-items: center; border: 1px solid var(--border-30); border-radius: 2px; background: transparent; color: var(--t-55); }
 .watchlist-search-control:focus-within { outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 1px; }

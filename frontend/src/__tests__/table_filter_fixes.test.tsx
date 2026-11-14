@@ -177,6 +177,32 @@ describe("Targeted watchlist columns", () => {
     }
   });
 
+  it("toggles the watchlist between all instruments, stocks only and CWs only", () => {
+    const page = render(<PersonalDashboard />);
+    const shown = () => [...page.container.querySelectorAll("tbody tr[data-symbol]")].map(row => row.getAttribute("data-symbol"));
+    const group = page.getByRole("group", { name: "Show instruments" });
+    const button = (name: string) => within(group).getByRole("button", { name });
+    const pressed = () => within(group).getAllByRole("button").filter(b => b.getAttribute("aria-pressed") === "true").map(b => b.textContent);
+
+    // Sits immediately left of FILTER ▾.
+    expect(group.nextElementSibling?.querySelector(".filter-trigger")?.textContent).toBe("FILTER ▾");
+    expect(pressed()).toEqual(["ALL"]);
+    const all = shown();
+    expect(all).toEqual(["HPG", "CHPG2602", "VPB", "CVPB2615"]);
+
+    fireEvent.click(button("STOCK"));
+    expect(pressed()).toEqual(["STOCK"]);
+    expect(shown()).toEqual(["HPG", "VPB"]);
+    expect(page.getByRole("table").getAttribute("aria-rowcount")).toBe("3");
+
+    fireEvent.click(button("CW"));
+    expect(pressed()).toEqual(["CW"]);
+    expect(shown()).toEqual(["CHPG2602", "CVPB2615"]);
+
+    fireEvent.click(button("ALL"));
+    expect(shown()).toEqual(all);
+  });
+
   it("keeps typing and suggestion selection separate from the submitted watchlist search", () => {
     const page = render(<PersonalDashboard />);
     const input = page.getByRole("combobox", { name: "Search watchlist symbols" });
