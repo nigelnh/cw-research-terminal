@@ -1,0 +1,59 @@
+name: Backend image check — does production still build?
+
+# Railway rebuilds the backend image from backend/Dockerfile on every deploy and resolves
+# requirements.txt fresh each time. Twice an upstream package has been deleted from PyPI:
+# vnstock and vnai in 2026-09, then vnstock_ezchart between 2026-10-31 and 2026-11-11. Both
+# times the first sign was a failed production rebuild. This job builds the same image,
+# weekly and on any PR that changes what goes into it, so a vanished or conflicting
+# dependency fails here first and production keeps running its last good image.
+#
+# GitHub turns schedules off in a public repository after 60 days with no commits. It emails
+# a warning first, and one click on the Actions tab turns the schedule back on.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "backend/requirements.txt"
+      - "backend/vendor/**"
+      - "backend/Dockerfile"
+      - ".github/workflows/backend-image-check.yml"
+  schedule:
+    - cron: "23 1 * * 1"   # Mondays 08:23 ICT, before the session opens
+
+concurrency:
+  group: backend-image-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest   # linux/amd64, the platform Railway builds for
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image Railway builds
+        # Same Dockerfile and build context (the service's root directory is /backend).
+        # --pull takes today's python:3.13-slim, as a fresh Railway build would.
+        run: docker build --pull -t cw-backend-check backend
+
+      - name: Installed dependencies are consistent
+        run: docker run --rm --entrypoint pip cw-backend-check check
+
+      - name: The application imports inside the image
+        run: >
+          docker run --rm --entrypoint python cw-backend-check
+          -c "from app.main import app; print('imported', app.title)"
+
+      - name: Record what resolved
+        if: always()
+        run: |
+          {
+            echo '### Resolved packages'
+            echo '```'
+            docker run --rm --entrypoint pip cw-backend-check freeze 2>/dev/null || echo "(image did not build)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
