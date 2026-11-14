@@ -463,10 +463,13 @@ select:focus-visible,
   .research-registry-grid { display: block; }
   .research-stock-panel { width: 100%; margin-top: 16px; }
 }
-.watchlist-table { min-width: 1260px; }
+/* Fixed layout: the <colgroup> widths (personal_dashboard.tsx VALUE_CH) are the only
+   input. With `auto`, columns re-sized to the ~50 virtualized rows currently mounted and
+   jumped while scrolling. Ellipsis only as a guard for a value past its budget. */
+.watchlist-table { min-width: 1260px; table-layout: fixed; }
 .watchlist-table .is-drop-target { outline: 1px solid var(--accent); outline-offset: -1px; }
 .watchlist-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-.watchlist-table th, .watchlist-table td { white-space: nowrap; }
+.watchlist-table th, .watchlist-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .watchlist-search { position: relative; width: 236px; flex: none; z-index: 46; }
 .watchlist-search-control { height: 24px; display: flex; align-items: center; border: 1px solid var(--border-30); border-radius: 2px; background: transparent; color: var(--t-55); }
 .watchlist-search-control:focus-within { outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 1px; }
