@@ -8,6 +8,7 @@ import { completeOrder, moveGroupedRows, useWatchlistLayout } from "@/components
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import { MarketOverviewStrip } from "./market_overview_strip";
 import { WatchlistSymbolSearch, matchingSymbols, prioritizeWatchlist, type WatchlistSearchOption } from "./watchlist_symbol_search";
+import { InstrumentKindToggle, type InstrumentKindView } from "./instrument_kind_toggle";
 import { useStockProfiles } from "@/data/query/use_stock_profiles";
 import {
   EMPTY_FILTER,
@@ -204,6 +205,7 @@ export function PersonalDashboard({
   const { getSpec } = useInstrumentSpecs();
   const [filterState, setFilterState] = useState<FilterState>(EMPTY_FILTER);
   const [symbolSearch, setSymbolSearch] = useState("");
+  const [kindView, setKindView] = useState<InstrumentKindView>("all");
   const hiddenRows = useHiddenRows();
 
   const allSymbols = useMemo(() => items.map((i) => i.symbol), [items]);
@@ -392,7 +394,7 @@ export function PersonalDashboard({
     view.clearOrder();
   };
 
-  const searchOptions = useMemo<WatchlistSearchOption[]>(() => view.ordered.map(row => {
+  const searchOptions = useMemo<WatchlistSearchOption[]>(() => view.ordered.filter(row => kindView === "all" || row.kind === kindView).map(row => {
     const profile = profilesBySymbol.get(row.kind === "stock" ? row.symbol : row.underlying ?? "");
     return {
       symbol: row.symbol,
@@ -401,9 +403,16 @@ export function PersonalDashboard({
       exchange: row.kind === "stock" ? profile?.exchange ?? null : "HOSE",
       underlying: row.underlying,
     };
-  }), [view.ordered, profilesBySymbol]);
+  }), [view.ordered, profilesBySymbol, kindView]);
   const searchMatches = useMemo(() => matchingSymbols(searchOptions, symbolSearch), [searchOptions, symbolSearch]);
   const searched = useMemo(() => prioritizeWatchlist(view.ordered, searchMatches), [view.ordered, searchMatches]);
+  // ALL / STOCK / CW is applied last, to the grouped display order only. Drag and Alt+↑/↓
+  // still read `view.ordered`, so a reorder in one view never scrambles the other kind's
+  // rows, and CW-only keeps each warrant in its underlying's group order.
+  const displayRows = useMemo(
+    () => kindView === "all" ? searched.rows : searched.rows.filter(row => row.kind === kindView),
+    [searched.rows, kindView],
+  );
 
   // Rendering 349 instruments used to create roughly 15k DOM/accessibility nodes. During
   // a busy SSI burst React then monopolised the browser main thread long enough to delay
@@ -441,16 +450,22 @@ export function PersonalDashboard({
     tableScrollRef.current.scrollTop = 0;
     measureViewport();
   }, [symbolSearch, measureViewport]);
+  useEffect(() => {
+    // A different set of rows starts at the top, as a new search does.
+    if (!tableScrollRef.current) return;
+    tableScrollRef.current.scrollTop = 0;
+    measureViewport();
+  }, [kindView, measureViewport]);
 
-  const virtualized = searched.rows.length > VIRTUALIZE_AFTER;
+  const virtualized = displayRows.length > VIRTUALIZE_AFTER;
   const bodyTop = Math.max(0, viewport.top - TABLE_HEADER_HEIGHT);
   const windowSize = Math.ceil(viewport.height / TABLE_ROW_HEIGHT) + VIRTUAL_OVERSCAN * 2;
   const unclampedStart = Math.max(0, Math.floor(bodyTop / TABLE_ROW_HEIGHT) - VIRTUAL_OVERSCAN);
   const startIndex = virtualized
-    ? Math.min(unclampedStart, Math.max(0, searched.rows.length - windowSize))
+    ? Math.min(unclampedStart, Math.max(0, displayRows.length - windowSize))
     : 0;
-  const endIndex = virtualized ? Math.min(searched.rows.length, startIndex + windowSize) : searched.rows.length;
-  const renderedRows = searched.rows.slice(startIndex, endIndex);
+  const endIndex = virtualized ? Math.min(displayRows.length, startIndex + windowSize) : displayRows.length;
+  const renderedRows = displayRows.slice(startIndex, endIndex);
   const spacerColSpan = columns.length + 2;
 
   // The symbol column follows the whole list (never just the mounted rows): the longest
@@ -542,12 +557,15 @@ export function PersonalDashboard({
         </span>
         <WatchlistSymbolSearch options={searchOptions} value={symbolSearch} onSubmit={setSymbolSearch} />
         <HiddenNote count={hiddenRows.count} onReset={hiddenRows.reset} />
-        <RegistryFilter
-          underlyingOptions={underlyingOptions}
-          issuerOptions={issuerOptions}
-          value={filterState}
-          onChange={setFilterState}
-        />
+        <div className="watchlist-view-controls">
+          <InstrumentKindToggle value={kindView} onChange={setKindView} />
+          <RegistryFilter
+            underlyingOptions={underlyingOptions}
+            issuerOptions={issuerOptions}
+            value={filterState}
+            onChange={setFilterState}
+          />
+        </div>
       </div>
 
       {items.length === 0 && (
@@ -580,7 +598,7 @@ export function PersonalDashboard({
         <div className="watchlist-table-scroll" ref={tableScrollRef} onScroll={onTableScroll}>
         <table
           className="mono grid-lined watchlist-table"
-          aria-rowcount={searched.rows.length + 1}
+          aria-rowcount={displayRows.length + 1}
           style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}
         >
           <colgroup>
@@ -630,9 +648,16 @@ export function PersonalDashboard({
               </tr>
             )}
             {renderedRows.map(renderRow)}
-            {virtualized && endIndex < searched.rows.length && (
+            {displayRows.length === 0 && (
+              <tr>
+                <td colSpan={spacerColSpan} style={{ padding: "40px 8px", textAlign: "center", color: "var(--t-46)" }}>
+                  {kindView === "stock" ? "No stocks match." : kindView === "cw" ? "No covered warrants match." : "No instruments match."}
+                </td>
+              </tr>
+            )}
+            {virtualized && endIndex < displayRows.length && (
               <tr aria-hidden="true" className="watchlist-virtual-spacer">
-                <td colSpan={spacerColSpan} style={{ height: (searched.rows.length - endIndex) * TABLE_ROW_HEIGHT, padding: 0, border: 0 }} />
+                <td colSpan={spacerColSpan} style={{ height: (displayRows.length - endIndex) * TABLE_ROW_HEIGHT, padding: 0, border: 0 }} />
               </tr>
             )}
           </tbody>
