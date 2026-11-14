@@ -146,6 +146,53 @@ const TABLE_HEADER_HEIGHT = 27;
 const VIRTUALIZE_AFTER = 80;
 const VIRTUAL_OVERSCAN = 12;
 
+/**
+ * Widest value each column must show, in `ch` of the table's monospace font.
+ *
+ * Only the rows around the viewport are mounted (see below), so `table-layout: auto`
+ * sized every column to whichever ~50 rows happened to be in the DOM: CEIL, %CHG, VOLUME
+ * and RATIO changed width as you scrolled the 439-row universe. The table is now
+ * `table-layout: fixed` and these budgets set the widths in a <colgroup>, so neither the
+ * mounted window nor a ticking price can resize a column. Sized to the widest values in
+ * the live universe (2026-11-14: 132,500 · 10,119,400 · 14.3518:1 · 100.00%) plus
+ * headroom where a busier session runs longer (VOLUME to 9 digits, +/- to 5).
+ */
+const VALUE_CH: Record<Exclude<QuoteColumnKey, "symbol">, number> = {
+  ceiling: 7,
+  floor: 7,
+  ref: 7,
+  bid: 7,
+  ask: 7,
+  last: 7,
+  strike: 7,
+  tradedQuantity: 9,
+  change: 6,
+  chgPct: 7,
+  vol: 11,
+  ratio: 9,
+  ivBid: 6,
+  ivTrade: 6,
+  ivAsk: 6,
+  lastTradingDate: 10,
+  dte: 3,
+  issuer: 5,
+};
+/** Pin dot (12px button) and dismiss × (11px button) plus their cell padding. */
+const PIN_COL_WIDTH = 21;
+const DISMISS_COL_WIDTH = 24;
+
+/** The header's sort icon (1em) + its 4px gap, in ch of a 0.6em-advance mono font. */
+const SORT_ICON_CH = 2.25;
+
+/**
+ * A column's width: its widest value (`contentCh`) or its header (label + 4px gap + 1em
+ * sort icon), whichever is wider, plus 16px of cell padding and the 1px column rule.
+ */
+const columnWidth = (label: string, contentCh: number) =>
+  contentCh >= label.length + SORT_ICON_CH
+    ? `calc(${contentCh}ch + 17px)`
+    : `calc(${label.length}ch + 1em + 21px)`;
+
 export function PersonalDashboard({
   onNavigateToUniverse,
   selectedSymbol = null,
@@ -406,7 +453,12 @@ export function PersonalDashboard({
   const renderedRows = searched.rows.slice(startIndex, endIndex);
   const spacerColSpan = columns.length + 2;
 
-  const symbolWidth = `calc(${Math.max(8, ...unifiedRows.map((r) => r.symbol.length + (r.kind === "cw" ? 1 : 0)))}ch + 24px)`;
+  // The symbol column follows the whole list (never just the mounted rows): the longest
+  // symbol, +1ch CW indent, +2ch for each ◆ conflict / ◇ untracked mark (glyph + 5px).
+  const symbolCh = Math.max(8, ...unifiedRows.map((r) =>
+    r.symbol.length + (r.kind === "cw" ? 1 : 0) + (r.conflicting ? 2 : 0) + (r.trackedRealtime ? 0 : 2)));
+  const colWidth = (key: QuoteColumnKey, label: string) =>
+    columnWidth(label, key === "symbol" ? symbolCh : VALUE_CH[key]);
   const renderRow = (r: UnifiedRow) => {
     const selected = selectedSymbol === r.symbol;
     return (
@@ -531,6 +583,11 @@ export function PersonalDashboard({
           aria-rowcount={searched.rows.length + 1}
           style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}
         >
+          <colgroup>
+            <col style={{ width: PIN_COL_WIDTH }} />
+            {columns.map(column => <col key={column.key} data-column={column.key} style={{ width: colWidth(column.key, column.label) }} />)}
+            <col style={{ width: DISMISS_COL_WIDTH }} />
+          </colgroup>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-strong)" }}>
               <PinHeader />
@@ -540,7 +597,7 @@ export function PersonalDashboard({
                   className={dropTarget === column.key ? "is-drop-target" : undefined}
                   aria-sort={view.sortMark(column.key) === "▲" ? "ascending" : view.sortMark(column.key) === "▼" ? "descending" : "none"}
                   title={`${QUOTE_COLUMN_HINTS[column.key] ? `${QUOTE_COLUMN_HINTS[column.key]} · ` : ""}Click to sort · Drag to reorder · Alt + ←/→ to move`}
-                  style={{ padding: "5px 8px", textAlign: column.key === "symbol" ? "left" : "right", width: column.key === "symbol" ? symbolWidth : column.key === "lastTradingDate" ? "1%" : undefined, color: "var(--t-92)", fontWeight: 500, cursor: "grab", userSelect: "none" }}
+                  style={{ padding: "5px 8px", textAlign: column.key === "symbol" ? "left" : "right", color: "var(--t-92)", fontWeight: 500, cursor: "grab", userSelect: "none" }}
                   onClick={() => { if (!drag.current) view.toggleSort(column.key); }}
                   onDragStart={(e) => { drag.current = { type: "column", key: column.key }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", column.key); }}
                   onDragOver={(e) => { if (drag.current?.type === "column") { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget(column.key); } }}

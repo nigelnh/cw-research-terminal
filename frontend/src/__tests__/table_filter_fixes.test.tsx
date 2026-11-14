@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { useState } from "react";
 import { PersonalDashboard } from "@/features/watchlist/personal_dashboard";
 import { InstrumentPanel } from "@/features/warrant_info/instrument_panel";
@@ -139,6 +139,39 @@ describe("Targeted watchlist columns", () => {
       expect(table.getAttribute("aria-rowcount")).toBe("350");
       expect(page.container.querySelectorAll("tbody tr[data-symbol]").length).toBeLessThan(60);
       expect(page.container.querySelectorAll(".watchlist-virtual-spacer")).toHaveLength(1);
+    } finally {
+      fixture.items.splice(0, fixture.items.length, ...original);
+    }
+  });
+
+  it("sizes the windowed columns from fixed budgets, so scrolling cannot resize them", async () => {
+    const original = [...fixture.items];
+    fixture.items.splice(0, fixture.items.length, ...Array.from({ length: 349 }, (_, index) => ({
+      symbol: `CZZZ${String(index).padStart(4, "0")}`,
+      instrumentType: "CW",
+      underlyingSymbol: "HPG",
+    })));
+    try {
+      const page = render(<PersonalDashboard />);
+      const table = page.getByRole("table");
+      const cols = () => [...table.querySelectorAll("colgroup col")].map(col => (col as HTMLElement).style.width);
+      const firstMounted = () => table.querySelector("tbody tr[data-symbol]")?.getAttribute("data-symbol");
+      // One <col> per header cell (pin + 19 quote columns + dismiss), each with a width.
+      expect(cols()).toHaveLength(table.querySelectorAll("thead th").length);
+      expect(cols().every(Boolean)).toBe(true);
+      // The quote headers carry no widths of their own: under table-layout: fixed the
+      // colgroup is the only input (a `1%` th width would collapse a fixed column).
+      expect([...table.querySelectorAll("thead th[data-column]")].every(th => !(th as HTMLElement).style.width)).toBe(true);
+      const before = cols();
+      expect(firstMounted()).toBe("CZZZ0000");
+
+      const scroller = page.container.querySelector(".watchlist-table-scroll") as HTMLElement;
+      Object.defineProperty(scroller, "scrollTop", { configurable: true, value: 6000 });
+      fireEvent.scroll(scroller);
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+
+      expect(firstMounted()).not.toBe("CZZZ0000");
+      expect(cols()).toEqual(before);
     } finally {
       fixture.items.splice(0, fixture.items.length, ...original);
     }
