@@ -21,6 +21,7 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
+from datetime import time as clock_time
 from pathlib import Path
 from typing import Any
 
@@ -51,12 +52,22 @@ from app.market_data.providers.ssi_realtime import (
 from app.market_data.trading_calendar import (
     VN_TZ,
     intraday_bar_is_complete,
+    is_trading_day,
     latest_completed_trading_session,
     reference_session_date,
 )
 
 EventCallback = Callable[[str, dict[str, Any], str], None]
 logger = logging.getLogger(__name__)
+# The price board is watched closely only while it can change: from the 08:00 display
+# rollover, when the new session's references appear, until half an hour after the 15:00
+# close, so the closing auction and put-through prints are on the board for the FINAL
+# snapshot. Outside that window it is read every VNSTOCK_QUOTE_IDLE_POLL_SECONDS.
+_BOARD_WATCH_START = clock_time(8, 0)
+_BOARD_WATCH_END = clock_time(15, 30)
+# An idle wait is minutes long, so the poll loop wakes this often to notice the window
+# opening instead of sleeping through 08:00.
+_IDLE_WAKE_SECONDS = 15.0
 _INDEX_CONSTITUENTS_PATH = (
     Path(__file__).resolve().parent.parent / "data" / "index_constituents.json"
 )
@@ -238,6 +249,9 @@ class VnstockProvider(MarketDataProvider):
         self.max_symbols = int(max_symbols or settings.MARKET_DATA_MAX_SYMBOLS)
         self._enabled = bool(settings.VNSTOCK_ENABLED)
         self._quote_interval = max(1.0, float(settings.VNSTOCK_QUOTE_POLL_SECONDS))
+        self._idle_quote_interval = max(
+            self._quote_interval, float(settings.VNSTOCK_QUOTE_IDLE_POLL_SECONDS)
+        )
         self._tape_sweep = max(30.0, float(settings.VNSTOCK_TAPE_SWEEP_SECONDS))
         self._tape_page_size = max(1, min(1000, int(settings.VNSTOCK_TAPE_PAGE_SIZE)))
         self._freshness = max(self._quote_interval * 2, float(settings.VNSTOCK_FEED_FRESHNESS_SECONDS))
@@ -854,6 +868,22 @@ class VnstockProvider(MarketDataProvider):
         )
 
     # ------------------------------ live polling -----------------------------
+    def _quote_poll_interval(self, now: datetime | None = None) -> float:
+        """Seconds between price-board polls at `now`.
+
+        Every other poller here already idles when the market closes. This one read the
+        whole board back to back around the clock, which made it the backend's entire
+        off-hours CPU floor (~0.075 vCPU) on a host that bills CPU by the second. A full
+        board is five requests and ~135 ms of parsing, and its ~870 events then go
+        through the market state. Overnight and on closed days the board cannot change,
+        so it is read every few minutes instead. Health is unaffected because it never
+        reports the feed fresh outside a session.
+        """
+        cur = (now or market_session.get_vn_now()).astimezone(VN_TZ)
+        if is_trading_day(cur.date()) and _BOARD_WATCH_START <= cur.time() < _BOARD_WATCH_END:
+            return self._quote_interval
+        return self._idle_quote_interval
+
     async def _run_quote_poll(self, generation: int) -> None:
         while self._connected and generation == self._generation:
             started = time.monotonic()
@@ -864,8 +894,15 @@ class VnstockProvider(MarketDataProvider):
                 raise
             except Exception as exc:  # noqa: BLE001 - the paced poller must survive vendor faults
                 logger.debug("Vnstock quote poll unavailable: %s", type(exc).__name__)
-            elapsed = time.monotonic() - started
-            await asyncio.sleep(max(0.2, self._quote_interval - elapsed))
+            # Wait for the next poll in short steps. An idle wait is minutes long, and the
+            # window opening at 08:00 has to cut it short. Inside the window this is one
+            # sleep, exactly as before.
+            while self._connected and generation == self._generation:
+                remaining = self._quote_poll_interval() - (time.monotonic() - started)
+                if remaining <= _IDLE_WAKE_SECONDS:
+                    await asyncio.sleep(max(0.2, remaining))
+                    break
+                await asyncio.sleep(_IDLE_WAKE_SECONDS)
 
     async def _poll_quotes_once(self, generation: int | None = None) -> int:
         symbols = list(self._active_symbols)
@@ -2182,7 +2219,9 @@ class VnstockProvider(MarketDataProvider):
             "last_book_tick_at": self._ms_iso(self._last_book_at_ms), "last_tick_at": last_data,
             "last_error": self._last_error_code, "request_count": self._request_count,
             "request_failure_count": self._request_failures,
-            "quote_poll_seconds": self._quote_interval, "tape_sweep_seconds": self._tape_sweep,
+            "quote_poll_seconds": self._quote_interval,
+            "idle_quote_poll_seconds": self._idle_quote_interval,
+            "tape_sweep_seconds": self._tape_sweep,
             "min_request_interval_seconds": self._request_floor,
             "reconnect_count": self._realtime_reconnect_count,
             "realtime_reconnect_count": self._realtime_reconnect_count,
