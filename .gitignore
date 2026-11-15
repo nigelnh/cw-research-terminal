@@ -24,6 +24,8 @@ __pycache__/
 *.pyo
 venv/
 .venv/
+# the repo-root .venv is a symlink to backend/.venv, which a trailing-slash rule misses
+/.venv
 *.egg-info/
 .eggs/
 
@@ -84,23 +86,35 @@ bin/
 /legacy/
 /server/
 /scratch/
-audit/claude/
+
+# ==============================================================================
+# AI agent / assistant tooling — local to each machine, never committed
+# ==============================================================================
+.claude/
+.agents/
+.mcp.json
+CLAUDE.md
+AGENTS.md
+
+# ==============================================================================
+# Local-only dev material: one-off audit/benchmark scripts, the FiinQuant POC,
+# and dated plans/reports/design hand-offs. Only the docs the code links to
+# (docs/domain/, docs/design/LANGUAGE_POLICY.md) are tracked.
+# ==============================================================================
+/audit/
+/backend/poc/
+/docs/*.md
+/docs/internal/
+/docs/design/*
+!/docs/design/LANGUAGE_POLICY.md
 
 # ==============================================================================
 # Misc
 # ==============================================================================
 performance_test_cw.js
-# docs/ is tracked (public-facts-only domain + convention docs). Internal scratch notes
-# live under docs/internal/ which stays ignored.
-docs/internal/
 /tests/
-.agents/
 server/archive/
 .vercel
 
 # local recovery / ops scratch — never commit
 scratchpad/
-
-# Claude Code: share skills, keep per-machine settings + locks local
-.claude/settings.local.json
-.claude/*.lock
