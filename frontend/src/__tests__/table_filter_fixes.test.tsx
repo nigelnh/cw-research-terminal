@@ -60,7 +60,9 @@ const fixture = vi.hoisted(() => {
       },
     ],
   ]);
-  return { items, quote, specs };
+  // Per-test stock quotes; empty unless a test fills it.
+  const stockQuotes = new Map<string, Record<string, unknown>>();
+  return { items, quote, specs, stockQuotes };
 });
 vi.mock("@/data/watchlist", () => ({
   useWatchlist: () => ({
@@ -92,7 +94,9 @@ vi.mock("@/data/query/use_dashboard_data", () => ({
             quote: fixture.quote,
             analytics: { ivBid: 0.21, ivTrade: 0.23, ivAsk: 0.25, dte: 23 },
           }
-        : undefined,
+        : fixture.stockQuotes.has(symbol)
+          ? { quote: fixture.stockQuotes.get(symbol) }
+          : undefined,
   }),
 }));
 vi.mock("@/data/query/use_market_overview", () => ({
@@ -119,6 +123,7 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  fixture.stockQuotes.clear();
   window.localStorage.clear();
   window.dispatchEvent(new StorageEvent("storage", { key: "cw-research:table-layout:v1" }));
   cleanup();
@@ -201,6 +206,76 @@ describe("Targeted watchlist columns", () => {
 
     fireEvent.click(button("ALL"));
     expect(shown()).toEqual(all);
+  });
+
+  it("shows a price board in the STOCK view instead of the warrant columns", () => {
+    fixture.stockQuotes.set("HPG", {
+      symbol: "HPG", referencePrice: 21000, ceilingPrice: 22450, floorPrice: 19550,
+      lastPrice: 21100, tradedQuantity: 500, priceChange: 100, priceChangePercent: 0.0048,
+      totalVolume: 9_460_100,
+      bidPrice: 21050, bidQuantity: 120_000, bid2Price: 21000, bid2Quantity: 1_150_500,
+      bid3Price: 20950, bid3Quantity: 300_000,
+      askPrice: 21100, askQuantity: 90_000, ask2Price: 21150, ask2Quantity: 250_000,
+      ask3Price: 21200, ask3Quantity: 779_000,
+      highPrice: 21200, lowPrice: 20900,
+      foreignBuy: 1_633_200, foreignSell: 470_100, foreignRoom: 2_292_162_142,
+    });
+    const page = render(<PersonalDashboard />);
+    const labels = () => [...page.container.querySelectorAll("thead th[data-column]")].map(th => th.textContent);
+    const hpg = () => {
+      const cells = [...page.container.querySelectorAll<HTMLTableCellElement>("tr[data-symbol='HPG'] td")].slice(1);
+      return Object.fromEntries(labels().map((label, i) => [label, cells[i]]));
+    };
+    const allLabels = labels();
+    expect(allLabels).toContain("IV_BID");
+
+    fireEvent.click(within(page.getByRole("group", { name: "Show instruments" })).getByRole("button", { name: "STOCK" }));
+    expect(labels()).toEqual([
+      "SYMBOL", "CEIL", "FLOOR", "REF",
+      "BID_PRC_3", "BID_AMT_3", "BID_PRC_2", "BID_AMT_2", "BID_PRC_1", "BID_AMT_1",
+      "TRD_PRC", "TRD_AMT", "+/-", "%CHG",
+      "ASK_PRC_1", "ASK_AMT_1", "ASK_PRC_2", "ASK_AMT_2", "ASK_PRC_3", "ASK_AMT_3",
+      "VOLUME", "HIGH", "LOW", "F_BUY", "F_SELL", "F_ROOM",
+    ]);
+    // One sized <col> per header, so the fixed layout covers every board column.
+    expect(page.container.querySelectorAll("colgroup col[data-column]")).toHaveLength(26);
+    const row = hpg();
+    const text = (label: string) => row[label].textContent;
+    expect(["BID_PRC_3", "BID_AMT_3", "BID_PRC_2", "BID_AMT_2", "BID_PRC_1", "BID_AMT_1"].map(text))
+      .toEqual(["20,950", "300,000", "21,000", "1,150,500", "21,050", "120,000"]);
+    expect(["ASK_PRC_1", "ASK_AMT_1", "ASK_PRC_2", "ASK_AMT_2", "ASK_PRC_3", "ASK_AMT_3"].map(text))
+      .toEqual(["21,100", "90,000", "21,150", "250,000", "21,200", "779,000"]);
+    expect(["VOLUME", "HIGH", "LOW", "F_BUY", "F_SELL", "F_ROOM"].map(text))
+      .toEqual(["9,460,100", "21,200", "20,900", "1,633,200", "470,100", "2,292,162,142"]);
+    // A depth size takes its own price's band: 21,000 is the reference, 21,200 is up.
+    expect(row["BID_AMT_2"].style.color).toBe(MARKET_COLOR.flat);
+    expect(row["ASK_AMT_3"].style.color).toBe(MARKET_COLOR.up);
+    expect(row["BID_AMT_3"].style.color).toBe(MARKET_COLOR.down);
+
+    fireEvent.click(within(page.getByRole("group", { name: "Show instruments" })).getByRole("button", { name: "ALL" }));
+    expect(labels()).toEqual(allLabels);
+  });
+
+  it("keeps the STOCK view's column order separate and drops a sort it cannot show", () => {
+    const page = render(<PersonalDashboard />);
+    const labels = () => [...page.container.querySelectorAll("thead th[data-column]")].map(th => th.textContent);
+    const header = (label: string) => [...page.container.querySelectorAll("thead th[data-column]")].find(th => th.textContent === label)!;
+    const view = (name: string) => fireEvent.click(within(page.getByRole("group", { name: "Show instruments" })).getByRole("button", { name }));
+    const allLabels = labels();
+
+    fireEvent.click(header("IV_BID"));
+    expect(header("IV_BID").getAttribute("aria-sort")).toBe("ascending");
+    view("STOCK");
+    expect(page.container.querySelector("thead th[aria-sort='ascending'], thead th[aria-sort='descending']")).toBeNull();
+
+    fireEvent.keyDown(header("BID_PRC_3"), { key: "ArrowRight", altKey: true });
+    expect(labels().slice(4, 6)).toEqual(["BID_AMT_3", "BID_PRC_3"]);
+    const saved = JSON.parse(window.localStorage.getItem("cw-research:table-layout:v1")!);
+    expect(saved.stockColumns.slice(4, 6)).toEqual(["bid3Qty", "bid3"]);
+
+    view("ALL");
+    expect(labels()).toEqual(allLabels);
+    expect(header("IV_BID").getAttribute("aria-sort")).toBe("none");
   });
 
   it("keeps typing and suggestion selection separate from the submitted watchlist search", () => {

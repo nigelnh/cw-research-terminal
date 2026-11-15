@@ -49,6 +49,7 @@ _QUOTE_FIELDS = (
     "last_price", "price_change", "price_change_percent",
     "open_price", "high_price", "low_price", "average_price",
     "total_volume", "trading_value", "traded_quantity", "underlying_price",
+    "foreign_buy_volume", "foreign_sell_volume", "foreign_room",
 )
 _BOOK_FIELDS = (
     "bid1_price", "bid1_quantity", "ask1_price", "ask1_quantity",
@@ -145,6 +146,9 @@ class ResolvedRow:
             "Ask2_Prc": p("ask2_price"), "Ask2_Qty": v.get("ask2_quantity"),
             "Bid3_Prc": p("bid3_price"), "Bid3_Qty": v.get("bid3_quantity"),
             "Ask3_Prc": p("ask3_price"), "Ask3_Qty": v.get("ask3_quantity"),
+            "Foreign_Buy_Vol": v.get("foreign_buy_volume"),
+            "Foreign_Sell_Vol": v.get("foreign_sell_volume"),
+            "Foreign_Room": v.get("foreign_room"),
             "Spread": None if spread is None else round(spread / scale, 6),
             "SpreadPercent": spread_pct,
             "Under_Symbol": self.underlying_symbol,

@@ -1,13 +1,21 @@
 import { useSyncExternalStore } from "react";
-import { QUOTE_COLUMNS, type QuoteColumnKey } from "./quote_columns";
+import {
+  QUOTE_COLUMNS,
+  STOCK_BOARD_COLUMNS,
+  type QuoteColumnKey,
+  type StockBoardColumnKey,
+} from "./quote_columns";
 
 const STORAGE_KEY = "cw-research:table-layout:v1";
 interface TableLayout {
   columns: QuoteColumnKey[];
+  /** The STOCK view's own column order; ALL and CW share `columns`. */
+  stockColumns: StockBoardColumnKey[];
   rows: string[];
 }
 const defaults: TableLayout = {
   columns: QUOTE_COLUMNS.map((c) => c.key),
+  stockColumns: STOCK_BOARD_COLUMNS.map((c) => c.key),
   rows: [],
 };
 const listeners = new Set<() => void>();
@@ -18,6 +26,10 @@ function readLayout(): TableLayout {
     );
     return {
       columns: columnOrder(Array.isArray(saved?.columns) ? saved.columns : []),
+      stockColumns: completeOrder(
+        defaults.stockColumns,
+        Array.isArray(saved?.stockColumns) ? saved.stockColumns : [],
+      ),
       rows: Array.isArray(saved?.rows)
         ? ([
             ...new Set(
@@ -149,6 +161,8 @@ export function useWatchlistLayout() {
     ...current,
     moveColumn: (from: QuoteColumnKey, to: QuoteColumnKey) =>
       update({ ...layout, columns: moveItem(layout.columns, from, to) }),
+    moveStockColumn: (from: StockBoardColumnKey, to: StockBoardColumnKey) =>
+      update({ ...layout, stockColumns: moveItem(layout.stockColumns, from, to) }),
     setRows: (rows: string[]) => update({ ...layout, rows }),
   };
 }

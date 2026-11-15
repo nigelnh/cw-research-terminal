@@ -129,6 +129,10 @@ def _board_quote(row: dict[str, Any], session: str) -> dict[str, Any]:
         "total_volume": volume if traded else None,
         "trading_value": _positive(row.get("total_value")) if traded else None,
     }
+    # Shares, and 0 is a real answer here: no foreign match yet, or no room left.
+    for field in ("foreign_buy_volume", "foreign_sell_volume", "foreign_room"):
+        count = _integer(row.get(field))
+        quote[field] = count if count is not None and count >= 0 else None
     for level in (1, 2, 3):
         for side in ("bid", "ask"):
             price = _positive(row.get(f"{side}_price_{level}"))
@@ -985,6 +989,9 @@ class VnstockProvider(MarketDataProvider):
             "PercentPriceChange": percent_change / 100.0 if percent_change is not None else None,
             "TotalMatchVolume": _integer(row.get("volume_accumulated")),
             "TotalMatchValue": _finite(row.get("total_value")),
+            "ForeignBuyVolume": _integer(row.get("foreign_buy_volume")),
+            "ForeignSellVolume": _integer(row.get("foreign_sell_volume")),
+            "ForeignRoom": _integer(row.get("foreign_room")),
             "TradingDate": session,
             "Timestamp": stamp,
             "MarketStatus": row.get("market_status") or row.get("MS"),

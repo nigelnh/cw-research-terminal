@@ -48,6 +48,12 @@ class CanonicalQuote(BaseModel):
     ask3_price: Optional[float] = None
     ask3_quantity: Optional[int] = None
 
+    # Foreign investors, in shares, from the KBS price board (the SSI stream has none):
+    # this session's matched buy and sell volume, and the remaining foreign-ownership room.
+    foreign_buy_volume: Optional[int] = None
+    foreign_sell_volume: Optional[int] = None
+    foreign_room: Optional[int] = None
+
     # Warrant specific fields
     underlying_symbol: Optional[str] = None
     underlying_price: Optional[float] = None
@@ -189,6 +195,9 @@ class CanonicalQuote(BaseModel):
             "Bid3_Qty": bid3_qty,
             "Ask3_Prc": ask3_prc,
             "Ask3_Qty": ask3_qty,
+            "Foreign_Buy_Vol": self.foreign_buy_volume if display_eligible else None,
+            "Foreign_Sell_Vol": self.foreign_sell_volume if display_eligible else None,
+            "Foreign_Room": self.foreign_room if display_eligible else None,
             "Under_Prc": to_wire_prc(self.underlying_price),
             "Strike_Prc": to_wire_prc(self.strike_price),
             "Ratio": self.exercise_ratio,
@@ -260,6 +269,9 @@ class CanonicalQuote(BaseModel):
             "bid3_quantity": ("Bid3_Qty", lambda v: v),
             "ask3_price": ("Ask3_Prc", to_wire_prc),
             "ask3_quantity": ("Ask3_Qty", lambda v: v),
+            "foreign_buy_volume": ("Foreign_Buy_Vol", lambda v: v),
+            "foreign_sell_volume": ("Foreign_Sell_Vol", lambda v: v),
+            "foreign_room": ("Foreign_Room", lambda v: v),
             "underlying_price": ("Under_Prc", to_wire_prc),
             "iv_ask": ("Vol1", to_wire_iv),
             "iv_trade": ("Vol2", to_wire_iv),

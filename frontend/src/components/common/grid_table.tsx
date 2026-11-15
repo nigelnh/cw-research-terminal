@@ -156,6 +156,8 @@ export interface SortPinApi<T> {
   ordered: T[];
   sort: SortSpec | null;
   toggleSort: (key: string) => void;
+  /** Drop the sort only; pins stay. */
+  clearSort: () => void;
   clearOrder: () => void;
   sortMark: (key: string) => string;
   isPinned: (symbol: string) => boolean;
@@ -230,7 +232,8 @@ export function useSortPin<T>(
     [pinned],
   );
 
-  return { ordered, sort, toggleSort, sortMark, isPinned, togglePin, pinFill, clearOrder: () => { setSort(null); setPinned([]); } };
+  const clearSort = useCallback(() => setSort(null), []);
+  return { ordered, sort, toggleSort, clearSort, sortMark, isPinned, togglePin, pinFill, clearOrder: () => { setSort(null); setPinned([]); } };
 }
 
 /* ------------------------------------------------------------------ pieces */
