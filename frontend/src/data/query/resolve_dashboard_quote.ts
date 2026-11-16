@@ -3,6 +3,7 @@ import { quoteTimestamp, type DisplayState, type RowProvenance } from "@/domain/
 
 const TRADE = ["lastPrice", "openPrice", "highPrice", "lowPrice", "averagePrice",
   "tradedQuantity", "totalVolume", "tradingValue", "priceChange", "priceChangePercent",
+  "foreignBuy", "foreignSell", "foreignRoom",
   "tradeTimestamp", "sourceTimestamp", "exchangeTimestamp", "tradeReceivedTimestamp"] as const;
 const BOOK = ["bidPrice", "bidQuantity", "askPrice", "askQuantity", "bid2Price", "bid2Quantity",
   "ask2Price", "ask2Quantity", "bid3Price", "bid3Quantity", "ask3Price", "ask3Quantity",

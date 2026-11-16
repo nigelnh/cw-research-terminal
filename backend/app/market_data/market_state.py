@@ -40,6 +40,9 @@ _INTRADAY_FIELDS = (
     "bid3_quantity",
     "ask3_price",
     "ask3_quantity",
+    # Session totals. Foreign room is a standing level, so it carries across sessions.
+    "foreign_buy_volume",
+    "foreign_sell_volume",
     "underlying_price",
     "iv_bid",
     "iv_trade",
@@ -484,6 +487,16 @@ class MarketState:
                     rows.append(self._quotes[sym].to_wire_snapshot_row(display_eligible=is_eligible))
             return rows
 
+    @staticmethod
+    def _apply_foreign_flow(
+        quote: CanonicalQuote, values: Dict[str, Optional[int]], diff: Dict[str, Any]
+    ) -> None:
+        """Write the foreign buy / sell / room the event observed; never blank one it omits."""
+        for name, value in values.items():
+            if value is not None and getattr(quote, name) != value:
+                setattr(quote, name, value)
+                diff[name] = value
+
     def apply_trade_event(self, raw_event: Dict[str, Any]) -> Tuple[CanonicalQuote, Dict[str, Any]]:
         """
         Merges a matching trade event from Trading_Data_Stream into canonical state.
@@ -578,6 +591,16 @@ class MarketState:
         if tot_val is None:
             tot_val = raw_event.get("TotalValue")
 
+        # Only the KBS price board carries these; a negative count is not an observation.
+        foreign_flow = {
+            name: value if value is not None and value >= 0 else None
+            for name, value in (
+                ("foreign_buy_volume", _integer(raw_event.get("ForeignBuyVolume"))),
+                ("foreign_sell_volume", _integer(raw_event.get("ForeignSellVolume"))),
+                ("foreign_room", _integer(raw_event.get("ForeignRoom"))),
+            )
+        }
+
         trading_date = raw_event.get("TradingDate")
         ts_str = raw_event.get("Timestamp")
         provider_market_status = raw_event.get("MarketStatus")
@@ -599,12 +622,21 @@ class MarketState:
 
             q = self._quotes[sym]
             if source_ts is not None and q.trade_timestamp is not None and source_ts < q.trade_timestamp:
+                # Older than the last streamed match, so it must not roll the trade back.
+                # The stream has no foreign flow, though: take the board's when it is
+                # this session's, or F_BUY / F_SELL would freeze while SSI ticks flow.
+                if (
+                    has_explicit_session
+                    and reference_session_date == self._quote_market_session_date(q)
+                ):
+                    self._apply_foreign_flow(q, foreign_flow, diff)
                 return q.model_copy(), diff
             if not has_explicit_session:
                 reference_session_date = self._quote_market_session_date(q) or reference_session_date
             if not self._prepare_intraday_session(q, reference_session_date, diff):
                 return q.model_copy(), diff
             self._expire_reference_metadata(q, reference_session_date, diff)
+            self._apply_foreign_flow(q, foreign_flow, diff)
 
             match_price = _number(match_price)
             ref_price = _number(ref_price)

@@ -84,6 +84,11 @@ export function applyRawPatchToQuote(
   if (patch.Ask3_Prc !== undefined) q.ask3Price = price(patch.Ask3_Prc);
   if (patch.Ask3_Qty !== undefined) q.ask3Quantity = patch.Ask3_Qty;
 
+  // Foreign investors (shares)
+  if (patch.Foreign_Buy_Vol !== undefined) q.foreignBuy = patch.Foreign_Buy_Vol;
+  if (patch.Foreign_Sell_Vol !== undefined) q.foreignSell = patch.Foreign_Sell_Vol;
+  if (patch.Foreign_Room !== undefined) q.foreignRoom = patch.Foreign_Room;
+
   // Volumes & Values
   if (patch.Traded_Qty !== undefined) q.tradedQuantity = patch.Traded_Qty;
   if (patch.Total_Vol !== undefined) q.totalVolume = patch.Total_Vol;
@@ -143,6 +148,9 @@ export function applyRawPatchToQuote(
     Bid3_Qty: "bid3Quantity",
     Ask3_Prc: "ask3Price",
     Ask3_Qty: "ask3Quantity",
+    Foreign_Buy_Vol: "foreignBuy",
+    Foreign_Sell_Vol: "foreignSell",
+    Foreign_Room: "foreignRoom",
     Traded_Qty: "tradedQuantity",
     Total_Vol: "totalVolume",
     Trading_Val: "tradingValue",

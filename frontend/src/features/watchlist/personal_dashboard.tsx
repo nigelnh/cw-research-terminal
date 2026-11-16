@@ -3,7 +3,16 @@ import type { RealtimePulseMap, WatchlistItem } from "@/domain/models";
 import { useWatchlist } from "@/data/watchlist";
 import { useResearchMarket } from "@/data/use_research_market";
 import { useDashboardData } from "@/data/query/use_dashboard_data";
-import { QUOTE_COLUMNS, QUOTE_COLUMN_HINTS, QUOTE_COLUMN_PULSE_FIELD, quoteCell, type QuoteColumnKey } from "@/components/common/quote_columns";
+import {
+  QUOTE_COLUMNS,
+  QUOTE_COLUMN_HINTS,
+  QUOTE_COLUMN_PULSE_FIELD,
+  STOCK_BOARD_COLUMNS,
+  watchlistCell,
+  type QuoteColumnKey,
+  type StockBoardColumnKey,
+  type WatchlistColumnKey,
+} from "@/components/common/quote_columns";
 import { completeOrder, moveGroupedRows, useWatchlistLayout } from "@/components/common/watchlist_layout";
 import { useInstrumentSpecs } from "@/data/instruments/use_instrument_specs";
 import { MarketOverviewStrip } from "./market_overview_strip";
@@ -42,7 +51,32 @@ const isCwItem = (item: WatchlistItem) =>
   item.instrumentType === "CW" ||
   (item.instrumentType !== "STOCK" && item.symbol.startsWith("C") && item.symbol.length >= 6);
 
-interface StockRow {
+/** The STOCK view's price-board values: depth either side, session range, foreign flow. */
+interface BoardValues {
+  bid2: number | null;
+  bid3: number | null;
+  ask2: number | null;
+  ask3: number | null;
+  bidQty: number | null;
+  bid2Qty: number | null;
+  bid3Qty: number | null;
+  askQty: number | null;
+  ask2Qty: number | null;
+  ask3Qty: number | null;
+  high: number | null;
+  low: number | null;
+  foreignBuy: number | null;
+  foreignSell: number | null;
+  foreignRoom: number | null;
+}
+
+const NO_BOARD_VALUES: BoardValues = {
+  bid2: null, bid3: null, ask2: null, ask3: null,
+  bidQty: null, bid2Qty: null, bid3Qty: null, askQty: null, ask2Qty: null, ask3Qty: null,
+  high: null, low: null, foreignBuy: null, foreignSell: null, foreignRoom: null,
+};
+
+interface StockRow extends BoardValues {
   symbol: string;
   ref: number | null;
   bid: number | null;
@@ -90,7 +124,7 @@ interface CwRow {
  * are children grouped under the parent whose symbol matches `underlying`. Every
  * row uses the same column schema — CW-only fields are null on stocks and vice versa.
  */
-interface UnifiedRow {
+interface UnifiedRow extends BoardValues {
   symbol: string;
   kind: "stock" | "cw";
   issuer: string | null;
@@ -138,6 +172,21 @@ const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
   ivBid: (r) => r.ivBid,
   ivTrade: (r) => r.ivTrade,
   ivAsk: (r) => r.ivAsk,
+  bid2: (r) => r.bid2,
+  bid3: (r) => r.bid3,
+  ask2: (r) => r.ask2,
+  ask3: (r) => r.ask3,
+  bidQty: (r) => r.bidQty,
+  bid2Qty: (r) => r.bid2Qty,
+  bid3Qty: (r) => r.bid3Qty,
+  askQty: (r) => r.askQty,
+  ask2Qty: (r) => r.ask2Qty,
+  ask3Qty: (r) => r.ask3Qty,
+  high: (r) => r.high,
+  low: (r) => r.low,
+  foreignBuy: (r) => r.foreignBuy,
+  foreignSell: (r) => r.foreignSell,
+  foreignRoom: (r) => r.foreignRoom,
 };
 
 const TD: React.CSSProperties = { padding: "0 8px", textAlign: "right" };
@@ -158,7 +207,7 @@ const VIRTUAL_OVERSCAN = 12;
  * the live universe (2026-11-14: 132,500 · 10,119,400 · 14.3518:1 · 100.00%) plus
  * headroom where a busier session runs longer (VOLUME to 9 digits, +/- to 5).
  */
-const VALUE_CH: Record<Exclude<QuoteColumnKey, "symbol">, number> = {
+const VALUE_CH: Record<Exclude<WatchlistColumnKey, "symbol">, number> = {
   ceiling: 7,
   floor: 7,
   ref: 7,
@@ -177,6 +226,23 @@ const VALUE_CH: Record<Exclude<QuoteColumnKey, "symbol">, number> = {
   lastTradingDate: 10,
   dte: 3,
   issuer: 5,
+  // STOCK view. Depth sizes run to 1,150,500 (HPG, 2026-11-13) and their 9-char headers
+  // set the width anyway; foreign room reaches 2,292,162,142 shares (HPG).
+  bid2: 7,
+  bid3: 7,
+  ask2: 7,
+  ask3: 7,
+  bidQty: 10,
+  bid2Qty: 10,
+  bid3Qty: 10,
+  askQty: 10,
+  ask2Qty: 10,
+  ask3Qty: 10,
+  high: 7,
+  low: 7,
+  foreignBuy: 10,
+  foreignSell: 10,
+  foreignRoom: 13,
 };
 /** Pin dot (12px button) and dismiss × (11px button) plus their cell padding. */
 const PIN_COL_WIDTH = 21;
@@ -243,6 +309,21 @@ export function PersonalDashboard({
             vol: quote?.totalVolume ?? null,
             ceiling: quote?.ceilingPrice ?? null,
             floor: quote?.floorPrice ?? null,
+            bid2: quote?.bid2Price ?? null,
+            bid3: quote?.bid3Price ?? null,
+            ask2: quote?.ask2Price ?? null,
+            ask3: quote?.ask3Price ?? null,
+            bidQty: quote?.bidQuantity ?? null,
+            bid2Qty: quote?.bid2Quantity ?? null,
+            bid3Qty: quote?.bid3Quantity ?? null,
+            askQty: quote?.askQuantity ?? null,
+            ask2Qty: quote?.ask2Quantity ?? null,
+            ask3Qty: quote?.ask3Quantity ?? null,
+            high: quote?.highPrice ?? null,
+            low: quote?.lowPrice ?? null,
+            foreignBuy: quote?.foreignBuy ?? null,
+            foreignSell: quote?.foreignSell ?? null,
+            foreignRoom: quote?.foreignRoom ?? null,
             pulses: quote?.realtimePulses,
             trackedRealtime: row?.trackedRealtime ?? isRealtimeTracked(item.symbol),
           };
@@ -319,6 +400,11 @@ export function PersonalDashboard({
   const unifiedRows: UnifiedRow[] = useMemo(
     () => [
       ...stockRows.map((s): UnifiedRow => ({
+        bid2: s.bid2, bid3: s.bid3, ask2: s.ask2, ask3: s.ask3,
+        bidQty: s.bidQty, bid2Qty: s.bid2Qty, bid3Qty: s.bid3Qty,
+        askQty: s.askQty, ask2Qty: s.ask2Qty, ask3Qty: s.ask3Qty,
+        high: s.high, low: s.low,
+        foreignBuy: s.foreignBuy, foreignSell: s.foreignSell, foreignRoom: s.foreignRoom,
         symbol: s.symbol,
         kind: "stock",
         issuer: null,
@@ -346,6 +432,8 @@ export function PersonalDashboard({
         trackedRealtime: s.trackedRealtime,
       })),
       ...cwRows.map((c): UnifiedRow => ({
+        // The STOCK view is the only one with board columns, and it shows no warrants.
+        ...NO_BOARD_VALUES,
         symbol: c.symbol,
         kind: "cw",
         issuer: c.issuer,
@@ -382,9 +470,24 @@ export function PersonalDashboard({
     return order.map(symbol => unifiedRows.find(r => r.symbol === symbol)!);
   }, [unifiedRows, layout.rows]);
   const view = useSortPin(manuallyOrdered, UNIFIED_FIELDS);
-  const drag = useRef<{ type: "column"; key: QuoteColumnKey } | { type: "row"; key: string } | null>(null);
+  const drag = useRef<{ type: "column"; key: WatchlistColumnKey } | { type: "row"; key: string } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const columns = layout.columns.map(key => QUOTE_COLUMNS.find(c => c.key === key)!);
+  // STOCK is a price board with its own columns (and order); ALL and CW share the
+  // warrant-oriented set.
+  const stockView = kindView === "stock";
+  const columns: { key: WatchlistColumnKey; label: string }[] = stockView
+    ? layout.stockColumns.map(key => STOCK_BOARD_COLUMNS.find(c => c.key === key)!)
+    : layout.columns.map(key => QUOTE_COLUMNS.find(c => c.key === key)!);
+  const moveColumn = (from: WatchlistColumnKey, to: WatchlistColumnKey) => {
+    if (stockView) layout.moveStockColumn(from as StockBoardColumnKey, to as StockBoardColumnKey);
+    else layout.moveColumn(from as QuoteColumnKey, to as QuoteColumnKey);
+  };
+  // A sort on a column the new view does not show would order rows by something hidden.
+  const columnKeys = columns.map(column => column.key).join(",");
+  const { sort: activeSort, clearSort } = view;
+  useEffect(() => {
+    if (activeSort && !columnKeys.split(",").includes(activeSort.key)) clearSort();
+  }, [columnKeys, activeSort, clearSort]);
   const endDrag = () => { drag.current = null; setDropTarget(null); };
   const moveRow = (from: string, to: string) => {
     const next = moveGroupedRows(view.ordered, from, to);
@@ -472,7 +575,7 @@ export function PersonalDashboard({
   // symbol, +1ch CW indent, +2ch for each ◆ conflict / ◇ untracked mark (glyph + 5px).
   const symbolCh = Math.max(8, ...unifiedRows.map((r) =>
     r.symbol.length + (r.kind === "cw" ? 1 : 0) + (r.conflicting ? 2 : 0) + (r.trackedRealtime ? 0 : 2)));
-  const colWidth = (key: QuoteColumnKey, label: string) =>
+  const colWidth = (key: WatchlistColumnKey, label: string) =>
     columnWidth(label, key === "symbol" ? symbolCh : VALUE_CH[key]);
   const renderRow = (r: UnifiedRow) => {
     const selected = selectedSymbol === r.symbol;
@@ -520,7 +623,7 @@ export function PersonalDashboard({
       >
         <PinCell symbol={r.symbol} fill={view.pinFill(r.symbol)} onToggle={view.togglePin} />
         {columns.map(column => {
-          const cell = quoteCell(r, column.key);
+          const cell = watchlistCell(r, column.key);
           return column.key === "symbol" ? (
             <td key={column.key} title={r.trackedRealtime ? undefined : "Not tracked in the fixed realtime universe"} style={{ padding: "0 8px", paddingLeft: r.kind === "cw" ? "calc(8px + 1ch)" : 8, color: cell.color, whiteSpace: "nowrap" }}>
               {r.symbol}
@@ -619,14 +722,14 @@ export function PersonalDashboard({
                   onClick={() => { if (!drag.current) view.toggleSort(column.key); }}
                   onDragStart={(e) => { drag.current = { type: "column", key: column.key }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", column.key); }}
                   onDragOver={(e) => { if (drag.current?.type === "column") { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget(column.key); } }}
-                  onDrop={(e) => { e.preventDefault(); if (drag.current?.type === "column") layout.moveColumn(drag.current.key, column.key); endDrag(); }}
+                  onDrop={(e) => { e.preventDefault(); if (drag.current?.type === "column") moveColumn(drag.current.key, column.key); endDrag(); }}
                   onDragEnd={endDrag}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); view.toggleSort(column.key); }
                     if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
                       e.preventDefault();
                       const to = columns[index + (e.key === "ArrowLeft" ? -1 : 1)];
-                      if (to) layout.moveColumn(column.key, to.key);
+                      if (to) moveColumn(column.key, to.key);
                     }
                   }}>
                   <span className="watchlist-column-label" style={{ flexDirection: column.key === "symbol" ? "row" : "row-reverse" }}>

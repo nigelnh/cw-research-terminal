@@ -86,6 +86,10 @@ export function mapRawSnapshotToQuote(raw: any): MarketQuote {
     ask3Price: price(raw.Ask3_Prc),
     ask3Quantity: typeof raw.Ask3_Qty === "number" ? raw.Ask3_Qty : null,
 
+    foreignBuy: typeof raw.Foreign_Buy_Vol === "number" ? raw.Foreign_Buy_Vol : null,
+    foreignSell: typeof raw.Foreign_Sell_Vol === "number" ? raw.Foreign_Sell_Vol : null,
+    foreignRoom: typeof raw.Foreign_Room === "number" ? raw.Foreign_Room : null,
+
     tradedQuantity: typeof raw.Traded_Qty === "number" ? raw.Traded_Qty : null,
     totalVolume:
       typeof raw.Total_Vol === "number"
