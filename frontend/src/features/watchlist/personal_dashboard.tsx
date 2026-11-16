@@ -625,7 +625,7 @@ export function PersonalDashboard({
         {columns.map(column => {
           const cell = watchlistCell(r, column.key);
           return column.key === "symbol" ? (
-            <td key={column.key} title={r.trackedRealtime ? undefined : "Not tracked in the fixed realtime universe"} style={{ padding: "0 8px", paddingLeft: r.kind === "cw" ? "calc(8px + 1ch)" : 8, color: cell.color, whiteSpace: "nowrap" }}>
+            <td key={column.key} className="watchlist-symbol-cell" title={r.trackedRealtime ? undefined : "Not tracked in the fixed realtime universe"} style={{ left: PIN_COL_WIDTH, padding: "0 8px", paddingLeft: r.kind === "cw" ? "calc(8px + 1ch)" : 8, color: cell.color, whiteSpace: "nowrap" }}>
               {r.symbol}
               {r.conflicting && <span title="Conflicting metadata — quant withheld" style={{ marginLeft: 5, color: "var(--down)" }}>◆</span>}
               {!r.trackedRealtime && <span className="untracked-realtime-mark" aria-label="Not tracked realtime" />}
@@ -718,7 +718,7 @@ export function PersonalDashboard({
                   className={dropTarget === column.key ? "is-drop-target" : undefined}
                   aria-sort={view.sortMark(column.key) === "▲" ? "ascending" : view.sortMark(column.key) === "▼" ? "descending" : "none"}
                   title={`${QUOTE_COLUMN_HINTS[column.key] ? `${QUOTE_COLUMN_HINTS[column.key]} · ` : ""}Click to sort · Drag to reorder · Alt + ←/→ to move`}
-                  style={{ padding: "5px 8px", textAlign: column.key === "symbol" ? "left" : "right", color: "var(--t-92)", fontWeight: 500, cursor: "grab", userSelect: "none" }}
+                  style={{ left: column.key === "symbol" ? PIN_COL_WIDTH : undefined, padding: "5px 8px", textAlign: column.key === "symbol" ? "left" : "right", color: "var(--t-92)", fontWeight: 500, cursor: "grab", userSelect: "none" }}
                   onClick={() => { if (!drag.current) view.toggleSort(column.key); }}
                   onDragStart={(e) => { drag.current = { type: "column", key: column.key }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", column.key); }}
                   onDragOver={(e) => { if (drag.current?.type === "column") { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget(column.key); } }}

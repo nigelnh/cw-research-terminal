@@ -470,6 +470,17 @@ select:focus-visible,
 .watchlist-table .is-drop-target { outline: 1px solid var(--accent); outline-offset: -1px; }
 .watchlist-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .watchlist-table th, .watchlist-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Frozen pin + SYMBOL columns: they hold the left edge while the board scrolls sideways
+   (SYMBOL's `left` is the pin column width, set inline). A frozen cell paints its row's
+   background or the cells scrolling under it show through, and border-collapse leaves the
+   grid rule behind, so the divider is a box-shadow. The header cells are sticky on both
+   axes and sit above the other headers. */
+.watchlist-row > td:first-child, .watchlist-table thead th:first-child { position: sticky; left: 0; }
+.watchlist-row > td.watchlist-symbol-cell, .watchlist-table thead th[data-column="symbol"] { position: sticky; }
+.watchlist-row > td:first-child, .watchlist-row > td.watchlist-symbol-cell { z-index: 1; background: inherit; }
+.watchlist-row > td.watchlist-symbol-cell { box-shadow: inset -1px 0 var(--border-strong); }
+.watchlist-table thead th:first-child, .watchlist-table thead th[data-column="symbol"] { z-index: 4; }
+.watchlist-table thead th[data-column="symbol"] { box-shadow: inset -1px 0 var(--border-strong), inset 0 -1px 0 var(--border-strong); }
 /* ALL / STOCK / CW toggle, just left of FILTER ▾. The wrapper takes the row's spare space
    (margin-left: auto), so the filter anchor's own auto margin resolves to 0 inside it. Same
    24px box, border and type as .filter-trigger; the pressed segment uses its active fill. */
@@ -493,7 +504,8 @@ select:focus-visible,
 .watchlist-search-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t-82); }
 .watchlist-search-kind { text-align: right; color: var(--t-55); white-space: nowrap; }
 .watchlist-search-empty { padding: 18px 10px; text-align: center; color: var(--t-46); font-size: 10.5px; }
-.watchlist-row.is-search-match, .watchlist-row.is-selected { box-shadow: inset 3px 0 var(--accent); }
+/* On the frozen pin cell, not the row: the cell's own background would cover a row shadow. */
+.watchlist-row.is-search-match > td:first-child, .watchlist-row.is-selected > td:first-child { box-shadow: inset 3px 0 var(--accent); }
 .untracked-realtime-mark::after { content: "◇"; margin-left: 5px; color: var(--t-40); font-size: .82em; }
 /* ---- Research analytics band -------------------------------------------------------
    Three cross-sectional chart cards between the overview strip and the registry. Fixed

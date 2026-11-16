@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { useState } from "react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { PersonalDashboard } from "@/features/watchlist/personal_dashboard";
 import { InstrumentPanel } from "@/features/warrant_info/instrument_panel";
 import {
@@ -276,6 +278,38 @@ describe("Targeted watchlist columns", () => {
     view("ALL");
     expect(labels()).toEqual(allLabels);
     expect(header("IV_BID").getAttribute("aria-sort")).toBe("none");
+  });
+
+  it("freezes the pin and SYMBOL columns at the left edge in every view, wherever SYMBOL is moved", () => {
+    // happy-dom has no layout engine: this applies the real stylesheet and checks which cells
+    // are sticky and where they stop; the scrolling itself was checked in a browser.
+    const style = document.createElement("style");
+    style.textContent = readFileSync(resolve(process.cwd(), "src/design/global.css"), "utf8");
+    document.head.appendChild(style);
+    try {
+      const page = render(<PersonalDashboard />);
+      const view = (name: string) => fireEvent.click(within(page.getByRole("group", { name: "Show instruments" })).getByRole("button", { name }));
+      const stickyLabels = () => [...page.container.querySelectorAll<HTMLElement>("thead th")]
+        .filter(th => getComputedStyle(th).position === "sticky" && !["", "auto"].includes(getComputedStyle(th).left))
+        .map(th => `${th.textContent || "pin"}@${getComputedStyle(th).left}`);
+      const frozen = (symbol: string) => [...page.container.querySelectorAll<HTMLElement>(`tr[data-symbol='${symbol}'] > td`)]
+        .map((td, i) => getComputedStyle(td).position === "sticky" ? `${i}:${td.textContent?.trim() || "pin"}@${getComputedStyle(td).left}` : null)
+        .filter(Boolean);
+
+      for (const name of ["ALL", "STOCK", "CW", "ALL"]) {
+        view(name);
+        expect(stickyLabels()).toEqual(["pin@0px", "SYMBOL@21px"]);
+        const symbol = page.container.querySelector("tbody tr[data-symbol]")!.getAttribute("data-symbol")!;
+        expect(frozen(symbol)).toEqual(["0:pin@0px", `1:${symbol}@21px`]);
+      }
+
+      // The freeze follows the SYMBOL column, not the first position.
+      fireEvent.keyDown(page.container.querySelector("thead th[data-column='symbol']")!, { key: "ArrowRight", altKey: true });
+      expect([...page.container.querySelectorAll("thead th[data-column]")].map(th => th.textContent).slice(0, 2)).toEqual(["CEIL", "SYMBOL"]);
+      expect(frozen("HPG")).toEqual(["0:pin@0px", "2:HPG@21px"]);
+    } finally {
+      style.remove();
+    }
   });
 
   it("keeps typing and suggestion selection separate from the submitted watchlist search", () => {
