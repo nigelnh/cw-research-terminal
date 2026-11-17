@@ -190,9 +190,17 @@ const UNIFIED_FIELDS: SortFields<UnifiedRow> = {
 };
 
 const TD: React.CSSProperties = { padding: "0 8px", textAlign: "right" };
+/**
+ * Cell side padding. The STOCK price board runs 26 columns, so it uses half the padding
+ * and wraps its labels (see `labelLines`) to fit a 1920px window without scrolling.
+ */
+const CELL_PAD = 8;
+const BOARD_CELL_PAD = 4;
 const ROW_BORDER = "1px solid var(--border-row)";
 const TABLE_ROW_HEIGHT = 26;
 const TABLE_HEADER_HEIGHT = 27;
+/** The board's header holds two label lines. */
+const BOARD_HEADER_HEIGHT = 41;
 const VIRTUALIZE_AFTER = 80;
 const VIRTUAL_OVERSCAN = 12;
 
@@ -252,13 +260,25 @@ const DISMISS_COL_WIDTH = 24;
 const SORT_ICON_CH = 2.25;
 
 /**
- * A column's width: its widest value (`contentCh`) or its header (label + 4px gap + 1em
- * sort icon), whichever is wider, plus 16px of cell padding and the 1px column rule.
+ * A header label's lines. On the board a label breaks after its first "_" - BID_ over
+ * PRC_3 - so a column is as wide as its values rather than its 9-char name; the text is
+ * unchanged. Single-word labels (CEIL, VOLUME) and the other views stay on one line.
  */
-const columnWidth = (label: string, contentCh: number) =>
-  contentCh >= label.length + SORT_ICON_CH
-    ? `calc(${contentCh}ch + 17px)`
-    : `calc(${label.length}ch + 1em + 21px)`;
+const labelLines = (label: string, wrap: boolean) => {
+  const cut = label.indexOf("_") + 1;
+  return wrap && cut > 0 && cut < label.length ? [label.slice(0, cut), label.slice(cut)] : [label];
+};
+
+/**
+ * A column's width: its widest value (`contentCh`) or its header (longest label line +
+ * 4px gap + 1em sort icon), whichever is wider, plus both side paddings and the 1px rule.
+ */
+const columnWidth = (label: string, contentCh: number, pad = CELL_PAD, wrap = false) => {
+  const labelCh = Math.max(...labelLines(label, wrap).map(line => line.length));
+  return contentCh >= labelCh + SORT_ICON_CH
+    ? `calc(${contentCh}ch + ${2 * pad + 1}px)`
+    : `calc(${labelCh}ch + 1em + ${2 * pad + 5}px)`;
+};
 
 export function PersonalDashboard({
   onNavigateToUniverse,
@@ -561,7 +581,7 @@ export function PersonalDashboard({
   }, [kindView, measureViewport]);
 
   const virtualized = displayRows.length > VIRTUALIZE_AFTER;
-  const bodyTop = Math.max(0, viewport.top - TABLE_HEADER_HEIGHT);
+  const bodyTop = Math.max(0, viewport.top - (stockView ? BOARD_HEADER_HEIGHT : TABLE_HEADER_HEIGHT));
   const windowSize = Math.ceil(viewport.height / TABLE_ROW_HEIGHT) + VIRTUAL_OVERSCAN * 2;
   const unclampedStart = Math.max(0, Math.floor(bodyTop / TABLE_ROW_HEIGHT) - VIRTUAL_OVERSCAN);
   const startIndex = virtualized
@@ -573,10 +593,12 @@ export function PersonalDashboard({
 
   // The symbol column follows the whole list (never just the mounted rows): the longest
   // symbol, +1ch CW indent, +2ch for each ◆ conflict / ◇ untracked mark (glyph + 5px).
-  const symbolCh = Math.max(8, ...unifiedRows.map((r) =>
+  // The STOCK board sizes it from stocks alone; its hidden CWs would widen it for nothing.
+  const symbolCh = Math.max(8, ...unifiedRows.filter(r => !stockView || r.kind === "stock").map((r) =>
     r.symbol.length + (r.kind === "cw" ? 1 : 0) + (r.conflicting ? 2 : 0) + (r.trackedRealtime ? 0 : 2)));
+  const pad = stockView ? BOARD_CELL_PAD : CELL_PAD;
   const colWidth = (key: WatchlistColumnKey, label: string) =>
-    columnWidth(label, key === "symbol" ? symbolCh : VALUE_CH[key]);
+    columnWidth(label, key === "symbol" ? symbolCh : VALUE_CH[key], pad, stockView);
   const renderRow = (r: UnifiedRow) => {
     const selected = selectedSymbol === r.symbol;
     return (
@@ -625,7 +647,7 @@ export function PersonalDashboard({
         {columns.map(column => {
           const cell = watchlistCell(r, column.key);
           return column.key === "symbol" ? (
-            <td key={column.key} title={r.trackedRealtime ? undefined : "Not tracked in the fixed realtime universe"} style={{ padding: "0 8px", paddingLeft: r.kind === "cw" ? "calc(8px + 1ch)" : 8, color: cell.color, whiteSpace: "nowrap" }}>
+            <td key={column.key} className="watchlist-symbol-cell" title={r.trackedRealtime ? undefined : "Not tracked in the fixed realtime universe"} style={{ left: PIN_COL_WIDTH, padding: `0 ${pad}px`, paddingLeft: r.kind === "cw" ? `calc(${pad}px + 1ch)` : pad, color: cell.color, whiteSpace: "nowrap" }}>
               {r.symbol}
               {r.conflicting && <span title="Conflicting metadata — quant withheld" style={{ marginLeft: 5, color: "var(--down)" }}>◆</span>}
               {!r.trackedRealtime && <span className="untracked-realtime-mark" aria-label="Not tracked realtime" />}
@@ -633,7 +655,7 @@ export function PersonalDashboard({
           ) : <RealtimeValue as="td" key={column.key} title={QUOTE_COLUMN_HINTS[column.key]}
             pulse={r.pulses?.[QUOTE_COLUMN_PULSE_FIELD[column.key] ?? ""]}
             tone={cell.tone}
-            style={{ ...TD, color: cell.color }}>
+            style={{ ...TD, padding: `0 ${pad}px`, color: cell.color }}>
             {r.kind === "stock" && ["ivBid", "ivTrade", "ivAsk", "strike", "ratio", "lastTradingDate", "dte", "issuer"].includes(column.key) ? null : cell.text}
           </RealtimeValue>;
         })}
@@ -718,7 +740,7 @@ export function PersonalDashboard({
                   className={dropTarget === column.key ? "is-drop-target" : undefined}
                   aria-sort={view.sortMark(column.key) === "▲" ? "ascending" : view.sortMark(column.key) === "▼" ? "descending" : "none"}
                   title={`${QUOTE_COLUMN_HINTS[column.key] ? `${QUOTE_COLUMN_HINTS[column.key]} · ` : ""}Click to sort · Drag to reorder · Alt + ←/→ to move`}
-                  style={{ padding: "5px 8px", textAlign: column.key === "symbol" ? "left" : "right", color: "var(--t-92)", fontWeight: 500, cursor: "grab", userSelect: "none" }}
+                  style={{ left: column.key === "symbol" ? PIN_COL_WIDTH : undefined, padding: `5px ${pad}px`, verticalAlign: stockView ? "bottom" : undefined, textAlign: column.key === "symbol" ? "left" : "right", color: "var(--t-92)", fontWeight: 500, cursor: "grab", userSelect: "none" }}
                   onClick={() => { if (!drag.current) view.toggleSort(column.key); }}
                   onDragStart={(e) => { drag.current = { type: "column", key: column.key }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", column.key); }}
                   onDragOver={(e) => { if (drag.current?.type === "column") { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDropTarget(column.key); } }}
@@ -733,7 +755,7 @@ export function PersonalDashboard({
                     }
                   }}>
                   <span className="watchlist-column-label" style={{ flexDirection: column.key === "symbol" ? "row" : "row-reverse" }}>
-                    <span>{column.label}</span>
+                    <span>{labelLines(column.label, stockView).map((line, i) => <span key={i}>{i > 0 && <br />}{line}</span>)}</span>
                     <svg className="watchlist-sort-icon" aria-hidden="true" viewBox="0 0 12 12" fill="currentColor"
                       style={{ visibility: view.sortMark(column.key) ? "visible" : "hidden" }}>
                       <path d={view.sortMark(column.key) === "▼" ? "M1 2h10L6 11Z" : "M1 10h10L6 1Z"} />

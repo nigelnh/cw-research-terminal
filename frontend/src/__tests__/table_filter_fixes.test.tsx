@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { useState } from "react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { PersonalDashboard } from "@/features/watchlist/personal_dashboard";
 import { InstrumentPanel } from "@/features/warrant_info/instrument_panel";
 import {
@@ -276,6 +278,74 @@ describe("Targeted watchlist columns", () => {
     view("ALL");
     expect(labels()).toEqual(allLabels);
     expect(header("IV_BID").getAttribute("aria-sort")).toBe("none");
+  });
+
+  it("fits all 26 STOCK board columns in a 1920px window and leaves the ALL view as it was", () => {
+    const page = render(<PersonalDashboard />);
+    const view = (name: string) => fireEvent.click(within(page.getByRole("group", { name: "Show instruments" })).getByRole("button", { name }));
+    const widths = () => [...page.container.querySelectorAll<HTMLElement>("colgroup col")].map(col => col.style.width);
+    // The table's 11.5px mono font: 1ch = 0.6em = 6.9px. happy-dom has no layout, so the
+    // calc() widths are summed here; a browser at 1920px rendered the same 1797px board.
+    const px = (width: string) => {
+      const m = /^(?:calc\((\d+(?:\.\d+)?)ch(?: \+ (1)em)? \+ (\d+)px\)|(\d+)px)$/.exec(width);
+      if (!m) throw new Error(`unparsed width ${width}`);
+      return m[4] ? Number(m[4]) : Number(m[1]) * 6.9 + (m[2] ? 11.5 : 0) + Number(m[3]);
+    };
+    const header = (key: string) => page.container.querySelector<HTMLElement>(`thead th[data-column='${key}']`)!;
+    const allWidths = widths();
+
+    view("STOCK");
+    const total = widths().reduce((sum, width) => sum + px(width), 0);
+    // 1920px leaves a 1878px panel, 1870px of it beside a vertical scrollbar.
+    expect(total).toBeLessThanOrEqual(1870);
+    expect(total).toBeCloseTo(1797, 0);
+    // Labels break after their first "_" (the text is unchanged); one-word labels don't.
+    expect(header("bid3").innerHTML).toContain("<br>");
+    expect(header("bid3").textContent).toBe("BID_PRC_3");
+    expect([...header("bid3").querySelectorAll(".watchlist-column-label > span > span")].map(line => line.textContent)).toEqual(["BID_", "PRC_3"]);
+    expect(header("ceiling").querySelector("br")).toBeNull();
+    expect(header("bid3").style.padding).toBe("5px 4px");
+    // Sized from stocks alone (the hidden CWs' long symbols would widen it), so the label sets it.
+    expect(page.container.querySelector<HTMLElement>("col[data-column='symbol']")!.style.width).toBe("calc(6ch + 1em + 13px)");
+    const hpg = page.container.querySelectorAll<HTMLElement>("tr[data-symbol='HPG'] td");
+    expect([hpg[1].style.paddingLeft, hpg[2].style.padding]).toEqual(["4px", "0px 4px"]);
+
+    view("ALL");
+    expect(widths()).toEqual(allWidths);
+    expect(page.container.querySelector("thead br")).toBeNull();
+    expect(header("ceiling").style.padding).toBe("5px 8px");
+  });
+
+  it("freezes the pin and SYMBOL columns at the left edge in every view, wherever SYMBOL is moved", () => {
+    // happy-dom has no layout engine: this applies the real stylesheet and checks which cells
+    // are sticky and where they stop; the scrolling itself was checked in a browser.
+    const style = document.createElement("style");
+    style.textContent = readFileSync(resolve(process.cwd(), "src/design/global.css"), "utf8");
+    document.head.appendChild(style);
+    try {
+      const page = render(<PersonalDashboard />);
+      const view = (name: string) => fireEvent.click(within(page.getByRole("group", { name: "Show instruments" })).getByRole("button", { name }));
+      const stickyLabels = () => [...page.container.querySelectorAll<HTMLElement>("thead th")]
+        .filter(th => getComputedStyle(th).position === "sticky" && !["", "auto"].includes(getComputedStyle(th).left))
+        .map(th => `${th.textContent || "pin"}@${getComputedStyle(th).left}`);
+      const frozen = (symbol: string) => [...page.container.querySelectorAll<HTMLElement>(`tr[data-symbol='${symbol}'] > td`)]
+        .map((td, i) => getComputedStyle(td).position === "sticky" ? `${i}:${td.textContent?.trim() || "pin"}@${getComputedStyle(td).left}` : null)
+        .filter(Boolean);
+
+      for (const name of ["ALL", "STOCK", "CW", "ALL"]) {
+        view(name);
+        expect(stickyLabels()).toEqual(["pin@0px", "SYMBOL@21px"]);
+        const symbol = page.container.querySelector("tbody tr[data-symbol]")!.getAttribute("data-symbol")!;
+        expect(frozen(symbol)).toEqual(["0:pin@0px", `1:${symbol}@21px`]);
+      }
+
+      // The freeze follows the SYMBOL column, not the first position.
+      fireEvent.keyDown(page.container.querySelector("thead th[data-column='symbol']")!, { key: "ArrowRight", altKey: true });
+      expect([...page.container.querySelectorAll("thead th[data-column]")].map(th => th.textContent).slice(0, 2)).toEqual(["CEIL", "SYMBOL"]);
+      expect(frozen("HPG")).toEqual(["0:pin@0px", "2:HPG@21px"]);
+    } finally {
+      style.remove();
+    }
   });
 
   it("keeps typing and suggestion selection separate from the submitted watchlist search", () => {
