@@ -105,7 +105,8 @@ _AUTHORITATIVE_HOLIDAYS: dict[int, frozenset[date]] = {
             date(2025, 9, 1), date(2025, 9, 2),                  # National Day (2-day)
         }
     ),
-    # Official HOSE notice dated 2025-12-09 ("Notice of trading holiday schedule for 2026").
+    # Official HOSE notice dated 2025-12-09 ("Notice of trading holiday schedule for 2026"),
+    # plus the closure HOSE added on 2026-11-11 (HNX 2026-11-10).
     2026: frozenset(
         {
             date(2026, 1, 1), date(2026, 1, 2),                  # New Year (2-day)
@@ -114,6 +115,9 @@ _AUTHORITATIVE_HOLIDAYS: dict[int, frozenset[date]] = {
             date(2026, 4, 27),                                   # Hung Kings' Day
             date(2026, 4, 30), date(2026, 5, 1),                 # Liberation + Labour
             date(2026, 8, 31), date(2026, 9, 1), date(2026, 9, 2),  # National Day (3-day)
+            # Vietnam Culture Day, a new holiday (Resolution 28/2026/QH16). Missing it, the
+            # app showed 24/11 as a session with no data: every quote blank all day.
+            date(2026, 11, 24),
         }
     ),
 }
