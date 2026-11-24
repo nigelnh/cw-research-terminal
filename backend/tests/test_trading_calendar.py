@@ -46,6 +46,19 @@ def test_previous_trading_session_skips_holiday_cluster():
     assert cal.previous_trading_session(date(2026, 9, 3)) == date(2026, 8, 28)
 
 
+def test_vietnam_culture_day_2026_is_a_closure():
+    # HOSE added Tue 2026-11-24 on 2026-11-11. Without it the whole day displayed a
+    # "session" no provider had data for, so every quote on the site was blank.
+    holiday_evening = _vn(2026, 11, 24, 22, 52)
+    assert cal.session_status(_vn(2026, 11, 24, 10, 0)) is MarketSessionStatus.CLOSED_HOLIDAY
+    context = cal.session_context(holiday_evening)
+    assert context["displaySessionDate"] == "2026-11-23"
+    assert context["latestCompletedSession"] == "2026-11-23"
+    assert context["calendarConfidence"] == "AUTHORITATIVE"
+    assert cal.previous_trading_session(date(2026, 11, 25)) == date(2026, 11, 23)
+    assert cal.next_trading_session_open(holiday_evening) == _vn(2026, 11, 25, 9, 0)
+
+
 def test_latest_completed_session_on_saturday():
     assert cal.latest_completed_trading_session(_vn(2026, 8, 29, 10, 0)) == date(2026, 8, 28)
 
