@@ -39,8 +39,12 @@ class Settings(BaseSettings):
     # the bounded Vnstock HTTP recovery poller; browsers only consume canonical state.
     MARKET_DATA_PROVIDER: str = Field(default="vnstock", description="Active provider: 'vnstock'")
     MARKET_DATA_MAX_SYMBOLS: int = Field(
-        default=500,
-        description="Maximum server-owned market universe (current VN30 + CW set is about 350)",
+        default=600,
+        # An over-cap universe is rejected whole, and a process restarted then tracks
+        # nothing: the set grew to 508 (2026-11-20) and the 2026-11-24 restart left every
+        # quote frozen. Keep headroom over the largest set seen; WS_MAX_SYMBOLS_PER_CLIENT
+        # must be at least this, or a browser asking for the whole universe is refused.
+        description="Maximum server-owned market universe (current VN30 + CW set is about 508)",
     )
     REALTIME_UNIVERSE_REFRESH_SECONDS: float = Field(
         default=3600.0,
@@ -633,7 +637,7 @@ class Settings(BaseSettings):
     WS_MAX_CONNECTIONS_TOTAL: int = Field(default=200, description="Global ceiling on concurrent /ws/market clients")
     WS_MAX_CONNECTIONS_PER_IP: int = Field(default=8, description="Max concurrent /ws/market connections from one client key")
     WS_MAX_SYMBOLS_PER_CLIENT: int = Field(
-        default=500,
+        default=600,
         description="Cap on eligible realtime delivery interests retained by one websocket client. "
         "Out-of-universe watchlist symbols do not consume this budget.",
     )
