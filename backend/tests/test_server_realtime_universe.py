@@ -519,6 +519,34 @@ async def test_manager_does_not_truncate_universe_when_provider_capacity_is_too_
     assert managed.get_universe_health()["server_universe_size"] == 0
 
 
+@pytest.mark.asyncio
+async def test_default_capacity_takes_the_largest_live_universe_seen():
+    # 2026-11-20 the live set reached 508 (30 VN30 + extras + CWs). Over the old 500 cap
+    # it was rejected whole, and the 2026-11-24 restart left the process tracking nothing.
+    from app.core.config import settings
+
+    symbols = [f"S{i:02d}" for i in range(30)] + [f"CW{i:04d}" for i in range(478)]
+    items = tuple(
+        {"symbol": s, "instrument_type": "STOCK" if s.startswith("S") else "CW"} for s in symbols
+    )
+    universe = ResolvedResearchUniverse(
+        known_through="2026-11-24", items=items, issues=(), configured_size=len(items),
+        expected_size=len(items), expected_stocks=30, expected_covered_warrants=478,
+        source="VNSTOCK_VCI_CURRENT_GROUPS", vn30_count=30,
+    )
+    managed = SubscriptionManager(
+        provider=MockMarketDataProvider(max_symbols=settings.MARKET_DATA_MAX_SYMBOLS),
+        state=MarketState(),
+        store=NullMarketStateStore(),
+    )
+
+    configured, _ = managed.configure_server_universe(universe)
+    assert configured is True
+    assert len(managed.get_server_universe_symbols()) == 508
+    # A browser asking for the whole universe must not be refused either.
+    assert settings.WS_MAX_SYMBOLS_PER_CLIENT >= settings.MARKET_DATA_MAX_SYMBOLS
+
+
 def test_two_websocket_clients_keep_isolated_interests_and_never_mutate_upstream():
     universe = {"HPG", "FPT"}
     market_state._quotes.pop("HPG", None)
